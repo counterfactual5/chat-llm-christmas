@@ -50,9 +50,11 @@ export default function ChatContainer() {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
-  const [userApiKey, setUserApiKey] = useState<string>('');
+  const [isAccountBound, setIsAccountBound] = useState(false);
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [accountError, setAccountError] = useState('');
+  const [accountSaving, setAccountSaving] = useState(false);
   const [userBalance, setUserBalance] = useState<string | null>(null);
 
   // Settings State
@@ -65,6 +67,9 @@ export default function ChatContainer() {
 
   // Load Saved State
   useEffect(() => {
+    // Migrate away from the old insecure client-side key storage.
+    localStorage.removeItem('llm_christmas_user_key');
+
     const savedChats = localStorage.getItem('llm_christmas_chats');
     if (savedChats) {
       try {
@@ -84,14 +89,15 @@ export default function ChatContainer() {
       createNewSession();
     }
 
-    const savedKey = localStorage.getItem('llm_christmas_user_key');
-    if (savedKey) {
-      setUserApiKey(savedKey);
-      setTempKeyInput(savedKey);
-    }
-
-    // initial fetch (without user key)
-    fetchModels(savedKey || '');
+    // Detect whether a personal API key is already bound in the HttpOnly cookie.
+    fetch('/api/account', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        const bound = Boolean(data?.bound);
+        setIsAccountBound(bound);
+        fetchModels();
+      })
+      .catch(() => fetchModels());
   }, []);
 
   // Save Sessions
@@ -170,25 +176,42 @@ export default function ChatContainer() {
     if (activeSessionId === id) setActiveSessionId(filtered[0].id);
   };
 
-  const saveUserKey = () => {
+  const saveUserKey = async () => {
     const trimmed = tempKeyInput.trim();
-    setUserApiKey(trimmed);
-    if (trimmed) {
-      localStorage.setItem('llm_christmas_user_key', trimmed);
-    } else {
-      localStorage.removeItem('llm_christmas_user_key');
+    setAccountError('');
+    setAccountSaving(true);
+    try {
+      const response = await fetch('/api/account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: trimmed }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || '绑定失败');
+      setIsAccountBound(true);
+      setTempKeyInput('');
+      setShowAuthModal(false);
+      await fetchModels();
+    } catch (error: any) {
+      setAccountError(error?.message || '绑定失败');
+    } finally {
+      setAccountSaving(false);
     }
-    setShowAuthModal(false);
-    // Reload models with the new auth state
-    fetchModels(trimmed);
   };
 
-  // Fetch dynamic models from backend (free or all, depending on auth)
-  const fetchModels = async (key: string) => {
+  const disconnectAccount = async () => {
+    await fetch('/api/account', { method: 'DELETE' });
+    setIsAccountBound(false);
+    setTempKeyInput('');
+    setShowAuthModal(false);
+    await fetchModels();
+  };
+
+  // Fetch dynamic models from backend. The server decides free/full access from its HttpOnly cookie.
+  const fetchModels = async () => {
     setModelsLoading(true);
     try {
       const res = await fetch('/api/models', {
-        headers: key ? { 'Authorization': `Bearer ${key}` } : {},
         cache: 'no-store',
       });
       const data = await res.json();
@@ -239,10 +262,7 @@ export default function ChatContainer() {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(userApiKey ? { 'Authorization': `Bearer ${userApiKey}` } : {})
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
           model: selectedModel,
@@ -403,15 +423,15 @@ export default function ChatContainer() {
                 className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700/80 transition-colors text-left"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-white", userApiKey ? "bg-emerald-500" : "bg-stone-400")}>
+                  <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-white", isAccountBound ? "bg-emerald-500" : "bg-stone-400")}>
                     <Key className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-semibold truncate">
-                      {userApiKey ? 'llm.christmas Key Connected' : 'Connect Account Key'}
+                      {isAccountBound ? '主站额度已连接' : '连接主站 API Key'}
                     </div>
                     <div className="text-[10px] text-stone-400 truncate">
-                      {userApiKey ? `Key: ${userApiKey.slice(0, 8)}...` : 'Share main site balance'}
+                      {isAccountBound ? 'Key 已安全存入 HttpOnly Cookie' : '一次绑定，自动使用主站余额'}
                     </div>
                   </div>
                 </div>
@@ -462,7 +482,7 @@ export default function ChatContainer() {
                   >
                     <div className="px-2 py-1 flex items-center justify-between sticky top-0 bg-inherit">
                       <span className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
-                        {userApiKey ? 'All Models (Balance Enabled)' : 'Free Models'}
+                        {isAccountBound ? 'All Models (Balance Enabled)' : 'Free Models'}
                       </span>
                       <span className="text-[10px] text-stone-400">
                         {availableModels.length} available
@@ -470,7 +490,7 @@ export default function ChatContainer() {
                     </div>
                     {availableModels.length === 0 && !modelsLoading && (
                       <div className="p-4 text-xs text-stone-400 text-center">
-                        {userApiKey ? 'No models found. Check your API key.' : 'No free models available right now.'}
+                        {isAccountBound ? 'No models found. Check your API key.' : 'No free models available right now.'}
                       </div>
                     )}
                     {modelsLoading && availableModels.length === 0 && (
@@ -506,7 +526,7 @@ export default function ChatContainer() {
                         {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500 shrink-0" />}
                       </button>
                     ))}
-                    {!userApiKey && (
+                    {!isAccountBound && (
                       <div className="mt-1 pt-2 border-t border-stone-100 dark:border-stone-800 p-2">
                         <button 
                           onClick={() => { setIsModelMenuOpen(false); setShowAuthModal(true); }}
@@ -634,9 +654,9 @@ export default function ChatContainer() {
               
               <div className="flex items-center justify-between px-3 pb-3 pt-1">
                 <div className="flex items-center gap-1 text-xs text-stone-400">
-                  {userApiKey ? (
+                  {isAccountBound ? (
                     <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                      <Check className="h-3 w-3" /> Using Custom Token
+                      <Check className="h-3 w-3" /> Using linked account balance
                     </span>
                   ) : (
                     <span>Using Free Site Tier</span>
@@ -713,24 +733,22 @@ export default function ChatContainer() {
                   />
                 </div>
 
+                {accountError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>
+                )}
+
                 <div className="flex gap-2">
                   <Button 
-                    onClick={saveUserKey} 
+                    onClick={saveUserKey}
+                    disabled={accountSaving || !tempKeyInput.trim()}
                     className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl"
                   >
-                    Save & Connect
+                    {accountSaving ? 'Validating…' : 'Save & Connect'}
                   </Button>
-                  {userApiKey && (
+                  {isAccountBound && (
                     <Button 
                       variant="outline"
-                      onClick={() => {
-                        setTempKeyInput('');
-                        setUserApiKey('');
-                        localStorage.removeItem('llm_christmas_user_key');
-                        setShowAuthModal(false);
-                        // Reload only free models after disconnect
-                        fetchModels('');
-                      }} 
+                      onClick={disconnectAccount}
                       className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
                     >
                       Disconnect

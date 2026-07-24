@@ -30,11 +30,10 @@ function jsonError(message: string, status: number = 500) {
 }
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('authorization') || '';
-  const userBearerKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
 
-  // 优先用用户自己的 key，没有就用站点 key 来拉取清单
-  const apiKey = userBearerKey || process.env.LLM_CHRISTMAS_API_KEY || process.env.OPENAI_API_KEY || '';
+  // 优先使用仅服务端可读的绑定 Key；游客使用站点免费 Key。
+  const apiKey = boundUserKey || process.env.LLM_CHRISTMAS_API_KEY || process.env.OPENAI_API_KEY || '';
   const baseURL = (process.env.LLM_CHRISTMAS_BASE_URL || 'https://api.llm.christmas/v1').replace(/\/$/, '');
 
   if (!apiKey) {
@@ -69,8 +68,8 @@ export async function GET(req: NextRequest) {
       tier: classifyModel(m),
     }));
 
-    // 仅当用户带了 Bearer key 时才返回付费模型
-    const showAll = Boolean(userBearerKey);
+    // 绑定个人 Key 后返回该 Key 可访问的全量模型；游客仅显示免费模型。
+    const showAll = Boolean(boundUserKey);
     const visible = showAll ? all : all.filter((m: any) => m.tier === 'free');
 
     return new Response(

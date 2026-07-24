@@ -16,7 +16,10 @@ function jsonError(message: string, status: number = 500) {
 export async function POST(req: NextRequest) {
   try {
     const { messages, model = 'deepseek-v4-flash-200k', temperature = 0.7 } = await req.json();
-    const apiKey = process.env.LLM_CHRISTMAS_API_KEY || process.env.OPENAI_API_KEY || '';
+    const authHeader = req.headers.get('authorization') || '';
+    const userBearerKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+    const apiKey = userBearerKey || process.env.LLM_CHRISTMAS_API_KEY || process.env.OPENAI_API_KEY || '';
     const baseURL = (process.env.LLM_CHRISTMAS_BASE_URL || 'https://api.llm.christmas/v1').replace(/\/$/, '');
 
     if (!apiKey) {

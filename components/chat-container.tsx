@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
   Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
-  Mic, Square, Download, Share, X
+  Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -30,7 +30,19 @@ interface ChatSession {
   updatedAt: number;
 }
 
-// --- Main Component ---
+interface ModelOption {
+  id: string;
+  name: string;
+  provider: string;
+}
+
+const DEFAULT_MODELS: ModelOption[] = [
+  { id: 'deepseek-v4-flash-200k', name: 'DeepSeek Flash 200k', provider: 'DeepSeek' },
+  { id: 'gpt-4o', name: 'GPT-4o Omnimodal', provider: 'OpenAI' },
+  { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
+  { id: 'qwen-turbo', name: 'Qwen Turbo', provider: 'Alibaba' },
+];
+
 export default function ChatContainer() {
   // State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -39,49 +51,61 @@ export default function ChatContainer() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
+  // Model & Auth State
+  const [selectedModel, setSelectedModel] = useState<string>('deepseek-v4-flash-200k');
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [userApiKey, setUserApiKey] = useState<string>('');
+  const [tempKeyInput, setTempKeyInput] = useState<string>('');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [userBalance, setUserBalance] = useState<string | null>(null);
+
   // Settings State
-  const [model, setModel] = useState('deepseek-v4-flash-200k');
   const [temperature, setTemperature] = useState(0.7);
   const [isListening, setIsListening] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Initialize & Load from LocalStorage
+  // Load Saved State
   useEffect(() => {
-    const saved = localStorage.getItem('llm_christmas_chats');
-    if (saved) {
+    const savedChats = localStorage.getItem('llm_christmas_chats');
+    if (savedChats) {
       try {
-        const parsed = JSON.parse(saved);
+        const parsed = JSON.parse(savedChats);
         if (parsed.length > 0) {
           setSessions(parsed);
           setActiveSessionId(parsed[0].id);
-          return;
+        } else {
+          createNewSession();
         }
-      } catch (e) { console.error('Failed to parse chats', e); }
+      } catch (e) { createNewSession(); }
+    } else {
+      createNewSession();
     }
-    // Create default session if empty
-    createNewSession();
+
+    const savedKey = localStorage.getItem('llm_christmas_user_key');
+    if (savedKey) {
+      setUserApiKey(savedKey);
+      setTempKeyInput(savedKey);
+    }
   }, []);
 
-  // Save to LocalStorage
+  // Save Sessions
   useEffect(() => {
     if (sessions.length > 0) {
       localStorage.setItem('llm_christmas_chats', JSON.stringify(sessions));
     }
   }, [sessions]);
 
-  // Scroll to bottom
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+  const messages = activeSession?.messages || [];
+
   const scrollToBottom = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   };
-
-  const activeSession = sessions.find(s => s.id === activeSessionId);
-  const messages = activeSession?.messages || [];
 
   useEffect(() => {
     scrollToBottom();
@@ -124,12 +148,22 @@ export default function ChatContainer() {
     }
   };
 
+  const saveUserKey = () => {
+    const trimmed = tempKeyInput.trim();
+    setUserApiKey(trimmed);
+    if (trimmed) {
+      localStorage.setItem('llm_christmas_user_key', trimmed);
+    } else {
+      localStorage.removeItem('llm_christmas_user_key');
+    }
+    setShowAuthModal(false);
+  };
+
   // --- Chat Logic ---
   const handleSubmit = async (overrideInput?: string) => {
     const textToSend = overrideInput || input;
     if (!textToSend.trim() || isLoading) return;
 
-    // Generate title for new chat
     let newTitle = activeSession?.title;
     if (messages.length === 0) {
       newTitle = textToSend.slice(0, 30) + (textToSend.length > 30 ? '...' : '');
@@ -152,16 +186,23 @@ export default function ChatContainer() {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(userApiKey ? { 'Authorization': `Bearer ${userApiKey}` } : {})
+        },
         body: JSON.stringify({
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          model,
+          model: selectedModel,
           temperature,
         }),
         signal: abortControllerRef.current.signal,
       });
 
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || 'Upstream error');
+      }
+
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
@@ -199,7 +240,7 @@ export default function ChatContainer() {
                   if (s.id === activeSessionId) {
                     const msgs = [...s.messages];
                     const last = msgs[msgs.length - 1];
-                    if (last.id === assistantMessage.id) {
+                    if (last && last.id === assistantMessage.id) {
                       last.content += parsed.content;
                     }
                     return { ...s, messages: msgs };
@@ -212,15 +253,13 @@ export default function ChatContainer() {
         }
       }
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('Aborted');
-      } else {
+      if (error.name !== 'AbortError') {
         updateActiveSession([
           ...newMessages,
           {
             id: Date.now().toString(),
             role: 'assistant',
-            content: `Error: ${error.message || 'Upstream request failed'}`,
+            content: `Error: ${error.message || 'Request failed'}`,
             timestamp: Date.now(),
           }
         ]);
@@ -238,67 +277,11 @@ export default function ChatContainer() {
     }
   };
 
-  const regenerateLast = () => {
-    if (messages.length === 0 || isLoading) return;
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-    if (lastUserMsg) {
-      // Remove all messages after the last user message
-      const idx = messages.findIndex(m => m.id === lastUserMsg.id);
-      const trimmed = messages.slice(0, idx);
-      updateActiveSession(trimmed);
-      handleSubmit(lastUserMsg.content);
-    }
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  };
-
-  // --- Voice Input (Web Speech API) ---
-  const toggleVoice = () => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Speech recognition is not supported in your browser.');
-      return;
-    }
-    
-    if (isListening) {
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US'; // Could be made configurable
-    recognition.continuous = false;
-    recognition.interimResults = true;
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results)
-        .map((result: any) => result[0])
-        .map((result) => result.transcript)
-        .join('');
-      setInput(prev => prev + ' ' + transcript);
-    };
-    recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
-    
-    recognition.start();
-  };
-
-  const exportChat = () => {
-    if (!activeSession) return;
-    const md = activeSession.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${m.content}\n`).join('\n---\n\n');
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${activeSession.title}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -311,28 +294,29 @@ export default function ChatContainer() {
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 280, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            className="h-full shrink-0 border-r border-stone-200 bg-stone-100/50 dark:border-stone-800 dark:bg-stone-900/50 flex flex-col"
+            className="h-full shrink-0 border-r border-stone-200 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/60 flex flex-col"
           >
-            <div className="p-4 flex gap-2">
+            <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-base tracking-tight text-stone-900 dark:text-stone-100">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
+                    <Sparkles className="h-4 w-4" />
+                  </div>
+                  llm.christmas
+                </div>
+              </div>
+
               <Button 
                 onClick={createNewSession}
-                className="flex-1 justify-start gap-2 bg-white text-stone-700 hover:bg-stone-50 border border-stone-200 dark:bg-stone-800 dark:text-stone-200 dark:border-stone-700 dark:hover:bg-stone-700"
+                className="w-full justify-start gap-2 bg-white text-stone-700 hover:bg-stone-50 border border-stone-200 shadow-sm dark:bg-stone-800 dark:text-stone-200 dark:border-stone-700 dark:hover:bg-stone-700"
               >
                 <Plus className="h-4 w-4" />
                 New Chat
               </Button>
-              <Button 
-                variant="outline" 
-                size="icon"
-                onClick={() => setIsSidebarOpen(false)}
-                className="md:hidden"
-              >
-                <X className="h-4 w-4" />
-              </Button>
             </div>
 
-            <ScrollArea className="flex-1 px-3">
-              <div className="space-y-1 pb-4">
+            <ScrollArea className="flex-1 px-3 py-2">
+              <div className="space-y-1">
                 {sessions.map(session => (
                   <div
                     key={session.id}
@@ -358,129 +342,153 @@ export default function ChatContainer() {
                 ))}
               </div>
             </ScrollArea>
+
+            {/* Sidebar Footer: Account & Quota Share */}
+            <div className="p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80">
+              <button 
+                onClick={() => setShowAuthModal(true)}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700/80 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-white", userApiKey ? "bg-emerald-500" : "bg-stone-400")}>
+                    <Key className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate">
+                      {userApiKey ? 'llm.christmas Key Connected' : 'Connect Account Key'}
+                    </div>
+                    <div className="text-[10px] text-stone-400 truncate">
+                      {userApiKey ? `Key: ${userApiKey.slice(0, 8)}...` : 'Share main site balance'}
+                    </div>
+                  </div>
+                </div>
+                <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* --- Main Chat Area --- */}
+      {/* --- Main Area --- */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950">
         
-        {/* Header */}
+        {/* Header with EXPLICIT MODEL SELECTOR */}
         <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-white/50 dark:bg-stone-900/50 backdrop-blur-md z-10">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             {!isSidebarOpen && (
               <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)} className="text-stone-500">
                 <Menu className="h-5 w-5" />
               </Button>
             )}
-            <div className="font-medium text-stone-800 dark:text-stone-200">
-              llm.christmas
-            </div>
-            <div className="hidden md:flex items-center ml-4 px-2 py-1 rounded-md bg-stone-200/50 dark:bg-stone-800 text-xs font-medium text-stone-500">
-              {model}
+            
+            {/* Prominent Model Selector Dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-sm font-medium shadow-sm transition-all dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700"
+              >
+                <Sparkles className="h-4 w-4 text-orange-500" />
+                <span>{DEFAULT_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
+              </button>
+
+              <AnimatePresence>
+                {isModelMenuOpen && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
+                    className="absolute left-0 top-11 z-30 w-64 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                  >
+                    <div className="px-2 py-1 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
+                      Select Model
+                    </div>
+                    {DEFAULT_MODELS.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          setSelectedModel(m.id);
+                          setIsModelMenuOpen(false);
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left",
+                          selectedModel === m.id 
+                            ? "bg-orange-50 text-orange-900 font-medium dark:bg-orange-950/40 dark:text-orange-300" 
+                            : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                        )}
+                      >
+                        <div>
+                          <div>{m.name}</div>
+                          <div className="text-[10px] text-stone-400">{m.provider}</div>
+                        </div>
+                        {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
-          
-          <div className="flex items-center gap-1">
-            {messages.length > 0 && (
-              <Button variant="ghost" size="icon" onClick={exportChat} title="Export Markdown" className="text-stone-500 hidden sm:flex">
-                <Download className="h-4 w-4" />
-              </Button>
-            )}
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setShowSettings(!showSettings)}
-              className={cn("text-stone-500", showSettings && "bg-stone-200 dark:bg-stone-800")}
+
+          <div className="flex items-center gap-2">
+            <a 
+              href="https://llm.christmas" 
+              target="_blank" 
+              rel="noreferrer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-xs font-medium text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
             >
-              <Settings2 className="h-4 w-4" />
-            </Button>
+              <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+              <span>Main Portal</span>
+            </a>
           </div>
         </header>
-
-        {/* Settings Dropdown */}
-        <AnimatePresence>
-          {showSettings && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute right-4 top-16 z-20 w-72 rounded-xl border border-stone-200 bg-white p-4 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-            >
-              <h3 className="mb-4 text-sm font-medium">Model Settings</h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs text-stone-500">Model</label>
-                  <select 
-                    value={model} 
-                    onChange={(e) => setModel(e.target.value)}
-                    className="w-full rounded-md border border-stone-200 p-2 text-sm dark:border-stone-700 dark:bg-stone-800"
-                  >
-                    <option value="deepseek-v4-flash-200k">DeepSeek Flash</option>
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs text-stone-500">
-                    <label>Temperature</label>
-                    <span>{temperature}</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0" max="2" step="0.1" 
-                    value={temperature}
-                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                    className="w-full accent-stone-700"
-                  />
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* Messages List */}
         <ScrollArea className="flex-1" ref={scrollRef}>
           <div className="mx-auto max-w-3xl px-4 py-8 md:px-8">
             {messages.length === 0 ? (
-              <div className="mt-20 flex flex-col items-center text-center">
-                <div className="mb-6 rounded-2xl bg-stone-200/50 p-4 dark:bg-stone-800">
-                  <Bot className="h-8 w-8 text-stone-600 dark:text-stone-400" />
+              <div className="mt-16 flex flex-col items-center text-center">
+                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
+                  <Sparkles className="h-7 w-7" />
                 </div>
-                <h2 className="mb-2 text-2xl font-semibold">How can I help you today?</h2>
-                <p className="text-stone-500">Ask anything, or try an example below.</p>
+                <h2 className="mb-2 text-2xl font-semibold text-stone-900 dark:text-stone-100">
+                  Universal AI at llm.christmas
+                </h2>
+                <p className="text-stone-500 max-w-md text-sm">
+                  Connected directly to llm.christmas gateway. Select a model above to start.
+                </p>
+
                 <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 w-full max-w-2xl">
-                  {['Write a React component', 'Explain quantum computing', 'Analyze this data', 'Translate to Spanish'].map(hint => (
+                  {['Write a TypeScript API endpoint', 'Explain impermanent loss in DeFi', 'Refactor Python code for async', 'Draft a pitch for a Web3 product'].map(hint => (
                     <button 
                       key={hint}
                       onClick={() => handleSubmit(hint)}
-                      className="rounded-xl border border-stone-200 bg-white p-4 text-left text-sm text-stone-600 transition-colors hover:bg-stone-50 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400 dark:hover:bg-stone-800"
+                      className="rounded-xl border border-stone-200/80 bg-white p-4 text-left text-sm text-stone-700 transition-all hover:border-orange-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-700"
                     >
-                      {hint} &rarr;
+                      <div className="font-medium">{hint}</div>
+                      <div className="mt-1 text-xs text-stone-400">Click to ask &rarr;</div>
                     </button>
                   ))}
                 </div>
               </div>
             ) : (
               <div className="space-y-8 pb-20">
-                {messages.map((message, idx) => (
+                {messages.map((message) => (
                   <div key={message.id} className="group relative flex gap-4 md:gap-6">
-                    {/* Avatar */}
                     <div className="flex shrink-0 mt-1">
                       {message.role === 'user' ? (
                         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300">
-                          <User className="h-5 w-5" />
+                          <User className="h-4 w-4" />
                         </div>
                       ) : (
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-500">
-                          <Bot className="h-5 w-5" />
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
+                          <Bot className="h-4 w-4" />
                         </div>
                       )}
                     </div>
                     
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium mb-1 text-sm text-stone-900 dark:text-stone-100">
+                      <div className="font-semibold mb-1 text-sm text-stone-900 dark:text-stone-100">
                         {message.role === 'user' ? 'You' : 'Assistant'}
                       </div>
                       
@@ -510,24 +518,6 @@ export default function ChatContainer() {
                           <div className="whitespace-pre-wrap">{message.content}</div>
                         )}
                       </div>
-
-                      {/* Message Actions */}
-                      <div className="mt-2 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
-                        <button 
-                          onClick={() => navigator.clipboard.writeText(message.content)}
-                          className="flex items-center gap-1 text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
-                        >
-                          <Copy className="h-3.5 w-3.5" /> Copy
-                        </button>
-                        {message.role === 'assistant' && idx === messages.length - 1 && (
-                          <button 
-                            onClick={regenerateLast}
-                            className="flex items-center gap-1 text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" /> Retry
-                          </button>
-                        )}
-                      </div>
                     </div>
                   </div>
                 ))}
@@ -536,41 +526,29 @@ export default function ChatContainer() {
           </div>
         </ScrollArea>
 
-        {/* Input Box - Floating bottom */}
+        {/* Floating Input Area */}
         <div className="px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
           <div className="mx-auto max-w-3xl relative">
-            <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-stone-400/20 focus-within:border-stone-400 dark:border-stone-700 dark:bg-stone-900 transition-all">
+            <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask anything..."
-                className="min-h-[60px] max-h-[400px] w-full resize-none border-0 bg-transparent px-4 py-4 text-base focus-visible:ring-0 placeholder:text-stone-400"
+                placeholder={`Ask ${selectedModel}...`}
+                className="min-h-[60px] max-h-[300px] w-full resize-none border-0 bg-transparent px-4 py-4 text-base focus-visible:ring-0 placeholder:text-stone-400"
                 disabled={isLoading}
-                rows={1}
-                style={{ height: 'auto', overflowY: 'hidden' }}
-                onInput={(e) => {
-                  const target = e.target as HTMLTextAreaElement;
-                  target.style.height = 'auto';
-                  target.style.height = Math.min(target.scrollHeight, 400) + 'px';
-                }}
               />
               
               <div className="flex items-center justify-between px-3 pb-3 pt-1">
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800" title="Attach file (UI Demo)">
-                    <ImageIcon className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    onClick={toggleVoice}
-                    className={cn("h-8 w-8 rounded-full", isListening ? "text-red-500 bg-red-50 dark:bg-red-900/20" : "text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800")}
-                    title="Voice input"
-                  >
-                    <Mic className="h-4 w-4" />
-                  </Button>
+                <div className="flex items-center gap-1 text-xs text-stone-400">
+                  {userApiKey ? (
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                      <Check className="h-3 w-3" /> Using Custom Token
+                    </span>
+                  ) : (
+                    <span>Using Free Site Tier</span>
+                  )}
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -578,8 +556,7 @@ export default function ChatContainer() {
                     <Button 
                       onClick={stopGenerating}
                       size="icon" 
-                      className="h-8 w-8 rounded-full bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white transition-transform active:scale-95"
-                      title="Stop generating"
+                      className="h-8 w-8 rounded-full bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900"
                     >
                       <Square className="h-3.5 w-3.5 fill-current" />
                     </Button>
@@ -601,13 +578,77 @@ export default function ChatContainer() {
                 </div>
               </div>
             </div>
-            <div className="mt-2 text-center text-xs text-stone-400">
-              AI can make mistakes. Consider verifying important information.
-            </div>
           </div>
         </div>
 
       </div>
+
+      {/* --- Key / Auth Modal --- */}
+      <AnimatePresence>
+        {showAuthModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 font-semibold text-lg">
+                  <Key className="h-5 w-5 text-orange-500" />
+                  Connect Account Key
+                </div>
+                <button onClick={() => setShowAuthModal(false)} className="text-stone-400 hover:text-stone-600">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <p className="text-sm text-stone-500 mb-4">
+                Paste your API Token from <a href="https://llm.christmas" target="_blank" rel="noreferrer" className="text-orange-600 underline">llm.christmas</a> to use your account balance and unlimited quotas.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                    API Token (sk-...)
+                  </label>
+                  <input
+                    type="password"
+                    value={tempKeyInput}
+                    onChange={(e) => setTempKeyInput(e.target.value)}
+                    placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                    className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-orange-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={saveUserKey} 
+                    className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl"
+                  >
+                    Save & Connect
+                  </Button>
+                  {userApiKey && (
+                    <Button 
+                      variant="outline"
+                      onClick={() => {
+                        setTempKeyInput('');
+                        setUserApiKey('');
+                        localStorage.removeItem('llm_christmas_user_key');
+                        setShowAuthModal(false);
+                      }} 
+                      className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                    >
+                      Disconnect
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }

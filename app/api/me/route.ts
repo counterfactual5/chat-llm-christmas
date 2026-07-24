@@ -5,11 +5,27 @@ export const maxDuration = 15;
 
 const MAIN_SITE_USER_URL = 'https://llm.christmas/api/user/self';
 
+function cookieNames(header: string): string[] {
+  if (!header) return [];
+  return header
+    .split(';')
+    .map((part) => part.trim().split('=')[0])
+    .filter(Boolean);
+}
+
 export async function GET(req: NextRequest) {
   const cookie = req.headers.get('cookie') || '';
+  const names = cookieNames(cookie);
 
   if (!cookie) {
-    return Response.json({ authenticated: false }, { status: 401 });
+    return Response.json(
+      {
+        authenticated: false,
+        reason: 'no_cookie_on_chat_request',
+        cookie_names: [],
+      },
+      { status: 401 }
+    );
   }
 
   try {
@@ -22,19 +38,34 @@ export async function GET(req: NextRequest) {
     });
 
     if (!upstream.ok) {
-      return Response.json({ authenticated: false }, { status: 401 });
+      return Response.json(
+        {
+          authenticated: false,
+          reason: 'main_site_rejected_cookie',
+          cookie_names: names,
+          upstream_status: upstream.status,
+        },
+        { status: 401 }
+      );
     }
 
     const payload = await upstream.json();
     const user = payload?.data || payload?.user || null;
 
     if (!user) {
-      return Response.json({ authenticated: false }, { status: 401 });
+      return Response.json(
+        {
+          authenticated: false,
+          reason: 'main_site_no_user_payload',
+          cookie_names: names,
+        },
+        { status: 401 }
+      );
     }
 
-    // Only expose profile fields required by the chat UI. Never return session data.
     return Response.json({
       authenticated: true,
+      cookie_names: names,
       user: {
         id: user.id,
         username: user.username || user.display_name || user.email || `User #${user.id}`,
@@ -44,6 +75,13 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch {
-    return Response.json({ authenticated: false }, { status: 502 });
+    return Response.json(
+      {
+        authenticated: false,
+        reason: 'upstream_fetch_failed',
+        cookie_names: names,
+      },
+      { status: 502 }
+    );
   }
 }

@@ -13,27 +13,6 @@ function jsonError(message: string, status: number = 500) {
   });
 }
 
-async function* chunkText(text: string) {
-  const chunkSize = 8;
-  for (let i = 0; i < text.length; i += chunkSize) {
-    yield text.slice(i, i + chunkSize);
-  }
-}
-
-async function* aiSdkV3TextStream(generator: AsyncGenerator<string>) {
-  const encoder = new TextEncoder();
-  async function* start() {
-    for await (const chunk of generator) {
-      const content = chunk;
-      if (content) {
-        yield encoder.encode(`data: ${JSON.stringify({ content })}\n\n`);
-      }
-    }
-    yield encoder.encode('data: [DONE]\n\n');
-  }
-  yield* start();
-}
-
 export async function POST(req: NextRequest) {
   try {
     const { messages, model = 'deepseek-v4-flash-200k' } = await req.json();
@@ -56,10 +35,33 @@ export async function POST(req: NextRequest) {
       messages: baseMessages,
     } as any);
 
-    return new Response(aiSdkV3TextStream(toCleanTextStream(response as any)), {
+    const encoder = new TextEncoder();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of response as any) {
+            const content = chunk?.choices?.[0]?.delta?.content || '';
+            if (content) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
+              );
+            }
+          }
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        } catch (err: any) {
+          controller.error(err);
+        }
+      },
+    });
+
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'X-Vercel-AI-Data-Stream': 'v1',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
       },
     });
   } catch (err: any) {
@@ -67,14 +69,5 @@ export async function POST(req: NextRequest) {
     const status = err?.status || err?.statusCode || err?.response?.status;
     const detail = err?.error?.message || err?.message || String(err || 'Upstream model request failed.');
     return jsonError(`${detail}${status ? ` (HTTP ${status})` : ''}`);
-  }
-}
-
-async function* toCleanTextStream(response: any) {
-  for await (const chunk of response) {
-    const content = chunk?.choices?.[0]?.delta?.content || '';
-    if (content) {
-      yield content;
-    }
   }
 }

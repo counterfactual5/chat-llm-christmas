@@ -13,8 +13,11 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: 'Chat at llm.christmas - AI Powered Conversation',
-  description: 'Modern AI chat interface powered by llm.christmas API. Ask anything, get instant responses.',
+  title: 'llm.christmas Chat — Universal AI Assistant',
+  description: 'Minimalist, fast, and powerful AI conversation experience powered by llm.christmas.',
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({

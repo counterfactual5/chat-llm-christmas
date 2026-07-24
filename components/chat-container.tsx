@@ -445,101 +445,17 @@ export default function ChatContainer() {
       {/* --- Main Area --- */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
         
-        {/* Header with EXPLICIT MODEL SELECTOR */}
-        <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-white/50 dark:bg-stone-900/50 backdrop-blur-md z-10">
+        {/* Header without Model Selector */}
+        <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-[#F9F8F6] dark:bg-stone-950 z-10 shrink-0">
           <div className="flex items-center gap-3">
             {!isSidebarOpen && (
-              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)} className="text-stone-500">
+              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)} className="text-stone-500 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
                 <Menu className="h-5 w-5" />
               </Button>
             )}
-            
-            {/* Prominent Model Selector Dropdown */}
-            <div className="relative">
-              <button 
-                onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-sm font-medium shadow-sm transition-all dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700 min-w-[200px]"
-              >
-                <Sparkles className="h-4 w-4 text-orange-500 shrink-0" />
-                <span className="truncate text-left flex-1">
-                  {modelsLoading 
-                    ? 'Loading models…' 
-                    : (availableModels.find(m => m.id === selectedModel)?.id || selectedModel || 'Select Model')}
-                </span>
-                {availableModels.find(m => m.id === selectedModel)?.tier === 'paid' && (
-                  <span className="text-[9px] font-bold tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded">PRO</span>
-                )}
-                <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
-              </button>
-
-              <AnimatePresence>
-                {isModelMenuOpen && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 5 }}
-                    className="absolute left-0 top-12 z-30 w-80 max-h-[480px] overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                  >
-                    <div className="px-2 py-1 flex items-center justify-between sticky top-0 bg-inherit">
-                      <span className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
-                        {isAccountBound ? 'All Models (Balance Enabled)' : 'Free Models'}
-                      </span>
-                      <span className="text-[10px] text-stone-400">
-                        {availableModels.length} available
-                      </span>
-                    </div>
-                    {availableModels.length === 0 && !modelsLoading && (
-                      <div className="p-4 text-xs text-stone-400 text-center">
-                        {isAccountBound ? 'No models found. Check your API key.' : 'No free models available right now.'}
-                      </div>
-                    )}
-                    {modelsLoading && availableModels.length === 0 && (
-                      <div className="p-4 text-xs text-stone-400 text-center">
-                        Loading...
-                      </div>
-                    )}
-                    {availableModels.map(m => (
-                      <button
-                        key={m.id}
-                        onClick={() => {
-                          setSelectedModel(m.id);
-                          setIsModelMenuOpen(false);
-                        }}
-                        className={cn(
-                          "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
-                          selectedModel === m.id 
-                            ? "bg-orange-50 text-orange-900 font-medium dark:bg-orange-950/40 dark:text-orange-300" 
-                            : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-                        )}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate">{m.id}</div>
-                          <div className="text-[10px] text-stone-400 truncate">
-                            {m.owned_by} {m.group ? `· ${m.group}` : ''}
-                          </div>
-                        </div>
-                        {m.tier === 'paid' ? (
-                          <span className="text-[9px] font-bold tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded shrink-0">PRO</span>
-                        ) : (
-                          <span className="text-[9px] font-bold tracking-wider bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded dark:bg-emerald-900/40 dark:text-emerald-300 shrink-0">FREE</span>
-                        )}
-                        {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500 shrink-0" />}
-                      </button>
-                    ))}
-                    {!isAccountBound && (
-                      <div className="mt-1 pt-2 border-t border-stone-100 dark:border-stone-800 p-2">
-                        <button 
-                          onClick={() => { setIsModelMenuOpen(false); setShowAuthModal(true); }}
-                          className="w-full text-xs text-center text-orange-600 hover:underline font-medium"
-                        >
-                          🔓 Sign in to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
-                        </button>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            <span className="font-semibold text-stone-700 dark:text-stone-300">
+              llm.christmas Chat
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -547,7 +463,7 @@ export default function ChatContainer() {
               href="https://llm.christmas" 
               target="_blank" 
               rel="noreferrer"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-xs font-medium text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-xs font-medium text-stone-600 shadow-sm dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
             >
               <Wallet className="h-3.5 w-3.5 text-emerald-500" />
               <span>Main Portal</span>
@@ -557,7 +473,7 @@ export default function ChatContainer() {
 
         {/* Messages List */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
-          <div className="mx-auto max-w-3xl px-4 py-8 md:px-8">
+          <div className="mx-auto max-w-4xl px-4 py-8 md:px-8">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
                 <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
@@ -567,7 +483,7 @@ export default function ChatContainer() {
                   Universal AI at llm.christmas
                 </h2>
                 <p className="text-stone-500 max-w-md text-sm">
-                  Connected directly to llm.christmas gateway. Select a model above to start.
+                  Connected directly to llm.christmas gateway.
                 </p>
 
                 <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 w-full max-w-2xl">
@@ -640,7 +556,7 @@ export default function ChatContainer() {
 
         {/* Floating Input Area */}
         <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
-          <div className="mx-auto max-w-3xl relative">
+          <div className="mx-auto max-w-4xl relative">
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea
                 ref={textareaRef}
@@ -653,14 +569,86 @@ export default function ChatContainer() {
               />
               
               <div className="flex items-center justify-between px-3 pb-3 pt-1">
-                <div className="flex items-center gap-1 text-xs text-stone-400">
-                  {isAccountBound ? (
-                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                      <Check className="h-3 w-3" /> Using linked account balance
-                    </span>
-                  ) : (
-                    <span>Using Free Site Tier</span>
-                  )}
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button 
+                      onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                      className="flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-stone-100 text-xs font-medium text-stone-600 transition-colors dark:text-stone-400 dark:hover:bg-stone-800"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                      <span className="truncate max-w-[140px] sm:max-w-[200px] text-left">
+                        {modelsLoading 
+                          ? 'Loading models…' 
+                          : (availableModels.find(m => m.id === selectedModel)?.id || selectedModel || 'Select Model')}
+                      </span>
+                      <ChevronDown className="h-3 w-3 text-stone-400" />
+                    </button>
+
+                    <AnimatePresence>
+                      {isModelMenuOpen && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 5 }}
+                          className="absolute left-0 bottom-10 mb-2 z-30 w-[280px] sm:w-80 max-h-[400px] overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                        >
+                          <div className="px-2 py-1 flex items-center justify-between sticky top-0 bg-inherit pb-2 border-b border-stone-100 dark:border-stone-800/50 mb-1">
+                            <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">
+                              {isAccountBound ? 'All Models' : 'Free Models'}
+                            </span>
+                            <span className="text-[10px] text-stone-400">
+                              {availableModels.length} models
+                            </span>
+                          </div>
+                          {availableModels.length === 0 && !modelsLoading && (
+                            <div className="p-4 text-xs text-stone-400 text-center">
+                              {isAccountBound ? 'No models found. Check connection.' : 'No free models available.'}
+                            </div>
+                          )}
+                          {modelsLoading && availableModels.length === 0 && (
+                            <div className="p-4 text-xs text-stone-400 text-center">
+                              Loading...
+                            </div>
+                          )}
+                          {availableModels.map(m => (
+                            <button
+                              key={m.id}
+                              onClick={() => {
+                                setSelectedModel(m.id);
+                                setIsModelMenuOpen(false);
+                              }}
+                              className={cn(
+                                "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
+                                selectedModel === m.id 
+                                  ? "bg-orange-50 text-orange-900 font-medium dark:bg-orange-950/40 dark:text-orange-300" 
+                                  : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                              )}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate">{m.id}</div>
+                              </div>
+                              {m.tier === 'paid' ? (
+                                <span className="text-[9px] font-bold tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded shrink-0">PRO</span>
+                              ) : (
+                                <span className="text-[9px] font-bold tracking-wider bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded dark:bg-emerald-900/40 dark:text-emerald-300 shrink-0">FREE</span>
+                              )}
+                              {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500 shrink-0 ml-1" />}
+                            </button>
+                          ))}
+                          {!isAccountBound && (
+                            <div className="mt-1 pt-2 border-t border-stone-100 dark:border-stone-800 p-2">
+                              <button 
+                                onClick={() => { setIsModelMenuOpen(false); setShowAuthModal(true); }}
+                                className="w-full text-xs text-center text-orange-600 hover:underline font-medium"
+                              >
+                                🔓 Sign in to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
+                              </button>
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
                 
                 <div className="flex items-center gap-2">

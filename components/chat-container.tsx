@@ -68,10 +68,14 @@ export default function ChatContainer() {
     const savedChats = localStorage.getItem('llm_christmas_chats');
     if (savedChats) {
       try {
-        const parsed = JSON.parse(savedChats);
-        if (parsed.length > 0) {
-          setSessions(parsed);
-          setActiveSessionId(parsed[0].id);
+        const parsed = JSON.parse(savedChats) as ChatSession[];
+        // Clean up drafts created by older versions: retain at most one blank chat.
+        const nonEmpty = parsed.filter((session) => session.messages?.length > 0);
+        const firstEmpty = parsed.find((session) => !session.messages?.length);
+        const normalized = firstEmpty ? [...nonEmpty, firstEmpty] : nonEmpty;
+        if (normalized.length > 0) {
+          setSessions(normalized);
+          setActiveSessionId(normalized[0].id);
         } else {
           createNewSession();
         }
@@ -112,8 +116,16 @@ export default function ChatContainer() {
 
   // --- Actions ---
   const createNewSession = () => {
+    // Reuse an existing empty draft instead of accumulating blank conversations.
+    const emptyDraft = sessions.find((session) => session.messages.length === 0);
+    if (emptyDraft) {
+      setActiveSessionId(emptyDraft.id);
+      if (window.innerWidth < 768) setIsSidebarOpen(false);
+      return;
+    }
+
     const newSession: ChatSession = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       title: 'New Conversation',
       messages: [],
       updatedAt: Date.now(),
@@ -140,11 +152,22 @@ export default function ChatContainer() {
   const deleteSession = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const filtered = sessions.filter(s => s.id !== id);
-    setSessions(filtered);
-    if (activeSessionId === id) {
-      if (filtered.length > 0) setActiveSessionId(filtered[0].id);
-      else createNewSession();
+
+    // Keep exactly one empty draft when the final conversation is removed.
+    if (filtered.length === 0) {
+      const emptyDraft: ChatSession = {
+        id: crypto.randomUUID(),
+        title: 'New Conversation',
+        messages: [],
+        updatedAt: Date.now(),
+      };
+      setSessions([emptyDraft]);
+      setActiveSessionId(emptyDraft.id);
+      return;
     }
+
+    setSessions(filtered);
+    if (activeSessionId === id) setActiveSessionId(filtered[0].id);
   };
 
   const saveUserKey = () => {

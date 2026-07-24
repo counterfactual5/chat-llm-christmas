@@ -443,7 +443,7 @@ export default function ChatContainer() {
       </AnimatePresence>
 
       {/* --- Main Area --- */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950">
+      <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
         
         {/* Header with EXPLICIT MODEL SELECTOR */}
         <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-white/50 dark:bg-stone-900/50 backdrop-blur-md z-10">
@@ -556,7 +556,7 @@ export default function ChatContainer() {
         </header>
 
         {/* Messages List */}
-        <ScrollArea className="flex-1" ref={scrollRef}>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
           <div className="mx-auto max-w-3xl px-4 py-8 md:px-8">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
@@ -636,10 +636,10 @@ export default function ChatContainer() {
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Floating Input Area */}
-        <div className="px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
+        <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
           <div className="mx-auto max-w-3xl relative">
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
   Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
-  Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut
+  Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';

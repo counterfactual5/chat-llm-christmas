@@ -428,10 +428,10 @@ export default function ChatContainer() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-semibold truncate">
-                      {isAccountBound ? '主站额度已连接' : '连接主站 API Key'}
+                      {isAccountBound ? '主站账号已连接' : '连接 llm.christmas 账号'}
                     </div>
                     <div className="text-[10px] text-stone-400 truncate">
-                      {isAccountBound ? 'Key 已安全存入 HttpOnly Cookie' : '一次绑定，自动使用主站余额'}
+                      {isAccountBound ? '自动使用主站账号额度' : '登录一次，无需复制 API Key'}
                     </div>
                   </div>
                 </div>
@@ -532,7 +532,7 @@ export default function ChatContainer() {
                           onClick={() => { setIsModelMenuOpen(false); setShowAuthModal(true); }}
                           className="w-full text-xs text-center text-orange-600 hover:underline font-medium"
                         >
-                          🔓 Connect Key to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
+                          🔓 Sign in to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
                         </button>
                       </div>
                     )}
@@ -708,7 +708,7 @@ export default function ChatContainer() {
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2 font-semibold text-lg">
                   <Key className="h-5 w-5 text-orange-500" />
-                  Connect Account Key
+                  Connect llm.christmas Account
                 </div>
                 <button onClick={() => setShowAuthModal(false)} className="text-stone-400 hover:text-stone-600">
                   <X className="h-5 w-5" />
@@ -716,10 +716,25 @@ export default function ChatContainer() {
               </div>
 
               <p className="text-sm text-stone-500 mb-4">
-                Paste your API Token from <a href="https://llm.christmas" target="_blank" rel="noreferrer" className="text-orange-600 underline">llm.christmas</a> to use your account balance and unlimited quotas.
+                Sign in on the main site and authorize Chat. Your balance and paid-model access will be shared automatically.
               </p>
 
               <div className="space-y-4">
+                {!isAccountBound && (
+                  <a
+                    href="/api/auth/start"
+                    className="flex h-11 w-full items-center justify-center rounded-xl bg-orange-500 font-semibold text-white hover:bg-orange-600"
+                  >
+                    Continue with llm.christmas
+                  </a>
+                )}
+
+                <div className="flex items-center gap-3 text-xs text-stone-400">
+                  <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                  Manual API Key fallback
+                  <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                </div>
+
                 <div>
                   <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
                     API Token (sk-...)

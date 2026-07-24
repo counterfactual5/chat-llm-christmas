@@ -32,16 +32,10 @@ interface ChatSession {
 
 interface ModelOption {
   id: string;
-  name: string;
-  provider: string;
+  owned_by: string;
+  tier: 'free' | 'paid';
+  group?: string;
 }
-
-const DEFAULT_MODELS: ModelOption[] = [
-  { id: 'deepseek-v4-flash-200k', name: 'DeepSeek Flash 200k', provider: 'DeepSeek' },
-  { id: 'gpt-4o', name: 'GPT-4o Omnimodal', provider: 'OpenAI' },
-  { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
-  { id: 'qwen-turbo', name: 'Qwen Turbo', provider: 'Alibaba' },
-];
 
 export default function ChatContainer() {
   // State
@@ -52,8 +46,10 @@ export default function ChatContainer() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   // Model & Auth State
-  const [selectedModel, setSelectedModel] = useState<string>('deepseek-v4-flash-200k');
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [userApiKey, setUserApiKey] = useState<string>('');
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -89,6 +85,9 @@ export default function ChatContainer() {
       setUserApiKey(savedKey);
       setTempKeyInput(savedKey);
     }
+
+    // initial fetch (without user key)
+    fetchModels(savedKey || '');
   }, []);
 
   // Save Sessions
@@ -157,6 +156,37 @@ export default function ChatContainer() {
       localStorage.removeItem('llm_christmas_user_key');
     }
     setShowAuthModal(false);
+    // Reload models with the new auth state
+    fetchModels(trimmed);
+  };
+
+  // Fetch dynamic models from backend (free or all, depending on auth)
+  const fetchModels = async (key: string) => {
+    setModelsLoading(true);
+    try {
+      const res = await fetch('/api/models', {
+        headers: key ? { 'Authorization': `Bearer ${key}` } : {},
+        cache: 'no-store',
+      });
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.models)) {
+        setAvailableModels(data.models);
+        // Set default selected model: prefer first free or first available
+        if (data.models.length > 0) {
+          setSelectedModel(prev => {
+            // Keep current selection if still valid
+            const exists = data.models.find((m: ModelOption) => m.id === prev);
+            return exists ? prev : data.models[0].id;
+          });
+        } else {
+          setSelectedModel('');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch models', e);
+    } finally {
+      setModelsLoading(false);
+    }
   };
 
   // --- Chat Logic ---
@@ -385,10 +415,17 @@ export default function ChatContainer() {
             <div className="relative">
               <button 
                 onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-sm font-medium shadow-sm transition-all dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-sm font-medium shadow-sm transition-all dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700 min-w-[200px]"
               >
-                <Sparkles className="h-4 w-4 text-orange-500" />
-                <span>{DEFAULT_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}</span>
+                <Sparkles className="h-4 w-4 text-orange-500 shrink-0" />
+                <span className="truncate text-left flex-1">
+                  {modelsLoading 
+                    ? 'Loading models…' 
+                    : (availableModels.find(m => m.id === selectedModel)?.id || selectedModel || 'Select Model')}
+                </span>
+                {availableModels.find(m => m.id === selectedModel)?.tier === 'paid' && (
+                  <span className="text-[9px] font-bold tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded">PRO</span>
+                )}
                 <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
               </button>
 
@@ -398,12 +435,27 @@ export default function ChatContainer() {
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 5 }}
-                    className="absolute left-0 top-11 z-30 w-64 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                    className="absolute left-0 top-12 z-30 w-80 max-h-[480px] overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
                   >
-                    <div className="px-2 py-1 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
-                      Select Model
+                    <div className="px-2 py-1 flex items-center justify-between sticky top-0 bg-inherit">
+                      <span className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
+                        {userApiKey ? 'All Models (Balance Enabled)' : 'Free Models'}
+                      </span>
+                      <span className="text-[10px] text-stone-400">
+                        {availableModels.length} available
+                      </span>
                     </div>
-                    {DEFAULT_MODELS.map(m => (
+                    {availableModels.length === 0 && !modelsLoading && (
+                      <div className="p-4 text-xs text-stone-400 text-center">
+                        {userApiKey ? 'No models found. Check your API key.' : 'No free models available right now.'}
+                      </div>
+                    )}
+                    {modelsLoading && availableModels.length === 0 && (
+                      <div className="p-4 text-xs text-stone-400 text-center">
+                        Loading...
+                      </div>
+                    )}
+                    {availableModels.map(m => (
                       <button
                         key={m.id}
                         onClick={() => {
@@ -411,19 +463,36 @@ export default function ChatContainer() {
                           setIsModelMenuOpen(false);
                         }}
                         className={cn(
-                          "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left",
+                          "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
                           selectedModel === m.id 
                             ? "bg-orange-50 text-orange-900 font-medium dark:bg-orange-950/40 dark:text-orange-300" 
                             : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
                         )}
                       >
-                        <div>
-                          <div>{m.name}</div>
-                          <div className="text-[10px] text-stone-400">{m.provider}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{m.id}</div>
+                          <div className="text-[10px] text-stone-400 truncate">
+                            {m.owned_by} {m.group ? `· ${m.group}` : ''}
+                          </div>
                         </div>
-                        {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500" />}
+                        {m.tier === 'paid' ? (
+                          <span className="text-[9px] font-bold tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded shrink-0">PRO</span>
+                        ) : (
+                          <span className="text-[9px] font-bold tracking-wider bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded dark:bg-emerald-900/40 dark:text-emerald-300 shrink-0">FREE</span>
+                        )}
+                        {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500 shrink-0" />}
                       </button>
                     ))}
+                    {!userApiKey && (
+                      <div className="mt-1 pt-2 border-t border-stone-100 dark:border-stone-800 p-2">
+                        <button 
+                          onClick={() => { setIsModelMenuOpen(false); setShowAuthModal(true); }}
+                          className="w-full text-xs text-center text-orange-600 hover:underline font-medium"
+                        >
+                          🔓 Connect Key to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
+                        </button>
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -636,6 +705,8 @@ export default function ChatContainer() {
                         setUserApiKey('');
                         localStorage.removeItem('llm_christmas_user_key');
                         setShowAuthModal(false);
+                        // Reload only free models after disconnect
+                        fetchModels('');
                       }} 
                       className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
                     >

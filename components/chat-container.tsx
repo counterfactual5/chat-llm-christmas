@@ -7,7 +7,7 @@ import {
   Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered
+  Play, ListOrdered, Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -99,12 +99,23 @@ function analyzeTruncation(
   if ((text.match(/\$\$/g) || []).length % 2 === 1) {
     return { truncated: true, reason: 'Unclosed math block' };
   }
+  if (/<think\b[^>]*>/i.test(text) && !/<\/think>/i.test(text)) {
+    return { truncated: true, reason: 'Unclosed thinking block' };
+  }
+  // Long thinking then only a short bridge sentence — usually cut before the real answer.
+  {
+    const afterThink = text.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim();
+    const thinkChars = Math.max(0, text.length - afterThink.length);
+    if (thinkChars > 80 && afterThink.length > 0 && afterThink.length < 180) {
+      return { truncated: true, reason: 'Stopped before finishing the answer' };
+    }
+  }
 
   if (finishReason && !NATURAL_STOPS.has(finishReason)) {
     return { truncated: true, reason: `Stopped early (${finishReason})` };
   }
 
-  // User hit Stop / page refreshed mid-stream.
+  // User hit Stop / page refreshed mid-stream / connection dropped.
   if (incomplete) {
     return { truncated: true, reason: 'Reply was interrupted' };
   }
@@ -222,7 +233,14 @@ export default function ChatContainer() {
   
   // Model & Auth State
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return localStorage.getItem('llm_christmas_selected_model') || '';
+    } catch {
+      return '';
+    }
+  });
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [isAccountBound, setIsAccountBound] = useState(false);
@@ -278,8 +296,8 @@ export default function ChatContainer() {
         const bound = Boolean(data?.bound);
         setIsAccountBound(bound);
         fetchModels();
-        
         if (bound) {
+          fetchSkills();
           // Connected user: load their chats from localStorage
           const savedChats = localStorage.getItem('llm_christmas_chats');
           if (savedChats) {
@@ -523,9 +541,19 @@ export default function ChatContainer() {
     let finishReason: string | null = null;
     let streamed = initialContent;
     let seamPending = Boolean(seamPrefix);
+    let sawDone = false;
 
-    const settle = () => {
-      const verdict = analyzeTruncation(streamed, finishReason);
+    const settle = (unexpectedEnd = false) => {
+      // Connection dropped / function killed mid-stream: no [DONE] arrived.
+      // Prefer Continue over silently treating the partial reply as finished.
+      if (unexpectedEnd && !finishReason) {
+        markAssistantIncomplete(assistantId, true, {
+          finishReason,
+          truncationReason: 'Stream ended unexpectedly',
+        });
+        return;
+      }
+      const verdict = analyzeTruncation(streamed, finishReason, unexpectedEnd);
       markAssistantIncomplete(assistantId, verdict.truncated, {
         finishReason,
         truncationReason: verdict.reason || undefined,
@@ -544,7 +572,8 @@ export default function ChatContainer() {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6);
         if (data === '[DONE]') {
-          settle();
+          sawDone = true;
+          settle(false);
           return;
         }
         try {
@@ -570,7 +599,7 @@ export default function ChatContainer() {
       }
     }
 
-    settle();
+    settle(!sawDone);
   };
 
   const deleteSession = (id: string, e: React.MouseEvent) => {
@@ -621,6 +650,7 @@ export default function ChatContainer() {
       setTempKeyInput('');
       setShowAuthModal(false);
       await fetchModels();
+      await fetchSkills();
     } catch (error: any) {
       setAccountError(error?.message || '绑定失败');
     } finally {
@@ -634,6 +664,8 @@ export default function ChatContainer() {
     setTempKeyInput('');
     setShowAuthModal(false);
     setSessions([]);
+    setSkills([]);
+    setEditingSkillTitle('');
     createNewSession();
     await fetchModels();
   };
@@ -774,10 +806,16 @@ export default function ChatContainer() {
         setAvailableModels(data.models);
         // Set default selected model: prefer first free or first available
         if (data.models.length > 0) {
-          setSelectedModel(prev => {
-            // Keep current selection if still valid
-            const exists = data.models.find((m: ModelOption) => m.id === prev);
-            return exists ? prev : data.models[0].id;
+          setSelectedModel((prev) => {
+            // Keep an in-session selection if it is still available.
+            if (prev && data.models.some((m: ModelOption) => m.id === prev)) return prev;
+            // Restore the last choice from localStorage (prev may be '' on first fetch).
+            let saved = '';
+            try {
+              saved = localStorage.getItem('llm_christmas_selected_model') || '';
+            } catch {}
+            if (saved && data.models.some((m: ModelOption) => m.id === saved)) return saved;
+            return data.models[0].id;
           });
         } else {
           setSelectedModel('');
@@ -1069,16 +1107,29 @@ export default function ChatContainer() {
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         setIsWaitingForFirstToken(false);
-        updateActiveSession([
-          ...newMessages,
-          {
-            id: assistantMessage.id,
-            role: 'assistant',
-            content: `Error: ${error.message || 'Request failed'}`,
-            timestamp: Date.now(),
-            incomplete: false,
-          },
-        ]);
+        // Keep any partial reply so the user can Continue; only use Error: when empty.
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== activeSessionId) return s;
+            const msgs = s.messages.map((m) => {
+              if (m.id !== assistantMessage.id) return m;
+              if (m.content.trim() || m.reasoning?.trim()) {
+                return {
+                  ...m,
+                  incomplete: true,
+                  truncationReason: error.message || 'Request failed',
+                };
+              }
+              return {
+                ...m,
+                content: `Error: ${error.message || 'Request failed'}`,
+                incomplete: false,
+                truncationReason: undefined,
+              };
+            });
+            return { ...s, messages: msgs, updatedAt: Date.now() };
+          }),
+        );
       } else {
         markAssistantIncomplete(assistantMessage.id, true, {
           truncationReason: 'Reply was interrupted',
@@ -1130,17 +1181,28 @@ export default function ChatContainer() {
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        // Replace the partial reply with a clean Error: bubble so Retry appears.
-        updateActiveSession([
-          ...messages.slice(0, -1),
-          {
-            id: last.id,
-            role: 'assistant',
-            content: `Error: ${error.message || 'Request failed'}`,
-            timestamp: Date.now(),
-            incomplete: false,
-          },
-        ]);
+        // Keep partial resumed text; fall back to Error only if somehow empty.
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== activeSessionId) return s;
+            const msgs = s.messages.map((m) => {
+              if (m.id !== last.id) return m;
+              if (m.content.trim()) {
+                return {
+                  ...m,
+                  incomplete: true,
+                  truncationReason: error.message || 'Request failed',
+                };
+              }
+              return {
+                ...m,
+                content: `Error: ${error.message || 'Request failed'}`,
+                incomplete: false,
+              };
+            });
+            return { ...s, messages: msgs, updatedAt: Date.now() };
+          }),
+        );
       } else {
         markAssistantIncomplete(last.id, true, {
           truncationReason: 'Stopped by you',
@@ -2186,23 +2248,39 @@ export default function ChatContainer() {
                     </div>
 
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
                           <Settings2 className="h-3.5 w-3.5" /> 
                           System Prompt
                         </label>
-                        {systemPrompt.trim() && (
-                          <button
-                            type="button"
-                            onClick={() => setSystemPrompt('')}
-                            className="text-[10px] text-stone-400 hover:text-red-500"
-                          >
-                            Reset
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {isAccountBound && systemPrompt.trim() && (
+                            <button
+                              type="button"
+                              onClick={saveCurrentAsSkill}
+                              disabled={isSavingSkill}
+                              className="text-[10px] font-medium text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30 px-2 py-1 rounded transition-colors disabled:opacity-50"
+                            >
+                              {isSavingSkill ? 'Saving…' : 'Save as Skill'}
+                            </button>
+                          )}
+                          {systemPrompt.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSystemPrompt('');
+                                setEditingSkillTitle('');
+                              }}
+                              className="text-[10px] text-stone-400 hover:text-red-500 px-1.5 py-1"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="text-[11px] leading-relaxed text-stone-400">
                         Standing instructions for tone, language, and role. Leave empty to use the default assistant.
+                        {isAccountBound ? ' You can save prompts as reusable Skills.' : ' Connect your account to save Skills.'}
                       </p>
                       <div className="flex flex-wrap gap-1.5">
                         {SYSTEM_PRESETS.map((preset) => (
@@ -2227,6 +2305,60 @@ export default function ChatContainer() {
                         placeholder="You are a helpful AI..."
                         className="min-h-24 text-xs bg-stone-50 dark:bg-stone-900/50 border-stone-200 dark:border-stone-800"
                       />
+
+                      {isAccountBound && (
+                        <div className="pt-1 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1">
+                              <Zap className="h-3 w-3 text-orange-500" />
+                              My Skills
+                            </label>
+                            <button
+                              type="button"
+                              onClick={fetchSkills}
+                              className="text-[10px] text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                            >
+                              Refresh
+                            </button>
+                          </div>
+                          {skills.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-stone-200 dark:border-stone-700 px-3 py-3 text-[11px] text-stone-400">
+                              No saved skills yet. Write a system prompt above, then click
+                              <span className="mx-1 font-medium text-orange-600">Save as Skill</span>.
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {skills.map((skill) => (
+                                <div
+                                  key={skill.id}
+                                  className="group flex max-w-full items-center overflow-hidden rounded-md border border-stone-200 bg-stone-100 text-xs dark:border-stone-700 dark:bg-stone-800"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSystemPrompt(skill.content);
+                                      setEditingSkillTitle(skill.title);
+                                    }}
+                                    className="flex min-w-0 items-center gap-1 px-2 py-1 text-left hover:bg-stone-200 dark:hover:bg-stone-700"
+                                    title={skill.title}
+                                  >
+                                    <Zap className="h-3 w-3 shrink-0 text-orange-500" />
+                                    <span className="truncate">{skill.title}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => deleteSkill(skill.id, e)}
+                                    className="px-1.5 py-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/30"
+                                    title="Delete skill"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                   </div>

@@ -128,3 +128,37 @@
     @apply font-sans;
   }
 }
+
+@layer components {
+  .katex-display {
+    margin: 1.25rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.5rem 0;
+  }
+
+  .katex-display > .katex {
+    white-space: nowrap;
+  }
+
+  .chat-markdown a {
+    color: #ea580c;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .chat-markdown hr {
+    margin: 1.25rem 0;
+    border-color: rgb(214 211 209 / 0.8);
+  }
+
+  .dark .chat-markdown hr {
+    border-color: rgb(68 64 60 / 0.8);
+  }
+
+  .chat-markdown img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 0.75rem;
+  }
+}

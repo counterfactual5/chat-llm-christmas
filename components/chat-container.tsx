@@ -13,7 +13,16 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { CodeBlock } from './markdown/code-block';
+
+function normalizeMathDelimiters(content: string) {
+  return content
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => `\n$$\n${expression.trim()}\n$$\n`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => `$${expression.trim()}$`);
+}
 
 // --- Types ---
 interface Message {
@@ -473,7 +482,7 @@ export default function ChatContainer() {
 
         {/* Messages List */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
-          <div className="mx-auto max-w-5xl px-4 py-8 md:px-8">
+          <div className="mx-auto w-full max-w-[1200px] px-5 py-8 md:px-10 lg:px-12">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
                 <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
@@ -502,9 +511,9 @@ export default function ChatContainer() {
             ) : (
               <div className="space-y-8 pb-20">
                 {messages.map((message) => (
-                  <div key={message.id} className="group relative flex flex-col gap-2 mx-auto max-w-4xl">
+                  <div key={message.id} className="group relative flex flex-col gap-3 w-full">
                     {/* Header: Avatar + Name */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5">
                       <div className="flex shrink-0">
                         {message.role === 'user' ? (
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300">
@@ -521,34 +530,83 @@ export default function ChatContainer() {
                       </div>
                     </div>
                     
-                    {/* Content */}
-                    <div className="pl-10">
-                      <div className="prose prose-stone dark:prose-invert max-w-none text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
-                        {message.role === 'assistant' ? (
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              code({ node, inline, className, children, ...props }: any) {
-                                const match = /language-(\w+)/.exec(className || '');
-                                const value = String(children).replace(/\n$/, '');
-                                if (!inline && match) {
-                                  return <CodeBlock language={match[1]} value={value} />;
-                                }
-                                return (
-                                  <code {...props} className="rounded bg-stone-200/50 px-1.5 py-0.5 text-sm dark:bg-stone-800">
-                                    {children}
-                                  </code>
-                                );
-                              },
-                              pre({ children }: any) { return <>{children}</>; },
-                            }}
-                          >
-                            {message.content}
-                          </ReactMarkdown>
-                        ) : (
-                          <div className="whitespace-pre-wrap">{message.content}</div>
-                        )}
-                      </div>
+                    {/* Content Area */}
+                    <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
+                      {message.role === 'assistant' ? (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkMath]}
+                          rehypePlugins={[rehypeKatex]}
+                          components={{
+                            p({ children }: any) {
+                              return <p className="mb-4 leading-7 last:mb-0">{children}</p>;
+                            },
+                            h1({ children }: any) {
+                              return <h1 className="text-xl font-bold mt-6 mb-3 text-stone-900 dark:text-stone-100">{children}</h1>;
+                            },
+                            h2({ children }: any) {
+                              return <h2 className="text-lg font-bold mt-5 mb-2.5 text-stone-900 dark:text-stone-100">{children}</h2>;
+                            },
+                            h3({ children }: any) {
+                              return <h3 className="text-base font-bold mt-4 mb-2 text-stone-900 dark:text-stone-100">{children}</h3>;
+                            },
+                            ul({ children }: any) {
+                              return <ul className="my-3 pl-6 list-disc space-y-1">{children}</ul>;
+                            },
+                            ol({ children }: any) {
+                              return <ol className="my-3 pl-6 list-decimal space-y-1">{children}</ol>;
+                            },
+                            li({ children }: any) {
+                              return <li className="leading-6">{children}</li>;
+                            },
+                            blockquote({ children }: any) {
+                              return (
+                                <blockquote className="my-4 border-l-4 border-stone-300 pl-4 italic text-stone-600 dark:border-stone-700 dark:text-stone-400">
+                                  {children}
+                                </blockquote>
+                              );
+                            },
+                            table({ children }: any) {
+                              return (
+                                <div className="my-4 w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
+                                  <table className="w-full text-left text-sm">{children}</table>
+                                </div>
+                              );
+                            },
+                            thead({ children }: any) {
+                              return <thead className="bg-stone-100 dark:bg-stone-900 text-stone-900 dark:text-stone-100 font-semibold">{children}</thead>;
+                            },
+                            tbody({ children }: any) {
+                              return <tbody className="divide-y divide-stone-200 dark:divide-stone-800">{children}</tbody>;
+                            },
+                            tr({ children }: any) {
+                              return <tr className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50">{children}</tr>;
+                            },
+                            th({ children }: any) {
+                              return <th className="px-3.5 py-2.5 font-semibold">{children}</th>;
+                            },
+                            td({ children }: any) {
+                              return <td className="px-3.5 py-2.5 align-top">{children}</td>;
+                            },
+                            code({ node, inline, className, children, ...props }: any) {
+                              const match = /language-(\w+)/.exec(className || '');
+                              const value = String(children).replace(/\n$/, '');
+                              if (!inline && match) {
+                                return <CodeBlock language={match[1]} value={value} />;
+                              }
+                              return (
+                                <code {...props} className="rounded bg-stone-200/60 px-1.5 py-0.5 text-xs font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100">
+                                  {children}
+                                </code>
+                              );
+                            },
+                            pre({ children }: any) { return <>{children}</>; },
+                          }}
+                        >
+                          {normalizeMathDelimiters(message.content)}
+                        </ReactMarkdown>
+                      ) : (
+                        <div className="whitespace-pre-wrap">{message.content}</div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -559,7 +617,7 @@ export default function ChatContainer() {
 
         {/* Floating Input Area */}
         <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
-          <div className="mx-auto max-w-4xl relative">
+          <div className="mx-auto w-full max-w-[1200px] px-1 md:px-6 lg:px-8 relative">
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea
                 ref={textareaRef}

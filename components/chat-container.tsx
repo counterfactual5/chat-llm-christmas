@@ -79,25 +79,6 @@ export default function ChatContainer() {
     // Migrate away from the old insecure client-side key storage.
     localStorage.removeItem('llm_christmas_user_key');
 
-    const savedChats = localStorage.getItem('llm_christmas_chats');
-    if (savedChats) {
-      try {
-        const parsed = JSON.parse(savedChats) as ChatSession[];
-        // Clean up drafts created by older versions: retain at most one blank chat.
-        const nonEmpty = parsed.filter((session) => session.messages?.length > 0);
-        const firstEmpty = parsed.find((session) => !session.messages?.length);
-        const normalized = firstEmpty ? [...nonEmpty, firstEmpty] : nonEmpty;
-        if (normalized.length > 0) {
-          setSessions(normalized);
-          setActiveSessionId(normalized[0].id);
-        } else {
-          createNewSession();
-        }
-      } catch (e) { createNewSession(); }
-    } else {
-      createNewSession();
-    }
-
     // Detect whether a personal API key is already bound in the HttpOnly cookie.
     fetch('/api/account', { cache: 'no-store' })
       .then((response) => response.json())
@@ -105,16 +86,43 @@ export default function ChatContainer() {
         const bound = Boolean(data?.bound);
         setIsAccountBound(bound);
         fetchModels();
+        
+        if (bound) {
+          // Connected user: load their chats from localStorage
+          const savedChats = localStorage.getItem('llm_christmas_chats');
+          if (savedChats) {
+            try {
+              const parsed = JSON.parse(savedChats) as ChatSession[];
+              const nonEmpty = parsed.filter((session) => session.messages?.length > 0);
+              const firstEmpty = parsed.find((session) => !session.messages?.length);
+              const normalized = firstEmpty ? [...nonEmpty, firstEmpty] : nonEmpty;
+              if (normalized.length > 0) {
+                setSessions(normalized);
+                setActiveSessionId(normalized[0].id);
+              } else {
+                createNewSession();
+              }
+            } catch (e) { createNewSession(); }
+          } else {
+            createNewSession();
+          }
+        } else {
+          // Guest user: start with a fresh memory-only session. Ignore anything saved.
+          createNewSession();
+        }
       })
-      .catch(() => fetchModels());
+      .catch(() => {
+        fetchModels();
+        createNewSession();
+      });
   }, []);
 
-  // Save Sessions
+  // Save Sessions ONLY if account is bound
   useEffect(() => {
-    if (sessions.length > 0) {
+    if (isAccountBound && sessions.length > 0) {
       localStorage.setItem('llm_christmas_chats', JSON.stringify(sessions));
     }
-  }, [sessions]);
+  }, [sessions, isAccountBound]);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
@@ -213,6 +221,8 @@ export default function ChatContainer() {
     setIsAccountBound(false);
     setTempKeyInput('');
     setShowAuthModal(false);
+    setSessions([]);
+    createNewSession();
     await fetchModels();
   };
 

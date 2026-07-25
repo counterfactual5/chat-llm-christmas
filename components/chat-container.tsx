@@ -914,6 +914,42 @@ export default function ChatContainer() {
         {/* Floating Input Area */}
         <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
           <div className="mx-auto w-full max-w-[960px] px-1 md:px-4 relative">
+            {/* Message Queue Indicator */}
+            <AnimatePresence>
+              {messageQueue.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="mb-3 flex flex-col gap-2"
+                >
+                  {messageQueue.map((task, idx) => (
+                    <div key={idx} className="flex items-center justify-between rounded-xl bg-stone-100/80 px-4 py-2 text-sm dark:bg-stone-800/80 border border-stone-200/50 dark:border-stone-700/50 shadow-sm backdrop-blur-sm">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-stone-400 shrink-0" />
+                        <span className="truncate text-stone-600 dark:text-stone-300">Queued: {task.content}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-4">
+                        <button
+                          onClick={() => jumpQueueAndSubmit(idx)}
+                          className="px-2.5 py-1 text-xs font-medium text-orange-600 hover:bg-orange-100 rounded-md dark:text-orange-400 dark:hover:bg-orange-900/30 transition-colors"
+                        >
+                          Send Now
+                        </button>
+                        <button
+                          onClick={() => cancelQueuedMessage(idx)}
+                          className="p-1 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-md dark:hover:bg-red-900/20 transition-colors"
+                          title="Cancel"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea
                 ref={textareaRef}
@@ -1034,48 +1070,12 @@ export default function ChatContainer() {
                 </div>
               </div>
             </div>
-            
-            {/* Message Queue Indicator */}
-            <AnimatePresence>
-              {messageQueue.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="mt-3 flex flex-col gap-2"
-                >
-                  {messageQueue.map((task, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-xl bg-stone-100/80 px-4 py-2 text-sm dark:bg-stone-800/80 border border-stone-200/50 dark:border-stone-700/50 shadow-sm backdrop-blur-sm">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-stone-400 shrink-0" />
-                        <span className="truncate text-stone-600 dark:text-stone-300">Queued: {task.content}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0 ml-4">
-                        <button
-                          onClick={() => jumpQueueAndSubmit(idx)}
-                          className="px-2.5 py-1 text-xs font-medium text-orange-600 hover:bg-orange-100 rounded-md dark:text-orange-400 dark:hover:bg-orange-900/30 transition-colors"
-                        >
-                          Send Now
-                        </button>
-                        <button
-                          onClick={() => cancelQueuedMessage(idx)}
-                          className="p-1 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-md dark:hover:bg-red-900/20 transition-colors"
-                          title="Cancel"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         </div>
         
-          </div>
+      </div>
 
-          {/* --- Context Panel --- */}
+      {/* --- Context Panel --- */}
           <AnimatePresence>
             {isContextPanelOpen && (
               <motion.div

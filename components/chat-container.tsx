@@ -473,7 +473,7 @@ export default function ChatContainer() {
 
         {/* Messages List */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
-          <div className="mx-auto max-w-4xl px-4 py-8 md:px-8">
+          <div className="mx-auto max-w-5xl px-4 py-8 md:px-8">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
                 <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
@@ -486,7 +486,7 @@ export default function ChatContainer() {
                   Connected directly to llm.christmas gateway.
                 </p>
 
-                <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 w-full max-w-2xl">
+                <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 w-full max-w-2xl mx-auto">
                   {['Write a TypeScript API endpoint', 'Explain impermanent loss in DeFi', 'Refactor Python code for async', 'Draft a pitch for a Web3 product'].map(hint => (
                     <button 
                       key={hint}
@@ -502,24 +502,27 @@ export default function ChatContainer() {
             ) : (
               <div className="space-y-8 pb-20">
                 {messages.map((message) => (
-                  <div key={message.id} className="group relative flex gap-4 md:gap-6">
-                    <div className="flex shrink-0 mt-1">
-                      {message.role === 'user' ? (
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300">
-                          <User className="h-4 w-4" />
-                        </div>
-                      ) : (
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
-                          <Bot className="h-4 w-4" />
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold mb-1 text-sm text-stone-900 dark:text-stone-100">
+                  <div key={message.id} className="group relative flex flex-col gap-2 mx-auto max-w-4xl">
+                    {/* Header: Avatar + Name */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex shrink-0">
+                        {message.role === 'user' ? (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300">
+                            <User className="h-4 w-4" />
+                          </div>
+                        ) : (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
+                            <Bot className="h-4 w-4" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="font-semibold text-sm text-stone-900 dark:text-stone-100">
                         {message.role === 'user' ? 'You' : 'Assistant'}
                       </div>
-                      
+                    </div>
+                    
+                    {/* Content */}
+                    <div className="pl-10">
                       <div className="prose prose-stone dark:prose-invert max-w-none text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
                         {message.role === 'assistant' ? (
                           <ReactMarkdown

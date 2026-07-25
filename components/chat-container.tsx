@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
   Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
-  Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X
+  Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X,
+  MoreHorizontal, Clock, Paperclip, FileText, PanelRightOpen, PanelRightClose, Quote
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -69,12 +70,28 @@ export default function ChatContainer() {
   const [userBalance, setUserBalance] = useState<string | null>(null);
 
   // Settings State
-  const [temperature, setTemperature] = useState(0.7);
+  const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
+
+  // Context & attachment state
+  const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [referenceText, setReferenceText] = useState('');
+  const [attachments, setAttachments] = useState<Array<{
+    id: string;
+    name: string;
+    type: string;
+    size: number;
+    text?: string;
+    previewUrl?: string;
+  }>>([]);
+
+  // Settings State
   const [isListening, setIsListening] = useState(false);
   const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load Saved State
@@ -229,6 +246,47 @@ export default function ChatContainer() {
     await fetchModels();
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+
+    const newAttachments = [...attachments];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const attachment = {
+        id: crypto.randomUUID(),
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      } as any;
+
+      if (file.type.startsWith('image/')) {
+        attachment.previewUrl = URL.createObjectURL(file);
+      } else {
+        attachment.text = await file.text();
+      }
+      newAttachments.push(attachment);
+    }
+    setAttachments(newAttachments);
+    setIsContextPanelOpen(true);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeAttachment = (id: string) => {
+    const toRemove = attachments.find(a => a.id === id);
+    if (toRemove?.previewUrl) URL.revokeObjectURL(toRemove.previewUrl);
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  };
+
+  const estimatedContextLength = useMemo(() => {
+    let text = systemPrompt + '\n\n' + referenceText + '\n\n';
+    for (const a of attachments) if (a.text) text += a.name + '\n' + a.text + '\n\n';
+    for (const m of messages) text += m.role + '\n' + m.content + '\n\n';
+    return text.length;
+  }, [messages, systemPrompt, referenceText, attachments]);
+
+  const estimatedTokens = Math.ceil(estimatedContextLength / 3.5);
+
   // Fetch dynamic models from backend. The server decides free/full access from its HttpOnly cookie.
   const fetchModels = async () => {
     setModelsLoading(true);
@@ -262,6 +320,24 @@ export default function ChatContainer() {
     const textToSend = overrideInput || input;
     if (!textToSend.trim() || isLoading) return;
 
+    let fullContent = textToSend.trim();
+
+    // Attach text files and references to the first message of a session
+    if (messages.length === 0) {
+      let contextParts = [];
+      if (referenceText.trim()) {
+        contextParts.push(`[Reference Material]\n${referenceText.trim()}`);
+      }
+      for (const a of attachments) {
+        if (a.text) {
+          contextParts.push(`[Attached File: ${a.name}]\n${a.text.trim()}`);
+        }
+      }
+      if (contextParts.length > 0) {
+        fullContent = contextParts.join('\n\n') + '\n\n---\n\n' + fullContent;
+      }
+    }
+
     const baseMessages = baseMessagesOverride ?? messages;
     let newTitle = activeSession?.title;
     if (baseMessages.length === 0) {
@@ -271,7 +347,7 @@ export default function ChatContainer() {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: textToSend.trim(),
+      content: fullContent,
       timestamp: Date.now(),
     };
 
@@ -290,7 +366,7 @@ export default function ChatContainer() {
         body: JSON.stringify({
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
           model: selectedModel,
-          temperature,
+          systemPrompt,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -393,6 +469,21 @@ export default function ChatContainer() {
     await handleSubmit(content, priorMessages);
   };
 
+  const exportChat = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const session = sessions.find((s) => s.id === id);
+    if (!session) return;
+    const md = session.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${m.content}\n`).join('\n---\n\n');
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${session.title}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSessionMenuOpenId(null);
+  };
+
   const stopGenerating = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -442,26 +533,75 @@ export default function ChatContainer() {
             <ScrollArea className="flex-1 px-3 py-2">
               <div className="space-y-1">
                 {sessions.map(session => (
-                  <div
-                    key={session.id}
-                    onClick={() => setActiveSessionId(session.id)}
-                    className={cn(
-                      "group flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
-                      activeSessionId === session.id 
-                        ? "bg-white text-stone-900 shadow-sm border border-stone-200 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-700" 
-                        : "text-stone-600 hover:bg-stone-200/50 dark:text-stone-400 dark:hover:bg-stone-800/50"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <MessageSquare className="h-4 w-4 shrink-0 opacity-50" />
-                      <span className="truncate">{session.title}</span>
-                    </div>
-                    <button 
-                      onClick={(e) => deleteSession(session.id, e)}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-opacity"
+                  <div key={session.id} className="relative group">
+                    <div
+                      onClick={() => setActiveSessionId(session.id)}
+                      className={cn(
+                        "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
+                        activeSessionId === session.id 
+                          ? "bg-white text-stone-900 shadow-sm border border-stone-200 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-700" 
+                          : "text-stone-600 hover:bg-stone-200/50 dark:text-stone-400 dark:hover:bg-stone-800/50"
+                      )}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                      <div className="flex items-center gap-2 overflow-hidden w-full pr-6">
+                        <MessageSquare className="h-4 w-4 shrink-0 opacity-50" />
+                        <span className="truncate">{session.title}</span>
+                      </div>
+                    </div>
+                    
+                    {session.messages.length > 0 && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSessionMenuOpenId(sessionMenuOpenId === session.id ? null : session.id);
+                        }}
+                        className={cn(
+                          "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity",
+                          sessionMenuOpenId === session.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        )}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
+                      </button>
+                    )}
+
+                    <AnimatePresence>
+                      {sessionMenuOpenId === session.id && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                        >
+                          <div className="px-2 py-1.5 border-b border-stone-100 dark:border-stone-800/50 mb-1 flex items-center gap-2 text-xs text-stone-400">
+                            <Clock className="h-3 w-3" />
+                            {new Date(session.updatedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </div>
+                          
+                          <div className="px-2 py-1 text-xs text-stone-500">
+                            {session.messages.length} messages
+                          </div>
+
+                          <button
+                            onClick={(e) => exportChat(session.id, e)}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 rounded-md dark:text-stone-300 dark:hover:bg-stone-800"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Export Markdown
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              deleteSession(session.id, e);
+                              setSessionMenuOpenId(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md dark:text-red-400 dark:hover:bg-red-900/20"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete Chat
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 ))}
               </div>
@@ -507,6 +647,15 @@ export default function ChatContainer() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
+              className={cn("text-xs gap-1.5", isContextPanelOpen ? "bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100" : "text-stone-500")}
+            >
+              {isContextPanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              Context
+            </Button>
             <a 
               href="https://llm.christmas" 
               target="_blank" 
@@ -519,8 +668,13 @@ export default function ChatContainer() {
           </div>
         </header>
 
-        {/* Messages List */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
+        {/* Messages and Context Split */}
+        <div className="flex-1 flex min-h-0 overflow-hidden relative">
+          
+          {/* Messages Area */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Messages List */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
           <div className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
@@ -832,7 +986,101 @@ export default function ChatContainer() {
             </div>
           </div>
         </div>
+        
+          </div>
 
+          {/* --- Context Panel --- */}
+          <AnimatePresence>
+            {isContextPanelOpen && (
+              <motion.div
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 280, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col"
+              >
+                <div className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
+                  <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">Context</span>
+                  <Button variant="ghost" size="icon" onClick={() => setIsContextPanelOpen(false)} className="h-8 w-8 text-stone-500">
+                    <PanelRightClose className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <ScrollArea className="flex-1 px-4 py-4">
+                  <div className="space-y-6">
+                    
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                        <FileText className="h-3.5 w-3.5" /> 
+                        Attachments ({attachments.length})
+                      </label>
+                      {attachments.length === 0 ? (
+                        <div className="text-xs text-stone-400 py-2">No files attached. Use the paperclip icon in the input box.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {attachments.map(a => (
+                            <div key={a.id} className="group flex items-center justify-between p-2 rounded-lg border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/50 text-xs">
+                              <div className="min-w-0 flex-1 flex items-center gap-2">
+                                {a.previewUrl ? (
+                                  <div className="h-8 w-8 shrink-0 rounded bg-stone-200 overflow-hidden">
+                                    <img src={a.previewUrl} alt="preview" className="h-full w-full object-cover" />
+                                  </div>
+                                ) : (
+                                  <FileText className="h-4 w-4 shrink-0 text-stone-400" />
+                                )}
+                                <div className="truncate text-stone-600 dark:text-stone-300">{a.name}</div>
+                              </div>
+                              <button onClick={() => removeAttachment(a.id)} className="p-1 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity">
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                        <Quote className="h-3.5 w-3.5" /> 
+                        Reference Material
+                      </label>
+                      <Textarea
+                        value={referenceText}
+                        onChange={e => setReferenceText(e.target.value)}
+                        placeholder="Paste context, docs, or background info here..."
+                        className="min-h-24 text-xs font-mono bg-stone-50 dark:bg-stone-900/50 border-stone-200 dark:border-stone-800"
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                        <Settings2 className="h-3.5 w-3.5" /> 
+                        System Prompt
+                      </label>
+                      <Textarea
+                        value={systemPrompt}
+                        onChange={e => setSystemPrompt(e.target.value)}
+                        placeholder="You are a helpful AI..."
+                        className="min-h-24 text-xs bg-stone-50 dark:bg-stone-900/50 border-stone-200 dark:border-stone-800"
+                      />
+                    </div>
+
+                  </div>
+                </ScrollArea>
+
+                <div className="p-4 border-t border-stone-200/50 dark:border-stone-800/50 shrink-0 bg-stone-50 dark:bg-stone-900/50 text-xs text-stone-500 space-y-1.5">
+                  <div className="flex justify-between">
+                    <span>Est. Tokens</span>
+                    <span className="font-mono text-stone-700 dark:text-stone-300">{estimatedTokens.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Context Chars</span>
+                    <span className="font-mono text-stone-700 dark:text-stone-300">{estimatedContextLength.toLocaleString()}</span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* --- Key / Auth Modal --- */}

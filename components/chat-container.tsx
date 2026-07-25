@@ -419,7 +419,7 @@ export default function ChatContainer() {
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
                     <Sparkles className="h-4 w-4" />
                   </div>
-                  llm.christmas
+                  llm.christmas Chat
                 </div>
               </div>
 
@@ -489,7 +489,7 @@ export default function ChatContainer() {
       {/* --- Main Area --- */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
         
-        {/* Header without Model Selector */}
+        {/* Minimal Header */}
         <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-[#F9F8F6] dark:bg-stone-950 z-10 shrink-0">
           <div className="flex items-center gap-3">
             {!isSidebarOpen && (
@@ -497,9 +497,6 @@ export default function ChatContainer() {
                 <Menu className="h-5 w-5" />
               </Button>
             )}
-            <span className="font-semibold text-stone-700 dark:text-stone-300">
-              llm.christmas Chat
-            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -517,7 +514,7 @@ export default function ChatContainer() {
 
         {/* Messages List */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
-          <div className="mx-auto w-full max-w-[1200px] px-5 py-8 md:px-10 lg:px-12">
+          <div className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
                 <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
@@ -677,7 +674,7 @@ export default function ChatContainer() {
 
         {/* Floating Input Area */}
         <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
-          <div className="mx-auto w-full max-w-[1200px] px-1 md:px-6 lg:px-8 relative">
+          <div className="mx-auto w-full max-w-[960px] px-1 md:px-4 relative">
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea
                 ref={textareaRef}

@@ -6,7 +6,7 @@ import {
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
   Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X,
-  MoreHorizontal, Clock, Paperclip, FileText, PanelRightOpen, PanelRightClose, Quote,
+  MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
   Play, ListOrdered
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -19,19 +19,140 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { CodeBlock } from './markdown/code-block';
+import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  estimateTokensFromText,
+  getModelSpec,
+} from '@/lib/model-specs';
+
+const MATH_ENVIRONMENTS = [
+  'aligned', 'align', 'alignat', 'gather', 'gathered', 'split', 'multline',
+  'equation', 'eqnarray', 'cases', 'array',
+  'matrix', 'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'smallmatrix',
+].join('|');
 
 function normalizeMathDelimiters(content: string) {
-  let result = content
+  // Fenced code must never be rewritten as math, so park it first.
+  const fences: string[] = [];
+  let working = content.replace(/```[\s\S]*?(?:```|$)/g, (block) => {
+    fences.push(block);
+    return `\u0000F${fences.length - 1}\u0000`;
+  });
+
+  working = working
     .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => `\n$$\n${expression.trim()}\n$$\n`)
     .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => `$${expression.trim()}$`);
 
-  // Wrap bare \begin{...} \end{...} environments in $$ if they aren't already
-  result = result.replace(
-    /(?<!\$\$[\s\S]*?)(?:\\begin\{(aligned|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|cases\*|equation|eqnarray)\})([\s\S]*?)(?:\\end\{\1\})(?![\s\S]*?\$\$)/g,
-    (match) => `\n$$\n${match}\n$$\n`
+  // Models often emit bare \begin{aligned}…\end{aligned} with no delimiters.
+  // Wrap those, but leave environments that already sit inside a $$ block alone.
+  const envPattern = new RegExp(
+    `\\\\begin\\{(${MATH_ENVIRONMENTS})\\*?\\}[\\s\\S]*?\\\\end\\{\\1\\*?\\}`,
+    'g',
   );
+  working = working
+    .split(/(\$\$[\s\S]*?\$\$)/g)
+    .map((segment) =>
+      segment.startsWith('$$')
+        ? segment
+        : segment.replace(envPattern, (match) => `\n$$\n${match}\n$$\n`),
+    )
+    .join('');
 
-  return result;
+  return working.replace(/\u0000F(\d+)\u0000/g, (_, index) => fences[Number(index)]);
+}
+
+/** Natural terminators reported by upstream providers. */
+const NATURAL_STOPS = new Set(['stop', 'end_turn', 'tool_calls', 'function_call']);
+
+/**
+ * Decide whether a reply was cut off. Prefer the provider's finish_reason;
+ * fall back to structural signals and the incomplete flag set by Stop / refresh.
+ * Missing finish_reason alone is NOT treated as truncation — many providers
+ * omit it on a clean stop, and old saved messages never had one.
+ */
+function analyzeTruncation(
+  content: string,
+  finishReason?: string | null,
+  incomplete?: boolean,
+  storedReason?: string,
+): { truncated: boolean; reason: string } {
+  const text = (content || '').trimEnd();
+  if (!text) return { truncated: false, reason: '' };
+
+  if (storedReason) {
+    return { truncated: true, reason: storedReason };
+  }
+
+  if (finishReason === 'length' || finishReason === 'max_tokens') {
+    return { truncated: true, reason: 'Hit the output token limit' };
+  }
+  if (finishReason === 'content_filter') {
+    return { truncated: true, reason: 'Blocked by content filter' };
+  }
+
+  // Strong structural signals — reply is unfinished regardless of finish_reason.
+  if ((text.match(/```/g) || []).length % 2 === 1) {
+    return { truncated: true, reason: 'Unclosed code block' };
+  }
+  if ((text.match(/\$\$/g) || []).length % 2 === 1) {
+    return { truncated: true, reason: 'Unclosed math block' };
+  }
+
+  if (finishReason && !NATURAL_STOPS.has(finishReason)) {
+    return { truncated: true, reason: `Stopped early (${finishReason})` };
+  }
+
+  // User hit Stop / page refreshed mid-stream.
+  if (incomplete) {
+    return { truncated: true, reason: 'Reply was interrupted' };
+  }
+
+  return { truncated: false, reason: '' };
+}
+
+/**
+ * Continuation instructions tailored to whatever structure the reply was cut
+ * inside, so the model resumes the same table / code block / formula instead of
+ * restarting it with a fresh header.
+ */
+function buildContinuationPrompt(previous: string): string {
+  const text = previous.trimEnd();
+  const tail = text.slice(-400);
+  const lines = text.split('\n');
+  const lastLine = lines[lines.length - 1] ?? '';
+
+  const rules: string[] = [
+    'Continue your previous reply from exactly where it stopped.',
+    'Your output is appended directly to the previous text, so do not repeat any sentence, row, or heading you already wrote, do not restart the answer, and do not add an intro or apology.',
+  ];
+
+  const insideCodeBlock = (text.match(/```/g) || []).length % 2 === 1;
+  const insideMath = (text.match(/\$\$/g) || []).length % 2 === 1;
+  const insideTable = /^\s*\|/.test(lastLine);
+
+  if (insideCodeBlock) {
+    rules.push(
+      'You stopped inside a fenced code block. Continue the code directly with no new opening fence, and close it with ``` when the code is finished.',
+    );
+  }
+  if (insideMath) {
+    rules.push(
+      'You stopped inside a $$ math block. Continue the LaTeX from that exact point and close the block with $$. Never open a new $$ block for this formula.',
+    );
+  }
+  if (insideTable) {
+    rules.push(
+      'You stopped inside a Markdown table. Emit only the remaining data rows, starting immediately with a newline followed by |. Do not repeat the header row, do not emit another |---| separator row, and do not repeat the last row shown below.',
+    );
+  }
+  if (!insideCodeBlock && !insideMath && !insideTable) {
+    rules.push(
+      'If the text was cut mid-sentence or mid-word, resume from that exact character.',
+    );
+  }
+
+  return `${rules.join('\n')}\n\nHere are the last characters you wrote — continue immediately after them:\n\n<<<TAIL\n${tail}\nTAIL>>>`;
 }
 
 // --- Types ---
@@ -40,6 +161,18 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** data: URLs embedded in this turn (multimodal). */
+  images?: Array<{ url: string; name?: string }>;
+  /** Marks a synthetic compacted-history bubble. */
+  compacted?: boolean;
+  /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */
+  reasoning?: string;
+  /** True while streaming, or after a stop / refresh / truncated reply. */
+  incomplete?: boolean;
+  /** Raw finish_reason from upstream, kept so Resume can explain itself. */
+  finishReason?: string | null;
+  /** Human-readable explanation of why the reply looks cut off. */
+  truncationReason?: string;
 }
 
 interface ChatSession {
@@ -54,6 +187,26 @@ interface ModelOption {
   owned_by: string;
   tier: 'free' | 'paid';
   group?: string;
+  context_window?: number | null;
+  max_output?: number | null;
+  vision?: boolean;
+}
+
+function messagePlainText(message: Message): string {
+  return message.content || '';
+}
+
+function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): boolean {
+  if (pending.some((a) => Boolean(a.dataUrl || a.type.startsWith('image/')))) return true;
+  return messages.some((m) => (m.images?.length || 0) > 0);
+}
+
+function toApiMessages(messages: Message[]) {
+  return messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+    images: m.images?.map((img) => img.url) || [],
+  }));
 }
 
 export default function ChatContainer() {
@@ -85,14 +238,11 @@ export default function ChatContainer() {
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [referenceText, setReferenceText] = useState('');
-  const [attachments, setAttachments] = useState<Array<{
-    id: string;
-    name: string;
-    type: string;
-    size: number;
-    text?: string;
-    previewUrl?: string;
-  }>>([]);
+  const [attachments, setAttachments] = useState<IngestedAttachment[]>([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const [attachError, setAttachError] = useState('');
+  const [compactNotice, setCompactNotice] = useState('');
+  const [isCompacting, setIsCompacting] = useState(false);
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
@@ -101,11 +251,16 @@ export default function ChatContainer() {
   // Stop should freeze the queue; only explicit Continue / Send Now resumes it.
   const [queuePaused, setQueuePaused] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(true);
+  /** Explicit open/closed overrides for reasoning panels (message id → open). */
+  const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({});
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const dragDepthRef = useRef(0);
+  // Only auto-follow new tokens while the user is already near the bottom.
+  const stickToBottomRef = useRef(true);
 
   // Load Saved State
   useEffect(() => {
@@ -163,6 +318,29 @@ export default function ChatContainer() {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
+  const lastMessage = messages[messages.length - 1];
+  const isAssistantError = (m?: Message) =>
+    Boolean(m && m.role === 'assistant' && m.content.trim().startsWith('Error:'));
+  const truncationInfo = useMemo(() => {
+    if (!lastMessage || lastMessage.role !== 'assistant') {
+      return { truncated: false, reason: '' };
+    }
+    // Failed requests need Retry, not Continue-from-partial.
+    if (!lastMessage.content?.trim() || isAssistantError(lastMessage)) {
+      return { truncated: false, reason: '' };
+    }
+    return analyzeTruncation(
+      lastMessage.content,
+      lastMessage.finishReason,
+      lastMessage.incomplete,
+      lastMessage.truncationReason,
+    );
+  }, [lastMessage]);
+  // Only offer Continue when we have a clear interruption signal — not for every
+  // finished assistant turn.
+  const canResumeIncomplete = !isLoading && truncationInfo.truncated;
+  // Timeout / upstream failures leave an Error: bubble — offer Retry for that turn.
+  const canRetryFailed = !isLoading && isAssistantError(lastMessage);
   // Empty drafts stay in state for the composer, but do not appear in the sidebar
   // until the first message is sent.
   const sidebarSessions = useMemo(
@@ -170,15 +348,34 @@ export default function ChatContainer() {
     [sessions],
   );
 
-  const scrollToBottom = () => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+  const NEAR_BOTTOM_PX = 96;
+
+  const isNearBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  };
+
+  const scrollToBottom = (force = false) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (!force && !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  };
+
+  const handleMessagesScroll = () => {
+    stickToBottomRef.current = isNearBottom();
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // Switching conversations should land at the latest message.
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    scrollToBottom(true);
+  }, [activeSessionId]);
 
   // --- Actions ---
   const createNewSession = () => {
@@ -209,7 +406,7 @@ export default function ChatContainer() {
   };
 
   const updateActiveSession = (newMessages: Message[], title?: string) => {
-    setSessions(prev => {
+    setSessions((prev) => {
       const exists = prev.some((s) => s.id === activeSessionId);
       if (!exists) {
         // First message on a missing draft — materialize the session now.
@@ -222,7 +419,7 @@ export default function ChatContainer() {
         if (!activeSessionId) setActiveSessionId(created.id);
         return [created, ...prev.filter((s) => s.messages.length > 0)];
       }
-      return prev.map(s => {
+      return prev.map((s) => {
         if (s.id === activeSessionId) {
           return {
             ...s,
@@ -234,6 +431,142 @@ export default function ChatContainer() {
         return s;
       });
     });
+  };
+
+  const markAssistantIncomplete = (
+    assistantId: string,
+    incomplete: boolean,
+    meta?: { finishReason?: string | null; truncationReason?: string },
+  ) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        return {
+          ...s,
+          updatedAt: Date.now(),
+          messages: s.messages.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  incomplete,
+                  finishReason: meta?.finishReason ?? m.finishReason,
+                  truncationReason: incomplete ? meta?.truncationReason : undefined,
+                }
+              : m,
+          ),
+        };
+      }),
+    );
+  };
+
+  const appendToAssistant = (assistantId: string, chunk: string) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const msgs = s.messages.map((m) =>
+          m.id === assistantId ? { ...m, content: m.content + chunk, incomplete: true } : m,
+        );
+        return { ...s, messages: msgs, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const appendToAssistantReasoning = (assistantId: string, chunk: string) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const msgs = s.messages.map((m) =>
+          m.id === assistantId
+            ? { ...m, reasoning: (m.reasoning || '') + chunk, incomplete: true }
+            : m,
+        );
+        return { ...s, messages: msgs, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const streamChatResponse = async (
+    apiMessages: ReturnType<typeof toApiMessages>,
+    assistantId: string,
+    signal: AbortSignal,
+    /** Text already present in the bubble, so Resume analyzes the whole reply. */
+    initialContent = '',
+    /** Inserted before the first resumed chunk to keep Markdown structure intact. */
+    seamPrefix = '',
+  ) => {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: apiMessages,
+        model: selectedModel,
+        systemPrompt,
+        referenceText,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Upstream error');
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finishReason: string | null = null;
+    let streamed = initialContent;
+    let seamPending = Boolean(seamPrefix);
+
+    const settle = () => {
+      const verdict = analyzeTruncation(streamed, finishReason);
+      markAssistantIncomplete(assistantId, verdict.truncated, {
+        finishReason,
+        truncationReason: verdict.reason || undefined,
+      });
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') {
+          settle();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.finish_reason) finishReason = parsed.finish_reason;
+          if (parsed.reasoning) {
+            // Reasoning counts as activity — hide the empty dots placeholder.
+            setIsWaitingForFirstToken(false);
+            appendToAssistantReasoning(assistantId, parsed.reasoning);
+          }
+          if (parsed.content) {
+            setIsWaitingForFirstToken(false);
+            let chunk = parsed.content as string;
+            if (seamPending) {
+              seamPending = false;
+              // Skip the seam if the model already emitted the break itself.
+              if (!chunk.startsWith('\n')) chunk = seamPrefix + chunk;
+            }
+            streamed += chunk;
+            appendToAssistant(assistantId, chunk);
+          }
+        } catch (e) {}
+      }
+    }
+
+    settle();
   };
 
   const deleteSession = (id: string, e: React.MouseEvent) => {
@@ -301,46 +634,129 @@ export default function ChatContainer() {
     await fetchModels();
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files) return;
-
-    const newAttachments = [...attachments];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const attachment = {
-        id: crypto.randomUUID(),
-        name: file.name,
-        type: file.type,
-        size: file.size,
-      } as any;
-
-      if (file.type.startsWith('image/')) {
-        attachment.previewUrl = URL.createObjectURL(file);
-      } else {
-        attachment.text = await file.text();
-      }
-      newAttachments.push(attachment);
+  const addIngestedFiles = async (files: FileList | File[]) => {
+    setAttachError('');
+    const { attachments: next, errors } = await ingestFiles(files);
+    if (next.length > 0) {
+      setAttachments((prev) => [...prev, ...next]);
+      // Do not auto-open the Context panel — attachments already show above the input.
     }
-    setAttachments(newAttachments);
-    setIsContextPanelOpen(true);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (errors.length > 0) setAttachError(errors.join(' · '));
   };
 
   const removeAttachment = (id: string) => {
-    const toRemove = attachments.find(a => a.id === id);
+    const toRemove = attachments.find((a) => a.id === id);
     if (toRemove?.previewUrl) URL.revokeObjectURL(toRemove.previewUrl);
-    setAttachments(prev => prev.filter(a => a.id !== id));
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
 
-  const estimatedContextLength = useMemo(() => {
-    let text = systemPrompt + '\n\n' + referenceText + '\n\n';
-    for (const a of attachments) if (a.text) text += a.name + '\n' + a.text + '\n\n';
-    for (const m of messages) text += m.role + '\n' + m.content + '\n\n';
-    return text.length;
+  const selectedSpec = useMemo(() => {
+    const fromList = availableModels.find((m) => m.id === selectedModel);
+    const fallback = getModelSpec(selectedModel);
+    return {
+      context: fromList?.context_window ?? fallback.context,
+      maxOutput: fromList?.max_output ?? fallback.maxOutput,
+      // Prefer explicit list flag; fall back to local specs so we don't
+      // treat vision models as text-only when the API field is missing.
+      vision: fromList?.vision ?? fallback.vision,
+    };
+  }, [availableModels, selectedModel]);
+
+  const hasImages = useMemo(
+    () => sessionHasImages(messages, attachments),
+    [messages, attachments],
+  );
+
+  // Close model menu on outside click / Escape.
+  useEffect(() => {
+    if (!isModelMenuOpen) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (modelMenuRef.current && target && !modelMenuRef.current.contains(target)) {
+        setIsModelMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsModelMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isModelMenuOpen]);
+
+  // When images appear on a text-only model, warn — do not silently jump models.
+  useEffect(() => {
+    if (hasImages && !selectedSpec.vision) {
+      setAttachError('This conversation has images. Pick a Vision model to continue.');
+      return;
+    }
+    setAttachError((prev) =>
+      prev === 'This conversation has images. Pick a Vision model to continue.' ? '' : prev,
+    );
+  }, [hasImages, selectedSpec.vision]);
+
+  // Token estimate aligned with what the server actually sends.
+  const contextBreakdown = useMemo(() => {
+    const systemText = (systemPrompt.trim() || DEFAULT_SYSTEM_PROMPT);
+    const system = estimateTokensFromText(systemText);
+    const reference = estimateTokensFromText(referenceText);
+    const files = estimateTokensFromText(
+      attachments
+        .filter((a) => a.text)
+        .map((a) => `${a.name}\n${a.text}`)
+        .join('\n\n'),
+    );
+    // Images are roughly ~1k tokens each for budgeting (provider-dependent).
+    const imageTokens =
+      attachments.filter((a) => a.dataUrl).length * 1000 +
+      messages.reduce((sum, m) => sum + (m.images?.length || 0) * 1000, 0);
+    const conversation = messages.reduce(
+      (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
+      0,
+    );
+    return {
+      system,
+      reference,
+      files,
+      images: imageTokens,
+      conversation,
+      total: system + reference + files + imageTokens + conversation,
+    };
   }, [messages, systemPrompt, referenceText, attachments]);
 
-  const estimatedTokens = Math.ceil(estimatedContextLength / 3.5);
+  const estimatedTokens = contextBreakdown.total;
+  const contextLimit = selectedSpec.context;
+  const outputReserve = Math.min(selectedSpec.maxOutput || 8192, 8192);
+  const usableLimit =
+    contextLimit != null ? Math.max(contextLimit - outputReserve, 1) : null;
+  const usageRatio =
+    usableLimit != null ? Math.min(estimatedTokens / usableLimit, 1.5) : null;
+
+  const contextSources = useMemo(
+    () =>
+      (
+        [
+          ['System', contextBreakdown.system],
+          ['Reference', contextBreakdown.reference],
+          ['Files', contextBreakdown.files],
+          ['Images', contextBreakdown.images],
+          ['Conversation', contextBreakdown.conversation],
+        ] as Array<[string, number]>
+      ).filter(([, tokens]) => tokens > 0),
+    [contextBreakdown],
+  );
+
+  const SYSTEM_PRESETS = [
+    { label: 'Concise', value: 'Answer concisely. Prefer short, direct sentences and skip preamble.' },
+    { label: 'Chinese', value: '始终使用简体中文回答，除代码与专有名词外不要混用英文。' },
+    { label: 'Engineer', value: 'You are a senior engineer. Give production-ready code, name tradeoffs, and flag edge cases.' },
+    { label: 'Explain', value: 'Explain step by step with concrete examples, assuming a smart beginner.' },
+  ];
 
   // Fetch dynamic models from backend. The server decides free/full access from its HttpOnly cookie.
   const fetchModels = async () => {
@@ -352,12 +768,16 @@ export default function ChatContainer() {
       const data = await res.json();
       if (data?.success && Array.isArray(data.models)) {
         setAvailableModels(data.models);
-        // Set default selected model: prefer first free or first available
         if (data.models.length > 0) {
-          setSelectedModel(prev => {
-            // Keep current selection if still valid
-            const exists = data.models.find((m: ModelOption) => m.id === prev);
-            return exists ? prev : data.models[0].id;
+          const saved =
+            typeof window !== 'undefined'
+              ? localStorage.getItem('llm_christmas_selected_model') || ''
+              : '';
+          setSelectedModel((prev) => {
+            // Prefer in-memory selection, then last saved choice, else first model.
+            const preferred = prev || saved;
+            const exists = data.models.find((m: ModelOption) => m.id === preferred);
+            return exists ? preferred : data.models[0].id;
           });
         } else {
           setSelectedModel('');
@@ -369,6 +789,12 @@ export default function ChatContainer() {
       setModelsLoading(false);
     }
   };
+
+  // Remember the user's model choice across refreshes.
+  useEffect(() => {
+    if (!selectedModel) return;
+    localStorage.setItem('llm_christmas_selected_model', selectedModel);
+  }, [selectedModel]);
 
   // --- Chat Logic ---
   // Auto-drain the queue only when idle and not paused (Stop freezes the queue).
@@ -382,9 +808,11 @@ export default function ChatContainer() {
 
   const enqueueOrSubmit = (overrideInput?: string, baseMessagesOverride?: Message[]) => {
     const textToSend = overrideInput || input;
-    if (!textToSend.trim()) return;
+    const hasPending = attachments.length > 0;
+    if (!textToSend.trim() && !hasPending) return;
 
     if (isLoading) {
+      if (!textToSend.trim()) return;
       const now = Date.now();
       const lastInQueue = messageQueue[messageQueue.length - 1];
       if (lastInQueue && lastInQueue.content === textToSend.trim() && now - lastInQueue.enqueueTime < 500) {
@@ -403,7 +831,6 @@ export default function ChatContainer() {
       return;
     }
 
-    // Fresh send while paused with leftovers: keep queue, send this message now.
     handleSubmit(textToSend, baseMessagesOverride);
   };
 
@@ -436,129 +863,258 @@ export default function ChatContainer() {
     }, 50);
   };
 
+  const runCompact = async (history: Message[]): Promise<Message[] | null> => {
+    // Keep the newest turns verbatim; summarize everything before that.
+    const keep = Math.min(6, history.length);
+    if (history.length <= keep) return history;
+
+    const older = history.slice(0, history.length - keep);
+    const recent = history.slice(history.length - keep);
+
+    setIsCompacting(true);
+    setCompactNotice('Compacting earlier conversation…');
+    try {
+      const res = await fetch('/api/compact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: toApiMessages(older),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Compact failed');
+
+      const compacted: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `[Compacted earlier conversation]\n\n${data.summary}`,
+        timestamp: Date.now(),
+        compacted: true,
+      };
+      setCompactNotice(`Compacted ${older.length} older messages`);
+      setTimeout(() => setCompactNotice(''), 4000);
+      return [compacted, ...recent];
+    } catch (err: any) {
+      setCompactNotice(err?.message || 'Compact failed');
+      return null;
+    } finally {
+      setIsCompacting(false);
+    }
+  };
+
   const handleSubmit = async (overrideInput?: string, baseMessagesOverride?: Message[], force: boolean = false) => {
     const textToSend = overrideInput || input;
-    if (!textToSend.trim() || (!force && isLoading)) return;
-
-    let fullContent = textToSend.trim();
-
-    // Attach text files and references to the first message of a session
-    if (messages.length === 0) {
-      let contextParts = [];
-      if (referenceText.trim()) {
-        contextParts.push(`[Reference Material]\n${referenceText.trim()}`);
-      }
-      for (const a of attachments) {
-        if (a.text) {
-          contextParts.push(`[Attached File: ${a.name}]\n${a.text.trim()}`);
-        }
-      }
-      if (contextParts.length > 0) {
-        fullContent = contextParts.join('\n\n') + '\n\n---\n\n' + fullContent;
-      }
+    const pendingImages = attachments.filter((a) => a.dataUrl);
+    const pendingTexts = attachments.filter((a) => a.text);
+    if ((!textToSend.trim() && pendingImages.length === 0 && pendingTexts.length === 0) || (!force && isLoading)) {
+      return;
+    }
+    if (hasImages && !selectedSpec.vision) {
+      setAttachError('This conversation has images — switch to a vision-capable model.');
+      return;
     }
 
-    const baseMessages = baseMessagesOverride ?? messages;
+    stickToBottomRef.current = true;
+    scrollToBottom(true);
+
+    let fullContent = textToSend.trim();
+    if (pendingTexts.length > 0) {
+      const contextParts = pendingTexts.map(
+        (a) => `[Attached File: ${a.name}]\n${a.text!.trim()}`,
+      );
+      fullContent = contextParts.join('\n\n') + (fullContent ? `\n\n---\n\n${fullContent}` : '');
+    }
+
+    const cleanedBase = (baseMessagesOverride ?? messages).filter(
+      (m, idx, arr) => !(idx === arr.length - 1 && m.role === 'assistant' && m.incomplete && !m.content),
+    );
+
+    let baseMessages = cleanedBase;
     let newTitle = activeSession?.title;
     if (baseMessages.length === 0) {
-      newTitle = textToSend.slice(0, 30) + (textToSend.length > 30 ? '...' : '');
+      newTitle = (textToSend || pendingImages[0]?.name || 'New Conversation').slice(0, 30)
+        + ((textToSend.length > 30) ? '...' : '');
+    }
+
+    // Compact before sending when the thread is near the model window.
+    if (usableLimit != null && estimatedTokens + estimateTokensFromText(fullContent) > usableLimit * 0.9) {
+      const compacted = await runCompact(baseMessages);
+      if (!compacted) {
+        setAttachError('Context is full. Compact failed — open a new chat or remove attachments.');
+        return;
+      }
+      baseMessages = compacted;
     }
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: fullContent,
+      content: fullContent || (pendingImages.length ? '(image)' : ''),
       timestamp: Date.now(),
+      images: pendingImages.map((a) => ({ url: a.dataUrl!, name: a.name })),
     };
 
     const newMessages = [...baseMessages, userMessage];
     updateActiveSession(newMessages, newTitle);
     setInput('');
+    attachments.forEach((a) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    });
+    setAttachments([]);
     setIsLoading(true);
     setIsWaitingForFirstToken(true);
+
+    const assistantMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      incomplete: true,
+    };
+    updateActiveSession([...newMessages, assistantMessage], newTitle);
 
     abortControllerRef.current = new AbortController();
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          model: selectedModel,
-          systemPrompt,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || 'Upstream error');
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-      };
-
-      updateActiveSession([...newMessages, assistantMessage]);
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              setIsLoading(false);
-              setIsWaitingForFirstToken(false);
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.content) {
-                if (isWaitingForFirstToken) setIsWaitingForFirstToken(false);
-                setSessions(prev => prev.map(s => {
-                  if (s.id === activeSessionId) {
-                    const msgs = [...s.messages];
-                    const last = msgs[msgs.length - 1];
-                    if (last && last.id === assistantMessage.id) {
-                      last.content += parsed.content;
-                    }
-                    return { ...s, messages: msgs };
-                  }
-                  return s;
-                }));
-              }
-            } catch (e) {}
-          }
-        }
-      }
+      await streamChatResponse(
+        toApiMessages(newMessages),
+        assistantMessage.id,
+        abortControllerRef.current.signal,
+      );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         setIsWaitingForFirstToken(false);
         updateActiveSession([
           ...newMessages,
           {
-            id: Date.now().toString(),
+            id: assistantMessage.id,
             role: 'assistant',
             content: `Error: ${error.message || 'Request failed'}`,
             timestamp: Date.now(),
-          }
+            incomplete: false,
+          },
         ]);
+      } else {
+        markAssistantIncomplete(assistantMessage.id, true, {
+          truncationReason: 'Reply was interrupted',
+        });
+      }
+    } finally {
+      setIsLoading(false);
+      setIsWaitingForFirstToken(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const resumeIncompleteReply = async () => {
+    const last = messages[messages.length - 1];
+    if (isLoading || !last || last.role !== 'assistant' || !last.content.trim()) return;
+    // Refuse to continue a reply that looks complete — matches the visible gate.
+    const verdict = analyzeTruncation(
+      last.content,
+      last.finishReason,
+      last.incomplete,
+      last.truncationReason,
+    );
+    if (!verdict.truncated) return;
+
+    stickToBottomRef.current = true;
+    scrollToBottom(true);
+    setIsLoading(true);
+    setIsWaitingForFirstToken(true);
+
+    abortControllerRef.current = new AbortController();
+
+    const apiMessages: ReturnType<typeof toApiMessages> = [
+      ...toApiMessages(messages),
+      { role: 'user', content: buildContinuationPrompt(last.content), images: [] },
+    ];
+
+    // A finished table row must not be continued on the same line.
+    const tail = last.content.trimEnd();
+    const lastLine = tail.split('\n').pop() ?? '';
+    const seamPrefix = /^\s*\|.*\|\s*$/.test(lastLine) ? '\n' : '';
+
+    try {
+      await streamChatResponse(
+        apiMessages,
+        last.id,
+        abortControllerRef.current.signal,
+        last.content,
+        seamPrefix,
+      );
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        // Replace the partial reply with a clean Error: bubble so Retry appears.
+        updateActiveSession([
+          ...messages.slice(0, -1),
+          {
+            id: last.id,
+            role: 'assistant',
+            content: `Error: ${error.message || 'Request failed'}`,
+            timestamp: Date.now(),
+            incomplete: false,
+          },
+        ]);
+      } else {
+        markAssistantIncomplete(last.id, true, {
+          truncationReason: 'Stopped by you',
+        });
+      }
+    } finally {
+      setIsLoading(false);
+      setIsWaitingForFirstToken(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  /** Drop the Error: assistant bubble and re-run the same user turn. */
+  const retryFailedReply = async () => {
+    const last = messages[messages.length - 1];
+    if (isLoading || !isAssistantError(last)) return;
+    const prior = messages.slice(0, -1);
+    const lastUser = [...prior].reverse().find((m) => m.role === 'user');
+    if (!lastUser) return;
+
+    stickToBottomRef.current = true;
+    scrollToBottom(true);
+    setIsLoading(true);
+    setIsWaitingForFirstToken(true);
+
+    const assistantMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      incomplete: true,
+    };
+    updateActiveSession([...prior, assistantMessage]);
+
+    abortControllerRef.current = new AbortController();
+    try {
+      await streamChatResponse(
+        toApiMessages(prior),
+        assistantMessage.id,
+        abortControllerRef.current.signal,
+      );
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        setIsWaitingForFirstToken(false);
+        updateActiveSession([
+          ...prior,
+          {
+            id: assistantMessage.id,
+            role: 'assistant',
+            content: `Error: ${error.message || 'Request failed'}`,
+            timestamp: Date.now(),
+            incomplete: false,
+          },
+        ]);
+      } else {
+        markAssistantIncomplete(assistantMessage.id, true, {
+          truncationReason: 'Reply was interrupted',
+        });
       }
     } finally {
       setIsLoading(false);
@@ -619,6 +1175,13 @@ export default function ChatContainer() {
       setIsLoading(false);
       setIsWaitingForFirstToken(false);
     }
+    // Keep the half-written assistant reply resumable after stop/refresh.
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant') {
+      markAssistantIncomplete(last.id, true, {
+        truncationReason: 'Stopped by you',
+      });
+    }
     // Stopping mid-reply should freeze remaining queued messages, not flush them.
     if (pauseQueue) setQueuePaused(true);
   };
@@ -632,8 +1195,62 @@ export default function ChatContainer() {
     }
   };
 
+  const onDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    if (e.dataTransfer.types.includes('Files')) setIsDraggingFiles(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingFiles(false);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onDropFiles = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDraggingFiles(false);
+    if (e.dataTransfer.files?.length) {
+      await addIngestedFiles(e.dataTransfer.files);
+    }
+  };
+  const onPasteFiles = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length === 0) return;
+    e.preventDefault();
+    await addIngestedFiles(files);
+  };
+
   return (
-    <div className="flex h-screen w-full bg-[#F9F8F6] font-sans text-stone-800 dark:bg-stone-950 dark:text-stone-200 overflow-hidden">
+    <div
+      className="relative flex h-screen w-full bg-[#F9F8F6] font-sans text-stone-800 dark:bg-stone-950 dark:text-stone-200 overflow-hidden"
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDropFiles}
+    >
+      {isDraggingFiles && (
+        <div className="pointer-events-none absolute inset-0 z-[60] flex items-center justify-center bg-orange-500/10 backdrop-blur-[1px]">
+          <div className="rounded-2xl border-2 border-dashed border-orange-400 bg-white/90 px-8 py-6 text-center shadow-lg dark:bg-stone-900/90">
+            <div className="text-sm font-semibold text-orange-700 dark:text-orange-300">Drop to attach</div>
+            <div className="mt-1 text-xs text-stone-500">Images, PDF, Word, or text files</div>
+          </div>
+        </div>
+      )}
       
       {/* --- Sidebar --- */}
       <AnimatePresence>
@@ -647,10 +1264,10 @@ export default function ChatContainer() {
             <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 text-white">
-                    <Sparkles className="h-3.5 w-3.5" />
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
+                    <Sparkles className="h-4 w-4" />
                   </div>
-                  Christmas Chat
+                  llm.christmas Chat
                 </div>
               </div>
 
@@ -737,35 +1354,35 @@ export default function ChatContainer() {
                 ))}
               </div>
             </ScrollArea>
-
-            {/* Sidebar Footer: Account & Quota Share */}
-            <div className="p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80">
-              <button 
-                onClick={() => setShowAuthModal(true)}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700/80 transition-colors text-left"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-white", isAccountBound ? "bg-emerald-500" : "bg-stone-400")}>
-                    <Key className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold truncate">
-                      {isAccountBound ? '主站账号已连接' : '连接 llm.christmas 账号'}
+              
+              {/* Sidebar Footer: Account & Quota Share */}
+              <div className="p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80">
+                <button 
+                  onClick={() => setShowAuthModal(true)}
+                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700/80 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-white", isAccountBound ? "bg-orange-500" : "bg-stone-400")}>
+                      <Key className="h-3.5 w-3.5" />
                     </div>
-                    <div className="text-[10px] text-stone-400 truncate">
-                      {isAccountBound ? '自动使用主站账号额度' : '登录一次，无需复制 API Key'}
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">
+                        {isAccountBound ? '主站账号已连接' : '连接 llm.christmas 账号'}
+                      </div>
+                      <div className="text-[10px] text-stone-400 truncate">
+                        {isAccountBound ? '自动使用主站账号额度' : '登录一次，无需复制 API Key'}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                  <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-      {/* --- Main Area --- */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
+        {/* --- Main Area --- */}
+        <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
         
         {/* Minimal Header */}
         <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-[#F9F8F6] dark:bg-stone-950 z-10 shrink-0">
@@ -793,7 +1410,7 @@ export default function ChatContainer() {
               rel="noreferrer"
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-xs font-medium text-stone-600 shadow-sm dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
             >
-              <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+              <Wallet className="h-3.5 w-3.5 text-orange-500" />
               <span>Main Portal</span>
             </a>
           </div>
@@ -805,7 +1422,11 @@ export default function ChatContainer() {
           {/* Messages Area */}
           <div className="flex-1 flex flex-col min-w-0">
             {/* Messages List */}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={scrollRef}>
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+              ref={scrollRef}
+              onScroll={handleMessagesScroll}
+            >
           <div className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
@@ -872,7 +1493,19 @@ export default function ChatContainer() {
                         ) : (
                           <>
                             <div className="rounded-2xl rounded-br-md bg-stone-200/80 px-4 py-3 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100 whitespace-pre-wrap">
-                              {message.content}
+                              {message.images && message.images.length > 0 && (
+                                <div className="mb-2 flex flex-wrap gap-2">
+                                  {message.images.map((img, idx) => (
+                                    <img
+                                      key={idx}
+                                      src={img.url}
+                                      alt={img.name || 'attachment'}
+                                      className="max-h-48 max-w-full rounded-lg object-contain"
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                              {message.content && message.content !== '(image)' ? message.content : null}
                             </div>
                             <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
                               <button
@@ -888,7 +1521,73 @@ export default function ChatContainer() {
                       </div>
                     </div>
                   ) : (
-                    <div key={message.id} className="w-full pr-8 sm:pr-16">
+                    <div key={message.id} className="w-full pr-8 sm:pr-16 space-y-3">
+                      {message.reasoning && (
+                        <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 dark:border-stone-800 dark:bg-stone-900/50 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setReasoningOpen((prev) => ({
+                                ...prev,
+                                [message.id]: !(
+                                  prev[message.id] ??
+                                  Boolean(message.incomplete && !message.content)
+                                ),
+                              }))
+                            }
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-stone-500 hover:bg-stone-100/80 dark:text-stone-400 dark:hover:bg-stone-800/50"
+                          >
+                            <ChevronDown
+                              className={cn(
+                                'h-3.5 w-3.5 shrink-0 transition-transform',
+                                (reasoningOpen[message.id] ??
+                                  Boolean(message.incomplete && !message.content))
+                                  ? 'rotate-0'
+                                  : '-rotate-90',
+                              )}
+                            />
+                            <span>
+                              {message.incomplete && !message.content
+                                ? 'Thinking…'
+                                : 'Thought process'}
+                            </span>
+                            {message.incomplete && !message.content && (
+                              <span className="ml-auto flex items-center gap-1">
+                                <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
+                                <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
+                                <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
+                              </span>
+                            )}
+                          </button>
+                          {(reasoningOpen[message.id] ??
+                            Boolean(message.incomplete && !message.content)) && (
+                            <div className="border-t border-stone-200/70 px-3 py-2.5 text-[13px] leading-6 text-stone-500 whitespace-pre-wrap dark:border-stone-800 dark:text-stone-400 max-h-72 overflow-y-auto">
+                              {message.reasoning}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {(message.content || (!message.reasoning && message.incomplete)) && (
+                        isAssistantError(message) ? (
+                          <div className="rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-3 dark:border-red-900/50 dark:bg-red-950/30">
+                            <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                              Request failed
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-red-600/90 dark:text-red-400/90">
+                              {message.content.replace(/^Error:\s*/, '')}
+                            </p>
+                            {message.id === lastMessage?.id && canRetryFailed && (
+                              <button
+                                type="button"
+                                onClick={() => retryFailedReply()}
+                                className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                                Retry
+                              </button>
+                            )}
+                          </div>
+                        ) : (
                       <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkMath]}
@@ -962,12 +1661,14 @@ export default function ChatContainer() {
                           {normalizeMathDelimiters(message.content)}
                         </ReactMarkdown>
                       </div>
+                        )
+                      )}
                     </div>
                   ),
                 )}
 
-                {/* Thinking / Waiting for first token indicator */}
-                {isWaitingForFirstToken && (
+                {/* Waiting dots only when nothing has streamed yet (no reasoning, no content). */}
+                {isWaitingForFirstToken && !(messages[messages.length - 1]?.reasoning) && (
                   <motion.div 
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1097,19 +1798,97 @@ export default function ChatContainer() {
               )}
             </AnimatePresence>
 
+            {(attachError || compactNotice) && (
+              <div className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
+                {attachError || compactNotice}
+              </div>
+            )}
+
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {attachments.map((a) => (
+                  <div
+                    key={a.id}
+                    className="group flex max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900"
+                  >
+                    {a.previewUrl || a.dataUrl ? (
+                      <img
+                        src={a.previewUrl || a.dataUrl}
+                        alt=""
+                        className="h-8 w-8 rounded object-cover"
+                      />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                    )}
+                    <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.id)}
+                      className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-red-500 dark:hover:bg-stone-800"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Continue / Retry — sit above the composer as recovery actions. */}
+            <AnimatePresence>
+              {(canResumeIncomplete || canRetryFailed) && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 6 }}
+                  className="mb-2 flex justify-center"
+                >
+                  {canRetryFailed ? (
+                    <button
+                      type="button"
+                      onClick={() => retryFailedReply()}
+                      title="Retry the last request"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3.5 py-1.5 text-xs font-medium text-red-800 shadow-sm transition-colors hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-950/80"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Retry
+                      <span className="hidden sm:inline font-normal text-red-600/80 dark:text-red-400/70">
+                        · Request failed
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => resumeIncompleteReply()}
+                      title={truncationInfo.reason || 'Continue the previous reply'}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-xs font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-950/80"
+                    >
+                      <Play className="h-3 w-3 fill-current" />
+                      Continue
+                      {truncationInfo.reason && (
+                        <span className="hidden sm:inline font-normal text-amber-600/80 dark:text-amber-400/70">
+                          · {truncationInfo.reason}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Ask ${selectedModel || 'anything'}...`}
+                onPaste={onPasteFiles}
+                placeholder={`Ask ${selectedModel || 'anything'}…  (drop or paste files here)`}
                 className="min-h-[60px] max-h-[300px] w-full resize-none border-0 bg-transparent px-4 py-4 text-base focus-visible:ring-0 placeholder:text-stone-400"
               />
               
               <div className="flex items-center justify-between px-3 pb-3 pt-1">
                 <div className="flex items-center gap-2">
-                  <div className="relative">
+                  <div className="relative" ref={modelMenuRef}>
                     <button 
                       onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
                       className="flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-stone-100 text-xs font-medium text-stone-600 transition-colors dark:text-stone-400 dark:hover:bg-stone-800"
@@ -1149,31 +1928,50 @@ export default function ChatContainer() {
                               Loading...
                             </div>
                           )}
-                          {availableModels.map(m => (
+                          {availableModels.map(m => {
+                            const blocked = hasImages && !m.vision;
+                            return (
                             <button
                               key={m.id}
+                              disabled={blocked}
                               onClick={() => {
+                                if (blocked) return;
                                 setSelectedModel(m.id);
                                 setIsModelMenuOpen(false);
                               }}
                               className={cn(
                                 "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
+                                blocked && "opacity-40 cursor-not-allowed",
                                 selectedModel === m.id 
                                   ? "bg-orange-50 text-orange-900 font-medium dark:bg-orange-950/40 dark:text-orange-300" 
                                   : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
                               )}
+                              title={blocked ? 'Text-only — this conversation has images' : undefined}
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="truncate">{m.id}</div>
+                                {blocked && (
+                                  <div className="text-[10px] text-stone-400">Text-only · needs vision</div>
+                                )}
                               </div>
+                              {m.vision && (
+                                <span className="text-[9px] font-semibold tracking-wide rounded border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-stone-500 shrink-0 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-400">
+                                  Vision
+                                </span>
+                              )}
                               {m.tier === 'paid' ? (
-                                <span className="text-[9px] font-bold tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded shrink-0">PRO</span>
+                                <span className="text-[9px] font-semibold tracking-wide rounded bg-orange-500 px-1.5 py-0.5 text-white shrink-0">
+                                  Pro
+                                </span>
                               ) : (
-                                <span className="text-[9px] font-bold tracking-wider bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded dark:bg-emerald-900/40 dark:text-emerald-300 shrink-0">FREE</span>
+                                <span className="text-[9px] font-semibold tracking-wide rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-orange-700 shrink-0 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300">
+                                  Free
+                                </span>
                               )}
                               {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500 shrink-0 ml-1" />}
                             </button>
-                          ))}
+                            );
+                          })}
                           {!isAccountBound && (
                             <div className="mt-1 pt-2 border-t border-stone-100 dark:border-stone-800 p-2">
                               <button 
@@ -1195,6 +1993,7 @@ export default function ChatContainer() {
                     <Button 
                       onClick={() => stopGenerating()}
                       size="icon" 
+                      title="Stop"
                       className="h-8 w-8 rounded-full bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900"
                     >
                       <Square className="h-3.5 w-3.5 fill-current" />
@@ -1202,11 +2001,12 @@ export default function ChatContainer() {
                   ) : (
                     <Button 
                       onClick={() => enqueueOrSubmit()}
-                      disabled={!input.trim()}
+                      disabled={(!input.trim() && attachments.length === 0) || isCompacting}
                       size="icon" 
+                      title="Send"
                       className={cn(
                         "h-8 w-8 rounded-full transition-all active:scale-95",
-                        input.trim() 
+                        (input.trim() || attachments.length > 0)
                           ? "bg-orange-500 hover:bg-orange-600 text-white shadow-sm" 
                           : "bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500"
                       )}
@@ -1247,7 +2047,9 @@ export default function ChatContainer() {
                         Attachments ({attachments.length})
                       </label>
                       {attachments.length === 0 ? (
-                        <div className="text-xs text-stone-400 py-2">No files attached. Use the paperclip icon in the input box.</div>
+                        <div className="text-xs text-stone-400 py-2">
+                          Drop files onto the chat, or paste images with Ctrl/Cmd+V. Supports images, PDF, Word, and text.
+                        </div>
                       ) : (
                         <div className="space-y-2">
                           {attachments.map(a => (
@@ -1271,24 +2073,74 @@ export default function ChatContainer() {
                       )}
                     </div>
 
-                    <div className="space-y-3">
-                      <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
-                        <Quote className="h-3.5 w-3.5" /> 
-                        Reference Material
-                      </label>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                          <Quote className="h-3.5 w-3.5" /> 
+                          Reference Material
+                        </label>
+                        {referenceText.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setReferenceText('')}
+                            className="text-[10px] text-stone-400 hover:text-red-500"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-stone-400">
+                        Background the model should treat as fact. Sent with every message in this chat.
+                      </p>
                       <Textarea
                         value={referenceText}
                         onChange={e => setReferenceText(e.target.value)}
                         placeholder="Paste context, docs, or background info here..."
                         className="min-h-24 text-xs font-mono bg-stone-50 dark:bg-stone-900/50 border-stone-200 dark:border-stone-800"
                       />
+                      {referenceText.trim() && (
+                        <div className="text-[10px] text-stone-400 text-right font-mono">
+                          ~{contextBreakdown.reference.toLocaleString()} tokens
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-3">
-                      <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
-                        <Settings2 className="h-3.5 w-3.5" /> 
-                        System Prompt
-                      </label>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                          <Settings2 className="h-3.5 w-3.5" /> 
+                          System Prompt
+                        </label>
+                        {systemPrompt.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setSystemPrompt('')}
+                            className="text-[10px] text-stone-400 hover:text-red-500"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-stone-400">
+                        Standing instructions for tone, language, and role. Leave empty to use the default assistant.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {SYSTEM_PRESETS.map((preset) => (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setSystemPrompt(preset.value)}
+                            className={cn(
+                              'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                              systemPrompt === preset.value
+                                ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
+                                : 'border-stone-200 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-stone-800',
+                            )}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
                       <Textarea
                         value={systemPrompt}
                         onChange={e => setSystemPrompt(e.target.value)}
@@ -1302,13 +2154,74 @@ export default function ChatContainer() {
 
                 <div className="p-4 border-t border-stone-200/50 dark:border-stone-800/50 shrink-0 bg-stone-50 dark:bg-stone-900/50 text-xs text-stone-500 space-y-1.5">
                   <div className="flex justify-between">
-                    <span>Est. Tokens</span>
-                    <span className="font-mono text-stone-700 dark:text-stone-300">{estimatedTokens.toLocaleString()}</span>
+                    <span>Messages</span>
+                    <span className="font-mono text-stone-700 dark:text-stone-300">{messages.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Context Chars</span>
-                    <span className="font-mono text-stone-700 dark:text-stone-300">{estimatedContextLength.toLocaleString()}</span>
+                    <span>Model window</span>
+                    <span className="font-mono text-stone-700 dark:text-stone-300">
+                      {contextLimit != null ? contextLimit.toLocaleString() : 'unknown'}
+                    </span>
                   </div>
+
+                  {usableLimit != null && (
+                    <div className="pt-1.5 space-y-1.5 border-t border-stone-200/60 dark:border-stone-800/60">
+                      <div className="flex justify-between font-medium">
+                        <span>Context used</span>
+                        <span className={cn(
+                          'font-mono',
+                          usageRatio != null && usageRatio >= 0.9
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-stone-700 dark:text-stone-300',
+                        )}>
+                          ~{estimatedTokens.toLocaleString()} / {usableLimit.toLocaleString()}
+                          {usageRatio != null && (
+                            <span className="text-stone-400 font-normal">
+                              {' '}({Math.round(usageRatio * 100)}%)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-all',
+                            usageRatio != null && usageRatio >= 0.9 ? 'bg-amber-500' : 'bg-orange-500',
+                          )}
+                          style={{ width: `${Math.min((usageRatio || 0) * 100, 100)}%` }}
+                        />
+                      </div>
+                      {usageRatio != null && usageRatio >= 0.85 && (
+                        <button
+                          type="button"
+                          disabled={isCompacting || messages.length < 4}
+                          onClick={async () => {
+                            const next = await runCompact(messages);
+                            if (next) updateActiveSession(next);
+                          }}
+                          className="w-full rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
+                        >
+                          {isCompacting ? 'Compacting…' : 'Compact now'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {contextSources.length > 1 && usableLimit != null && (
+                    <div className="pt-1.5 space-y-1 border-t border-stone-200/60 dark:border-stone-800/60">
+                      {contextSources.map(([label, tokens]) => (
+                        <div key={label} className="flex justify-between text-[11px]">
+                          <span className="text-stone-400">{label}</span>
+                          <span className="font-mono text-stone-500">
+                            {tokens.toLocaleString()}
+                            <span className="text-stone-400">
+                              {' '}({Math.round((tokens / usableLimit) * 100)}%)
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -1337,60 +2250,61 @@ export default function ChatContainer() {
               </div>
 
               <p className="text-sm text-stone-500 mb-4">
-                Sign in on the main site and authorize Chat. Your balance and paid-model access will be shared automatically.
+                {isAccountBound
+                  ? 'Your llm.christmas account is connected. Balance and paid-model access are shared automatically.'
+                  : 'Sign in on the main site and authorize Chat. Your balance and paid-model access will be shared automatically.'}
               </p>
 
               <div className="space-y-4">
-                {!isAccountBound && (
-                  <a
-                    href="/api/auth/start"
-                    className="flex h-11 w-full items-center justify-center rounded-xl bg-orange-500 font-semibold text-white hover:bg-orange-600"
+                {isAccountBound ? (
+                  <Button
+                    variant="outline"
+                    onClick={disconnectAccount}
+                    className="w-full rounded-xl border-red-200 text-red-600 hover:bg-red-50"
                   >
-                    Continue with llm.christmas
-                  </a>
-                )}
-
-                <div className="flex items-center gap-3 text-xs text-stone-400">
-                  <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
-                  Manual API Key fallback
-                  <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                    API Token (sk-...)
-                  </label>
-                  <input
-                    type="password"
-                    value={tempKeyInput}
-                    onChange={(e) => setTempKeyInput(e.target.value)}
-                    placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                    className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-orange-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
-                  />
-                </div>
-
-                {accountError && (
-                  <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>
-                )}
-
-                <div className="flex gap-2">
-                  <Button 
-                    onClick={saveUserKey}
-                    disabled={accountSaving || !tempKeyInput.trim()}
-                    className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-xl"
-                  >
-                    {accountSaving ? 'Validating…' : 'Save & Connect'}
+                    Disconnect
                   </Button>
-                  {isAccountBound && (
-                    <Button 
-                      variant="outline"
-                      onClick={disconnectAccount}
-                      className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                ) : (
+                  <>
+                    <a
+                      href="/api/auth/start"
+                      className="flex h-11 w-full items-center justify-center rounded-xl bg-orange-500 font-semibold text-white hover:bg-orange-600"
                     >
-                      Disconnect
+                      Continue with llm.christmas
+                    </a>
+
+                    <div className="flex items-center gap-3 text-xs text-stone-400">
+                      <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                      Manual API Key fallback
+                      <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
+                        API Token (sk-...)
+                      </label>
+                      <input
+                        type="password"
+                        value={tempKeyInput}
+                        onChange={(e) => setTempKeyInput(e.target.value)}
+                        placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                        className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-orange-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
+                      />
+                    </div>
+
+                    {accountError && (
+                      <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>
+                    )}
+
+                    <Button
+                      onClick={saveUserKey}
+                      disabled={accountSaving || !tempKeyInput.trim()}
+                      className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-xl"
+                    >
+                      {accountSaving ? 'Validating…' : 'Save & Connect'}
                     </Button>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
             </motion.div>
           </div>

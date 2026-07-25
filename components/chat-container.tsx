@@ -53,6 +53,8 @@ export default function ChatContainer() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessageContent, setEditingMessageContent] = useState('');
   
   // Model & Auth State
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -255,23 +257,24 @@ export default function ChatContainer() {
   };
 
   // --- Chat Logic ---
-  const handleSubmit = async (overrideInput?: string) => {
+  const handleSubmit = async (overrideInput?: string, baseMessagesOverride?: Message[]) => {
     const textToSend = overrideInput || input;
     if (!textToSend.trim() || isLoading) return;
 
+    const baseMessages = baseMessagesOverride ?? messages;
     let newTitle = activeSession?.title;
-    if (messages.length === 0) {
+    if (baseMessages.length === 0) {
       newTitle = textToSend.slice(0, 30) + (textToSend.length > 30 ? '...' : '');
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content: textToSend.trim(),
       timestamp: Date.now(),
     };
 
-    const newMessages = [...messages, userMessage];
+    const newMessages = [...baseMessages, userMessage];
     updateActiveSession(newMessages, newTitle);
     setInput('');
     setIsLoading(true);
@@ -360,6 +363,28 @@ export default function ChatContainer() {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
+  };
+
+  const editUserMessage = (message: Message) => {
+    if (isLoading) return;
+    setEditingMessageId(message.id);
+    setEditingMessageContent(message.content);
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingMessageContent('');
+  };
+
+  const saveEditedMessage = async (messageId: string) => {
+    const content = editingMessageContent.trim();
+    if (!content || isLoading) return;
+    const index = messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return;
+    const priorMessages = messages.slice(0, index);
+    setEditingMessageId(null);
+    setEditingMessageContent('');
+    await handleSubmit(content, priorMessages);
   };
 
   const stopGenerating = () => {
@@ -520,29 +545,56 @@ export default function ChatContainer() {
               </div>
             ) : (
               <div className="space-y-8 pb-20">
-                {messages.map((message) => (
-                  <div key={message.id} className="group relative flex flex-col gap-3 w-full">
-                    {/* Header: Avatar + Name */}
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex shrink-0">
-                        {message.role === 'user' ? (
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-200 text-stone-600 dark:bg-stone-700 dark:text-stone-300">
-                            <User className="h-4 w-4" />
+                {messages.map((message) =>
+                  message.role === 'user' ? (
+                    <div key={message.id} className="group flex w-full justify-end">
+                      <div className="max-w-[82%] sm:max-w-[72%]">
+                        {editingMessageId === message.id ? (
+                          <div className="rounded-2xl border border-orange-300 bg-white p-3 shadow-sm dark:border-orange-800 dark:bg-stone-900">
+                            <textarea
+                              value={editingMessageContent}
+                              onChange={(event) => setEditingMessageContent(event.target.value)}
+                              className="min-h-24 w-full resize-y bg-transparent text-[15px] leading-7 outline-none"
+                              autoFocus
+                            />
+                            <div className="mt-2 flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={cancelEditMessage}
+                                className="rounded-lg px-3 py-1.5 text-xs font-medium text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveEditedMessage(message.id)}
+                                className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                              >
+                                Save & resend
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
-                            <Bot className="h-4 w-4" />
-                          </div>
+                          <>
+                            <div className="rounded-2xl rounded-br-md bg-stone-200/80 px-4 py-3 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100 whitespace-pre-wrap">
+                              {message.content}
+                            </div>
+                            <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                type="button"
+                                onClick={() => editUserMessage(message)}
+                                className="rounded-md px-2 py-1 text-[11px] text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </>
                         )}
                       </div>
-                      <div className="font-semibold text-sm text-stone-900 dark:text-stone-100">
-                        {message.role === 'user' ? 'You' : 'Assistant'}
-                      </div>
                     </div>
-                    
-                    {/* Content Area */}
-                    <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
-                      {message.role === 'assistant' ? (
+                  ) : (
+                    <div key={message.id} className="w-full pr-8 sm:pr-16">
+                      <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkMath]}
                           rehypePlugins={[rehypeKatex]}
@@ -614,12 +666,10 @@ export default function ChatContainer() {
                         >
                           {normalizeMathDelimiters(message.content)}
                         </ReactMarkdown>
-                      ) : (
-                        <div className="whitespace-pre-wrap">{message.content}</div>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ),
+                )}
               </div>
             )}
           </div>

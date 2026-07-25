@@ -17,6 +17,19 @@ export async function POST(req: NextRequest) {
   try {
     const { messages, model = 'deepseek-v4-flash-200k', temperature = 0.7 } = await req.json();
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
+    const isBoundAccount = Boolean(boundUserKey);
+    const requestedModel = String(model || '').trim();
+
+    // This is a server-side authorization boundary, not just a UI filter.
+    // Guests may only use models explicitly marked as free. Logged-in/bound users
+    // use their own account key and can access every model allowed by that key.
+    if (!isBoundAccount && !requestedModel.toLowerCase().includes('free')) {
+      return jsonError(
+        'This model requires a connected llm.christmas account. Guests can only use free models.',
+        403,
+      );
+    }
+
     const apiKey = boundUserKey || process.env.LLM_CHRISTMAS_API_KEY || process.env.OPENAI_API_KEY || '';
     const baseURL = (process.env.LLM_CHRISTMAS_BASE_URL || 'https://api.llm.christmas/v1').replace(/\/$/, '');
 
@@ -31,7 +44,7 @@ export async function POST(req: NextRequest) {
     const baseMessages: any[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...messages];
 
     const response = await openai.chat.completions.create({
-      model,
+      model: requestedModel,
       temperature,
       stream: true,
       messages: baseMessages,

@@ -1,0 +1,296 @@
+'use client';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+
+export type Locale = 'zh' | 'en';
+
+const STORAGE_KEY = 'llm_christmas_locale';
+
+const dict = {
+  en: {
+    newChat: 'New Chat',
+    skills: 'Skills',
+    newSkill: 'New Skill',
+    recent: 'Recent',
+    exportMarkdown: 'Export Markdown',
+    deleteChat: 'Delete Chat',
+    deleteConversation: 'Delete conversation',
+    deleteConversationConfirm: 'Delete “{title}”? This cannot be undone.',
+    cancel: 'Cancel',
+    delete: 'Delete',
+    deleting: 'Deleting…',
+    accountConnected: 'Account connected',
+    connectAccount: 'Connect llm.christmas',
+    accountConnectedHint: 'Using your main-site quota',
+    connectAccountHint: 'Sign in once — no API key copy',
+    context: 'Context',
+    thinking: 'Thinking…',
+    thoughtProcess: 'Thought process',
+    searchingWeb: 'Searching the web…',
+    searchedWeb: 'Searched the web',
+    fetchingResults: 'Fetching results…',
+    searchedVia: 'via {provider}',
+    searchNoResults: 'No results',
+    searchFailed: 'Search returned no results',
+    searchSourcesInMaterial: '{n} sources saved to Reference Material',
+    webSearchSources: 'Web search',
+    clearWebSources: 'Clear sources',
+    referencePlaceholder: 'Paste context, docs, or background info here…',
+    requestFailed: 'Request failed',
+    retry: 'Retry',
+    continue: 'Continue',
+    stop: 'Stop',
+    send: 'Send',
+    clear: 'Clear',
+    queued: 'queued',
+    queuePaused: 'Paused',
+    resumeQueue: 'Resume queue',
+    sendNow: 'Send',
+    searchModels: 'Search models…',
+    allModels: 'All Models',
+    freeModels: 'Free Models',
+    modelsCount: '{n} models',
+    modelsFiltered: '{shown} / {total}',
+    noModelsMatch: 'No models match “{q}”',
+    noModelsFound: 'No models found. Check connection.',
+    noFreeModels: 'No free models available.',
+    loading: 'Loading…',
+    loadingModels: 'Loading models…',
+    selectModel: 'Select Model',
+    signInUnlock: 'Sign in to unlock {what}',
+    allModelsLower: 'all models',
+    premium: 'premium',
+    generateImage: 'Generate image',
+    imageHint: '/image',
+    writeMessage: 'Ask {model}…  (/image, /skills, drop files)',
+    quote: 'Quote',
+    quoted: 'Quoted',
+    clearQuote: 'Remove quote',
+    heroTitle: 'Universal AI at llm.christmas',
+    heroSubtitle: 'Connected directly to llm.christmas gateway.',
+    clickToAsk: 'Click to ask →',
+    starter1: 'Write a TypeScript API endpoint',
+    starter2: 'Explain a concept in simple terms',
+    starter3: 'Refactor Python code for async',
+    starter4: 'Help me draft a clear project README',
+    language: 'Language',
+    languageZh: '中文',
+    languageEn: 'English',
+    theme: 'Appearance',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    settings: 'Settings',
+    signOut: 'Sign out',
+    connect: 'Connect account',
+    messagesCount: '{n} messages',
+    generating: 'Generating',
+    deleteSkill: 'Delete Skill',
+    deleteSkillConfirm: 'Delete “{title}”? This cannot be undone.',
+    skillName: 'Name',
+    skillContent: 'Content',
+    skillBrief: 'Describe what this skill should do',
+    save: 'Save',
+    generate: 'Generate with AI',
+    generatingSkill: 'Generating…',
+    saving: 'Saving…',
+    compact: 'Compact',
+    attachments: 'Attachments',
+    referenceMaterial: 'Reference Material',
+    systemPrompt: 'System Prompt',
+    vision: 'Vision',
+    pro: 'Pro',
+    free: 'Free',
+    textOnlyNeedsVision: 'Text-only · needs vision',
+    textOnlyConversation: 'Text-only — this conversation has images',
+    enableSkill: 'Enable Skill · /{name}',
+    disableSkill: 'Enabled /{name} — click to disable',
+    authTitle: 'Connect account',
+    authHint: 'Paste your llm.christmas API key, or sign in on the main site.',
+    bind: 'Bind key',
+    binding: 'Binding…',
+    copied: 'Copied',
+    copy: 'Copy',
+  },
+  zh: {
+    newChat: '新对话',
+    skills: 'Skills',
+    newSkill: '新建 Skill',
+    recent: '最近',
+    exportMarkdown: '导出 Markdown',
+    deleteChat: '删除对话',
+    deleteConversation: '删除对话',
+    deleteConversationConfirm: '确定删除「{title}」？此操作无法撤销。',
+    cancel: '取消',
+    delete: '删除',
+    deleting: '删除中…',
+    accountConnected: '主站账号已连接',
+    connectAccount: '连接 llm.christmas 账号',
+    accountConnectedHint: '自动使用主站账号额度',
+    connectAccountHint: '登录一次，无需复制 API Key',
+    context: '上下文',
+    thinking: '思考中…',
+    thoughtProcess: '思考过程',
+    searchingWeb: '正在搜索网页…',
+    searchedWeb: '已搜索网页',
+    fetchingResults: '正在获取结果…',
+    searchedVia: '来源 {provider}',
+    searchNoResults: '无结果',
+    searchFailed: '搜索未返回结果',
+    searchSourcesInMaterial: '{n} 条来源已写入参考资料',
+    webSearchSources: '网页搜索',
+    clearWebSources: '清除来源',
+    referencePlaceholder: '在此粘贴上下文、文档或背景资料…',
+    requestFailed: '请求失败',
+    retry: '重试',
+    continue: '继续',
+    stop: '停止',
+    send: '发送',
+    clear: '清空',
+    queued: '排队中',
+    queuePaused: '已暂停',
+    resumeQueue: '继续队列',
+    sendNow: '立即发送',
+    searchModels: '搜索模型…',
+    allModels: '全部模型',
+    freeModels: '免费模型',
+    modelsCount: '{n} 个模型',
+    modelsFiltered: '{shown} / {total}',
+    noModelsMatch: '没有匹配「{q}」的模型',
+    noModelsFound: '未找到模型，请检查连接。',
+    noFreeModels: '暂无免费模型。',
+    loading: '加载中…',
+    loadingModels: '加载模型…',
+    selectModel: '选择模型',
+    signInUnlock: '登录以解锁{what}',
+    allModelsLower: '全部模型',
+    premium: '高级模型',
+    generateImage: '生成图片',
+    imageHint: '/image',
+    writeMessage: '问 {model}…  (/image、/skills、拖放文件)',
+    quote: '引用',
+    quoted: '引用',
+    clearQuote: '取消引用',
+    heroTitle: 'Universal AI at llm.christmas',
+    heroSubtitle: '直连 llm.christmas 网关。',
+    clickToAsk: '点击提问 →',
+    starter1: '写一个 TypeScript API 接口示例',
+    starter2: '用简单的话解释一个概念',
+    starter3: '把 Python 代码改成异步',
+    starter4: '帮我起草一份清晰的项目 README',
+    language: '语言',
+    languageZh: '中文',
+    languageEn: 'English',
+    theme: '外观',
+    themeLight: '浅色',
+    themeDark: '深色',
+    settings: '设置',
+    signOut: '退出登录',
+    connect: '连接账号',
+    messagesCount: '{n} 条消息',
+    generating: '生成中',
+    deleteSkill: '删除 Skill',
+    deleteSkillConfirm: '确定删除「{title}」？此操作无法撤销。',
+    skillName: '名称',
+    skillContent: '内容',
+    skillBrief: '用一句话描述这个 Skill 要做什么',
+    save: '保存',
+    generate: 'AI 生成',
+    generatingSkill: '生成中…',
+    saving: '保存中…',
+    compact: '压缩',
+    attachments: '附件',
+    referenceMaterial: '参考资料',
+    systemPrompt: '系统提示',
+    vision: '视觉',
+    pro: 'Pro',
+    free: '免费',
+    textOnlyNeedsVision: '仅文本 · 需要视觉模型',
+    textOnlyConversation: '当前对话含图片 — 请选择视觉模型',
+    enableSkill: '启用 Skill · /{name}',
+    disableSkill: '已启用 /{name} — 再点取消',
+    authTitle: '连接账号',
+    authHint: '粘贴 llm.christmas API Key，或在主站登录。',
+    bind: '绑定密钥',
+    binding: '绑定中…',
+    copied: '已复制',
+    copy: '复制',
+  },
+} as const;
+
+export type MessageKey = keyof typeof dict.en;
+
+type Vars = Record<string, string | number>;
+
+function format(template: string, vars?: Vars) {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (_, key: string) =>
+    vars[key] != null ? String(vars[key]) : `{${key}}`,
+  );
+}
+
+export function detectBrowserLocale(): Locale {
+  if (typeof navigator === 'undefined') return 'en';
+  const lang = (navigator.language || '').toLowerCase();
+  return lang.startsWith('zh') ? 'zh' : 'en';
+}
+
+function readStoredLocale(): Locale | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === 'zh' || raw === 'en') return raw;
+  } catch {}
+  return null;
+}
+
+type LocaleContextValue = {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  t: (key: MessageKey, vars?: Vars) => string;
+};
+
+const LocaleContext = createContext<LocaleContextValue | null>(null);
+
+export function LocaleProvider({ children }: { children: ReactNode }) {
+  const [locale, setLocaleState] = useState<Locale>('en');
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setLocaleState(readStoredLocale() ?? detectBrowserLocale());
+    setReady(true);
+  }, []);
+
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {}
+  }, []);
+
+  const t = useCallback(
+    (key: MessageKey, vars?: Vars) => format(dict[locale][key] ?? dict.en[key] ?? key, vars),
+    [locale],
+  );
+
+  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
+
+  if (!ready) {
+    // Avoid a wrong-language flash: still provide context with browser guess.
+    return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
+  }
+
+  return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
+}
+
+export function useLocale() {
+  const ctx = useContext(LocaleContext);
+  if (!ctx) throw new Error('useLocale must be used within LocaleProvider');
+  return ctx;
+}

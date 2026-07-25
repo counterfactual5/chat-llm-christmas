@@ -4,15 +4,16 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
-  Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
-  Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X,
+  Menu, Plus, Settings2, Image as ImageIcon, 
+  Mic, Square, Download, Key, Sparkles, ChevronDown, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered, Zap
+  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { ThemeToggle } from '@/components/theme-toggle';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -26,6 +27,14 @@ import {
   formatContextWindow,
   getModelSpec,
 } from '@/lib/model-specs';
+import { contentHasThinkMarkup, createThinkStreamParser, extractThinkBlocks } from '@/lib/think-tags';
+import {
+  contentHasToolMarkup,
+  createToolCallStripper,
+  stripFakeToolMarkup,
+} from '@/lib/tool-tags';
+import { useLocale } from '@/lib/i18n';
+import { useTheme } from '@/components/theme-provider';
 
 const MATH_ENVIRONMENTS = [
   'aligned', 'align', 'alignat', 'gather', 'gathered', 'split', 'multline',
@@ -63,8 +72,10 @@ function normalizeMathDelimiters(content: string) {
   return working.replace(/\u0000F(\d+)\u0000/g, (_, index) => fences[Number(index)]);
 }
 
-/** Natural terminators reported by upstream providers. */
-const NATURAL_STOPS = new Set(['stop', 'end_turn', 'tool_calls', 'function_call']);
+/** Natural terminators reported by upstream providers.
+ *  Note: tool_calls / function_call are NOT natural here — this chat has no
+ *  tool runtime, so those finishes mean the model stopped mid-task. */
+const NATURAL_STOPS = new Set(['stop', 'end_turn']);
 
 /**
  * Decide whether a reply was cut off. Prefer the provider's finish_reason;
@@ -91,6 +102,11 @@ function analyzeTruncation(
   if (finishReason === 'content_filter') {
     return { truncated: true, reason: 'Blocked by content filter' };
   }
+  // Cursor / agent models often stop with tool_calls even though we never
+  // advertise tools. Treat that as an interrupted reply so Continue stays available.
+  if (finishReason === 'tool_calls' || finishReason === 'function_call') {
+    return { truncated: true, reason: 'Model tried to use a tool (unsupported here)' };
+  }
 
   // Strong structural signals — reply is unfinished regardless of finish_reason.
   if ((text.match(/```/g) || []).length % 2 === 1) {
@@ -99,14 +115,15 @@ function analyzeTruncation(
   if ((text.match(/\$\$/g) || []).length % 2 === 1) {
     return { truncated: true, reason: 'Unclosed math block' };
   }
-  if (/<think\b[^>]*>/i.test(text) && !/<\/think>/i.test(text)) {
-    return { truncated: true, reason: 'Unclosed thinking block' };
-  }
-  // Long thinking then only a short bridge sentence — usually cut before the real answer.
+  // Prefer analyzing the visible answer (think tags stripped); unclosed think
+  // means the model never finished its private reasoning block.
   {
-    const afterThink = text.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim();
-    const thinkChars = Math.max(0, text.length - afterThink.length);
-    if (thinkChars > 80 && afterThink.length > 0 && afterThink.length < 180) {
+    const { content: visible, reasoning } = extractThinkBlocks(text);
+    if (contentHasThinkMarkup(text) && /<think\b|<thinking\b/i.test(text) && !/<\/(?:think|thinking)>/i.test(text)) {
+      return { truncated: true, reason: 'Unclosed thinking block' };
+    }
+    // Long thinking then only a short bridge sentence — usually cut before the real answer.
+    if (reasoning.length > 80 && visible.trim().length > 0 && visible.trim().length < 180) {
       return { truncated: true, reason: 'Stopped before finishing the answer' };
     }
   }
@@ -120,7 +137,30 @@ function analyzeTruncation(
     return { truncated: true, reason: 'Reply was interrupted' };
   }
 
+  // Recover replies that only narrated fake tool use and never answered
+  // (common with cursor-auto when Continue previously treated tool_calls as done).
+  if (looksLikeToolNarration(text) && !/[.!?。！？…]\s*$/.test(text)) {
+    return { truncated: true, reason: 'Stopped while trying to use tools' };
+  }
+
   return { truncated: false, reason: '' };
+}
+
+/** Heuristic: partial reply is stuck narrating IDE/agent tool use. */
+function looksLikeToolNarration(text: string): boolean {
+  return /工作区|workspace|正在扫描|改用\s*shell|同步\s*I\/O|tool_call|function_call|正在读取|扫描工作区|定位同步|Read\s+\S+|Shell\s+扫描|异步重构|排查工作区/i.test(
+    text,
+  );
+}
+
+/** Assistant is continuing a coding/agent task that doesn't match this chat's last user ask. */
+function assistantMismatchesUserTopic(userText: string, assistantText: string): boolean {
+  if (!looksLikeToolNarration(assistantText)) return false;
+  // Same-chat coding asks may legitimately mention workspace — don't treat as cross-bleed.
+  if (/async|python|refactor|代码|工作区|workspace|shell|文件|bug|报错|debug|重构/i.test(userText)) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -142,6 +182,15 @@ function buildContinuationPrompt(previous: string): string {
   const insideCodeBlock = (text.match(/```/g) || []).length % 2 === 1;
   const insideMath = (text.match(/\$\$/g) || []).length % 2 === 1;
   const insideTable = /^\s*\|/.test(lastLine);
+  const toolStuck = looksLikeToolNarration(text);
+
+  if (toolStuck) {
+    rules.push(
+      'You previously tried to use workspace/shell/search tools that are NOT available in this web chat.',
+      'Do not continue scanning files, running shell, or emitting tool_call markup.',
+      'Stop the tool narration and answer the user\'s original request directly with what you know.',
+    );
+  }
 
   if (insideCodeBlock) {
     rules.push(
@@ -158,7 +207,7 @@ function buildContinuationPrompt(previous: string): string {
       'You stopped inside a Markdown table. Emit only the remaining data rows, starting immediately with a newline followed by |. Do not repeat the header row, do not emit another |---| separator row, and do not repeat the last row shown below.',
     );
   }
-  if (!insideCodeBlock && !insideMath && !insideTable) {
+  if (!insideCodeBlock && !insideMath && !insideTable && !toolStuck) {
     rules.push(
       'If the text was cut mid-sentence or mid-word, resume from that exact character.',
     );
@@ -179,6 +228,16 @@ interface Message {
   compacted?: boolean;
   /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */
   reasoning?: string;
+  /** Built-in tool runs (e.g. web_search) for this assistant turn. */
+  toolRuns?: Array<{
+    id: string;
+    name: string;
+    status: 'start' | 'done';
+    query?: string;
+    provider?: string;
+    results?: Array<{ title: string; url: string; snippet: string }>;
+    error?: string;
+  }>;
   /** True while streaming, or after a stop / refresh / truncated reply. */
   incomplete?: boolean;
   /** Raw finish_reason from upstream, kept so Resume can explain itself. */
@@ -187,11 +246,96 @@ interface Message {
   truncationReason?: string;
 }
 
+type WebSearchSource = {
+  title: string;
+  url: string;
+  snippet?: string;
+  provider?: string;
+  query?: string;
+};
+
 interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
   updatedAt: number;
+  /** Attached Skill ids for this chat — additive, not a System Prompt replacement. */
+  skillIds?: string[];
+  /** Latest web search hits for this chat — shown in Reference Material. */
+  webSources?: WebSearchSource[];
+}
+
+function formatWebSourcesForReference(sources: WebSearchSource[]): string {
+  if (!sources.length) return '';
+  const byQuery = new Map<string, WebSearchSource[]>();
+  for (const s of sources) {
+    const key = s.query?.trim() || 'web';
+    const list = byQuery.get(key) || [];
+    list.push(s);
+    byQuery.set(key, list);
+  }
+  const blocks: string[] = [];
+  let n = 1;
+  for (const [query, list] of byQuery) {
+    const provider = list[0]?.provider;
+    const header =
+      query === 'web'
+        ? 'Web search results:'
+        : `Web search results for "${query}"${provider && provider !== 'none' ? ` (${provider})` : ''}:`;
+    blocks.push(
+      [
+        header,
+        ...list.map((s) => {
+          const title = s.title || s.url;
+          const snip = s.snippet?.trim() ? `\n   ${s.snippet.trim()}` : '';
+          return `${n++}. [${title}](${s.url})${snip}`;
+        }),
+      ].join('\n'),
+    );
+  }
+  return blocks.join('\n\n');
+}
+
+/** Rebuild Material sources from every completed search in the chat (deduped by URL). */
+function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
+  const seen = new Set<string>();
+  const out: WebSearchSource[] = [];
+  for (const m of messages) {
+    for (const run of m.toolRuns || []) {
+      if (run.status !== 'done' || !run.results?.length) continue;
+      for (const r of run.results) {
+        if (!r.url || seen.has(r.url)) continue;
+        seen.add(r.url);
+        out.push({
+          title: r.title,
+          url: r.url,
+          snippet: r.snippet,
+          provider: run.provider,
+          query: run.query,
+        });
+      }
+    }
+  }
+  return out.slice(-40);
+}
+
+type SkillItem = { id: string; title: string; content: string };
+
+function skillSlashName(title: string): string {
+  const slug = title
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\u4e00-\u9fff-]/g, '');
+  return slug.slice(0, 48) || 'skill';
+}
+
+/** Explicit image-gen command: `/image a cat` or `/img a cat`. */
+const IMAGE_CMD_RE = /^(?:\/image|\/img)\s+([\s\S]+)$/i;
+
+function parseImageCommand(text: string): string | null {
+  const m = text.trim().match(IMAGE_CMD_RE);
+  return m?.[1]?.trim() || null;
 }
 
 interface ModelOption {
@@ -208,6 +352,18 @@ function messagePlainText(message: Message): string {
   return message.content || '';
 }
 
+/** Strip leaked <think> / fake tool tags for display / export; merge into reasoning panel. */
+function displayAssistantParts(message: Message): { content: string; reasoning: string } {
+  const hasThink = contentHasThinkMarkup(message.content);
+  const extracted = hasThink
+    ? extractThinkBlocks(message.content)
+    : { content: message.content, reasoning: '' };
+  return {
+    content: stripFakeToolMarkup(extracted.content),
+    reasoning: [message.reasoning, extracted.reasoning].filter(Boolean).join('\n\n'),
+  };
+}
+
 function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): boolean {
   if (pending.some((a) => Boolean(a.dataUrl || a.type.startsWith('image/')))) return true;
   return messages.some((m) => (m.images?.length || 0) > 0);
@@ -218,16 +374,32 @@ function toApiMessages(messages: Message[]) {
     role: m.role,
     content: m.content,
     images: m.images?.map((img) => img.url) || [],
+    timestamp: m.timestamp as number | undefined,
   }));
 }
 
+type QueuedTask = {
+  id: string;
+  sessionId: string;
+  content: string;
+  baseMessages?: Message[];
+  enqueueTime: number;
+};
+
 export default function ChatContainer() {
+  const { t, locale, setLocale } = useLocale();
+  const { theme, setTheme } = useTheme();
+
   // State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  /** Per-session streaming flags — multiple chats can run in parallel. */
+  const [loadingBySession, setLoadingBySession] = useState<Record<string, boolean>>({});
+  const [waitingBySession, setWaitingBySession] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageContent, setEditingMessageContent] = useState('');
   
@@ -242,6 +414,7 @@ export default function ChatContainer() {
     }
   });
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [modelsLoading, setModelsLoading] = useState(false);
   const [isAccountBound, setIsAccountBound] = useState(false);
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
@@ -252,13 +425,30 @@ export default function ChatContainer() {
 
   // Settings State
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
+  const [sessionPendingDelete, setSessionPendingDelete] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
 
   // Skills State
-  const [skills, setSkills] = useState<Array<{ id: string; title: string; content: string }>>([]);
+  const [skills, setSkills] = useState<SkillItem[]>([]);
   const [isSavingSkill, setIsSavingSkill] = useState(false);
-  const [editingSkillTitle, setEditingSkillTitle] = useState('');
-  const [skillsExpanded, setSkillsExpanded] = useState(true);
+  const [skillsExpanded, setSkillsExpanded] = useState(false);
+  const [showSkillModal, setShowSkillModal] = useState(false);
+  const [skillDraftTitle, setSkillDraftTitle] = useState('');
+  const [skillDraftContent, setSkillDraftContent] = useState('');
+  const [skillDraftBrief, setSkillDraftBrief] = useState('');
+  const [isGeneratingSkill, setIsGeneratingSkill] = useState(false);
+  const [skillModalError, setSkillModalError] = useState('');
+  const [skillPendingDelete, setSkillPendingDelete] = useState<SkillItem | null>(null);
+  const [isDeletingSkill, setIsDeletingSkill] = useState(false);
+  const [isSkillPickerOpen, setIsSkillPickerOpen] = useState(false);
+  const [slashHighlight, setSlashHighlight] = useState(0);
+  const skillPickerRef = useRef<HTMLDivElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
+  const [referenceExpanded, setReferenceExpanded] = useState(false);
+  const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [referenceText, setReferenceText] = useState('');
   const [attachments, setAttachments] = useState<IngestedAttachment[]>([]);
@@ -269,21 +459,44 @@ export default function ChatContainer() {
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
-  const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
-  const [messageQueue, setMessageQueue] = useState<Array<{ id: string; content: string; baseMessages?: Message[]; enqueueTime: number }>>([]);
-  // Stop should freeze the queue; only explicit Continue / Send Now resumes it.
-  const [queuePaused, setQueuePaused] = useState(false);
+  const [messageQueue, setMessageQueue] = useState<QueuedTask[]>([]);
+  // Stop freezes that session's queue; Continue / Send Now resumes it.
+  const [queuePausedBySession, setQueuePausedBySession] = useState<Record<string, boolean>>({});
   const [queueExpanded, setQueueExpanded] = useState(true);
   /** Explicit open/closed overrides for reasoning panels (message id → open). */
   const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({});
+  const [toolRunOpen, setToolRunOpen] = useState<Record<string, boolean>>({});
+  /** Text quoted from a message selection into the composer. */
+  const [quotedSelection, setQuotedSelection] = useState('');
+  const quoteToolbarWrapRef = useRef<HTMLDivElement>(null);
+  const quoteToolbarTextRef = useRef('');
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesContentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const modelSearchRef = useRef<HTMLInputElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const sessionsRef = useRef(sessions);
+  const activeSessionIdRef = useRef(activeSessionId);
+  const skillsRef = useRef(skills);
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
+
+  sessionsRef.current = sessions;
+  activeSessionIdRef.current = activeSessionId;
+  skillsRef.current = skills;
+
+  const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
+  const isActiveLoading = isSessionLoading(activeSessionId);
+  const isWaitingForFirstToken = Boolean(waitingBySession[activeSessionId]);
+  const activeQueue = useMemo(
+    () => messageQueue.filter((task) => task.sessionId === activeSessionId),
+    [messageQueue, activeSessionId],
+  );
+  const queuePaused = Boolean(queuePausedBySession[activeSessionId]);
 
   // Load Saved State
   useEffect(() => {
@@ -306,7 +519,26 @@ export default function ChatContainer() {
               const parsed = JSON.parse(savedChats) as ChatSession[];
               // Only restore conversations that already have messages.
               // Empty drafts are never persisted / shown in the sidebar.
-              const nonEmpty = parsed.filter((session) => session.messages?.length > 0);
+              const nonEmpty = parsed
+                .filter((session) => session.messages?.length > 0)
+                .map((session) => ({
+                  ...session,
+                  // Scrub leaked <think> / fake tool tags from older Cursor Auto replies.
+                  messages: session.messages.map((m) => {
+                    if (
+                      m.role !== 'assistant' ||
+                      (!contentHasThinkMarkup(m.content) && !contentHasToolMarkup(m.content))
+                    ) {
+                      return m;
+                    }
+                    const parts = displayAssistantParts(m);
+                    return {
+                      ...m,
+                      content: parts.content,
+                      reasoning: parts.reasoning || undefined,
+                    };
+                  }),
+                }));
               if (nonEmpty.length > 0) {
                 setSessions(nonEmpty);
                 setActiveSessionId(nonEmpty[0].id);
@@ -341,9 +573,107 @@ export default function ChatContainer() {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
-  const lastMessage = messages[messages.length - 1];
+  const activeSkillIds = activeSession?.skillIds || [];
+  const webSources = activeSession?.webSources || [];
+
+  // Repair Material when history has more search hits than the stored list
+  // (e.g. older searches were overwritten before we started accumulating).
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const collected = collectWebSourcesFromMessages(messages);
+    const storedLen = activeSession?.webSources?.length || 0;
+    if (collected.length <= storedLen) return;
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSessionId ? { ...s, webSources: collected } : s,
+      ),
+    );
+  }, [activeSessionId, messages, activeSession?.webSources?.length]);
+  const activeSkills = useMemo(
+    () =>
+      activeSkillIds
+        .map((id) => skills.find((s) => s.id === id))
+        .filter((s): s is SkillItem => Boolean(s)),
+    [activeSkillIds, skills],
+  );
+
+  const setActiveSkillIds = (updater: string[] | ((prev: string[]) => string[])) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const next = typeof updater === 'function' ? updater(s.skillIds || []) : updater;
+        return { ...s, skillIds: next, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const toggleSkill = (skillId: string) => {
+    setActiveSkillIds((prev) =>
+      prev.includes(skillId) ? prev.filter((id) => id !== skillId) : [...prev, skillId],
+    );
+  };
+
+  const attachSkill = (skill: SkillItem) => {
+    setActiveSkillIds((prev) => (prev.includes(skill.id) ? prev : [...prev, skill.id]));
+    setIsSkillPickerOpen(false);
+  };
+
+  /** Trailing `/query` at start of input or after a newline — slash-command mode. */
+  const slashMatch = input.match(/(?:^|\n)\/([^\n]*)$/);
+  const slashQuery = slashMatch ? slashMatch[1].trim().toLowerCase() : null;
+
+  type SlashMenuItem =
+    | { kind: 'command'; id: string; title: string; insert: string; hint: string }
+    | { kind: 'skill'; skill: SkillItem };
+
+  const slashMenuItems = useMemo((): SlashMenuItem[] => {
+    if (slashQuery == null) return [];
+    const items: SlashMenuItem[] = [];
+    if (
+      !slashQuery ||
+      'image'.startsWith(slashQuery) ||
+      'img'.startsWith(slashQuery)
+    ) {
+      items.push({
+        kind: 'command',
+        id: 'image',
+                        title: t('generateImage'),
+                        insert: '/image ',
+                        hint: t('imageHint'),
+                      });
+    }
+    if (isAccountBound) {
+      for (const s of skills) {
+        const name = skillSlashName(s.title);
+        if (
+          !slashQuery ||
+          name.includes(slashQuery) ||
+          s.title.toLowerCase().includes(slashQuery)
+        ) {
+          items.push({ kind: 'skill', skill: s });
+        }
+      }
+    }
+    return items.slice(0, 8);
+  }, [slashQuery, skills, isAccountBound]);
+
+  const consumeSlashItem = (item: SlashMenuItem) => {
+    if (item.kind === 'command') {
+      setInput((prev) =>
+        prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? `\n${item.insert}` : item.insert)),
+      );
+      setIsSkillPickerOpen(false);
+      setSlashHighlight(0);
+      return;
+    }
+    attachSkill(item.skill);
+    setInput((prev) => prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? '\n' : '')));
+    setSlashHighlight(0);
+  };
+
   const isAssistantError = (m?: Message) =>
     Boolean(m && m.role === 'assistant' && m.content.trim().startsWith('Error:'));
+  const lastMessage = messages[messages.length - 1];
   const truncationInfo = useMemo(() => {
     if (!lastMessage || lastMessage.role !== 'assistant') {
       return { truncated: false, reason: '' };
@@ -361,9 +691,9 @@ export default function ChatContainer() {
   }, [lastMessage]);
   // Only offer Continue when we have a clear interruption signal — not for every
   // finished assistant turn.
-  const canResumeIncomplete = !isLoading && truncationInfo.truncated;
+  const canResumeIncomplete = !isActiveLoading && truncationInfo.truncated;
   // Timeout / upstream failures leave an Error: bubble — offer Retry for that turn.
-  const canRetryFailed = !isLoading && isAssistantError(lastMessage);
+  const canRetryFailed = !isActiveLoading && isAssistantError(lastMessage);
   // Empty drafts stay in state for the composer, but do not appear in the sidebar
   // until the first message is sent.
   const sidebarSessions = useMemo(
@@ -392,7 +722,7 @@ export default function ChatContainer() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading]);
+  }, [messages, isActiveLoading]);
 
   // Switching conversations should land at the latest message.
   useEffect(() => {
@@ -404,6 +734,7 @@ export default function ChatContainer() {
   const createNewSession = () => {
     // Switch to a blank composer. The draft is kept in memory only and is
     // omitted from the sidebar until the first message lands.
+    setQuotedSelection('');
     setSessions((prev) => {
       const emptyDraft = prev.find((session) => session.messages.length === 0);
       if (emptyDraft) {
@@ -428,22 +759,22 @@ export default function ChatContainer() {
     }
   };
 
-  const updateActiveSession = (newMessages: Message[], title?: string) => {
+  const updateSession = (sessionId: string, newMessages: Message[], title?: string) => {
     setSessions((prev) => {
-      const exists = prev.some((s) => s.id === activeSessionId);
+      const exists = prev.some((s) => s.id === sessionId);
       if (!exists) {
         // First message on a missing draft — materialize the session now.
         const created: ChatSession = {
-          id: activeSessionId || crypto.randomUUID(),
+          id: sessionId || crypto.randomUUID(),
           title: title || 'New Conversation',
           messages: newMessages,
           updatedAt: Date.now(),
         };
-        if (!activeSessionId) setActiveSessionId(created.id);
+        if (!sessionId) setActiveSessionId(created.id);
         return [created, ...prev.filter((s) => s.messages.length > 0)];
       }
       return prev.map((s) => {
-        if (s.id === activeSessionId) {
+        if (s.id === sessionId) {
           return {
             ...s,
             messages: newMessages,
@@ -456,14 +787,19 @@ export default function ChatContainer() {
     });
   };
 
+  const updateActiveSession = (newMessages: Message[], title?: string) => {
+    updateSession(activeSessionId, newMessages, title);
+  };
+
   const markAssistantIncomplete = (
+    sessionId: string,
     assistantId: string,
     incomplete: boolean,
     meta?: { finishReason?: string | null; truncationReason?: string },
   ) => {
     setSessions((prev) =>
       prev.map((s) => {
-        if (s.id !== activeSessionId) return s;
+        if (s.id !== sessionId) return s;
         return {
           ...s,
           updatedAt: Date.now(),
@@ -482,10 +818,11 @@ export default function ChatContainer() {
     );
   };
 
-  const appendToAssistant = (assistantId: string, chunk: string) => {
+  const appendToAssistant = (sessionId: string, assistantId: string, chunk: string) => {
     setSessions((prev) =>
       prev.map((s) => {
-        if (s.id !== activeSessionId) return s;
+        if (s.id !== sessionId) return s;
+        if (!s.messages.some((m) => m.id === assistantId)) return s;
         const msgs = s.messages.map((m) =>
           m.id === assistantId ? { ...m, content: m.content + chunk, incomplete: true } : m,
         );
@@ -494,10 +831,11 @@ export default function ChatContainer() {
     );
   };
 
-  const appendToAssistantReasoning = (assistantId: string, chunk: string) => {
+  const appendToAssistantReasoning = (sessionId: string, assistantId: string, chunk: string) => {
     setSessions((prev) =>
       prev.map((s) => {
-        if (s.id !== activeSessionId) return s;
+        if (s.id !== sessionId) return s;
+        if (!s.messages.some((m) => m.id === assistantId)) return s;
         const msgs = s.messages.map((m) =>
           m.id === assistantId
             ? { ...m, reasoning: (m.reasoning || '') + chunk, incomplete: true }
@@ -508,7 +846,89 @@ export default function ChatContainer() {
     );
   };
 
+  const upsertAssistantToolRun = (
+    sessionId: string,
+    assistantId: string,
+    run: {
+      name: string;
+      status: 'start' | 'done';
+      query?: string;
+      provider?: string;
+      results?: Array<{ title: string; url: string; snippet: string }>;
+      error?: string;
+    },
+  ) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        const msgs = s.messages.map((m) => {
+          if (m.id !== assistantId) return m;
+          const existing = m.toolRuns || [];
+          const idx = existing.findIndex(
+            (r) => r.name === run.name && r.query === run.query && r.status === 'start',
+          );
+          let toolRuns;
+          if (run.status === 'start') {
+            toolRuns = [
+              ...existing,
+              {
+                id: crypto.randomUUID(),
+                name: run.name,
+                status: 'start' as const,
+                query: run.query,
+              },
+            ];
+          } else if (idx >= 0) {
+            toolRuns = existing.map((r, i) =>
+              i === idx
+                ? {
+                    ...r,
+                    status: 'done' as const,
+                    provider: run.provider,
+                    results: run.results,
+                    error: run.error,
+                  }
+                : r,
+            );
+          } else {
+            toolRuns = [
+              ...existing,
+              {
+                id: crypto.randomUUID(),
+                name: run.name,
+                status: 'done' as const,
+                query: run.query,
+                provider: run.provider,
+                results: run.results,
+                error: run.error,
+              },
+            ];
+          }
+          return { ...m, toolRuns, incomplete: true };
+        });
+        const nextSession = { ...s, messages: msgs, updatedAt: Date.now() };
+        if (run.status === 'done') {
+          nextSession.webSources = collectWebSourcesFromMessages(msgs);
+          if ((nextSession.webSources?.length || 0) > 0) {
+            queueMicrotask(() => setReferenceExpanded(true));
+          }
+        }
+        return nextSession;
+      }),
+    );
+  };
+
+  const clearWaiting = (sessionId: string) => {
+    setWaitingBySession((prev) => {
+      if (!prev[sessionId]) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+  };
+
   const streamChatResponse = async (
+    sessionId: string,
     apiMessages: ReturnType<typeof toApiMessages>,
     assistantId: string,
     signal: AbortSignal,
@@ -517,6 +937,15 @@ export default function ChatContainer() {
     /** Inserted before the first resumed chunk to keep Markdown structure intact. */
     seamPrefix = '',
   ) => {
+    const sessionSources =
+      sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [];
+    const combinedReference = [
+      String(referenceText || '').trim(),
+      formatWebSourcesForReference(sessionSources),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -524,7 +953,9 @@ export default function ChatContainer() {
         messages: apiMessages,
         model: selectedModel,
         systemPrompt,
-        referenceText,
+        referenceText: combinedReference,
+        skills: skillsPayloadForSession(sessionId),
+        conversationId: sessionId,
       }),
       signal,
     });
@@ -540,22 +971,91 @@ export default function ChatContainer() {
     const decoder = new TextDecoder();
     let buffer = '';
     let finishReason: string | null = null;
-    let streamed = initialContent;
     let seamPending = Boolean(seamPrefix);
     let sawDone = false;
+    const thinkParser = createThinkStreamParser();
+    const toolStripper = createToolCallStripper();
+
+    // Clean any leaked <think> / fake tool markup already in the bubble (history / Resume).
+    const seededThink = extractThinkBlocks(initialContent);
+    const seededContent = stripFakeToolMarkup(seededThink.content);
+    let streamed = seededContent;
+    if (contentHasThinkMarkup(initialContent) || contentHasToolMarkup(initialContent)) {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) => {
+              if (m.id !== assistantId) return m;
+              const mergedReasoning = [m.reasoning, seededThink.reasoning]
+                .filter(Boolean)
+                .join('\n\n');
+              return {
+                ...m,
+                content: seededContent,
+                reasoning: mergedReasoning || undefined,
+              };
+            }),
+          };
+        }),
+      );
+    }
+    // Keep parsers in sync if the previous reply was cut mid-tag.
+    if (initialContent) {
+      const seededSplit = thinkParser.push(initialContent);
+      if (seededSplit.content) toolStripper.push(seededSplit.content);
+    }
+
+    const emitContent = (chunk: string) => {
+      const cleaned = toolStripper.push(chunk);
+      if (!cleaned) return;
+      clearWaiting(sessionId);
+      streamed += cleaned;
+      appendToAssistant(sessionId, assistantId, cleaned);
+      if (sessionId === activeSessionIdRef.current) scrollToBottom();
+    };
+
+    const applyThinkSplit = (raw: string) => {
+      const split = thinkParser.push(raw);
+      if (split.reasoning) {
+        clearWaiting(sessionId);
+        appendToAssistantReasoning(sessionId, assistantId, split.reasoning);
+      }
+      if (split.content) emitContent(split.content);
+    };
 
     const settle = (unexpectedEnd = false) => {
+      const flushed = thinkParser.flush();
+      if (flushed.reasoning) appendToAssistantReasoning(sessionId, assistantId, flushed.reasoning);
+      if (flushed.content) {
+        const cleaned = toolStripper.push(flushed.content) + toolStripper.flush();
+        if (cleaned) {
+          streamed += cleaned;
+          appendToAssistant(sessionId, assistantId, cleaned);
+        }
+      } else {
+        const cleaned = toolStripper.flush();
+        if (cleaned) {
+          streamed += cleaned;
+          appendToAssistant(sessionId, assistantId, cleaned);
+        }
+      }
       // Connection dropped / function killed mid-stream: no [DONE] arrived.
       // Prefer Continue over silently treating the partial reply as finished.
       if (unexpectedEnd && !finishReason) {
-        markAssistantIncomplete(assistantId, true, {
+        markAssistantIncomplete(sessionId, assistantId, true, {
           finishReason,
           truncationReason: 'Stream ended unexpectedly',
         });
         return;
       }
-      const verdict = analyzeTruncation(streamed, finishReason, unexpectedEnd);
-      markAssistantIncomplete(assistantId, verdict.truncated, {
+      const verdict = analyzeTruncation(
+        streamed,
+        finishReason,
+        unexpectedEnd || thinkParser.inThink,
+      );
+      markAssistantIncomplete(sessionId, assistantId, verdict.truncated, {
         finishReason,
         truncationReason: verdict.reason || undefined,
       });
@@ -581,20 +1081,28 @@ export default function ChatContainer() {
           const parsed = JSON.parse(data);
           if (parsed.finish_reason) finishReason = parsed.finish_reason;
           if (parsed.reasoning) {
-            // Reasoning counts as activity — hide the empty dots placeholder.
-            setIsWaitingForFirstToken(false);
-            appendToAssistantReasoning(assistantId, parsed.reasoning);
+            clearWaiting(sessionId);
+            appendToAssistantReasoning(sessionId, assistantId, parsed.reasoning);
+          }
+          if (parsed.tool) {
+            clearWaiting(sessionId);
+            upsertAssistantToolRun(sessionId, assistantId, {
+              name: String(parsed.tool.name || 'web_search'),
+              status: parsed.tool.status === 'done' ? 'done' : 'start',
+              query: parsed.tool.query,
+              provider: parsed.tool.provider,
+              results: Array.isArray(parsed.tool.results) ? parsed.tool.results : undefined,
+              error: parsed.tool.error,
+            });
           }
           if (parsed.content) {
-            setIsWaitingForFirstToken(false);
             let chunk = parsed.content as string;
             if (seamPending) {
               seamPending = false;
               // Skip the seam if the model already emitted the break itself.
               if (!chunk.startsWith('\n')) chunk = seamPrefix + chunk;
             }
-            streamed += chunk;
-            appendToAssistant(assistantId, chunk);
+            applyThinkSplit(chunk);
           }
         } catch (e) {}
       }
@@ -603,8 +1111,11 @@ export default function ChatContainer() {
     settle(!sawDone);
   };
 
-  const deleteSession = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const deleteSession = (id: string) => {
+    const controller = abortControllersRef.current.get(id);
+    if (controller) controller.abort();
+    endLoading(id);
+    setMessageQueue((prev) => prev.filter((task) => task.sessionId !== id));
     setSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== id && s.messages.length > 0);
 
@@ -633,6 +1144,8 @@ export default function ChatContainer() {
 
       return filtered;
     });
+    setSessionPendingDelete(null);
+    setSessionMenuOpenId(null);
   };
 
   const saveUserKey = async () => {
@@ -666,7 +1179,6 @@ export default function ChatContainer() {
     setShowAuthModal(false);
     setSessions([]);
     setSkills([]);
-    setEditingSkillTitle('');
     createNewSession();
     await fetchModels();
   };
@@ -676,7 +1188,7 @@ export default function ChatContainer() {
     const { attachments: next, errors } = await ingestFiles(files);
     if (next.length > 0) {
       setAttachments((prev) => [...prev, ...next]);
-      // Do not auto-open the Context panel — attachments already show above the input.
+      setAttachmentsExpanded(true);
     }
     if (errors.length > 0) setAttachError(errors.join(' · '));
   };
@@ -711,10 +1223,14 @@ export default function ChatContainer() {
       const target = event.target as Node | null;
       if (modelMenuRef.current && target && !modelMenuRef.current.contains(target)) {
         setIsModelMenuOpen(false);
+        setModelSearchQuery('');
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsModelMenuOpen(false);
+      if (event.key === 'Escape') {
+        setIsModelMenuOpen(false);
+        setModelSearchQuery('');
+      }
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('touchstart', onPointerDown);
@@ -725,6 +1241,77 @@ export default function ChatContainer() {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [isModelMenuOpen]);
+
+  // Close account menu on outside click / Escape.
+  useEffect(() => {
+    if (!isAccountMenuOpen) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (accountMenuRef.current && target && !accountMenuRef.current.contains(target)) {
+        setIsAccountMenuOpen(false);
+        setIsLanguageMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAccountMenuOpen(false);
+        setIsLanguageMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isAccountMenuOpen]);
+
+  // Close session "more" menu on outside click / Escape.
+  useEffect(() => {
+    if (!sessionMenuOpenId) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        target.closest(`[data-session-menu="${sessionMenuOpenId}"]`) ||
+        target.closest(`[data-session-menu-trigger="${sessionMenuOpenId}"]`)
+      ) {
+        return;
+      }
+      setSessionMenuOpenId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSessionMenuOpenId(null);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [sessionMenuOpenId]);
+
+  // Focus search when the model menu opens.
+  useEffect(() => {
+    if (!isModelMenuOpen) return;
+    const timer = window.setTimeout(() => modelSearchRef.current?.focus(), 30);
+    return () => window.clearTimeout(timer);
+  }, [isModelMenuOpen]);
+
+  // Keep <html lang> in sync with UI locale.
+  useEffect(() => {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+  }, [locale]);
+
+  const filteredModels = useMemo(() => {
+    const q = modelSearchQuery.trim().toLowerCase();
+    if (!q) return availableModels;
+    return availableModels.filter((m) => m.id.toLowerCase().includes(q));
+  }, [availableModels, modelSearchQuery]);
 
   // When images appear on a text-only model, warn — do not silently jump models.
   useEffect(() => {
@@ -741,7 +1328,13 @@ export default function ChatContainer() {
   const contextBreakdown = useMemo(() => {
     const systemText = (systemPrompt.trim() || DEFAULT_SYSTEM_PROMPT);
     const system = estimateTokensFromText(systemText);
-    const reference = estimateTokensFromText(referenceText);
+    const skillTokens = activeSkills.reduce(
+      (sum, s) => sum + estimateTokensFromText(`${s.title}\n${s.content}`) + 8,
+      0,
+    );
+    const reference = estimateTokensFromText(
+      [referenceText, formatWebSourcesForReference(webSources)].filter(Boolean).join('\n\n'),
+    );
     const files = estimateTokensFromText(
       attachments
         .filter((a) => a.text)
@@ -758,13 +1351,14 @@ export default function ChatContainer() {
     );
     return {
       system,
+      skills: skillTokens,
       reference,
       files,
       images: imageTokens,
       conversation,
-      total: system + reference + files + imageTokens + conversation,
+      total: system + skillTokens + reference + files + imageTokens + conversation,
     };
-  }, [messages, systemPrompt, referenceText, attachments]);
+  }, [messages, systemPrompt, referenceText, webSources, attachments, activeSkills]);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -779,6 +1373,7 @@ export default function ChatContainer() {
       (
         [
           ['System', contextBreakdown.system],
+          ['Skills', contextBreakdown.skills],
           ['Reference', contextBreakdown.reference],
           ['Files', contextBreakdown.files],
           ['Images', contextBreakdown.images],
@@ -845,39 +1440,92 @@ export default function ChatContainer() {
     }
   };
 
-  const saveCurrentAsSkill = async () => {
-    if (!systemPrompt.trim()) return;
-    const title = prompt('给这个 Skill 取个名字：', editingSkillTitle || 'My Skill');
-    if (!title) return;
-    
+  const openNewSkillModal = () => {
+    setSkillDraftTitle('');
+    setSkillDraftContent('');
+    setSkillDraftBrief('');
+    setSkillModalError('');
+    setShowSkillModal(true);
+  };
+
+  const createSkill = async (title: string, content: string) => {
+    const trimmedTitle = title.trim();
+    const trimmedContent = content.trim();
+    if (!trimmedTitle || !trimmedContent) {
+      setSkillModalError('请填写名称和内容');
+      return false;
+    }
     setIsSavingSkill(true);
+    setSkillModalError('');
     try {
       const res = await fetch('/api/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content: systemPrompt }),
+        body: JSON.stringify({ title: trimmedTitle, content: trimmedContent }),
       });
       const json = await res.json();
-      if (json.success) {
-        setSkills(prev => [json.data, ...prev]);
-        setEditingSkillTitle(title);
+      if (!res.ok) throw new Error(json?.error || '保存失败');
+      if (json.success || json.data) {
+        const saved = json.data || { id: crypto.randomUUID(), title: trimmedTitle, content: trimmedContent };
+        setSkills((prev) => [saved, ...prev.filter((s) => s.id !== saved.id)]);
+        setShowSkillModal(false);
+        return true;
       }
-    } catch (e) {
+      throw new Error(json?.error || '保存失败');
+    } catch (e: any) {
       console.error(e);
-      alert('保存失败');
+      setSkillModalError(e?.message || '保存失败');
+      alert(e?.message || '保存失败');
+      return false;
     } finally {
       setIsSavingSkill(false);
     }
   };
 
-  const deleteSkill = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm('确认删除这个 Skill 吗？')) return;
+  const generateSkillWithAI = async () => {
+    const brief = skillDraftBrief.trim() || skillDraftTitle.trim();
+    if (!brief) {
+      setSkillModalError('先用一句话描述这个 Skill 要做什么');
+      return;
+    }
+    setIsGeneratingSkill(true);
+    setSkillModalError('');
     try {
-      await fetch(`/api/skills/${id}`, { method: 'DELETE' });
-      setSkills(prev => prev.filter(s => s.id !== id));
+      const res = await fetch('/api/skills/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief, model: selectedModel || undefined }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || '生成失败');
+      if (json.title) setSkillDraftTitle(json.title);
+      if (json.content) setSkillDraftContent(json.content);
+    } catch (e: any) {
+      setSkillModalError(e?.message || '生成失败');
+    } finally {
+      setIsGeneratingSkill(false);
+    }
+  };
+
+  const requestDeleteSkill = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const skill = skills.find((s) => s.id === id) || null;
+    if (!skill) return;
+    setSkillPendingDelete(skill);
+  };
+
+  const confirmDeleteSkill = async () => {
+    if (!skillPendingDelete || isDeletingSkill) return;
+    setIsDeletingSkill(true);
+    try {
+      await fetch(`/api/skills/${skillPendingDelete.id}`, { method: 'DELETE' });
+      setSkills((prev) => prev.filter((s) => s.id !== skillPendingDelete.id));
+      setActiveSkillIds((prev) => prev.filter((id) => id !== skillPendingDelete.id));
+      setSkillPendingDelete(null);
     } catch (e) {
       console.error(e);
+    } finally {
+      setIsDeletingSkill(false);
     }
   };
 
@@ -887,25 +1535,207 @@ export default function ChatContainer() {
     localStorage.setItem('llm_christmas_selected_model', selectedModel);
   }, [selectedModel]);
 
-  // --- Chat Logic ---
-  // Auto-drain the queue only when idle and not paused (Stop freezes the queue).
+  // Keep slash highlight in range when the filtered list shrinks.
   useEffect(() => {
-    if (!isLoading && !queuePaused && messageQueue.length > 0) {
-      const nextTask = messageQueue[0];
-      setMessageQueue((prev) => prev.slice(1));
-      handleSubmit(nextTask.content, nextTask.baseMessages);
+    setSlashHighlight(0);
+  }, [slashQuery]);
+
+  // Close skill picker on outside click.
+  useEffect(() => {
+    if (!isSkillPickerOpen) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (skillPickerRef.current && target && !skillPickerRef.current.contains(target)) {
+        setIsSkillPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+    };
+  }, [isSkillPickerOpen]);
+
+  // Floating "Quote" button when selecting text inside the message list.
+  // Shown/positioned via DOM only — no setState — so React re-renders cannot
+  // collapse the browser selection highlight.
+  useEffect(() => {
+    let raf = 0;
+    const wrap = () => quoteToolbarWrapRef.current;
+
+    const hideToolbar = () => {
+      const el = wrap();
+      if (el) el.style.display = 'none';
+      quoteToolbarTextRef.current = '';
+    };
+
+    const updateFromSelection = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        hideToolbar();
+        return;
+      }
+      const text = sel.toString().replace(/\u00a0/g, ' ').trim();
+      if (!text) {
+        hideToolbar();
+        return;
+      }
+      const root = messagesContentRef.current;
+      if (!root) {
+        hideToolbar();
+        return;
+      }
+      const anchor = sel.anchorNode;
+      const focus = sel.focusNode;
+      if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) {
+        hideToolbar();
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) {
+        hideToolbar();
+        return;
+      }
+      const clipped = text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
+      const x = Math.min(window.innerWidth - 12, Math.max(12, rect.left + rect.width / 2));
+      // Sit just above the selection; wrapper uses translate(-50%, -100%).
+      const y = Math.max(8, rect.top - 10);
+      const el = wrap();
+      if (el) {
+        el.style.display = 'block';
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+      }
+      quoteToolbarTextRef.current = clipped;
+    };
+
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(updateFromSelection);
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') hideToolbar();
+      else if (e.shiftKey || e.key.startsWith('Arrow')) scheduleUpdate();
+    };
+
+    document.addEventListener('selectionchange', scheduleUpdate);
+    document.addEventListener('keyup', onKeyUp);
+    document.addEventListener('mouseup', scheduleUpdate);
+    const scroller = scrollRef.current;
+    scroller?.addEventListener('scroll', scheduleUpdate, { passive: true });
+    window.addEventListener('resize', scheduleUpdate);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('selectionchange', scheduleUpdate);
+      document.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('mouseup', scheduleUpdate);
+      scroller?.removeEventListener('scroll', scheduleUpdate);
+      window.removeEventListener('resize', scheduleUpdate);
+    };
+  }, []);
+
+  const quoteSelectedText = (text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    setQuotedSelection(clean);
+    quoteToolbarTextRef.current = '';
+    const el = quoteToolbarWrapRef.current;
+    if (el) el.style.display = 'none';
+    window.getSelection()?.removeAllRanges();
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const formatQuotedMessage = (userText: string, quote: string) => {
+    const q = quote.trim();
+    const body = userText.trim();
+    if (!q) return body;
+    const block = q
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    return body ? `${block}\n\n${body}` : block;
+  };
+
+  const beginLoading = (sessionId: string) => {
+    setLoadingBySession((prev) => ({ ...prev, [sessionId]: true }));
+  };
+
+  const endLoading = (sessionId: string) => {
+    setLoadingBySession((prev) => {
+      if (!prev[sessionId]) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+    clearWaiting(sessionId);
+    abortControllersRef.current.delete(sessionId);
+  };
+
+  /** Only clear loading if this controller is still the active one for the session.
+   *  Prevents a stopped/aborted request's finally from wiping a newer in-flight request. */
+  const endLoadingIfController = (sessionId: string, controller: AbortController) => {
+    if (abortControllersRef.current.get(sessionId) !== controller) return;
+    endLoading(sessionId);
+  };
+
+  const skillsPayloadForSession = (sessionId: string) => {
+    const ids = sessionsRef.current.find((s) => s.id === sessionId)?.skillIds || [];
+    return ids
+      .map((id) => skillsRef.current.find((s) => s.id === id))
+      .filter((s): s is SkillItem => Boolean(s))
+      .map((s) => ({ title: s.title, content: s.content }));
+  };
+
+  // --- Chat Logic ---
+  // Drain each session's queue only when that session is idle and not paused.
+  useEffect(() => {
+    const toStart: QueuedTask[] = [];
+    const seen = new Set<string>();
+    for (const task of messageQueue) {
+      if (seen.has(task.sessionId)) continue;
+      if (loadingBySession[task.sessionId] || queuePausedBySession[task.sessionId]) continue;
+      seen.add(task.sessionId);
+      toStart.push(task);
     }
-  }, [isLoading, messageQueue, queuePaused]);
+    if (toStart.length === 0) return;
+    const ids = new Set(toStart.map((task) => task.id));
+    setMessageQueue((prev) => prev.filter((task) => !ids.has(task.id)));
+    for (const task of toStart) {
+      // Reserve the session slot immediately so another drain can't double-start
+      // while handleSubmit awaits compact / network.
+      beginLoading(task.sessionId);
+      void (async () => {
+        const ok = await handleSubmit(task.content, task.baseMessages, false, task.sessionId, {
+          alreadyLoading: true,
+        });
+        if (!ok) {
+          endLoading(task.sessionId);
+          setMessageQueue((prev) => [
+            ...prev,
+            { ...task, id: crypto.randomUUID(), enqueueTime: Date.now() },
+          ]);
+        }
+      })();
+    }
+  }, [messageQueue, loadingBySession, queuePausedBySession]);
 
   const enqueueOrSubmit = (overrideInput?: string, baseMessagesOverride?: Message[]) => {
-    const textToSend = overrideInput || input;
-    const hasPending = attachments.length > 0;
+    const fromComposer = overrideInput == null;
+    const raw = overrideInput ?? input;
+    const quote = fromComposer ? quotedSelection : '';
+    const textToSend = formatQuotedMessage(raw, quote);
+    const hasPending = fromComposer && attachments.length > 0;
     if (!textToSend.trim() && !hasPending) return;
+    const sessionId = activeSessionId;
 
-    if (isLoading) {
+    if (isSessionLoading(sessionId)) {
       if (!textToSend.trim()) return;
       const now = Date.now();
-      const lastInQueue = messageQueue[messageQueue.length - 1];
+      const sessionQueue = messageQueue.filter((task) => task.sessionId === sessionId);
+      const lastInQueue = sessionQueue[sessionQueue.length - 1];
       if (lastInQueue && lastInQueue.content === textToSend.trim() && now - lastInQueue.enqueueTime < 500) {
         return;
       }
@@ -913,44 +1743,77 @@ export default function ChatContainer() {
         ...prev,
         {
           id: crypto.randomUUID(),
+          sessionId,
           content: textToSend.trim(),
-          baseMessages: baseMessagesOverride,
+          // Snapshot this session's thread so a later drain cannot pick up
+          // another conversation via a stale active-session fallback.
+          baseMessages:
+            baseMessagesOverride ??
+            sessionsRef.current.find((s) => s.id === sessionId)?.messages,
           enqueueTime: now,
         },
       ]);
       setInput('');
+      if (fromComposer) setQuotedSelection('');
       return;
     }
 
-    handleSubmit(textToSend, baseMessagesOverride);
+    if (fromComposer) setQuotedSelection('');
+    handleSubmit(textToSend, baseMessagesOverride, false, sessionId);
   };
 
   const cancelQueuedMessage = (id: string) => {
     setMessageQueue((prev) => {
+      const removed = prev.find((task) => task.id === id);
       const next = prev.filter((task) => task.id !== id);
-      if (next.length === 0) setQueuePaused(false);
+      if (removed && !next.some((task) => task.sessionId === removed.sessionId)) {
+        setQueuePausedBySession((p) => {
+          if (!p[removed.sessionId]) return p;
+          const copy = { ...p };
+          delete copy[removed.sessionId];
+          return copy;
+        });
+      }
       return next;
     });
   };
 
   const clearQueue = () => {
-    setMessageQueue([]);
-    setQueuePaused(false);
+    const sessionId = activeSessionId;
+    setMessageQueue((prev) => prev.filter((task) => task.sessionId !== sessionId));
+    setQueuePausedBySession((prev) => {
+      if (!prev[sessionId]) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
   };
 
   const resumeQueue = () => {
-    setQueuePaused(false);
+    setQueuePausedBySession((prev) => {
+      if (!prev[activeSessionId]) return prev;
+      const next = { ...prev };
+      delete next[activeSessionId];
+      return next;
+    });
   };
 
   const jumpQueueAndSubmit = (id: string) => {
     const task = messageQueue.find((item) => item.id === id);
     if (!task) return;
     setMessageQueue((prev) => prev.filter((item) => item.id !== id));
-    // Send Now is an explicit action — abort current reply without freezing the rest.
-    if (isLoading) stopGenerating({ pauseQueue: false });
-    setQueuePaused(false);
+    // Send Now — abort that session's current reply without freezing the rest.
+    if (isSessionLoading(task.sessionId)) {
+      stopGenerating({ pauseQueue: false, sessionId: task.sessionId });
+    }
+    setQueuePausedBySession((prev) => {
+      if (!prev[task.sessionId]) return prev;
+      const next = { ...prev };
+      delete next[task.sessionId];
+      return next;
+    });
     setTimeout(() => {
-      handleSubmit(task.content, task.baseMessages, true);
+      handleSubmit(task.content, task.baseMessages, true, task.sessionId);
     }, 50);
   };
 
@@ -994,20 +1857,162 @@ export default function ChatContainer() {
     }
   };
 
-  const handleSubmit = async (overrideInput?: string, baseMessagesOverride?: Message[], force: boolean = false) => {
-    const textToSend = overrideInput || input;
-    const pendingImages = attachments.filter((a) => a.dataUrl);
-    const pendingTexts = attachments.filter((a) => a.text);
-    if ((!textToSend.trim() && pendingImages.length === 0 && pendingTexts.length === 0) || (!force && isLoading)) {
-      return;
+  const generateImage = async (
+    prompt: string,
+    opts?: {
+      baseMessages?: Message[];
+      skipDuplicateUser?: boolean;
+      sessionId?: string;
+      /** Caller already called beginLoading (e.g. queue drain). */
+      alreadyLoading?: boolean;
+    },
+  ): Promise<boolean> => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return false;
+    if (!isAccountBound) {
+      setShowAuthModal(true);
+      return false;
     }
-    if (hasImages && !selectedSpec.vision) {
-      setAttachError('This conversation has images — switch to a vision-capable model.');
-      return;
-    }
+    const sessionId = opts?.sessionId || activeSessionId;
+    if (isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
 
     stickToBottomRef.current = true;
-    scrollToBottom(true);
+    if (sessionId === activeSessionId) scrollToBottom(true);
+    setIsSkillPickerOpen(false);
+    if (sessionId === activeSessionId) setInput('');
+    if (!opts?.alreadyLoading) beginLoading(sessionId);
+    clearWaiting(sessionId);
+
+    const sessionMessages =
+      opts?.baseMessages ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
+      [];
+    const cleanedBase = sessionMessages.filter(
+      (m, idx, arr) => !(idx === arr.length - 1 && m.role === 'assistant' && m.incomplete && !m.content),
+    );
+    let newTitle = sessionsRef.current.find((s) => s.id === sessionId)?.title;
+    if (cleanedBase.length === 0 || (cleanedBase.length === 1 && opts?.skipDuplicateUser)) {
+      newTitle = trimmed.slice(0, 30) + (trimmed.length > 30 ? '...' : '');
+    }
+
+    const assistantId = crypto.randomUUID();
+    const assistantMessage: Message = {
+      id: assistantId,
+      role: 'assistant',
+      content: 'Generating image…',
+      timestamp: Date.now(),
+      incomplete: true,
+    };
+
+    const thread = opts?.skipDuplicateUser
+      ? [...cleanedBase, assistantMessage]
+      : [
+          ...cleanedBase,
+          {
+            id: crypto.randomUUID(),
+            role: 'user' as const,
+            content: `/image ${trimmed}`,
+            timestamp: Date.now(),
+          },
+          assistantMessage,
+        ];
+    updateSession(sessionId, thread, newTitle);
+
+    try {
+      const res = await fetch('/api/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: trimmed,
+          model: 'gpt-image-1.5',
+          size: '1024x1024',
+          quality: 'medium',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Image generation failed');
+      if (!data?.image) throw new Error('No image returned');
+
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    content: data.revised_prompt || trimmed,
+                    images: [{ url: data.image as string, name: 'generated.png' }],
+                    incomplete: false,
+                  }
+                : m,
+            ),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } catch (error: any) {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    content: `Error: ${error?.message || 'Image generation failed'}`,
+                    incomplete: false,
+                    images: undefined,
+                  }
+                : m,
+            ),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } finally {
+      endLoading(sessionId);
+    }
+    return true;
+  };
+
+  const handleSubmit = async (
+    overrideInput?: string,
+    baseMessagesOverride?: Message[],
+    force: boolean = false,
+    targetSessionId?: string,
+    opts?: { alreadyLoading?: boolean },
+  ): Promise<boolean> => {
+    const sessionId = targetSessionId || activeSessionId;
+    const textToSend = overrideInput || (sessionId === activeSessionId ? input : '');
+    const imagePrompt = parseImageCommand(textToSend);
+    if (imagePrompt) {
+      if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+      return generateImage(imagePrompt, {
+        sessionId,
+        alreadyLoading: opts?.alreadyLoading,
+      });
+    }
+
+    const pendingImages = sessionId === activeSessionId ? attachments.filter((a) => a.dataUrl) : [];
+    const pendingTexts = sessionId === activeSessionId ? attachments.filter((a) => a.text) : [];
+    if (
+      (!textToSend.trim() && pendingImages.length === 0 && pendingTexts.length === 0) ||
+      (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading)
+    ) {
+      return false;
+    }
+    if (sessionId === activeSessionId && hasImages && !selectedSpec.vision) {
+      setAttachError('This conversation has images — switch to a vision-capable model.');
+      return false;
+    }
+
+    if (sessionId === activeSessionId) {
+      stickToBottomRef.current = true;
+      scrollToBottom(true);
+    }
 
     let fullContent = textToSend.trim();
     if (pendingTexts.length > 0) {
@@ -1017,16 +2022,23 @@ export default function ChatContainer() {
       fullContent = contextParts.join('\n\n') + (fullContent ? `\n\n---\n\n${fullContent}` : '');
     }
 
-    const cleanedBase = (baseMessagesOverride ?? messages).filter(
+    const sessionMessages =
+      baseMessagesOverride ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
+      [];
+    const cleanedBase = sessionMessages.filter(
       (m, idx, arr) => !(idx === arr.length - 1 && m.role === 'assistant' && m.incomplete && !m.content),
     );
 
     let baseMessages = cleanedBase;
-    let newTitle = activeSession?.title;
+    let newTitle = sessionsRef.current.find((s) => s.id === sessionId)?.title;
     if (baseMessages.length === 0) {
       newTitle = (textToSend || pendingImages[0]?.name || 'New Conversation').slice(0, 30)
         + ((textToSend.length > 30) ? '...' : '');
     }
+
+    // Lock the session before await compact so the queue cannot start a second stream.
+    if (!opts?.alreadyLoading) beginLoading(sessionId);
 
     // Compact before sending when the thread is near the selected model's window.
     // usableLimit already follows selectedModel (context − output reserve).
@@ -1042,6 +2054,7 @@ export default function ChatContainer() {
       );
       return (
         contextBreakdown.system +
+        contextBreakdown.skills +
         contextBreakdown.reference +
         historyText +
         historyImages +
@@ -1056,7 +2069,8 @@ export default function ChatContainer() {
         const compacted = await runCompact(baseMessages);
         if (!compacted) {
           setAttachError('Context is full. Compact failed — open a new chat or remove attachments.');
-          return;
+          if (!opts?.alreadyLoading) endLoading(sessionId);
+          return false;
         }
         baseMessages = compacted;
         projected = estimateForSend(baseMessages, fullContent);
@@ -1065,7 +2079,8 @@ export default function ChatContainer() {
           setAttachError(
             `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
           );
-          return;
+          if (!opts?.alreadyLoading) endLoading(sessionId);
+          return false;
         }
       }
     }
@@ -1079,14 +2094,15 @@ export default function ChatContainer() {
     };
 
     const newMessages = [...baseMessages, userMessage];
-    updateActiveSession(newMessages, newTitle);
-    setInput('');
-    attachments.forEach((a) => {
-      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-    });
-    setAttachments([]);
-    setIsLoading(true);
-    setIsWaitingForFirstToken(true);
+    updateSession(sessionId, newMessages, newTitle);
+    if (sessionId === activeSessionId) {
+      setInput('');
+      attachments.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+      setAttachments([]);
+    }
+    setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
 
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
@@ -1095,23 +2111,25 @@ export default function ChatContainer() {
       timestamp: Date.now(),
       incomplete: true,
     };
-    updateActiveSession([...newMessages, assistantMessage], newTitle);
+    updateSession(sessionId, [...newMessages, assistantMessage], newTitle);
 
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllersRef.current.set(sessionId, controller);
 
     try {
       await streamChatResponse(
+        sessionId,
         toApiMessages(newMessages),
         assistantMessage.id,
-        abortControllerRef.current.signal,
+        controller.signal,
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        setIsWaitingForFirstToken(false);
+        clearWaiting(sessionId);
         // Keep any partial reply so the user can Continue; only use Error: when empty.
         setSessions((prev) =>
           prev.map((s) => {
-            if (s.id !== activeSessionId) return s;
+            if (s.id !== sessionId) return s;
             const msgs = s.messages.map((m) => {
               if (m.id !== assistantMessage.id) return m;
               if (m.content.trim() || m.reasoning?.trim()) {
@@ -1132,20 +2150,21 @@ export default function ChatContainer() {
           }),
         );
       } else {
-        markAssistantIncomplete(assistantMessage.id, true, {
+        markAssistantIncomplete(sessionId, assistantMessage.id, true, {
           truncationReason: 'Reply was interrupted',
         });
       }
     } finally {
-      setIsLoading(false);
-      setIsWaitingForFirstToken(false);
-      abortControllerRef.current = null;
+      endLoadingIfController(sessionId, controller);
     }
+    return true;
   };
 
   const resumeIncompleteReply = async () => {
-    const last = messages[messages.length - 1];
-    if (isLoading || !last || last.role !== 'assistant' || !last.content.trim()) return;
+    const sessionId = activeSessionIdRef.current;
+    const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+    const last = sessionMessages[sessionMessages.length - 1];
+    if (isSessionLoading(sessionId) || !last || last.role !== 'assistant' || !last.content.trim()) return;
     // Refuse to continue a reply that looks complete — matches the visible gate.
     const verdict = analyzeTruncation(
       last.content,
@@ -1157,27 +2176,83 @@ export default function ChatContainer() {
 
     stickToBottomRef.current = true;
     scrollToBottom(true);
-    setIsLoading(true);
-    setIsWaitingForFirstToken(true);
+    beginLoading(sessionId);
+    setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
 
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllersRef.current.set(sessionId, controller);
 
-    const apiMessages: ReturnType<typeof toApiMessages> = [
-      ...toApiMessages(messages),
-      { role: 'user', content: buildContinuationPrompt(last.content), images: [] },
-    ];
+    const lastUser = [...sessionMessages].reverse().find((m) => m.role === 'user');
+    const polluted =
+      Boolean(lastUser) &&
+      assistantMismatchesUserTopic(lastUser!.content, last.content);
 
-    // A finished table row must not be continued on the same line.
-    const tail = last.content.trimEnd();
-    const lastLine = tail.split('\n').pop() ?? '';
-    const seamPrefix = /^\s*\|.*\|\s*$/.test(lastLine) ? '\n' : '';
+    // Cross-chat bleed (e.g. formula chat Continue resumes a Python agent task):
+    // drop the polluted assistant text and re-answer this thread's last user ask.
+    let apiMessages: ReturnType<typeof toApiMessages>;
+    let initialContent = last.content;
+    let seamPrefix = '';
+
+    if (polluted && lastUser) {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            messages: s.messages.map((m) =>
+              m.id === last.id
+                ? {
+                    ...m,
+                    content: '',
+                    reasoning: undefined,
+                    incomplete: true,
+                    truncationReason: undefined,
+                    finishReason: undefined,
+                  }
+                : m,
+            ),
+          };
+        }),
+      );
+      apiMessages = [
+        ...toApiMessages(sessionMessages.filter((m) => m.id !== last.id)),
+        {
+          role: 'user',
+          content: [
+            lastUser.content,
+            '',
+            'Answer the question above in THIS conversation only.',
+            'Do not continue any other chat\'s tasks, workspace scans, refactors, or tool plans.',
+            'Do not mention filesystems, shell, or scanning a workspace.',
+          ].join('\n'),
+          images: lastUser.images?.map((img) => img.url) || [],
+          timestamp: lastUser.timestamp || Date.now(),
+        },
+      ];
+      initialContent = '';
+    } else {
+      apiMessages = [
+        ...toApiMessages(sessionMessages),
+        {
+          role: 'user',
+          content: buildContinuationPrompt(last.content),
+          images: [],
+          timestamp: Date.now(),
+        },
+      ];
+      const tail = last.content.trimEnd();
+      const lastLine = tail.split('\n').pop() ?? '';
+      seamPrefix = /^\s*\|.*\|\s*$/.test(lastLine) ? '\n' : '';
+    }
 
     try {
       await streamChatResponse(
+        sessionId,
         apiMessages,
         last.id,
-        abortControllerRef.current.signal,
-        last.content,
+        controller.signal,
+        initialContent,
         seamPrefix,
       );
     } catch (error: any) {
@@ -1185,7 +2260,7 @@ export default function ChatContainer() {
         // Keep partial resumed text; fall back to Error only if somehow empty.
         setSessions((prev) =>
           prev.map((s) => {
-            if (s.id !== activeSessionId) return s;
+            if (s.id !== sessionId) return s;
             const msgs = s.messages.map((m) => {
               if (m.id !== last.id) return m;
               if (m.content.trim()) {
@@ -1205,29 +2280,39 @@ export default function ChatContainer() {
           }),
         );
       } else {
-        markAssistantIncomplete(last.id, true, {
+        markAssistantIncomplete(sessionId, last.id, true, {
           truncationReason: 'Stopped by you',
         });
       }
     } finally {
-      setIsLoading(false);
-      setIsWaitingForFirstToken(false);
-      abortControllerRef.current = null;
+      endLoadingIfController(sessionId, controller);
     }
   };
 
   /** Drop the Error: assistant bubble and re-run the same user turn. */
   const retryFailedReply = async () => {
-    const last = messages[messages.length - 1];
-    if (isLoading || !isAssistantError(last)) return;
-    const prior = messages.slice(0, -1);
+    const sessionId = activeSessionIdRef.current;
+    const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+    const last = sessionMessages[sessionMessages.length - 1];
+    if (isSessionLoading(sessionId) || !isAssistantError(last)) return;
+    const prior = sessionMessages.slice(0, -1);
     const lastUser = [...prior].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;
 
+    const imagePrompt = parseImageCommand(lastUser.content);
+    if (imagePrompt) {
+      await generateImage(imagePrompt, {
+        baseMessages: prior,
+        skipDuplicateUser: true,
+        sessionId,
+      });
+      return;
+    }
+
     stickToBottomRef.current = true;
     scrollToBottom(true);
-    setIsLoading(true);
-    setIsWaitingForFirstToken(true);
+    beginLoading(sessionId);
+    setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
 
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
@@ -1236,19 +2321,21 @@ export default function ChatContainer() {
       timestamp: Date.now(),
       incomplete: true,
     };
-    updateActiveSession([...prior, assistantMessage]);
+    updateSession(sessionId, [...prior, assistantMessage]);
 
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllersRef.current.set(sessionId, controller);
     try {
       await streamChatResponse(
+        sessionId,
         toApiMessages(prior),
         assistantMessage.id,
-        abortControllerRef.current.signal,
+        controller.signal,
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        setIsWaitingForFirstToken(false);
-        updateActiveSession([
+        clearWaiting(sessionId);
+        updateSession(sessionId, [
           ...prior,
           {
             id: assistantMessage.id,
@@ -1259,19 +2346,17 @@ export default function ChatContainer() {
           },
         ]);
       } else {
-        markAssistantIncomplete(assistantMessage.id, true, {
+        markAssistantIncomplete(sessionId, assistantMessage.id, true, {
           truncationReason: 'Reply was interrupted',
         });
       }
     } finally {
-      setIsLoading(false);
-      setIsWaitingForFirstToken(false);
-      abortControllerRef.current = null;
+      endLoadingIfController(sessionId, controller);
     }
   };
 
   const editUserMessage = (message: Message) => {
-    if (isLoading) return;
+    if (isActiveLoading) return;
     setEditingMessageId(message.id);
     setEditingMessageContent(message.content);
   };
@@ -1283,20 +2368,20 @@ export default function ChatContainer() {
 
   const saveEditedMessage = async (messageId: string) => {
     const content = editingMessageContent.trim();
-    if (!content || isLoading) return;
+    if (!content || isActiveLoading) return;
     const index = messages.findIndex((message) => message.id === messageId);
     if (index < 0) return;
     const priorMessages = messages.slice(0, index);
     setEditingMessageId(null);
     setEditingMessageContent('');
     
-    if (isLoading) {
+    if (isActiveLoading) {
       stopGenerating();
       setTimeout(() => {
-        handleSubmit(content, priorMessages);
+        handleSubmit(content, priorMessages, false, activeSessionId);
       }, 50);
     } else {
-      await handleSubmit(content, priorMessages);
+      await handleSubmit(content, priorMessages, false, activeSessionId);
     }
   };
 
@@ -1315,25 +2400,59 @@ export default function ChatContainer() {
     setSessionMenuOpenId(null);
   };
 
-  const stopGenerating = (opts?: { pauseQueue?: boolean }) => {
+  const stopGenerating = (opts?: { pauseQueue?: boolean; sessionId?: string }) => {
     const pauseQueue = opts?.pauseQueue ?? true;
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      setIsLoading(false);
-      setIsWaitingForFirstToken(false);
+    const sessionId = opts?.sessionId || activeSessionIdRef.current;
+    const controller = abortControllersRef.current.get(sessionId);
+    if (controller) {
+      controller.abort();
+      endLoading(sessionId);
     }
     // Keep the half-written assistant reply resumable after stop/refresh.
-    const last = messages[messages.length - 1];
+    const sessionMsgs = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+    const last = sessionMsgs[sessionMsgs.length - 1];
     if (last?.role === 'assistant') {
-      markAssistantIncomplete(last.id, true, {
+      markAssistantIncomplete(sessionId, last.id, true, {
         truncationReason: 'Stopped by you',
       });
     }
-    // Stopping mid-reply should freeze remaining queued messages, not flush them.
-    if (pauseQueue) setQueuePaused(true);
+    // Stopping mid-reply should freeze remaining queued messages for this session.
+    if (pauseQueue) {
+      setQueuePausedBySession((prev) => ({ ...prev, [sessionId]: true }));
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (slashMenuItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashHighlight((i) => (i + 1) % slashMenuItems.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashHighlight((i) => (i - 1 + slashMenuItems.length) % slashMenuItems.length);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const pick = slashMenuItems[slashHighlight] || slashMenuItems[0];
+        if (pick) consumeSlashItem(pick);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInput((prev) => prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? '\n' : '')));
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const pick = slashMenuItems[slashHighlight] || slashMenuItems[0];
+        if (pick) consumeSlashItem(pick);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       // Prevent holding down Enter to spawn dozens of identical tasks
@@ -1423,7 +2542,7 @@ export default function ChatContainer() {
                 className="w-full justify-start gap-2 bg-white text-stone-700 hover:bg-stone-50 border border-stone-200 shadow-sm dark:bg-stone-800 dark:text-stone-200 dark:border-stone-700 dark:hover:bg-stone-700"
               >
                 <Plus className="h-4 w-4" />
-                New Chat
+                {t('newChat')}
               </Button>
 
               {/* Skills entry under New Chat (ChatGPT-style tools area) */}
@@ -1441,8 +2560,8 @@ export default function ChatContainer() {
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
                 >
                   <span className="flex items-center gap-2 font-medium">
-                    <Zap className="h-4 w-4 text-orange-500" />
-                    Skills
+                    <ScrollText className="h-4 w-4 text-stone-500" />
+                    {t('skills')}
                   </span>
                   <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', skillsExpanded && isAccountBound ? 'rotate-180' : '')} />
                 </button>
@@ -1456,13 +2575,15 @@ export default function ChatContainer() {
                       className="overflow-hidden pl-2"
                     >
                       <div className="space-y-0.5 pb-1">
-                        {skills.length === 0 ? (
-                          <div className="px-3 py-2 text-[11px] leading-relaxed text-stone-400">
-                            还没有 Skill。在右侧 Context 的 System Prompt 里写好后点
-                            <span className="mx-1 font-medium text-orange-600">Save as Skill</span>
-                            保存。
-                          </div>
-                        ) : (
+                        <button
+                          type="button"
+                          onClick={openNewSkillModal}
+                          className="mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-stone-500 hover:bg-stone-200/50 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-200"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          {t('newSkill')}
+                        </button>
+                        {skills.length === 0 ? null : (
                           skills.map((skill) => (
                             <div
                               key={skill.id}
@@ -1471,20 +2592,29 @@ export default function ChatContainer() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setSystemPrompt(skill.content);
-                                  setEditingSkillTitle(skill.title);
-                                  setIsContextPanelOpen(true);
-                                  createNewSession();
+                                  toggleSkill(skill.id);
                                 }}
-                                className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm text-stone-600 dark:text-stone-300"
-                                title={skill.title}
+                                className={cn(
+                                  'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
+                                  activeSkillIds.includes(skill.id)
+                                    ? 'text-orange-700 dark:text-orange-300'
+                                    : 'text-stone-600 dark:text-stone-300',
+                                )}
+                                title={
+                                  activeSkillIds.includes(skill.id)
+                                    ? `已启用 /${skillSlashName(skill.title)} — 再点取消`
+                                    : `启用 Skill · /${skillSlashName(skill.title)}`
+                                }
                               >
-                                <Zap className="h-3.5 w-3.5 shrink-0 text-orange-500/80" />
+                                <ScrollText className="h-3.5 w-3.5 shrink-0 text-orange-500/80" />
                                 <span className="truncate">{skill.title}</span>
+                                {activeSkillIds.includes(skill.id) && (
+                                  <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                )}
                               </button>
                               <button
                                 type="button"
-                                onClick={(e) => deleteSkill(skill.id, e)}
+                                onClick={(e) => requestDeleteSkill(skill.id, e)}
                                 className="mr-1 rounded p-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/20"
                                 title="Delete skill"
                               >
@@ -1503,12 +2633,16 @@ export default function ChatContainer() {
             <ScrollArea className="flex-1 px-3 py-2">
               <div className="space-y-1">
                 <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                  最近
+                  {t('recent')}
                 </div>
                 {sidebarSessions.map(session => (
                   <div key={session.id} className="relative group">
                     <div
-                      onClick={() => setActiveSessionId(session.id)}
+                      onClick={() => {
+                        setActiveSessionId(session.id);
+                        setQuotedSelection('');
+                        setSessionMenuOpenId(null);
+                      }}
                       className={cn(
                         "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
                         activeSessionId === session.id 
@@ -1516,13 +2650,20 @@ export default function ChatContainer() {
                           : "text-stone-600 hover:bg-stone-200/50 dark:text-stone-400 dark:hover:bg-stone-800/50"
                       )}
                     >
-                      <div className="flex items-center gap-2 overflow-hidden w-full pr-6">
-                        <MessageSquare className="h-4 w-4 shrink-0 opacity-50" />
-                        <span className="truncate">{session.title}</span>
+                      <div className="flex w-full items-center gap-2 overflow-hidden pr-6">
+                        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                        {isSessionLoading(session.id) && (
+                          <Loader2
+                            className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-500"
+                            aria-label={t('generating')}
+                          />
+                        )}
                       </div>
                     </div>
                     
                     <button 
+                      type="button"
+                      data-session-menu-trigger={session.id}
                       onClick={(e) => {
                         e.stopPropagation();
                         setSessionMenuOpenId(sessionMenuOpenId === session.id ? null : session.id);
@@ -1538,6 +2679,7 @@ export default function ChatContainer() {
                     <AnimatePresence>
                       {sessionMenuOpenId === session.id && (
                         <motion.div
+                          data-session-menu={session.id}
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 0.95 }}
@@ -1553,22 +2695,29 @@ export default function ChatContainer() {
                           </div>
 
                           <button
-                            onClick={(e) => exportChat(session.id, e)}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              exportChat(session.id, e);
+                              setSessionMenuOpenId(null);
+                            }}
                             className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 rounded-md dark:text-stone-300 dark:hover:bg-stone-800"
                           >
                             <Download className="h-3.5 w-3.5" />
-                            Export Markdown
+                            {t('exportMarkdown')}
                           </button>
 
                           <button
+                            type="button"
                             onClick={(e) => {
-                              deleteSession(session.id, e);
+                              e.stopPropagation();
                               setSessionMenuOpenId(null);
+                              setSessionPendingDelete({ id: session.id, title: session.title });
                             }}
                             className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md dark:text-red-400 dark:hover:bg-red-900/20"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                            Delete Chat
+                            {t('deleteChat')}
                           </button>
                         </motion.div>
                       )}
@@ -1578,10 +2727,119 @@ export default function ChatContainer() {
               </div>
             </ScrollArea>
               
-              {/* Sidebar Footer: Account & Quota Share */}
-              <div className="p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80">
-                <button 
-                  onClick={() => setShowAuthModal(true)}
+              {/* Sidebar Footer: Account / Language / Theme */}
+              <div className="relative p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80" ref={accountMenuRef}>
+                <AnimatePresence>
+                  {isAccountMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      className="absolute bottom-full left-3 right-3 mb-2 z-50 overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                    >
+                      <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
+                        <div className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
+                          {isAccountBound ? t('accountConnected') : t('connectAccount')}
+                        </div>
+                        <div className="text-[11px] text-stone-400 truncate">
+                          {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setIsLanguageMenuOpen((v) => !v)}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                        >
+                          <Globe className="h-3.5 w-3.5 text-stone-400" />
+                          <span className="flex-1 text-left">{t('language')}</span>
+                          <span className="text-xs text-stone-400">
+                            {locale === 'zh' ? t('languageZh') : t('languageEn')}
+                          </span>
+                          <ChevronDown className={cn('h-3 w-3 text-stone-400 transition-transform', isLanguageMenuOpen && 'rotate-180')} />
+                        </button>
+                        {isLanguageMenuOpen && (
+                          <div className="mb-1 ml-6 mr-1 space-y-0.5 rounded-lg border border-stone-100 p-1 dark:border-stone-800">
+                            {([
+                              { id: 'zh' as const, label: t('languageZh') },
+                              { id: 'en' as const, label: t('languageEn') },
+                            ]).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => {
+                                  setLocale(opt.id);
+                                  setIsLanguageMenuOpen(false);
+                                }}
+                                className={cn(
+                                  'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs',
+                                  locale === opt.id
+                                    ? 'bg-orange-50 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300'
+                                    : 'text-stone-600 hover:bg-stone-50 dark:text-stone-400 dark:hover:bg-stone-800',
+                                )}
+                              >
+                                {opt.label}
+                                {locale === opt.id && <Check className="h-3 w-3" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                      >
+                        {theme === 'dark' ? (
+                          <Sun className="h-3.5 w-3.5 text-stone-400" />
+                        ) : (
+                          <Moon className="h-3.5 w-3.5 text-stone-400" />
+                        )}
+                        <span className="flex-1 text-left">{t('theme')}</span>
+                        <span className="text-xs text-stone-400">
+                          {theme === 'dark' ? t('themeDark') : t('themeLight')}
+                        </span>
+                      </button>
+
+                      <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
+
+                      {isAccountBound ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAccountMenuOpen(false);
+                            void disconnectAccount();
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                        >
+                          <LogOut className="h-3.5 w-3.5" />
+                          {t('signOut')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAccountMenuOpen(false);
+                            setShowAuthModal(true);
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-orange-700 hover:bg-orange-50 dark:text-orange-300 dark:hover:bg-orange-950/30"
+                        >
+                          <Key className="h-3.5 w-3.5" />
+                          {t('connect')}
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAccountMenuOpen((v) => !v);
+                    setIsLanguageMenuOpen(false);
+                  }}
                   className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700/80 transition-colors text-left"
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -1590,14 +2848,14 @@ export default function ChatContainer() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs font-semibold truncate">
-                        {isAccountBound ? '主站账号已连接' : '连接 llm.christmas 账号'}
+                        {isAccountBound ? t('accountConnected') : t('connectAccount')}
                       </div>
                       <div className="text-[10px] text-stone-400 truncate">
-                        {isAccountBound ? '自动使用主站账号额度' : '登录一次，无需复制 API Key'}
+                        {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
                       </div>
                     </div>
                   </div>
-                  <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
+                  <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
                 </button>
               </div>
             </motion.div>
@@ -1617,7 +2875,8 @@ export default function ChatContainer() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <ThemeToggle className="h-8 w-8 text-stone-500 hover:bg-stone-200/50 dark:hover:bg-stone-800/50" />
             <Button 
               variant="ghost" 
               size="sm" 
@@ -1625,17 +2884,8 @@ export default function ChatContainer() {
               className={cn("text-xs gap-1.5", isContextPanelOpen ? "bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100" : "text-stone-500")}
             >
               {isContextPanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-              Context
+              {t('context')}
             </Button>
-            <a 
-              href="https://llm.christmas" 
-              target="_blank" 
-              rel="noreferrer"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-xs font-medium text-stone-600 shadow-sm dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400"
-            >
-              <Wallet className="h-3.5 w-3.5 text-orange-500" />
-              <span>Main Portal</span>
-            </a>
           </div>
         </header>
 
@@ -1650,28 +2900,33 @@ export default function ChatContainer() {
               ref={scrollRef}
               onScroll={handleMessagesScroll}
             >
-          <div className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
+          <div ref={messagesContentRef} className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
                 <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
                   <Sparkles className="h-7 w-7" />
                 </div>
                 <h2 className="mb-2 text-2xl font-semibold text-stone-900 dark:text-stone-100">
-                  Universal AI at llm.christmas
+                  {t('heroTitle')}
                 </h2>
                 <p className="text-stone-500 max-w-md text-sm">
-                  Connected directly to llm.christmas gateway.
+                  {t('heroSubtitle')}
                 </p>
 
                 <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 w-full max-w-2xl mx-auto">
-                  {['Write a TypeScript API endpoint', 'Explain impermanent loss in DeFi', 'Refactor Python code for async', 'Draft a pitch for a Web3 product'].map(hint => (
+                  {[
+                    t('starter1'),
+                    t('starter2'),
+                    t('starter3'),
+                    t('starter4'),
+                  ].map(hint => (
                     <button 
                       key={hint}
                       onClick={() => handleSubmit(hint)}
                       className="rounded-xl border border-stone-200/80 bg-white p-4 text-left text-sm text-stone-700 transition-all hover:border-orange-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-700"
                     >
                       <div className="font-medium">{hint}</div>
-                      <div className="mt-1 text-xs text-stone-400">Click to ask &rarr;</div>
+                      <div className="mt-1 text-xs text-stone-400">{t('clickToAsk')}</div>
                     </button>
                   ))}
                 </div>
@@ -1745,7 +3000,114 @@ export default function ChatContainer() {
                     </div>
                   ) : (
                     <div key={message.id} className="w-full pr-8 sm:pr-16 space-y-3">
-                      {message.reasoning && (
+                      {(() => {
+                        const parts = displayAssistantParts(message);
+                        const visibleContent = parts.content;
+                        const visibleReasoning = parts.reasoning;
+                        const thinkingOnly =
+                          Boolean(message.incomplete && !visibleContent && visibleReasoning);
+                        return (
+                          <>
+                      {message.toolRuns && message.toolRuns.length > 0 && (
+                        <div className="space-y-2">
+                          {message.toolRuns.map((run) => {
+                            const failed =
+                              run.status === 'done' &&
+                              (!run.results || run.results.length === 0);
+                            const searching = run.status === 'start';
+                            const expanded = toolRunOpen[run.id] ?? searching;
+                            const resultCount = run.results?.length || 0;
+                            return (
+                              <div
+                                key={run.id}
+                                className="overflow-hidden rounded-xl border border-stone-200/80 bg-stone-50/80 dark:border-stone-800 dark:bg-stone-900/50"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setToolRunOpen((prev) => ({
+                                      ...prev,
+                                      [run.id]: !(prev[run.id] ?? searching),
+                                    }))
+                                  }
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-stone-500 hover:bg-stone-100/80 dark:text-stone-400 dark:hover:bg-stone-800/50"
+                                >
+                                  <ChevronDown
+                                    className={cn(
+                                      'h-3.5 w-3.5 shrink-0 transition-transform',
+                                      expanded ? 'rotate-0' : '-rotate-90',
+                                    )}
+                                  />
+                                  {searching ? (
+                                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-500" />
+                                  ) : (
+                                    <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                  )}
+                                  <span
+                                    className={cn(
+                                      failed && 'text-amber-700 dark:text-amber-400',
+                                    )}
+                                  >
+                                    {searching
+                                      ? t('searchingWeb')
+                                      : failed
+                                        ? t('searchFailed')
+                                        : t('searchedWeb')}
+                                  </span>
+                                  {run.status === 'done' &&
+                                    run.provider &&
+                                    run.provider !== 'none' && (
+                                      <span className="opacity-60">
+                                        {t('searchedVia').replace(
+                                          '{provider}',
+                                          run.provider,
+                                        )}
+                                      </span>
+                                    )}
+                                  {searching && (
+                                    <span className="ml-auto flex items-center gap-1">
+                                      <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
+                                      <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
+                                      <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
+                                    </span>
+                                  )}
+                                </button>
+                                {expanded && (
+                                  <div className="space-y-1.5 border-t border-stone-200/70 px-3 py-2 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
+                                    {searching && <div>{t('fetchingResults')}</div>}
+                                    {run.error && (
+                                      <div className="text-amber-700 dark:text-amber-400">
+                                        {run.error}
+                                      </div>
+                                    )}
+                                    {run.status === 'done' && resultCount > 0 && (
+                                      <ul className="space-y-1">
+                                        {(run.results || []).slice(0, 8).map((r) => (
+                                          <li key={r.url} className="truncate">
+                                            <a
+                                              href={r.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-stone-600 underline-offset-2 hover:underline dark:text-stone-300"
+                                              title={r.snippet || r.title}
+                                            >
+                                              {r.title || r.url}
+                                            </a>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                    {run.status === 'done' && failed && !run.error && (
+                                      <div>{t('searchNoResults')}</div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {visibleReasoning && (
                         <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 dark:border-stone-800 dark:bg-stone-900/50 overflow-hidden">
                           <button
                             type="button"
@@ -1753,8 +3115,7 @@ export default function ChatContainer() {
                               setReasoningOpen((prev) => ({
                                 ...prev,
                                 [message.id]: !(
-                                  prev[message.id] ??
-                                  Boolean(message.incomplete && !message.content)
+                                  prev[message.id] ?? thinkingOnly
                                 ),
                               }))
                             }
@@ -1763,18 +3124,15 @@ export default function ChatContainer() {
                             <ChevronDown
                               className={cn(
                                 'h-3.5 w-3.5 shrink-0 transition-transform',
-                                (reasoningOpen[message.id] ??
-                                  Boolean(message.incomplete && !message.content))
+                                (reasoningOpen[message.id] ?? thinkingOnly)
                                   ? 'rotate-0'
                                   : '-rotate-90',
                               )}
                             />
                             <span>
-                              {message.incomplete && !message.content
-                                ? 'Thinking…'
-                                : 'Thought process'}
+                              {thinkingOnly ? t('thinking') : t('thoughtProcess')}
                             </span>
-                            {message.incomplete && !message.content && (
+                            {thinkingOnly && (
                               <span className="ml-auto flex items-center gap-1">
                                 <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
                                 <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
@@ -1782,22 +3140,24 @@ export default function ChatContainer() {
                               </span>
                             )}
                           </button>
-                          {(reasoningOpen[message.id] ??
-                            Boolean(message.incomplete && !message.content)) && (
+                          {(reasoningOpen[message.id] ?? thinkingOnly) && (
                             <div className="border-t border-stone-200/70 px-3 py-2.5 text-[13px] leading-6 text-stone-500 whitespace-pre-wrap dark:border-stone-800 dark:text-stone-400 max-h-72 overflow-y-auto">
-                              {message.reasoning}
+                              {visibleReasoning}
                             </div>
                           )}
                         </div>
                       )}
-                      {(message.content || (!message.reasoning && message.incomplete)) && (
+                      {(visibleContent ||
+                        message.images?.length ||
+                        message.toolRuns?.length ||
+                        (!visibleReasoning && message.incomplete)) && (
                         isAssistantError(message) ? (
                           <div className="rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-3 dark:border-red-900/50 dark:bg-red-950/30">
                             <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                              Request failed
+                              {t('requestFailed')}
                             </p>
                             <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-red-600/90 dark:text-red-400/90">
-                              {message.content.replace(/^Error:\s*/, '')}
+                              {visibleContent.replace(/^Error:\s*/, '')}
                             </p>
                             {message.id === lastMessage?.id && canRetryFailed && (
                               <button
@@ -1806,12 +3166,32 @@ export default function ChatContainer() {
                                 className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
                               >
                                 <RefreshCw className="h-3 w-3" />
-                                Retry
+                                {t('retry')}
                               </button>
                             )}
                           </div>
                         ) : (
-                      <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px]">
+                      <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3">
+                        {message.images && message.images.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {message.images.map((img, idx) => (
+                              <a
+                                key={idx}
+                                href={img.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+                              >
+                                <img
+                                  src={img.url}
+                                  alt={img.name || 'generated'}
+                                  className="max-h-[420px] max-w-full object-contain"
+                                />
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                        {visibleContent && !(message.images?.length && visibleContent === 'Generating image…') && (
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm, remarkMath]}
                           rehypePlugins={[rehypeKatex]}
@@ -1881,11 +3261,15 @@ export default function ChatContainer() {
                             pre({ children }: any) { return <>{children}</>; },
                           }}
                         >
-                          {normalizeMathDelimiters(message.content)}
+                          {normalizeMathDelimiters(visibleContent)}
                         </ReactMarkdown>
+                        )}
                       </div>
                         )
                       )}
+                          </>
+                        );
+                      })()}
                     </div>
                   ),
                 )}
@@ -1926,7 +3310,7 @@ export default function ChatContainer() {
           <div className="mx-auto w-full max-w-[960px] px-1 md:px-4 relative">
             {/* Compact message queue */}
             <AnimatePresence>
-              {messageQueue.length > 0 && (
+              {activeQueue.length > 0 && (
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -1941,11 +3325,11 @@ export default function ChatContainer() {
                     >
                       <ListOrdered className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                       <span className="text-xs font-medium text-stone-700 dark:text-stone-300">
-                        {messageQueue.length} queued
+                        {activeQueue.length} {t('queued')}
                       </span>
                       {queuePaused && (
                         <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                          Paused
+                          {t('queuePaused')}
                         </span>
                       )}
                       <ChevronDown
@@ -1963,7 +3347,7 @@ export default function ChatContainer() {
                           className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950/30"
                         >
                           <Play className="h-3 w-3 fill-current" />
-                          Continue
+                          {t('resumeQueue')}
                         </button>
                       )}
                       <button
@@ -1971,7 +3355,7 @@ export default function ChatContainer() {
                         onClick={clearQueue}
                         className="rounded-lg px-2 py-1 text-xs text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
                       >
-                        Clear
+                        {t('clear')}
                       </button>
                     </div>
                   </div>
@@ -1985,7 +3369,7 @@ export default function ChatContainer() {
                         className="max-h-36 overflow-y-auto"
                       >
                         <ul className="divide-y divide-stone-100 dark:divide-stone-800">
-                          {messageQueue.map((task, idx) => (
+                          {activeQueue.map((task, idx) => (
                             <li
                               key={task.id}
                               className="group flex items-center gap-2 px-3 py-1.5 text-sm"
@@ -2085,29 +3469,223 @@ export default function ChatContainer() {
               )}
             </AnimatePresence>
 
-            <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all">
+            <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all relative">
+              {activeSkills.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+                  {activeSkills.map((skill) => (
+                    <span
+                      key={skill.id}
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-orange-200 bg-orange-50 pl-2 pr-1 py-0.5 text-[11px] font-medium text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300"
+                      title={`/${skillSlashName(skill.title)}`}
+                    >
+                      <ScrollText className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{skill.title}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleSkill(skill.id)}
+                        className="rounded-full p-0.5 hover:bg-orange-100 dark:hover:bg-orange-900/50"
+                        title="移除 Skill"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {quotedSelection && (
+                <div className="mx-3 mt-3 flex items-start gap-2 rounded-xl border border-orange-200/80 bg-orange-50/70 px-3 py-2 dark:border-orange-900/50 dark:bg-orange-950/30">
+                  <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600/80 dark:text-orange-400/80">
+                      {t('quoted')}
+                    </div>
+                    <p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-stone-700 dark:text-stone-300">
+                      {quotedSelection}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuotedSelection('')}
+                    className="shrink-0 rounded-md p-1 text-stone-400 hover:bg-orange-100 hover:text-stone-700 dark:hover:bg-orange-900/40 dark:hover:text-stone-200"
+                    title={t('clearQuote')}
+                    aria-label={t('clearQuote')}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Slash-command menu: /image + Skills */}
+              <AnimatePresence>
+                {slashMenuItems.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    className="absolute left-3 right-3 bottom-full mb-2 z-40 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                  >
+                    <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400 border-b border-stone-100 dark:border-stone-800">
+                      Commands
+                    </div>
+                    {slashMenuItems.map((item, idx) => (
+                      <button
+                        key={item.kind === 'skill' ? item.skill.id : item.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          consumeSlashItem(item);
+                        }}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                          idx === slashHighlight
+                            ? 'bg-orange-50 text-orange-900 dark:bg-orange-950/40 dark:text-orange-300'
+                            : 'text-stone-700 hover:bg-stone-50 dark:text-stone-300 dark:hover:bg-stone-800',
+                        )}
+                      >
+                        {item.kind === 'command' ? (
+                          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                        ) : (
+                          <ScrollText className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {item.kind === 'command' ? item.title : item.skill.title}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                          {item.kind === 'command'
+                            ? item.hint
+                            : `/${skillSlashName(item.skill.title)}`}
+                        </span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <Textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={onPasteFiles}
-                placeholder={`Ask ${selectedModel || 'anything'}…  (drop or paste files here)`}
+                placeholder={t('writeMessage', { model: selectedModel || 'AI' })}
                 className="min-h-[60px] max-h-[300px] w-full resize-none border-0 bg-transparent px-4 py-4 text-base focus-visible:ring-0 placeholder:text-stone-400"
               />
               
               <div className="flex items-center justify-between px-3 pb-3 pt-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="relative" ref={skillPickerRef}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSkillPickerOpen((v) => !v);
+                        setIsModelMenuOpen(false);
+                        if (isAccountBound && skills.length === 0) fetchSkills();
+                      }}
+                      title="Add"
+                      className={cn(
+                        'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                        isSkillPickerOpen || activeSkills.length > 0
+                          ? 'bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300'
+                          : 'text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800',
+                      )}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    <AnimatePresence>
+                      {isSkillPickerOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 5 }}
+                          className="absolute left-0 bottom-10 z-30 w-64 max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isAccountBound) {
+                                setIsSkillPickerOpen(false);
+                                setShowAuthModal(true);
+                                return;
+                              }
+                              setIsSkillPickerOpen(false);
+                              setInput('/image ');
+                              textareaRef.current?.focus();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1">{t('generateImage')}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-stone-400">/image</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isAccountBound) {
+                                setIsSkillPickerOpen(false);
+                                setShowAuthModal(true);
+                                return;
+                              }
+                              setIsSkillPickerOpen(false);
+                              openNewSkillModal();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                          >
+                            <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1">{t('newSkill')}</span>
+                          </button>
+
+                          {isAccountBound && skills.length > 0 && (
+                            <>
+                              <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
+                              {skills.map((skill) => {
+                                const on = activeSkillIds.includes(skill.id);
+                                return (
+                                  <button
+                                    key={skill.id}
+                                    type="button"
+                                    onClick={() => toggleSkill(skill.id)}
+                                    className={cn(
+                                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                      on
+                                        ? 'bg-orange-50 text-orange-900 dark:bg-orange-950/40 dark:text-orange-300'
+                                        : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
+                                    )}
+                                  >
+                                    <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    <span className="min-w-0 flex-1 truncate">{skill.title}</span>
+                                    {on ? (
+                                      <Check className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                    ) : (
+                                      <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                        /{skillSlashName(skill.title)}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
                   <div className="relative" ref={modelMenuRef}>
                     <button 
-                      onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                      onClick={() => {
+                        setIsModelMenuOpen((open) => {
+                          if (open) setModelSearchQuery('');
+                          return !open;
+                        });
+                      }}
                       className="flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-stone-100 text-xs font-medium text-stone-600 transition-colors dark:text-stone-400 dark:hover:bg-stone-800"
                     >
-                      <Sparkles className="h-3.5 w-3.5 text-orange-500 shrink-0" />
                       <span className="truncate max-w-[140px] sm:max-w-[200px] text-left">
                         {modelsLoading 
-                          ? 'Loading models…' 
-                          : (availableModels.find(m => m.id === selectedModel)?.id || selectedModel || 'Select Model')}
+                          ? t('loadingModels')
+                          : (availableModels.find(m => m.id === selectedModel)?.id || selectedModel || t('selectModel'))}
                       </span>
                       <ChevronDown className="h-3 w-3 text-stone-400" />
                     </button>
@@ -2118,27 +3696,63 @@ export default function ChatContainer() {
                           initial={{ opacity: 0, y: 5 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: 5 }}
-                          className="absolute left-0 bottom-10 mb-2 z-30 w-[280px] sm:w-80 max-h-[400px] overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                          className="absolute left-0 bottom-10 mb-2 z-30 flex w-[280px] sm:w-80 max-h-[420px] flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xl dark:border-stone-700 dark:bg-stone-900"
                         >
-                          <div className="px-2 py-1 flex items-center justify-between sticky top-0 bg-inherit pb-2 border-b border-stone-100 dark:border-stone-800/50 mb-1">
-                            <span className="text-[10px] font-semibold text-stone-400 uppercase tracking-wider">
-                              {isAccountBound ? 'All Models' : 'Free Models'}
-                            </span>
-                            <span className="text-[10px] text-stone-400">
-                              {availableModels.length} models
-                            </span>
+                          <div className="shrink-0 space-y-2 border-b border-stone-100 p-2 dark:border-stone-800">
+                            <div className="relative">
+                              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
+                              <input
+                                ref={modelSearchRef}
+                                type="text"
+                                value={modelSearchQuery}
+                                onChange={(e) => setModelSearchQuery(e.target.value)}
+                                onKeyDown={(e) => e.stopPropagation()}
+                                placeholder={t('searchModels')}
+                                className="w-full rounded-lg border border-stone-200 bg-stone-50 py-1.5 pl-8 pr-8 text-xs text-stone-800 outline-none placeholder:text-stone-400 focus:border-orange-300 focus:ring-2 focus:ring-orange-200/60 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:placeholder:text-stone-500 dark:focus:border-orange-700 dark:focus:ring-orange-900/40"
+                              />
+                              {modelSearchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModelSearchQuery('');
+                                    modelSearchRef.current?.focus();
+                                  }}
+                                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+                                  aria-label="Clear search"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between px-1">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                                {isAccountBound ? t('allModels') : t('freeModels')}
+                              </span>
+                              <span className="text-[10px] text-stone-400">
+                                {modelSearchQuery.trim()
+                                  ? `${filteredModels.length} / ${availableModels.length}`
+                                  : `${availableModels.length} models`}
+                              </span>
+                            </div>
                           </div>
+
+                          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
                           {availableModels.length === 0 && !modelsLoading && (
-                            <div className="p-4 text-xs text-stone-400 text-center">
+                            <div className="p-4 text-center text-xs text-stone-400">
                               {isAccountBound ? 'No models found. Check connection.' : 'No free models available.'}
                             </div>
                           )}
                           {modelsLoading && availableModels.length === 0 && (
-                            <div className="p-4 text-xs text-stone-400 text-center">
+                            <div className="p-4 text-center text-xs text-stone-400">
                               Loading...
                             </div>
                           )}
-                          {availableModels.map(m => {
+                          {availableModels.length > 0 && filteredModels.length === 0 && (
+                            <div className="p-4 text-center text-xs text-stone-400">
+                              No models match “{modelSearchQuery.trim()}”
+                            </div>
+                          )}
+                          {filteredModels.map(m => {
                             const blocked = hasImages && !m.vision;
                             return (
                             <button
@@ -2148,6 +3762,7 @@ export default function ChatContainer() {
                                 if (blocked) return;
                                 setSelectedModel(m.id);
                                 setIsModelMenuOpen(false);
+                                setModelSearchQuery('');
                               }}
                               className={cn(
                                 "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
@@ -2191,11 +3806,12 @@ export default function ChatContainer() {
                             </button>
                             );
                           })}
+                          </div>
                           {!isAccountBound && (
-                            <div className="mt-1 pt-2 border-t border-stone-100 dark:border-stone-800 p-2">
+                            <div className="shrink-0 border-t border-stone-100 p-2 dark:border-stone-800">
                               <button 
-                                onClick={() => { setIsModelMenuOpen(false); setShowAuthModal(true); }}
-                                className="w-full text-xs text-center text-orange-600 hover:underline font-medium"
+                                onClick={() => { setIsModelMenuOpen(false); setModelSearchQuery(''); setShowAuthModal(true); }}
+                                className="w-full text-center text-xs font-medium text-orange-600 hover:underline"
                               >
                                 🔓 Sign in to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
                               </button>
@@ -2208,11 +3824,11 @@ export default function ChatContainer() {
                 </div>
                 
                 <div className="flex items-center gap-2">
-                  {isLoading ? (
+                  {isActiveLoading ? (
                     <Button 
                       onClick={() => stopGenerating()}
                       size="icon" 
-                      title="Stop"
+                      title={t('stop')}
                       className="h-8 w-8 rounded-full bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900"
                     >
                       <Square className="h-3.5 w-3.5 fill-current" />
@@ -2220,7 +3836,7 @@ export default function ChatContainer() {
                   ) : (
                     <Button 
                       onClick={() => enqueueOrSubmit()}
-                      disabled={(!input.trim() && attachments.length === 0) || isCompacting}
+                      disabled={(!input.trim() && !quotedSelection.trim() && attachments.length === 0) || isCompacting}
                       size="icon" 
                       title="Send"
                       className={cn(
@@ -2258,186 +3874,277 @@ export default function ChatContainer() {
                 </div>
 
                 <ScrollArea className="flex-1 px-4 py-4">
-                  <div className="space-y-6">
-                    
-                    <div className="space-y-3">
-                      <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
-                        <FileText className="h-3.5 w-3.5" /> 
-                        Attachments ({attachments.length})
-                      </label>
-                      {attachments.length === 0 ? (
-                        <div className="text-xs text-stone-400 py-2">
-                          Drop files onto the chat, or paste images with Ctrl/Cmd+V. Supports images, PDF, Word, and text.
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {attachments.map(a => (
-                            <div key={a.id} className="group flex items-center justify-between p-2 rounded-lg border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/50 text-xs">
-                              <div className="min-w-0 flex-1 flex items-center gap-2">
-                                {a.previewUrl ? (
-                                  <div className="h-8 w-8 shrink-0 rounded bg-stone-200 overflow-hidden">
-                                    <img src={a.previewUrl} alt="preview" className="h-full w-full object-cover" />
-                                  </div>
-                                ) : (
-                                  <FileText className="h-4 w-4 shrink-0 text-stone-400" />
-                                )}
-                                <div className="truncate text-stone-600 dark:text-stone-300">{a.name}</div>
-                              </div>
-                              <button onClick={() => removeAttachment(a.id)} className="p-1 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity">
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
-                          <Quote className="h-3.5 w-3.5" /> 
-                          Reference Material
-                        </label>
-                        {referenceText.trim() && (
-                          <button
-                            type="button"
-                            onClick={() => setReferenceText('')}
-                            className="text-[10px] text-stone-400 hover:text-red-500"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-stone-400">
-                        Background the model should treat as fact. Sent with every message in this chat.
-                      </p>
-                      <Textarea
-                        value={referenceText}
-                        onChange={e => setReferenceText(e.target.value)}
-                        placeholder="Paste context, docs, or background info here..."
-                        className="min-h-24 text-xs font-mono bg-stone-50 dark:bg-stone-900/50 border-stone-200 dark:border-stone-800"
-                      />
-                      {referenceText.trim() && (
-                        <div className="text-[10px] text-stone-400 text-right font-mono">
-                          ~{contextBreakdown.reference.toLocaleString()} tokens
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
-                          <Settings2 className="h-3.5 w-3.5" /> 
-                          System Prompt
-                        </label>
-                        <div className="flex items-center gap-1">
-                          {isAccountBound && systemPrompt.trim() && (
-                            <button
-                              type="button"
-                              onClick={saveCurrentAsSkill}
-                              disabled={isSavingSkill}
-                              className="text-[10px] font-medium text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/30 px-2 py-1 rounded transition-colors disabled:opacity-50"
-                            >
-                              {isSavingSkill ? 'Saving…' : 'Save as Skill'}
-                            </button>
+                  <div className="space-y-2">
+                    {/* Attachments — collapsible */}
+                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setAttachmentsExpanded((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                          <FileText className="h-3.5 w-3.5" />
+                          Attachments
+                          <span className="font-mono font-normal normal-case tracking-normal text-stone-400">
+                            ({attachments.length})
+                          </span>
+                        </span>
+                        <ChevronDown
+                          className={cn(
+                            'h-3.5 w-3.5 text-stone-400 transition-transform',
+                            attachmentsExpanded && 'rotate-180',
                           )}
-                          {systemPrompt.trim() && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSystemPrompt('');
-                                setEditingSkillTitle('');
+                        />
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {attachmentsExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="max-h-48 space-y-2 overflow-y-auto border-t border-stone-200/70 px-3 py-2 dark:border-stone-800">
+                              {attachments.length === 0 ? (
+                                <div className="py-2 text-xs text-stone-400">No files</div>
+                              ) : (
+                                attachments.map((a) => (
+                                  <div
+                                    key={a.id}
+                                    className="group flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-2 text-xs dark:border-stone-800 dark:bg-stone-900/50"
+                                  >
+                                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                                      {a.previewUrl ? (
+                                        <div className="h-8 w-8 shrink-0 overflow-hidden rounded bg-stone-200">
+                                          <img
+                                            src={a.previewUrl}
+                                            alt="preview"
+                                            className="h-full w-full object-cover"
+                                          />
+                                        </div>
+                                      ) : (
+                                        <FileText className="h-4 w-4 shrink-0 text-stone-400" />
+                                      )}
+                                      <div className="truncate text-stone-600 dark:text-stone-300">
+                                        {a.name}
+                                      </div>
+                                    </div>
+                                    <button
+                                      onClick={() => removeAttachment(a.id)}
+                                      className="p-1 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Reference Material — user notes + web search sources */}
+                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setReferenceExpanded((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                          <Quote className="h-3.5 w-3.5" />
+                          {t('referenceMaterial')}
+                          {webSources.length > 0 && (
+                            <span className="rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                              {webSources.length}
+                            </span>
+                          )}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {(referenceText.trim() || webSources.length > 0) && (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setReferenceText('');
+                                setSessions((prev) =>
+                                  prev.map((s) =>
+                                    s.id === activeSessionId
+                                      ? { ...s, webSources: undefined }
+                                      : s,
+                                  ),
+                                );
                               }}
-                              className="text-[10px] text-stone-400 hover:text-red-500 px-1.5 py-1"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.stopPropagation();
+                                  setReferenceText('');
+                                  setSessions((prev) =>
+                                    prev.map((s) =>
+                                      s.id === activeSessionId
+                                        ? { ...s, webSources: undefined }
+                                        : s,
+                                    ),
+                                  );
+                                }
+                              }}
+                              className="rounded px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-400 hover:text-red-500"
+                            >
+                              {t('clear')}
+                            </span>
+                          )}
+                          <ChevronDown
+                            className={cn(
+                              'h-3.5 w-3.5 text-stone-400 transition-transform',
+                              referenceExpanded && 'rotate-180',
+                            )}
+                          />
+                        </div>
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {referenceExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="max-h-64 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+                              {webSources.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                                      <Globe className="h-3 w-3" />
+                                      {t('webSearchSources')}
+                                      {webSources[0]?.provider &&
+                                        webSources[0].provider !== 'none' && (
+                                          <span className="font-medium normal-case tracking-normal opacity-70">
+                                            · {webSources[0].provider}
+                                          </span>
+                                        )}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setSessions((prev) =>
+                                          prev.map((s) =>
+                                            s.id === activeSessionId
+                                              ? { ...s, webSources: undefined }
+                                              : s,
+                                          ),
+                                        )
+                                      }
+                                      className="text-[10px] text-stone-400 hover:text-red-500"
+                                    >
+                                      {t('clearWebSources')}
+                                    </button>
+                                  </div>
+                                  <ul className="space-y-1">
+                                    {webSources.map((src) => (
+                                      <li key={src.url}>
+                                        <a
+                                          href={src.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="block truncate rounded-md px-1.5 py-1 text-xs text-stone-600 hover:bg-stone-100 hover:underline dark:text-stone-300 dark:hover:bg-stone-800/80"
+                                          title={src.snippet || src.title}
+                                        >
+                                          {src.title || src.url}
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              <Textarea
+                                value={referenceText}
+                                onChange={(e) => setReferenceText(e.target.value)}
+                                placeholder={t('referencePlaceholder')}
+                                className="min-h-24 border-stone-200 bg-stone-50 text-xs font-mono dark:border-stone-800 dark:bg-stone-900/50"
+                              />
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* System Prompt — collapsible */}
+                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setSystemPromptExpanded((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                          <Settings2 className="h-3.5 w-3.5" />
+                          System Prompt
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {systemPrompt.trim() && (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSystemPrompt('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.stopPropagation();
+                                  setSystemPrompt('');
+                                }
+                              }}
+                              className="rounded px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-400 hover:text-red-500"
                             >
                               Reset
-                            </button>
+                            </span>
                           )}
-                        </div>
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-stone-400">
-                        Standing instructions for tone, language, and role. Leave empty to use the default assistant.
-                        {isAccountBound ? ' You can save prompts as reusable Skills.' : ' Connect your account to save Skills.'}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {SYSTEM_PRESETS.map((preset) => (
-                          <button
-                            key={preset.label}
-                            type="button"
-                            onClick={() => setSystemPrompt(preset.value)}
+                          <ChevronDown
                             className={cn(
-                              'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
-                              systemPrompt === preset.value
-                                ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
-                                : 'border-stone-200 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-stone-800',
+                              'h-3.5 w-3.5 text-stone-400 transition-transform',
+                              systemPromptExpanded && 'rotate-180',
                             )}
-                          >
-                            {preset.label}
-                          </button>
-                        ))}
-                      </div>
-                      <Textarea
-                        value={systemPrompt}
-                        onChange={e => setSystemPrompt(e.target.value)}
-                        placeholder="You are a helpful AI..."
-                        className="min-h-24 text-xs bg-stone-50 dark:bg-stone-900/50 border-stone-200 dark:border-stone-800"
-                      />
-
-                      {isAccountBound && (
-                        <div className="pt-1 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <label className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 flex items-center gap-1">
-                              <Zap className="h-3 w-3 text-orange-500" />
-                              My Skills
-                            </label>
-                            <button
-                              type="button"
-                              onClick={fetchSkills}
-                              className="text-[10px] text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
-                            >
-                              Refresh
-                            </button>
-                          </div>
-                          {skills.length === 0 ? (
-                            <div className="rounded-lg border border-dashed border-stone-200 dark:border-stone-700 px-3 py-3 text-[11px] text-stone-400">
-                              No saved skills yet. Write a system prompt above, then click
-                              <span className="mx-1 font-medium text-orange-600">Save as Skill</span>.
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {skills.map((skill) => (
-                                <div
-                                  key={skill.id}
-                                  className="group flex max-w-full items-center overflow-hidden rounded-md border border-stone-200 bg-stone-100 text-xs dark:border-stone-700 dark:bg-stone-800"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSystemPrompt(skill.content);
-                                      setEditingSkillTitle(skill.title);
-                                    }}
-                                    className="flex min-w-0 items-center gap-1 px-2 py-1 text-left hover:bg-stone-200 dark:hover:bg-stone-700"
-                                    title={skill.title}
-                                  >
-                                    <Zap className="h-3 w-3 shrink-0 text-orange-500" />
-                                    <span className="truncate">{skill.title}</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => deleteSkill(skill.id, e)}
-                                    className="px-1.5 py-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/30"
-                                    title="Delete skill"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          />
                         </div>
-                      )}
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {systemPromptExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="space-y-2 border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+                              <div className="flex flex-wrap gap-1.5">
+                                {SYSTEM_PRESETS.map((preset) => (
+                                  <button
+                                    key={preset.label}
+                                    type="button"
+                                    onClick={() => setSystemPrompt(preset.value)}
+                                    className={cn(
+                                      'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                                      systemPrompt === preset.value
+                                        ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
+                                        : 'border-stone-200 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-400 dark:hover:bg-stone-800',
+                                    )}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
+                              <Textarea
+                                value={systemPrompt}
+                                onChange={(e) => setSystemPrompt(e.target.value)}
+                                placeholder="You are a helpful AI..."
+                                className="min-h-24 border-stone-200 bg-stone-50 text-xs dark:border-stone-800 dark:bg-stone-900/50"
+                              />
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
-
                   </div>
                 </ScrollArea>
 
@@ -2526,6 +4233,240 @@ export default function ChatContainer() {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* Floating quote action for message text selection.
+          Outer wrapper owns fixed positioning + translate so nothing can
+          clobber `translate(-50%, -100%)` and drop the chip onto the text.
+          Visibility/position are written via the ref (no setState). */}
+      <div
+        ref={quoteToolbarWrapRef}
+        style={{
+          position: 'fixed',
+          display: 'none',
+          left: 0,
+          top: 0,
+          transform: 'translate(-50%, -100%)',
+          zIndex: 60,
+          pointerEvents: 'none',
+        }}
+      >
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            quoteSelectedText(quoteToolbarTextRef.current);
+          }}
+          className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 shadow-lg dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+        >
+          <Quote className="h-3.5 w-3.5 text-orange-500" />
+          {t('quote')}
+        </button>
+      </div>
+
+      {/* --- Delete Chat Modal --- */}
+      <AnimatePresence>
+        {sessionPendingDelete && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={() => setSessionPendingDelete(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-base font-semibold text-stone-900 dark:text-stone-100">
+                  {t('deleteConversation')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSessionPendingDelete(null)}
+                  className="text-stone-400 hover:text-stone-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                {t('deleteConversationConfirm', { title: sessionPendingDelete.title })}
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setSessionPendingDelete(null)}
+                  className="rounded-xl"
+                >
+                  {t('cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => deleteSession(sessionPendingDelete.id)}
+                  className="rounded-xl bg-red-500 text-white hover:bg-red-600"
+                >
+                  {t('delete')}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* --- Delete Skill Modal --- */}
+      <AnimatePresence>
+        {skillPendingDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-base font-semibold text-stone-900 dark:text-stone-100">
+                  {t('deleteSkill')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !isDeletingSkill && setSkillPendingDelete(null)}
+                  className="text-stone-400 hover:text-stone-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                {t('deleteSkillConfirm', { title: skillPendingDelete.title })}
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={isDeletingSkill}
+                  onClick={() => setSkillPendingDelete(null)}
+                  className="rounded-xl"
+                >
+                  取消
+                </Button>
+                <Button
+                  type="button"
+                  disabled={isDeletingSkill}
+                  onClick={confirmDeleteSkill}
+                  className="rounded-xl bg-red-500 text-white hover:bg-red-600"
+                >
+                  {isDeletingSkill ? '删除中…' : '删除'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* --- New Skill Modal --- */}
+      <AnimatePresence>
+        {showSkillModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-lg rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-base font-semibold">
+                  <ScrollText className="h-5 w-5 text-orange-500" />
+                  {t('newSkill')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSkillModal(false)}
+                  className="text-stone-400 hover:text-stone-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+                    一句话描述（可选，给 AI 生成用）
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      value={skillDraftBrief}
+                      onChange={(e) => setSkillDraftBrief(e.target.value)}
+                      placeholder="例如：严谨的中文代码审查助手，只指出问题并给改法"
+                      className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-stone-700 dark:bg-stone-900/60"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={generateSkillWithAI}
+                      disabled={isGeneratingSkill}
+                      className="shrink-0 rounded-xl"
+                    >
+                      {isGeneratingSkill ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 text-orange-500" />
+                      )}
+                      <span className="ml-1.5">{isGeneratingSkill ? '生成中' : 'AI 生成'}</span>
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+                    名称
+                  </label>
+                  <input
+                    value={skillDraftTitle}
+                    onChange={(e) => setSkillDraftTitle(e.target.value)}
+                    placeholder="Skill 名称"
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-stone-700 dark:bg-stone-900/60"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+                    系统提示词
+                  </label>
+                  <Textarea
+                    value={skillDraftContent}
+                    onChange={(e) => setSkillDraftContent(e.target.value)}
+                    placeholder="模型每轮都会遵守的角色、语气、约束…"
+                    className="min-h-36 text-sm bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-700"
+                  />
+                </div>
+
+                {skillModalError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{skillModalError}</p>
+                )}
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setShowSkillModal(false)}
+                    className="rounded-xl"
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => createSkill(skillDraftTitle, skillDraftContent)}
+                    disabled={isSavingSkill || !skillDraftTitle.trim() || !skillDraftContent.trim()}
+                    className="rounded-xl bg-orange-500 text-white hover:bg-orange-600"
+                  >
+                    {isSavingSkill ? '保存中…' : '保存到账号'}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* --- Key / Auth Modal --- */}
       <AnimatePresence>

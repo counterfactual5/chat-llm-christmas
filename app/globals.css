@@ -179,4 +179,115 @@
   .katex svg path {
     stroke-width: 0.04em !important;
   }
+
+  /* Syntax highlighting — light (atom-one inspired) */
+  .hljs {
+    background: transparent;
+    color: #383a42;
+  }
+  .hljs .hljs-comment,
+  .hljs .hljs-quote {
+    color: #a0a1a7;
+    font-style: italic;
+  }
+  .hljs .hljs-keyword,
+  .hljs .hljs-selector-tag,
+  .hljs .hljs-literal {
+    color: #a626a4;
+  }
+  .hljs .hljs-string,
+  .hljs .hljs-doctag,
+  .hljs .hljs-regexp {
+    color: #50a14f;
+  }
+  .hljs .hljs-number,
+  .hljs .hljs-symbol,
+  .hljs .hljs-bullet {
+    color: #986801;
+  }
+  .hljs .hljs-title,
+  .hljs .hljs-section,
+  .hljs .hljs-attribute,
+  .hljs .hljs-built_in,
+  .hljs .hljs-type {
+    color: #c18401;
+  }
+  .hljs .hljs-attr,
+  .hljs .hljs-variable,
+  .hljs .hljs-template-variable,
+  .hljs .hljs-name,
+  .hljs .hljs-selector-id,
+  .hljs .hljs-selector-class,
+  .hljs .hljs-selector-attr {
+    color: #e45649;
+  }
+  .hljs .hljs-meta,
+  .hljs .hljs-meta .hljs-keyword {
+    color: #4078f2;
+  }
+  .hljs .hljs-punctuation,
+  .hljs .hljs-subst {
+    color: #383a42;
+  }
+  .hljs .hljs-deletion {
+    color: #e45649;
+  }
+  .hljs .hljs-addition {
+    color: #50a14f;
+  }
+
+  /* Syntax highlighting — dark */
+  .dark .hljs {
+    color: #abb2bf;
+  }
+  .dark .hljs .hljs-comment,
+  .dark .hljs .hljs-quote {
+    color: #5c6370;
+    font-style: italic;
+  }
+  .dark .hljs .hljs-keyword,
+  .dark .hljs .hljs-selector-tag,
+  .dark .hljs .hljs-literal {
+    color: #c678dd;
+  }
+  .dark .hljs .hljs-string,
+  .dark .hljs .hljs-doctag,
+  .dark .hljs .hljs-regexp {
+    color: #98c379;
+  }
+  .dark .hljs .hljs-number,
+  .dark .hljs .hljs-symbol,
+  .dark .hljs .hljs-bullet {
+    color: #d19a66;
+  }
+  .dark .hljs .hljs-title,
+  .dark .hljs .hljs-section,
+  .dark .hljs .hljs-attribute,
+  .dark .hljs .hljs-built_in,
+  .dark .hljs .hljs-type {
+    color: #e5c07b;
+  }
+  .dark .hljs .hljs-attr,
+  .dark .hljs .hljs-variable,
+  .dark .hljs .hljs-template-variable,
+  .dark .hljs .hljs-name,
+  .dark .hljs .hljs-selector-id,
+  .dark .hljs .hljs-selector-class,
+  .dark .hljs .hljs-selector-attr {
+    color: #e06c75;
+  }
+  .dark .hljs .hljs-meta,
+  .dark .hljs .hljs-meta .hljs-keyword {
+    color: #61afef;
+  }
+  .dark .hljs .hljs-punctuation,
+  .dark .hljs .hljs-subst {
+    color: #abb2bf;
+  }
+  .dark .hljs .hljs-deletion {
+    color: #e06c75;
+  }
+  .dark .hljs .hljs-addition {
+    color: #98c379;
+  }
 }

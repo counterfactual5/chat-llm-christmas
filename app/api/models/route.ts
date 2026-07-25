@@ -1,25 +1,20 @@
 import { NextRequest } from 'next/server';
+import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
+import { getModelSpec, isImageGenerationModel } from '@/lib/model-specs';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
 
-// 常见免/付费分组标签
-const FREE_GROUP_KEYWORDS = ['free', 'trial', 'demo'];
-const PAID_GROUP_KEYWORDS = ['pro', 'paid', 'plus', 'premium', 'vip'];
-
-function classifyModel(model: any) {
-  // 新API/one-api 类型系统里，model.id 是 'gpt-4o'，model.group 是分组
-  // 兜底：没有 group 时，id 中包含 'free' 也算免费
-  const id = String(model?.id || '').toLowerCase();
-  const group = String(model?.group || '').toLowerCase();
-  const tags = (model?.tags || []).map((t: string) => String(t).toLowerCase());
-
-  const haystack = [id, group, ...tags].join(' ');
-
-  if (FREE_GROUP_KEYWORDS.some(k => haystack.includes(k))) {
-    return 'free';
+/**
+ * A model is free when the main site prices it at zero. Names are only used as
+ * a fallback if the pricing table is unreachable.
+ */
+function classifyModel(model: any, freeModels: Set<string>) {
+  const id = String(model?.id || '');
+  if (freeModels.size > 0) {
+    return freeModels.has(id.toLowerCase()) ? 'free' : 'paid';
   }
-  return 'paid';
+  return looksFreeByName(id) ? 'free' : 'paid';
 }
 
 function jsonError(message: string, status: number = 500) {
@@ -59,18 +54,28 @@ export async function GET(req: NextRequest) {
     const data = await res.json();
     const list = Array.isArray(data?.data) ? data.data : [];
 
-    // 转换为前端友好结构，并做免费/付费分类
-    const all = list.map((m: any) => ({
-      id: m.id,
-      owned_by: m.owned_by || 'unknown',
-      group: m.group || 'default',
-      tags: m.tags || [],
-      tier: classifyModel(m),
-    }));
+    const freeModels = await fetchFreeModelNames();
+
+    // 转换为前端友好结构，并按主站定价 + 能力表做分类
+    const all = list.map((m: any) => {
+      const spec = getModelSpec(String(m.id || ''));
+      return {
+        id: m.id,
+        owned_by: m.owned_by || 'unknown',
+        group: m.group || 'default',
+        tags: m.tags || [],
+        tier: classifyModel(m, freeModels),
+        context_window: spec.context,
+        max_output: spec.maxOutput,
+        vision: spec.vision,
+      };
+    });
 
     // 绑定个人 Key 后返回该 Key 可访问的全量模型；游客仅显示免费模型。
+    // Image-only models (gpt-image-*, dall-e, …) stay out of chat — use /image.
     const showAll = Boolean(boundUserKey);
-    const visible = showAll ? all : all.filter((m: any) => m.tier === 'free');
+    const chatModels = all.filter((m: any) => !isImageGenerationModel(m.id));
+    const visible = showAll ? chatModels : chatModels.filter((m: any) => m.tier === 'free');
 
     return new Response(
       JSON.stringify({

@@ -88,6 +88,7 @@ export default function ChatContainer() {
   // Settings State
   const [isListening, setIsListening] = useState(false);
   const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
+  const [messageQueue, setMessageQueue] = useState<Array<{ content: string; baseMessages?: Message[] }>>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -316,6 +317,42 @@ export default function ChatContainer() {
   };
 
   // --- Chat Logic ---
+  // Process queue when idle
+  useEffect(() => {
+    if (!isLoading && messageQueue.length > 0) {
+      const nextTask = messageQueue[0];
+      setMessageQueue((prev) => prev.slice(1));
+      handleSubmit(nextTask.content, nextTask.baseMessages);
+    }
+  }, [isLoading, messageQueue]);
+
+  const enqueueOrSubmit = (overrideInput?: string, baseMessagesOverride?: Message[]) => {
+    const textToSend = overrideInput || input;
+    if (!textToSend.trim()) return;
+
+    if (isLoading) {
+      setMessageQueue((prev) => [...prev, { content: textToSend.trim(), baseMessages: baseMessagesOverride }]);
+      setInput('');
+      return;
+    }
+
+    handleSubmit(textToSend, baseMessagesOverride);
+  };
+
+  const cancelQueuedMessage = (index: number) => {
+    setMessageQueue((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const jumpQueueAndSubmit = (index: number) => {
+    const task = messageQueue[index];
+    cancelQueuedMessage(index);
+    if (isLoading) stopGenerating();
+    // Use a small timeout to allow stopGenerating state updates to propagate
+    setTimeout(() => {
+      handleSubmit(task.content, task.baseMessages);
+    }, 50);
+  };
+
   const handleSubmit = async (overrideInput?: string, baseMessagesOverride?: Message[]) => {
     const textToSend = overrideInput || input;
     if (!textToSend.trim() || isLoading) return;
@@ -466,7 +503,15 @@ export default function ChatContainer() {
     const priorMessages = messages.slice(0, index);
     setEditingMessageId(null);
     setEditingMessageContent('');
-    await handleSubmit(content, priorMessages);
+    
+    if (isLoading) {
+      stopGenerating();
+      setTimeout(() => {
+        handleSubmit(content, priorMessages);
+      }, 50);
+    } else {
+      await handleSubmit(content, priorMessages);
+    }
   };
 
   const exportChat = (id: string, e: React.MouseEvent) => {
@@ -495,7 +540,7 @@ export default function ChatContainer() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit();
+      enqueueOrSubmit();
     }
   };
 
@@ -708,11 +753,17 @@ export default function ChatContainer() {
                     <div key={message.id} className="group flex w-full justify-end">
                       <div className="max-w-[82%] sm:max-w-[72%]">
                         {editingMessageId === message.id ? (
-                          <div className="rounded-2xl border border-orange-300 bg-white p-3 shadow-sm dark:border-orange-800 dark:bg-stone-900">
-                            <textarea
+                          <div className="rounded-2xl border border-orange-300 bg-white p-3 shadow-sm dark:border-orange-800 dark:bg-stone-900 w-full">
+                            <Textarea
                               value={editingMessageContent}
                               onChange={(event) => setEditingMessageContent(event.target.value)}
-                              className="min-h-24 w-full resize-y bg-transparent text-[15px] leading-7 outline-none"
+                              className="min-h-[40px] max-h-[400px] w-full resize-none border-0 bg-transparent p-0 text-[15px] leading-7 focus-visible:ring-0"
+                              style={{ height: 'auto' }}
+                              onInput={(e) => {
+                                const target = e.target as HTMLTextAreaElement;
+                                target.style.height = 'auto';
+                                target.style.height = Math.min(target.scrollHeight, 400) + 'px';
+                              }}
                               autoFocus
                             />
                             <div className="mt-2 flex justify-end gap-2">
@@ -869,9 +920,8 @@ export default function ChatContainer() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Ask ${selectedModel}...`}
+                placeholder={`Ask ${selectedModel || 'anything'}...`}
                 className="min-h-[60px] max-h-[300px] w-full resize-none border-0 bg-transparent px-4 py-4 text-base focus-visible:ring-0 placeholder:text-stone-400"
-                disabled={isLoading}
               />
               
               <div className="flex items-center justify-between px-3 pb-3 pt-1">
@@ -968,7 +1018,7 @@ export default function ChatContainer() {
                     </Button>
                   ) : (
                     <Button 
-                      onClick={() => handleSubmit()}
+                      onClick={() => enqueueOrSubmit()}
                       disabled={!input.trim()}
                       size="icon" 
                       className={cn(
@@ -984,6 +1034,42 @@ export default function ChatContainer() {
                 </div>
               </div>
             </div>
+            
+            {/* Message Queue Indicator */}
+            <AnimatePresence>
+              {messageQueue.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="mt-3 flex flex-col gap-2"
+                >
+                  {messageQueue.map((task, idx) => (
+                    <div key={idx} className="flex items-center justify-between rounded-xl bg-stone-100/80 px-4 py-2 text-sm dark:bg-stone-800/80 border border-stone-200/50 dark:border-stone-700/50 shadow-sm backdrop-blur-sm">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-stone-400 shrink-0" />
+                        <span className="truncate text-stone-600 dark:text-stone-300">Queued: {task.content}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 ml-4">
+                        <button
+                          onClick={() => jumpQueueAndSubmit(idx)}
+                          className="px-2.5 py-1 text-xs font-medium text-orange-600 hover:bg-orange-100 rounded-md dark:text-orange-400 dark:hover:bg-orange-900/30 transition-colors"
+                        >
+                          Send Now
+                        </button>
+                        <button
+                          onClick={() => cancelQueuedMessage(idx)}
+                          className="p-1 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-md dark:hover:bg-red-900/20 transition-colors"
+                          title="Cancel"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
         

@@ -257,6 +257,7 @@ export default function ChatContainer() {
   const [skills, setSkills] = useState<Array<{ id: string; title: string; content: string }>>([]);
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [editingSkillTitle, setEditingSkillTitle] = useState('');
+  const [skillsExpanded, setSkillsExpanded] = useState(true);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [referenceText, setReferenceText] = useState('');
@@ -1424,10 +1425,86 @@ export default function ChatContainer() {
                 <Plus className="h-4 w-4" />
                 New Chat
               </Button>
+
+              {/* Skills entry under New Chat (ChatGPT-style tools area) */}
+              <div className="space-y-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAccountBound) {
+                      setShowAuthModal(true);
+                      return;
+                    }
+                    setSkillsExpanded((v) => !v);
+                    if (skills.length === 0) fetchSkills();
+                  }}
+                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <Zap className="h-4 w-4 text-orange-500" />
+                    Skills
+                  </span>
+                  <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', skillsExpanded && isAccountBound ? 'rotate-180' : '')} />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isAccountBound && skillsExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="space-y-0.5 pb-1">
+                        {skills.length === 0 ? (
+                          <div className="px-3 py-2 text-[11px] leading-relaxed text-stone-400">
+                            还没有 Skill。在右侧 Context 的 System Prompt 里写好后点
+                            <span className="mx-1 font-medium text-orange-600">Save as Skill</span>
+                            保存。
+                          </div>
+                        ) : (
+                          skills.map((skill) => (
+                            <div
+                              key={skill.id}
+                              className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSystemPrompt(skill.content);
+                                  setEditingSkillTitle(skill.title);
+                                  setIsContextPanelOpen(true);
+                                  createNewSession();
+                                }}
+                                className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm text-stone-600 dark:text-stone-300"
+                                title={skill.title}
+                              >
+                                <Zap className="h-3.5 w-3.5 shrink-0 text-orange-500/80" />
+                                <span className="truncate">{skill.title}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => deleteSkill(skill.id, e)}
+                                className="mr-1 rounded p-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/20"
+                                title="Delete skill"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             <ScrollArea className="flex-1 px-3 py-2">
               <div className="space-y-1">
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                  最近
+                </div>
                 {sidebarSessions.map(session => (
                   <div key={session.id} className="relative group">
                     <div

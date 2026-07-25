@@ -161,4 +161,22 @@
     height: auto;
     border-radius: 0.75rem;
   }
+
+  /* 修复 Tailwind Reset 对 KaTeX 边框和线条的破坏 */
+  .katex * {
+    border-color: currentColor;
+  }
+  .katex .frac-line {
+    border-bottom-width: 0.04em !important;
+    border-bottom-style: solid !important;
+  }
+  .katex .overline .overline-line,
+  .katex .underline .underline-line,
+  .katex .svg-align line {
+    border-bottom-width: 0.04em !important;
+    border-bottom-style: solid !important;
+  }
+  .katex svg path {
+    stroke-width: 0.04em !important;
+  }
 }

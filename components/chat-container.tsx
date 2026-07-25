@@ -20,9 +20,17 @@ import 'katex/dist/katex.min.css';
 import { CodeBlock } from './markdown/code-block';
 
 function normalizeMathDelimiters(content: string) {
-  return content
+  let result = content
     .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => `\n$$\n${expression.trim()}\n$$\n`)
     .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => `$${expression.trim()}$`);
+
+  // Wrap bare \begin{...} \end{...} environments in $$ if they aren't already
+  result = result.replace(
+    /(?<!\$\$[\s\S]*?)(?:\\begin\{(aligned|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|cases\*|equation|eqnarray)\})([\s\S]*?)(?:\\end\{\1\})(?![\s\S]*?\$\$)/g,
+    (match) => `\n$$\n${match}\n$$\n`
+  );
+
+  return result;
 }
 
 // --- Types ---
@@ -114,12 +122,12 @@ export default function ChatContainer() {
           if (savedChats) {
             try {
               const parsed = JSON.parse(savedChats) as ChatSession[];
+              // Only restore conversations that already have messages.
+              // Empty drafts are never persisted / shown in the sidebar.
               const nonEmpty = parsed.filter((session) => session.messages?.length > 0);
-              const firstEmpty = parsed.find((session) => !session.messages?.length);
-              const normalized = firstEmpty ? [...nonEmpty, firstEmpty] : nonEmpty;
-              if (normalized.length > 0) {
-                setSessions(normalized);
-                setActiveSessionId(normalized[0].id);
+              if (nonEmpty.length > 0) {
+                setSessions(nonEmpty);
+                setActiveSessionId(nonEmpty[0].id);
               } else {
                 createNewSession();
               }
@@ -138,15 +146,25 @@ export default function ChatContainer() {
       });
   }, []);
 
-  // Save Sessions ONLY if account is bound
+  // Save Sessions ONLY if account is bound — never persist empty drafts
   useEffect(() => {
-    if (isAccountBound && sessions.length > 0) {
-      localStorage.setItem('llm_christmas_chats', JSON.stringify(sessions));
+    if (!isAccountBound) return;
+    const persisted = sessions.filter((session) => session.messages.length > 0);
+    if (persisted.length > 0) {
+      localStorage.setItem('llm_christmas_chats', JSON.stringify(persisted));
+    } else {
+      localStorage.removeItem('llm_christmas_chats');
     }
   }, [sessions, isAccountBound]);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
+  // Empty drafts stay in state for the composer, but do not appear in the sidebar
+  // until the first message is sent.
+  const sidebarSessions = useMemo(
+    () => sessions.filter((session) => session.messages.length > 0),
+    [sessions],
+  );
 
   const scrollToBottom = () => {
     if (scrollRef.current) {
@@ -160,58 +178,90 @@ export default function ChatContainer() {
 
   // --- Actions ---
   const createNewSession = () => {
-    // Reuse an existing empty draft instead of accumulating blank conversations.
-    const emptyDraft = sessions.find((session) => session.messages.length === 0);
-    if (emptyDraft) {
-      setActiveSessionId(emptyDraft.id);
-      if (window.innerWidth < 768) setIsSidebarOpen(false);
-      return;
-    }
-
-    const newSession: ChatSession = {
-      id: crypto.randomUUID(),
-      title: 'New Conversation',
-      messages: [],
-      updatedAt: Date.now(),
-    };
-    setSessions(prev => [newSession, ...prev]);
-    setActiveSessionId(newSession.id);
-    if (window.innerWidth < 768) setIsSidebarOpen(false);
-  };
-
-  const updateActiveSession = (newMessages: Message[], title?: string) => {
-    setSessions(prev => prev.map(s => {
-      if (s.id === activeSessionId) {
-        return {
-          ...s,
-          messages: newMessages,
-          title: title || s.title,
-          updatedAt: Date.now(),
-        };
+    // Switch to a blank composer. The draft is kept in memory only and is
+    // omitted from the sidebar until the first message lands.
+    setSessions((prev) => {
+      const emptyDraft = prev.find((session) => session.messages.length === 0);
+      if (emptyDraft) {
+        setActiveSessionId(emptyDraft.id);
+        return prev.filter(
+          (session) => session.messages.length > 0 || session.id === emptyDraft.id,
+        );
       }
-      return s;
-    }));
-  };
 
-  const deleteSession = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const filtered = sessions.filter(s => s.id !== id);
-
-    // Keep exactly one empty draft when the final conversation is removed.
-    if (filtered.length === 0) {
-      const emptyDraft: ChatSession = {
+      const newSession: ChatSession = {
         id: crypto.randomUUID(),
         title: 'New Conversation',
         messages: [],
         updatedAt: Date.now(),
       };
-      setSessions([emptyDraft]);
-      setActiveSessionId(emptyDraft.id);
-      return;
+      setActiveSessionId(newSession.id);
+      // Drop any stray empty drafts while creating a fresh one.
+      return [newSession, ...prev.filter((session) => session.messages.length > 0)];
+    });
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
     }
+  };
 
-    setSessions(filtered);
-    if (activeSessionId === id) setActiveSessionId(filtered[0].id);
+  const updateActiveSession = (newMessages: Message[], title?: string) => {
+    setSessions(prev => {
+      const exists = prev.some((s) => s.id === activeSessionId);
+      if (!exists) {
+        // First message on a missing draft — materialize the session now.
+        const created: ChatSession = {
+          id: activeSessionId || crypto.randomUUID(),
+          title: title || 'New Conversation',
+          messages: newMessages,
+          updatedAt: Date.now(),
+        };
+        if (!activeSessionId) setActiveSessionId(created.id);
+        return [created, ...prev.filter((s) => s.messages.length > 0)];
+      }
+      return prev.map(s => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: newMessages,
+            title: title || s.title,
+            updatedAt: Date.now(),
+          };
+        }
+        return s;
+      });
+    });
+  };
+
+  const deleteSession = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSessions((prev) => {
+      const filtered = prev.filter((s) => s.id !== id && s.messages.length > 0);
+
+      if (filtered.length === 0) {
+        const emptyDraft: ChatSession = {
+          id: crypto.randomUUID(),
+          title: 'New Conversation',
+          messages: [],
+          updatedAt: Date.now(),
+        };
+        setActiveSessionId(emptyDraft.id);
+        return [emptyDraft];
+      }
+
+      if (activeSessionId === id) {
+        // After deleting the active chat, return to a blank New Chat draft.
+        const emptyDraft: ChatSession = {
+          id: crypto.randomUUID(),
+          title: 'New Conversation',
+          messages: [],
+          updatedAt: Date.now(),
+        };
+        setActiveSessionId(emptyDraft.id);
+        return [emptyDraft, ...filtered];
+      }
+
+      return filtered;
+    });
   };
 
   const saveUserKey = async () => {
@@ -347,15 +397,15 @@ export default function ChatContainer() {
     const task = messageQueue[index];
     cancelQueuedMessage(index);
     if (isLoading) stopGenerating();
-    // Use a small timeout to allow stopGenerating state updates to propagate
+    // Force submit regardless of immediate isLoading state propagation
     setTimeout(() => {
-      handleSubmit(task.content, task.baseMessages);
+      handleSubmit(task.content, task.baseMessages, true);
     }, 50);
   };
 
-  const handleSubmit = async (overrideInput?: string, baseMessagesOverride?: Message[]) => {
+  const handleSubmit = async (overrideInput?: string, baseMessagesOverride?: Message[], force: boolean = false) => {
     const textToSend = overrideInput || input;
-    if (!textToSend.trim() || isLoading) return;
+    if (!textToSend.trim() || (!force && isLoading)) return;
 
     let fullContent = textToSend.trim();
 
@@ -558,11 +608,11 @@ export default function ChatContainer() {
           >
             <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-bold text-base tracking-tight text-stone-900 dark:text-stone-100">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
-                    <Sparkles className="h-4 w-4" />
+                <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-orange-600 text-white">
+                    <Sparkles className="h-3.5 w-3.5" />
                   </div>
-                  llm.christmas Chat
+                  Christmas Chat
                 </div>
               </div>
 
@@ -577,7 +627,7 @@ export default function ChatContainer() {
 
             <ScrollArea className="flex-1 px-3 py-2">
               <div className="space-y-1">
-                {sessions.map(session => (
+                {sidebarSessions.map(session => (
                   <div key={session.id} className="relative group">
                     <div
                       onClick={() => setActiveSessionId(session.id)}
@@ -594,20 +644,18 @@ export default function ChatContainer() {
                       </div>
                     </div>
                     
-                    {session.messages.length > 0 && (
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSessionMenuOpenId(sessionMenuOpenId === session.id ? null : session.id);
-                        }}
-                        className={cn(
-                          "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity",
-                          sessionMenuOpenId === session.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                        )}
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
-                      </button>
-                    )}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSessionMenuOpenId(sessionMenuOpenId === session.id ? null : session.id);
+                      }}
+                      className={cn(
+                        "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity",
+                        sessionMenuOpenId === session.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                      )}
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
+                    </button>
 
                     <AnimatePresence>
                       {sessionMenuOpenId === session.id && (

@@ -71,6 +71,7 @@ export default function ChatContainer() {
   // Settings State
   const [temperature, setTemperature] = useState(0.7);
   const [isListening, setIsListening] = useState(false);
+  const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -278,6 +279,7 @@ export default function ChatContainer() {
     updateActiveSession(newMessages, newTitle);
     setInput('');
     setIsLoading(true);
+    setIsWaitingForFirstToken(true);
 
     abortControllerRef.current = new AbortController();
 
@@ -326,11 +328,13 @@ export default function ChatContainer() {
             const data = line.slice(6);
             if (data === '[DONE]') {
               setIsLoading(false);
+              setIsWaitingForFirstToken(false);
               return;
             }
             try {
               const parsed = JSON.parse(data);
               if (parsed.content) {
+                if (isWaitingForFirstToken) setIsWaitingForFirstToken(false);
                 setSessions(prev => prev.map(s => {
                   if (s.id === activeSessionId) {
                     const msgs = [...s.messages];
@@ -349,6 +353,7 @@ export default function ChatContainer() {
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {
+        setIsWaitingForFirstToken(false);
         updateActiveSession([
           ...newMessages,
           {
@@ -361,6 +366,7 @@ export default function ChatContainer() {
       }
     } finally {
       setIsLoading(false);
+      setIsWaitingForFirstToken(false);
       abortControllerRef.current = null;
     }
   };
@@ -391,6 +397,7 @@ export default function ChatContainer() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       setIsLoading(false);
+      setIsWaitingForFirstToken(false);
     }
   };
 
@@ -666,6 +673,33 @@ export default function ChatContainer() {
                       </div>
                     </div>
                   ),
+                )}
+
+                {/* Thinking / Waiting for first token indicator */}
+                {isWaitingForFirstToken && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="w-full pr-8 sm:pr-16 flex items-center gap-2 text-stone-400 dark:text-stone-500"
+                  >
+                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800/50 shadow-sm w-fit">
+                      <motion.div
+                        animate={{ opacity: [0.4, 1, 0.4] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                        className="w-1.5 h-1.5 rounded-full bg-orange-500"
+                      />
+                      <motion.div
+                        animate={{ opacity: [0.4, 1, 0.4] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
+                        className="w-1.5 h-1.5 rounded-full bg-orange-500"
+                      />
+                      <motion.div
+                        animate={{ opacity: [0.4, 1, 0.4] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.4 }}
+                        className="w-1.5 h-1.5 rounded-full bg-orange-500"
+                      />
+                    </div>
+                  </motion.div>
                 )}
               </div>
             )}

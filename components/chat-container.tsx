@@ -23,6 +23,7 @@ import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
 import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
+  formatContextWindow,
   getModelSpec,
 } from '@/lib/model-specs';
 
@@ -234,7 +235,10 @@ export default function ChatContainer() {
   // Settings State
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
 
-  // Context & attachment state
+  // Skills State
+  const [skills, setSkills] = useState<Array<{ id: string; title: string; content: string }>>([]);
+  const [isSavingSkill, setIsSavingSkill] = useState(false);
+  const [editingSkillTitle, setEditingSkillTitle] = useState('');
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [referenceText, setReferenceText] = useState('');
@@ -768,25 +772,73 @@ export default function ChatContainer() {
       const data = await res.json();
       if (data?.success && Array.isArray(data.models)) {
         setAvailableModels(data.models);
+        // Set default selected model: prefer first free or first available
         if (data.models.length > 0) {
-          const saved =
-            typeof window !== 'undefined'
-              ? localStorage.getItem('llm_christmas_selected_model') || ''
-              : '';
-          setSelectedModel((prev) => {
-            // Prefer in-memory selection, then last saved choice, else first model.
-            const preferred = prev || saved;
-            const exists = data.models.find((m: ModelOption) => m.id === preferred);
-            return exists ? preferred : data.models[0].id;
+          setSelectedModel(prev => {
+            // Keep current selection if still valid
+            const exists = data.models.find((m: ModelOption) => m.id === prev);
+            return exists ? prev : data.models[0].id;
           });
         } else {
           setSelectedModel('');
         }
       }
+
+      if (data?.authed) {
+        fetchSkills();
+      }
     } catch (e) {
       console.error('Failed to fetch models', e);
     } finally {
       setModelsLoading(false);
+    }
+  };
+
+  const fetchSkills = async () => {
+    try {
+      const res = await fetch('/api/skills', { cache: 'no-store' });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setSkills(json.data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch skills', e);
+    }
+  };
+
+  const saveCurrentAsSkill = async () => {
+    if (!systemPrompt.trim()) return;
+    const title = prompt('给这个 Skill 取个名字：', editingSkillTitle || 'My Skill');
+    if (!title) return;
+    
+    setIsSavingSkill(true);
+    try {
+      const res = await fetch('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content: systemPrompt }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSkills(prev => [json.data, ...prev]);
+        setEditingSkillTitle(title);
+      }
+    } catch (e) {
+      console.error(e);
+      alert('保存失败');
+    } finally {
+      setIsSavingSkill(false);
+    }
+  };
+
+  const deleteSkill = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('确认删除这个 Skill 吗？')) return;
+    try {
+      await fetch(`/api/skills/${id}`, { method: 'DELETE' });
+      setSkills(prev => prev.filter(s => s.id !== id));
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -937,14 +989,46 @@ export default function ChatContainer() {
         + ((textToSend.length > 30) ? '...' : '');
     }
 
-    // Compact before sending when the thread is near the model window.
-    if (usableLimit != null && estimatedTokens + estimateTokensFromText(fullContent) > usableLimit * 0.9) {
-      const compacted = await runCompact(baseMessages);
-      if (!compacted) {
-        setAttachError('Context is full. Compact failed — open a new chat or remove attachments.');
-        return;
+    // Compact before sending when the thread is near the selected model's window.
+    // usableLimit already follows selectedModel (context − output reserve).
+    const estimateForSend = (history: Message[], nextUserText: string) => {
+      // fullContent already embeds pending text files — do not also add files.
+      const historyText = history.reduce(
+        (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
+        0,
+      );
+      const historyImages = history.reduce(
+        (sum, m) => sum + (m.images?.length || 0) * 1000,
+        0,
+      );
+      return (
+        contextBreakdown.system +
+        contextBreakdown.reference +
+        historyText +
+        historyImages +
+        pendingImages.length * 1000 +
+        estimateTokensFromText(nextUserText)
+      );
+    };
+
+    if (usableLimit != null) {
+      let projected = estimateForSend(baseMessages, fullContent);
+      if (projected > usableLimit * 0.9) {
+        const compacted = await runCompact(baseMessages);
+        if (!compacted) {
+          setAttachError('Context is full. Compact failed — open a new chat or remove attachments.');
+          return;
+        }
+        baseMessages = compacted;
+        projected = estimateForSend(baseMessages, fullContent);
+        // Still over after compact (huge attachments / short thread): refuse rather than 413 upstream.
+        if (projected > usableLimit) {
+          setAttachError(
+            `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
+          );
+          return;
+        }
       }
-      baseMessages = compacted;
     }
 
     const userMessage: Message = {
@@ -1833,44 +1917,31 @@ export default function ChatContainer() {
               </div>
             )}
 
-            {/* Continue / Retry — sit above the composer as recovery actions. */}
+            {/* Continue — only when the last reply was clearly interrupted.
+                Sits above the composer so it reads as "finish that reply".
+                Failed requests use the Retry on the error card instead. */}
             <AnimatePresence>
-              {(canResumeIncomplete || canRetryFailed) && (
+              {canResumeIncomplete && (
                 <motion.div
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 6 }}
                   className="mb-2 flex justify-center"
                 >
-                  {canRetryFailed ? (
-                    <button
-                      type="button"
-                      onClick={() => retryFailedReply()}
-                      title="Retry the last request"
-                      className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3.5 py-1.5 text-xs font-medium text-red-800 shadow-sm transition-colors hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-950/80"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      Retry
-                      <span className="hidden sm:inline font-normal text-red-600/80 dark:text-red-400/70">
-                        · Request failed
+                  <button
+                    type="button"
+                    onClick={() => resumeIncompleteReply()}
+                    title={truncationInfo.reason || 'Continue the previous reply'}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-xs font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-950/80"
+                  >
+                    <Play className="h-3 w-3 fill-current" />
+                    Continue
+                    {truncationInfo.reason && (
+                      <span className="hidden sm:inline font-normal text-amber-600/80 dark:text-amber-400/70">
+                        · {truncationInfo.reason}
                       </span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => resumeIncompleteReply()}
-                      title={truncationInfo.reason || 'Continue the previous reply'}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-xs font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-950/80"
-                    >
-                      <Play className="h-3 w-3 fill-current" />
-                      Continue
-                      {truncationInfo.reason && (
-                        <span className="hidden sm:inline font-normal text-amber-600/80 dark:text-amber-400/70">
-                          · {truncationInfo.reason}
-                        </span>
-                      )}
-                    </button>
-                  )}
+                    )}
+                  </button>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1954,21 +2025,30 @@ export default function ChatContainer() {
                                   <div className="text-[10px] text-stone-400">Text-only · needs vision</div>
                                 )}
                               </div>
+                              <span
+                                className="text-[9px] font-mono text-stone-400 shrink-0 tabular-nums"
+                                title={m.context_window != null ? `${m.context_window.toLocaleString()} context` : 'Unknown context'}
+                              >
+                                {formatContextWindow(m.context_window)}
+                              </span>
                               {m.vision && (
-                                <span className="text-[9px] font-semibold tracking-wide rounded border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-stone-500 shrink-0 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-400">
-                                  Vision
+                                <span
+                                  title="Vision"
+                                  className="text-[8px] font-semibold leading-none rounded border border-stone-200 bg-stone-50 px-1 py-px text-stone-500 shrink-0 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-400"
+                                >
+                                  V
                                 </span>
                               )}
                               {m.tier === 'paid' ? (
-                                <span className="text-[9px] font-semibold tracking-wide rounded bg-orange-500 px-1.5 py-0.5 text-white shrink-0">
+                                <span className="text-[8px] font-semibold leading-none rounded bg-orange-500 px-1 py-px text-white shrink-0">
                                   Pro
                                 </span>
                               ) : (
-                                <span className="text-[9px] font-semibold tracking-wide rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-orange-700 shrink-0 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300">
+                                <span className="text-[8px] font-semibold leading-none rounded border border-orange-200 bg-orange-50 px-1 py-px text-orange-700 shrink-0 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300">
                                   Free
                                 </span>
                               )}
-                              {selectedModel === m.id && <Check className="h-4 w-4 text-orange-500 shrink-0 ml-1" />}
+                              {selectedModel === m.id && <Check className="h-3.5 w-3.5 text-orange-500 shrink-0" />}
                             </button>
                             );
                           })}
@@ -2159,8 +2239,17 @@ export default function ChatContainer() {
                   </div>
                   <div className="flex justify-between">
                     <span>Model window</span>
-                    <span className="font-mono text-stone-700 dark:text-stone-300">
-                      {contextLimit != null ? contextLimit.toLocaleString() : 'unknown'}
+                    <span className="font-mono text-stone-700 dark:text-stone-300 text-right">
+                      {contextLimit != null ? (
+                        <>
+                          {contextLimit.toLocaleString()}
+                          <span className="block text-[10px] font-sans font-normal text-stone-400 truncate max-w-[140px]">
+                            {selectedModel || '—'}
+                          </span>
+                        </>
+                      ) : (
+                        'unknown'
+                      )}
                     </span>
                   </div>
 

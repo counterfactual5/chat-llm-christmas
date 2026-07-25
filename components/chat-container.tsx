@@ -6,7 +6,8 @@ import {
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
   Menu, Plus, MessageSquare, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, Wallet, LogOut, X,
-  MoreHorizontal, Clock, Paperclip, FileText, PanelRightOpen, PanelRightClose, Quote
+  MoreHorizontal, Clock, Paperclip, FileText, PanelRightOpen, PanelRightClose, Quote,
+  Play, ListOrdered
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -96,7 +97,10 @@ export default function ChatContainer() {
   // Settings State
   const [isListening, setIsListening] = useState(false);
   const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
-  const [messageQueue, setMessageQueue] = useState<Array<{ content: string; baseMessages?: Message[] }>>([]);
+  const [messageQueue, setMessageQueue] = useState<Array<{ id: string; content: string; baseMessages?: Message[]; enqueueTime: number }>>([]);
+  // Stop should freeze the queue; only explicit Continue / Send Now resumes it.
+  const [queuePaused, setQueuePaused] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -367,37 +371,66 @@ export default function ChatContainer() {
   };
 
   // --- Chat Logic ---
-  // Process queue when idle
+  // Auto-drain the queue only when idle and not paused (Stop freezes the queue).
   useEffect(() => {
-    if (!isLoading && messageQueue.length > 0) {
+    if (!isLoading && !queuePaused && messageQueue.length > 0) {
       const nextTask = messageQueue[0];
       setMessageQueue((prev) => prev.slice(1));
       handleSubmit(nextTask.content, nextTask.baseMessages);
     }
-  }, [isLoading, messageQueue]);
+  }, [isLoading, messageQueue, queuePaused]);
 
   const enqueueOrSubmit = (overrideInput?: string, baseMessagesOverride?: Message[]) => {
     const textToSend = overrideInput || input;
     if (!textToSend.trim()) return;
 
     if (isLoading) {
-      setMessageQueue((prev) => [...prev, { content: textToSend.trim(), baseMessages: baseMessagesOverride }]);
+      const now = Date.now();
+      const lastInQueue = messageQueue[messageQueue.length - 1];
+      if (lastInQueue && lastInQueue.content === textToSend.trim() && now - lastInQueue.enqueueTime < 500) {
+        return;
+      }
+      setMessageQueue((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          content: textToSend.trim(),
+          baseMessages: baseMessagesOverride,
+          enqueueTime: now,
+        },
+      ]);
       setInput('');
       return;
     }
 
+    // Fresh send while paused with leftovers: keep queue, send this message now.
     handleSubmit(textToSend, baseMessagesOverride);
   };
 
-  const cancelQueuedMessage = (index: number) => {
-    setMessageQueue((prev) => prev.filter((_, i) => i !== index));
+  const cancelQueuedMessage = (id: string) => {
+    setMessageQueue((prev) => {
+      const next = prev.filter((task) => task.id !== id);
+      if (next.length === 0) setQueuePaused(false);
+      return next;
+    });
   };
 
-  const jumpQueueAndSubmit = (index: number) => {
-    const task = messageQueue[index];
-    cancelQueuedMessage(index);
-    if (isLoading) stopGenerating();
-    // Force submit regardless of immediate isLoading state propagation
+  const clearQueue = () => {
+    setMessageQueue([]);
+    setQueuePaused(false);
+  };
+
+  const resumeQueue = () => {
+    setQueuePaused(false);
+  };
+
+  const jumpQueueAndSubmit = (id: string) => {
+    const task = messageQueue.find((item) => item.id === id);
+    if (!task) return;
+    setMessageQueue((prev) => prev.filter((item) => item.id !== id));
+    // Send Now is an explicit action — abort current reply without freezing the rest.
+    if (isLoading) stopGenerating({ pauseQueue: false });
+    setQueuePaused(false);
     setTimeout(() => {
       handleSubmit(task.content, task.baseMessages, true);
     }, 50);
@@ -579,17 +612,22 @@ export default function ChatContainer() {
     setSessionMenuOpenId(null);
   };
 
-  const stopGenerating = () => {
+  const stopGenerating = (opts?: { pauseQueue?: boolean }) => {
+    const pauseQueue = opts?.pauseQueue ?? true;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       setIsLoading(false);
       setIsWaitingForFirstToken(false);
     }
+    // Stopping mid-reply should freeze remaining queued messages, not flush them.
+    if (pauseQueue) setQueuePaused(true);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // Prevent holding down Enter to spawn dozens of identical tasks
+      if (e.repeat) return;
       enqueueOrSubmit();
     }
   };
@@ -962,38 +1000,99 @@ export default function ChatContainer() {
         {/* Floating Input Area */}
         <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
           <div className="mx-auto w-full max-w-[960px] px-1 md:px-4 relative">
-            {/* Message Queue Indicator */}
+            {/* Compact message queue */}
             <AnimatePresence>
               {messageQueue.length > 0 && (
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="mb-3 flex flex-col gap-2"
+                  exit={{ opacity: 0, y: 8 }}
+                  className="mb-3 overflow-hidden rounded-2xl border border-stone-200/80 bg-white/90 shadow-sm backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-900/90"
                 >
-                  {messageQueue.map((task, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-xl bg-stone-100/80 px-4 py-2 text-sm dark:bg-stone-800/80 border border-stone-200/50 dark:border-stone-700/50 shadow-sm backdrop-blur-sm">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-stone-400 shrink-0" />
-                        <span className="truncate text-stone-600 dark:text-stone-300">Queued: {task.content}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0 ml-4">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-stone-100 dark:border-stone-800">
+                    <button
+                      type="button"
+                      onClick={() => setQueueExpanded((v) => !v)}
+                      className="flex min-w-0 items-center gap-2 text-left"
+                    >
+                      <ListOrdered className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                      <span className="text-xs font-medium text-stone-700 dark:text-stone-300">
+                        {messageQueue.length} queued
+                      </span>
+                      {queuePaused && (
+                        <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                          Paused
+                        </span>
+                      )}
+                      <ChevronDown
+                        className={cn(
+                          'h-3 w-3 shrink-0 text-stone-400 transition-transform',
+                          queueExpanded ? 'rotate-180' : '',
+                        )}
+                      />
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {queuePaused && (
                         <button
-                          onClick={() => jumpQueueAndSubmit(idx)}
-                          className="px-2.5 py-1 text-xs font-medium text-orange-600 hover:bg-orange-100 rounded-md dark:text-orange-400 dark:hover:bg-orange-900/30 transition-colors"
+                          type="button"
+                          onClick={resumeQueue}
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950/30"
                         >
-                          Send Now
+                          <Play className="h-3 w-3 fill-current" />
+                          Continue
                         </button>
-                        <button
-                          onClick={() => cancelQueuedMessage(idx)}
-                          className="p-1 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-md dark:hover:bg-red-900/20 transition-colors"
-                          title="Cancel"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={clearQueue}
+                        className="rounded-lg px-2 py-1 text-xs text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
+                      >
+                        Clear
+                      </button>
                     </div>
-                  ))}
+                  </div>
+
+                  <AnimatePresence initial={false}>
+                    {queueExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="max-h-36 overflow-y-auto"
+                      >
+                        <ul className="divide-y divide-stone-100 dark:divide-stone-800">
+                          {messageQueue.map((task, idx) => (
+                            <li
+                              key={task.id}
+                              className="group flex items-center gap-2 px-3 py-1.5 text-sm"
+                            >
+                              <span className="w-4 shrink-0 text-center text-[11px] tabular-nums text-stone-400">
+                                {idx + 1}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-stone-600 dark:text-stone-300">
+                                {task.content}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => jumpQueueAndSubmit(task.id)}
+                                className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-orange-600 opacity-70 hover:bg-orange-50 hover:opacity-100 group-hover:opacity-100 dark:text-orange-400 dark:hover:bg-orange-950/30"
+                              >
+                                Send
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => cancelQueuedMessage(task.id)}
+                                className="shrink-0 rounded-md p-0.5 text-stone-300 opacity-70 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-950/20"
+                                title="Remove"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1094,7 +1193,7 @@ export default function ChatContainer() {
                 <div className="flex items-center gap-2">
                   {isLoading ? (
                     <Button 
-                      onClick={stopGenerating}
+                      onClick={() => stopGenerating()}
                       size="icon" 
                       className="h-8 w-8 rounded-full bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900"
                     >

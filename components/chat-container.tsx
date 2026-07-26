@@ -416,6 +416,12 @@ export default function ChatContainer() {
   const [accountError, setAccountError] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
   const [userBalance, setUserBalance] = useState<string | null>(null);
+  const [notionStatus, setNotionStatus] = useState<{
+    connected: boolean;
+    available: boolean;
+    label?: string;
+  } | null>(null);
+  const [notionBusy, setNotionBusy] = useState(false);
 
   // Settings State
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
@@ -492,10 +498,61 @@ export default function ChatContainer() {
   );
   const queuePaused = Boolean(queuePausedBySession[activeSessionId]);
 
+  const fetchIntegrations = async () => {
+    try {
+      const response = await fetch('/api/integrations', { cache: 'no-store' });
+      if (!response.ok) {
+        setNotionStatus(null);
+        return;
+      }
+      const data = await response.json();
+      const notion = (data?.integrations || []).find((i: any) => i?.provider === 'notion');
+      if (!notion) {
+        setNotionStatus(null);
+        return;
+      }
+      setNotionStatus({
+        connected: Boolean(notion.connected),
+        available: Boolean(notion.available),
+        label: notion.label || undefined,
+      });
+    } catch {
+      setNotionStatus(null);
+    }
+  };
+
+  const disconnectNotion = async () => {
+    setNotionBusy(true);
+    try {
+      await fetch('/api/integrations/notion', { method: 'DELETE' });
+      await fetchIntegrations();
+    } finally {
+      setNotionBusy(false);
+    }
+  };
+
   // Load Saved State
   useEffect(() => {
     // Migrate away from the old insecure client-side key storage.
     localStorage.removeItem('llm_christmas_user_key');
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const authError = params.get('auth_error');
+      const notionOk = params.get('notion_connected');
+      if (authError) {
+        setAccountError(authError);
+        setShowAuthModal(true);
+      }
+      if (authError || notionOk || params.get('connected')) {
+        const clean = new URL(window.location.href);
+        clean.search = '';
+        window.history.replaceState({}, '', clean.pathname);
+      }
+      if (notionOk) setShowAuthModal(true);
+    } catch {
+      // ignore
+    }
 
     // Detect whether a personal API key is already bound in the HttpOnly cookie.
     fetch('/api/account', { cache: 'no-store' })
@@ -506,6 +563,7 @@ export default function ChatContainer() {
         fetchModels();
         if (bound) {
           fetchSkills();
+          void fetchIntegrations();
           // Connected user: load their chats from localStorage
           const savedChats = localStorage.getItem('llm_christmas_chats');
           if (savedChats) {
@@ -1218,6 +1276,7 @@ export default function ChatContainer() {
       setShowAuthModal(false);
       await fetchModels();
       await fetchSkills();
+      await fetchIntegrations();
     } catch (error: any) {
       setAccountError(error?.message || '绑定失败');
     } finally {
@@ -1230,6 +1289,7 @@ export default function ChatContainer() {
     setIsAccountBound(false);
     setTempKeyInput('');
     setShowAuthModal(false);
+    setNotionStatus(null);
     setSessions([]);
     setSkills([]);
     createNewSession();
@@ -4810,13 +4870,71 @@ export default function ChatContainer() {
 
               <div className="space-y-4">
                 {isAccountBound ? (
-                  <Button
-                    variant="outline"
-                    onClick={disconnectAccount}
-                    className="w-full rounded-xl border-red-200 text-red-600 hover:bg-red-50"
-                  >
-                    Disconnect
-                  </Button>
+                  <>
+                    <div className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
+                      <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
+                        {t('integrations')}
+                      </div>
+                      <p className="mt-0.5 text-[11px] leading-4 text-stone-500 dark:text-stone-400">
+                        {t('integrationsHint')}
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
+                              Notion
+                            </div>
+                            <div className="truncate text-[11px] text-stone-500 dark:text-stone-400">
+                              {notionStatus?.connected
+                                ? `${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`
+                                : notionStatus?.available === false
+                                  ? t('notionNotConfigured')
+                                  : t('notionConnectHint')}
+                            </div>
+                          </div>
+                          {notionStatus?.connected ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={notionBusy}
+                              onClick={() => void disconnectNotion()}
+                              className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50"
+                            >
+                              {t('disconnectNotion')}
+                            </Button>
+                          ) : (
+                            <a
+                              href={
+                                notionStatus?.available === false
+                                  ? undefined
+                                  : '/api/integrations/notion/start'
+                              }
+                              aria-disabled={notionStatus?.available === false}
+                              onClick={(e) => {
+                                if (notionStatus?.available === false) e.preventDefault();
+                              }}
+                              className={cn(
+                                'inline-flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
+                                notionStatus?.available === false
+                                  ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
+                                  : 'bg-orange-500 text-white hover:bg-orange-600',
+                              )}
+                            >
+                              {t('connectNotion')}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      onClick={disconnectAccount}
+                      className="w-full rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                    >
+                      Disconnect
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <a
@@ -4857,6 +4975,9 @@ export default function ChatContainer() {
                       {accountSaving ? 'Validating…' : 'Save & Connect'}
                     </Button>
                   </>
+                )}
+                {isAccountBound && accountError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>
                 )}
               </div>
             </motion.div>

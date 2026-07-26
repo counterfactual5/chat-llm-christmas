@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { clearVaultCookie } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 20;
@@ -37,6 +38,8 @@ export async function POST(req: NextRequest) {
     await validateKey(normalized);
 
     const response = NextResponse.json({ bound: true });
+    // Switching accounts must drop the previous owner's Notion/GitHub tokens.
+    clearVaultCookie(response);
     response.cookies.set({
       name: COOKIE_NAME,
       value: normalized,
@@ -57,6 +60,7 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   const response = NextResponse.json({ bound: false });
+  clearVaultCookie(response);
   response.cookies.set({
     name: COOKIE_NAME,
     value: '',

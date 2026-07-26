@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { clearVaultCookie } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest) {
     const home = new URL('/', req.url);
     home.searchParams.set('connected', '1');
     const result = NextResponse.redirect(home);
+    clearVaultCookie(result);
     result.cookies.set({
       name: KEY_COOKIE,
       value: payload.data.apiKey,

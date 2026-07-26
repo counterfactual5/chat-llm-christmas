@@ -238,6 +238,14 @@ interface Message {
     results?: Array<{ title: string; url: string; snippet: string }>;
     error?: string;
   }>;
+  /**
+   * Chronological activity for this turn (thinking / tools interleaved as they arrived).
+   * Final answer `content` always renders after this list.
+   */
+  activity?: Array<
+    | { id: string; kind: 'reasoning'; text: string }
+    | { id: string; kind: 'tool'; toolRunId: string }
+  >;
   /** True while streaming, or after a stop / refresh / truncated reply. */
   incomplete?: boolean;
   /** Raw finish_reason from upstream, kept so Resume can explain itself. */
@@ -576,19 +584,27 @@ export default function ChatContainer() {
   const activeSkillIds = activeSession?.skillIds || [];
   const webSources = activeSession?.webSources || [];
 
-  // Repair Material when history has more search hits than the stored list
-  // (e.g. older searches were overwritten before we started accumulating).
+  // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
   useEffect(() => {
     if (!activeSessionId) return;
     const collected = collectWebSourcesFromMessages(messages);
-    const storedLen = activeSession?.webSources?.length || 0;
-    if (collected.length <= storedLen) return;
+    const stored = activeSession?.webSources || [];
+    const collectedKey = collected.map((c) => c.url).join('\n');
+    const storedKey = stored.map((c) => c.url).join('\n');
+    if (collectedKey === storedKey) return;
+    const grew = collected.length > stored.length;
     setSessions((prev) =>
       prev.map((s) =>
         s.id === activeSessionId ? { ...s, webSources: collected } : s,
       ),
     );
-  }, [activeSessionId, messages, activeSession?.webSources?.length]);
+    if (grew && collected.length > 0) {
+      queueMicrotask(() => {
+        setIsContextPanelOpen(true);
+        setReferenceExpanded(true);
+      });
+    }
+  }, [activeSessionId, messages, activeSession?.webSources]);
   const activeSkills = useMemo(
     () =>
       activeSkillIds
@@ -769,6 +785,7 @@ export default function ChatContainer() {
           title: title || 'New Conversation',
           messages: newMessages,
           updatedAt: Date.now(),
+          webSources: collectWebSourcesFromMessages(newMessages),
         };
         if (!sessionId) setActiveSessionId(created.id);
         return [created, ...prev.filter((s) => s.messages.length > 0)];
@@ -780,6 +797,8 @@ export default function ChatContainer() {
             messages: newMessages,
             title: title || s.title,
             updatedAt: Date.now(),
+            // Keep Material in sync with history (edit/resend truncates prior tool hits).
+            webSources: collectWebSourcesFromMessages(newMessages),
           };
         }
         return s;
@@ -832,15 +851,37 @@ export default function ChatContainer() {
   };
 
   const appendToAssistantReasoning = (sessionId: string, assistantId: string, chunk: string) => {
+    if (!chunk) return;
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id !== sessionId) return s;
         if (!s.messages.some((m) => m.id === assistantId)) return s;
-        const msgs = s.messages.map((m) =>
-          m.id === assistantId
-            ? { ...m, reasoning: (m.reasoning || '') + chunk, incomplete: true }
-            : m,
-        );
+        const msgs = s.messages.map((m) => {
+          if (m.id !== assistantId) return m;
+          const activity = [...(m.activity || [])];
+          const last = activity[activity.length - 1];
+          // Only append to the last step when it is already reasoning.
+          // After a tool runs, start a new reasoning step so the timeline stays
+          // chronological: think → search → think (tool sits in the middle).
+          if (last?.kind === 'reasoning') {
+            activity[activity.length - 1] = {
+              ...last,
+              text: last.text + chunk,
+            };
+          } else {
+            activity.push({
+              id: crypto.randomUUID(),
+              kind: 'reasoning',
+              text: chunk,
+            });
+          }
+          return {
+            ...m,
+            reasoning: (m.reasoning || '') + chunk,
+            activity,
+            incomplete: true,
+          };
+        });
         return { ...s, messages: msgs, updatedAt: Date.now() };
       }),
     );
@@ -868,16 +909,23 @@ export default function ChatContainer() {
             (r) => r.name === run.name && r.query === run.query && r.status === 'start',
           );
           let toolRuns;
+          let activity = [...(m.activity || [])];
           if (run.status === 'start') {
+            const toolRunId = crypto.randomUUID();
             toolRuns = [
               ...existing,
               {
-                id: crypto.randomUUID(),
+                id: toolRunId,
                 name: run.name,
                 status: 'start' as const,
                 query: run.query,
               },
             ];
+            activity.push({
+              id: crypto.randomUUID(),
+              kind: 'tool',
+              toolRunId,
+            });
           } else if (idx >= 0) {
             toolRuns = existing.map((r, i) =>
               i === idx
@@ -891,10 +939,11 @@ export default function ChatContainer() {
                 : r,
             );
           } else {
+            const toolRunId = crypto.randomUUID();
             toolRuns = [
               ...existing,
               {
-                id: crypto.randomUUID(),
+                id: toolRunId,
                 name: run.name,
                 status: 'done' as const,
                 query: run.query,
@@ -903,14 +952,22 @@ export default function ChatContainer() {
                 error: run.error,
               },
             ];
+            activity.push({
+              id: crypto.randomUUID(),
+              kind: 'tool',
+              toolRunId,
+            });
           }
-          return { ...m, toolRuns, incomplete: true };
+          return { ...m, toolRuns, activity, incomplete: true };
         });
         const nextSession = { ...s, messages: msgs, updatedAt: Date.now() };
         if (run.status === 'done') {
           nextSession.webSources = collectWebSourcesFromMessages(msgs);
           if ((nextSession.webSources?.length || 0) > 0) {
-            queueMicrotask(() => setReferenceExpanded(true));
+            queueMicrotask(() => {
+              setIsContextPanelOpen(true);
+              setReferenceExpanded(true);
+            });
           }
         }
         return nextSession;
@@ -1657,6 +1714,32 @@ export default function ChatContainer() {
       .map((line) => `> ${line}`)
       .join('\n');
     return body ? `${block}\n\n${body}` : block;
+  };
+
+  /** Split a sent user message that was built by formatQuotedMessage into quote + body. */
+  const parseQuotedUserMessage = (content: string): { quote: string; body: string } => {
+    const text = String(content || '');
+    if (!text.startsWith('>')) return { quote: '', body: text };
+    const lines = text.split('\n');
+    const quoteLines: string[] = [];
+    let i = 0;
+    for (; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith('> ')) {
+        quoteLines.push(line.slice(2));
+        continue;
+      }
+      if (line === '>') {
+        quoteLines.push('');
+        continue;
+      }
+      break;
+    }
+    while (i < lines.length && lines[i].trim() === '') i++;
+    return {
+      quote: quoteLines.join('\n').trim(),
+      body: lines.slice(i).join('\n'),
+    };
   };
 
   const beginLoading = (sessionId: string) => {
@@ -2970,21 +3053,47 @@ export default function ChatContainer() {
                           </div>
                         ) : (
                           <>
-                            <div className="rounded-2xl rounded-br-md bg-stone-200/80 px-4 py-3 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100 whitespace-pre-wrap">
-                              {message.images && message.images.length > 0 && (
-                                <div className="mb-2 flex flex-wrap gap-2">
-                                  {message.images.map((img, idx) => (
-                                    <img
-                                      key={idx}
-                                      src={img.url}
-                                      alt={img.name || 'attachment'}
-                                      className="max-h-48 max-w-full rounded-lg object-contain"
-                                    />
-                                  ))}
+                            {(() => {
+                              const { quote, body } = parseQuotedUserMessage(
+                                message.content && message.content !== '(image)'
+                                  ? message.content
+                                  : '',
+                              );
+                              return (
+                                <div className="overflow-hidden rounded-2xl rounded-br-md bg-stone-200/80 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100">
+                                  {quote ? (
+                                    <div className="flex items-start gap-2 border-b border-stone-300/60 bg-orange-50/80 px-3.5 py-2.5 dark:border-stone-700 dark:bg-orange-950/35">
+                                      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600/80 dark:text-orange-400/80">
+                                          {t('quoted')}
+                                        </div>
+                                        <p className="mt-0.5 whitespace-pre-wrap text-xs leading-5 text-stone-700 dark:text-stone-300">
+                                          {quote}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                  {(body || (message.images && message.images.length > 0)) && (
+                                  <div className="px-4 py-3 whitespace-pre-wrap">
+                                    {message.images && message.images.length > 0 && (
+                                      <div className={cn('flex flex-wrap gap-2', body && 'mb-2')}>
+                                        {message.images.map((img, idx) => (
+                                          <img
+                                            key={idx}
+                                            src={img.url}
+                                            alt={img.name || 'attachment'}
+                                            className="max-h-48 max-w-full rounded-lg object-contain"
+                                          />
+                                        ))}
+                                      </div>
+                                    )}
+                                    {body || null}
+                                  </div>
+                                  )}
                                 </div>
-                              )}
-                              {message.content && message.content !== '(image)' ? message.content : null}
-                            </div>
+                              );
+                            })()}
                             <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
                               <button
                                 type="button"
@@ -3006,148 +3115,225 @@ export default function ChatContainer() {
                         const visibleReasoning = parts.reasoning;
                         const thinkingOnly =
                           Boolean(message.incomplete && !visibleContent && visibleReasoning);
-                        return (
-                          <>
-                      {message.toolRuns && message.toolRuns.length > 0 && (
-                        <div className="space-y-2">
-                          {message.toolRuns.map((run) => {
-                            const failed =
-                              run.status === 'done' &&
-                              (!run.results || run.results.length === 0);
-                            const searching = run.status === 'start';
-                            const expanded = toolRunOpen[run.id] ?? searching;
-                            const resultCount = run.results?.length || 0;
-                            return (
-                              <div
-                                key={run.id}
-                                className="overflow-hidden rounded-xl border border-stone-200/80 bg-stone-50/80 dark:border-stone-800 dark:bg-stone-900/50"
+                        const toolById = new Map(
+                          (message.toolRuns || []).map((run) => [run.id, run]),
+                        );
+                        // Prefer live activity timeline; fall back for older saved messages.
+                        const activitySteps = (() => {
+                          const base =
+                            message.activity && message.activity.length > 0
+                              ? [...message.activity]
+                              : [
+                                  ...(visibleReasoning
+                                    ? [
+                                        {
+                                          id: `${message.id}-reasoning`,
+                                          kind: 'reasoning' as const,
+                                          text: visibleReasoning,
+                                        },
+                                      ]
+                                    : []),
+                                  ...(message.toolRuns || []).map((run) => ({
+                                    id: `${message.id}-tool-${run.id}`,
+                                    kind: 'tool' as const,
+                                    toolRunId: run.id,
+                                  })),
+                                ];
+                          const seen = new Set(
+                            base
+                              .filter((s): s is { id: string; kind: 'tool'; toolRunId: string } =>
+                                s.kind === 'tool',
+                              )
+                              .map((s) => s.toolRunId),
+                          );
+                          for (const run of message.toolRuns || []) {
+                            if (!seen.has(run.id)) {
+                              base.push({
+                                id: `${message.id}-tool-orphan-${run.id}`,
+                                kind: 'tool',
+                                toolRunId: run.id,
+                              });
+                            }
+                          }
+                          return base;
+                        })();
+                        type ToolStep = Extract<(typeof activitySteps)[number], { kind: 'tool' }>;
+
+                        const toolCount = activitySteps.filter((s) => s.kind === 'tool').length;
+                        const anyToolSearching = activitySteps.some((s) => {
+                          if (s.kind !== 'tool') return false;
+                          return toolById.get(s.toolRunId)?.status === 'start';
+                        });
+                        const processLive =
+                          Boolean(message.incomplete && !visibleContent) &&
+                          (Boolean(visibleReasoning) || anyToolSearching || toolCount > 0);
+                        // Keep open by default when tools ran — otherwise search UI
+                        // disappears inside a collapsed「思考过程」after streaming ends.
+                        const processOpen =
+                          reasoningOpen[message.id] ?? (processLive || toolCount > 0);
+
+                        const renderToolStep = (step: ToolStep) => {
+                          const run = toolById.get(step.toolRunId);
+                          if (!run) return null;
+                          const failed =
+                            run.status === 'done' &&
+                            (!run.results || run.results.length === 0);
+                          const searching = run.status === 'start';
+                          const resultCount = run.results?.length || 0;
+                          // Keep result links open by default so search isn't buried.
+                          const expanded =
+                            toolRunOpen[run.id] ?? (searching || resultCount > 0);
+                          return (
+                            <div key={step.id} className="overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setToolRunOpen((prev) => ({
+                                    ...prev,
+                                    [run.id]: !(
+                                      prev[run.id] ?? (searching || resultCount > 0)
+                                    ),
+                                  }))
+                                }
+                                className={cn(
+                                  'flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
+                                  failed && 'text-amber-700 dark:text-amber-400',
+                                )}
                               >
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setToolRunOpen((prev) => ({
-                                      ...prev,
-                                      [run.id]: !(prev[run.id] ?? searching),
-                                    }))
-                                  }
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-stone-500 hover:bg-stone-100/80 dark:text-stone-400 dark:hover:bg-stone-800/50"
-                                >
-                                  <ChevronDown
-                                    className={cn(
-                                      'h-3.5 w-3.5 shrink-0 transition-transform',
-                                      expanded ? 'rotate-0' : '-rotate-90',
-                                    )}
-                                  />
-                                  {searching ? (
-                                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-500" />
-                                  ) : (
-                                    <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                <ChevronDown
+                                  className={cn(
+                                    'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                                    expanded ? 'rotate-0' : '-rotate-90',
                                   )}
-                                  <span
-                                    className={cn(
-                                      failed && 'text-amber-700 dark:text-amber-400',
-                                    )}
-                                  >
-                                    {searching
-                                      ? t('searchingWeb')
-                                      : failed
-                                        ? t('searchFailed')
-                                        : t('searchedWeb')}
-                                  </span>
-                                  {run.status === 'done' &&
-                                    run.provider &&
-                                    run.provider !== 'none' && (
-                                      <span className="opacity-60">
-                                        {t('searchedVia').replace(
-                                          '{provider}',
-                                          run.provider,
-                                        )}
-                                      </span>
-                                    )}
-                                  {searching && (
-                                    <span className="ml-auto flex items-center gap-1">
-                                      <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
-                                      <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
-                                      <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
+                                />
+                                {searching ? (
+                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-orange-500" />
+                                ) : (
+                                  <Globe className="h-3 w-3 shrink-0 opacity-60" />
+                                )}
+                                <span>
+                                  {searching
+                                    ? t('searchingWeb')
+                                    : failed
+                                      ? t('searchFailed')
+                                      : t('searchedWeb')}
+                                </span>
+                                {run.status === 'done' &&
+                                  run.provider &&
+                                  run.provider !== 'none' && (
+                                    <span className="opacity-50">
+                                      {t('searchedVia').replace(
+                                        '{provider}',
+                                        run.provider,
+                                      )}
                                     </span>
                                   )}
-                                </button>
-                                {expanded && (
-                                  <div className="space-y-1.5 border-t border-stone-200/70 px-3 py-2 text-xs text-stone-500 dark:border-stone-800 dark:text-stone-400">
-                                    {searching && <div>{t('fetchingResults')}</div>}
-                                    {run.error && (
-                                      <div className="text-amber-700 dark:text-amber-400">
-                                        {run.error}
-                                      </div>
-                                    )}
-                                    {run.status === 'done' && resultCount > 0 && (
-                                      <ul className="space-y-1">
-                                        {(run.results || []).slice(0, 8).map((r) => (
-                                          <li key={r.url} className="truncate">
-                                            <a
-                                              href={r.url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="text-stone-600 underline-offset-2 hover:underline dark:text-stone-300"
-                                              title={r.snippet || r.title}
-                                            >
-                                              {r.title || r.url}
-                                            </a>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    )}
-                                    {run.status === 'done' && failed && !run.error && (
-                                      <div>{t('searchNoResults')}</div>
-                                    )}
-                                  </div>
+                                {searching && (
+                                  <span className="ml-1 flex items-center gap-0.5">
+                                    <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
+                                    <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
+                                    <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
+                                  </span>
                                 )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {visibleReasoning && (
-                        <div className="rounded-xl border border-stone-200/80 bg-stone-50/80 dark:border-stone-800 dark:bg-stone-900/50 overflow-hidden">
+                              </button>
+                              {expanded && (
+                                <div className="space-y-1 pb-1 pl-5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                                  {searching && <div>{t('fetchingResults')}</div>}
+                                  {run.error && (
+                                    <div className="text-amber-700 dark:text-amber-400">
+                                      {run.error}
+                                    </div>
+                                  )}
+                                  {run.status === 'done' && resultCount > 0 && (
+                                    <ul className="space-y-0.5">
+                                      {(run.results || []).slice(0, 8).map((r) => (
+                                        <li key={r.url} className="truncate">
+                                          <a
+                                            href={r.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-stone-600 underline-offset-2 hover:underline dark:text-stone-300"
+                                            title={r.snippet || r.title}
+                                          >
+                                            {r.title || r.url}
+                                          </a>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {run.status === 'done' && failed && !run.error && (
+                                    <div>{t('searchNoResults')}</div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        };
+
+                        return (
+                          <>
+                      {activitySteps.length > 0 && (
+                        <div
+                          className={cn(
+                            'overflow-hidden',
+                            processOpen &&
+                              'rounded-md border border-stone-200/70 bg-stone-50/50 dark:border-stone-800/80 dark:bg-stone-900/40',
+                          )}
+                        >
                           <button
                             type="button"
                             onClick={() =>
                               setReasoningOpen((prev) => ({
                                 ...prev,
-                                [message.id]: !(
-                                  prev[message.id] ?? thinkingOnly
-                                ),
+                                [message.id]: !(prev[message.id] ?? (processLive || toolCount > 0)),
                               }))
                             }
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-stone-500 hover:bg-stone-100/80 dark:text-stone-400 dark:hover:bg-stone-800/50"
+                            className={cn(
+                              'flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
+                              processOpen && 'px-2 pt-1.5',
+                            )}
                           >
                             <ChevronDown
                               className={cn(
-                                'h-3.5 w-3.5 shrink-0 transition-transform',
-                                (reasoningOpen[message.id] ?? thinkingOnly)
-                                  ? 'rotate-0'
-                                  : '-rotate-90',
+                                'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                                processOpen ? 'rotate-0' : '-rotate-90',
                               )}
                             />
                             <span>
-                              {thinkingOnly ? t('thinking') : t('thoughtProcess')}
+                              {processLive ? t('thinking') : t('thoughtProcess')}
                             </span>
-                            {thinkingOnly && (
-                              <span className="ml-auto flex items-center gap-1">
+                            {toolCount > 0 && (
+                              <span className="opacity-50">· {toolCount}</span>
+                            )}
+                            {processLive && (
+                              <span className="ml-1 flex items-center gap-0.5">
                                 <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
                                 <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
                                 <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
                               </span>
                             )}
                           </button>
-                          {(reasoningOpen[message.id] ?? thinkingOnly) && (
-                            <div className="border-t border-stone-200/70 px-3 py-2.5 text-[13px] leading-6 text-stone-500 whitespace-pre-wrap dark:border-stone-800 dark:text-stone-400 max-h-72 overflow-y-auto">
-                              {visibleReasoning}
+                          {processOpen && (
+                            <div className="max-h-72 space-y-1.5 overflow-y-auto px-2 pb-1.5 pl-6">
+                              {activitySteps.map((step) => {
+                                if (step.kind === 'reasoning') {
+                                  if (!step.text.trim()) return null;
+                                  return (
+                                    <div
+                                      key={step.id}
+                                      className="whitespace-pre-wrap text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                                    >
+                                      {step.text}
+                                    </div>
+                                  );
+                                }
+                                return renderToolStep(step);
+                              })}
                             </div>
                           )}
                         </div>
                       )}
-                      {(visibleContent ||
+                                            {(visibleContent ||
                         message.images?.length ||
                         message.toolRuns?.length ||
                         (!visibleReasoning && message.incomplete)) && (
@@ -3219,8 +3405,13 @@ export default function ChatContainer() {
                             },
                             blockquote({ children }: any) {
                               return (
-                                <blockquote className="my-4 border-l-4 border-stone-300 pl-4 italic text-stone-600 dark:border-stone-700 dark:text-stone-400">
-                                  {children}
+                                <blockquote className="my-3 overflow-hidden rounded-xl border border-orange-200/80 bg-orange-50/70 not-italic dark:border-orange-900/50 dark:bg-orange-950/30">
+                                  <div className="flex items-start gap-2 px-3 py-2.5">
+                                    <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                    <div className="min-w-0 flex-1 text-[13px] leading-6 text-stone-700 dark:text-stone-300 [&_p]:mb-0">
+                                      {children}
+                                    </div>
+                                  </div>
                                 </blockquote>
                               );
                             },

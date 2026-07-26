@@ -3104,20 +3104,14 @@ export default function ChatContainer() {
                               return (
                                 <div className="overflow-hidden rounded-2xl rounded-br-md bg-stone-200/80 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100">
                                   {quote ? (
-                                    <div className="flex items-start gap-2 border-b border-stone-300/60 bg-orange-50/80 px-3.5 py-2.5 dark:border-stone-700 dark:bg-orange-950/35">
-                                      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
-                                      <div className="min-w-0 flex-1">
-                                        <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600/80 dark:text-orange-400/80">
-                                          {t('quoted')}
-                                        </div>
-                                        <p className="mt-0.5 whitespace-pre-wrap text-xs leading-5 text-stone-700 dark:text-stone-300">
-                                          {quote}
-                                        </p>
-                                      </div>
-                                    </div>
+                                    <blockquote className="mx-4 mt-3 mb-0 border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500">
+                                      <p className="whitespace-pre-wrap text-[13px] leading-5 text-stone-500 dark:text-stone-400">
+                                        {quote}
+                                      </p>
+                                    </blockquote>
                                   ) : null}
                                   {(body || (message.images && message.images.length > 0)) && (
-                                  <div className="px-4 py-3 whitespace-pre-wrap">
+                                  <div className={cn('px-4 py-3 whitespace-pre-wrap', quote && 'pt-2')}>
                                     {message.images && message.images.length > 0 && (
                                       <div className={cn('flex flex-wrap gap-2', body && 'mb-2')}>
                                         {message.images.map((img, idx) => (
@@ -3447,13 +3441,8 @@ export default function ChatContainer() {
                             },
                             blockquote({ children }: any) {
                               return (
-                                <blockquote className="my-3 overflow-hidden rounded-xl border border-orange-200/80 bg-orange-50/70 not-italic dark:border-orange-900/50 dark:bg-orange-950/30">
-                                  <div className="flex items-start gap-2 px-3 py-2.5">
-                                    <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
-                                    <div className="min-w-0 flex-1 text-[13px] leading-6 text-stone-700 dark:text-stone-300 [&_p]:mb-0">
-                                      {children}
-                                    </div>
-                                  </div>
+                                <blockquote className="my-3 border-l-[3px] border-stone-300 pl-3 text-[13px] leading-5 text-stone-500 not-italic dark:border-stone-600 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                                  {children}
                                 </blockquote>
                               );
                             },

@@ -3760,9 +3760,9 @@ export default function ChatContainer() {
               )}
 
               {quotedSelections.length > 0 && (
-                <div className="mx-3 mt-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2 px-0.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600/80 dark:text-orange-400/80">
+                <div className="mx-3 mt-3 space-y-2 border-b border-stone-200/80 pb-3 dark:border-stone-700/80">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">
                       {quotedSelections.length === 1
                         ? t('quoted')
                         : t('quotedCount', { n: quotedSelections.length })}
@@ -3777,26 +3777,46 @@ export default function ChatContainer() {
                       </button>
                     )}
                   </div>
-                  {quotedSelections.map((quote, index) => (
-                    <div
-                      key={`${index}-${quote.slice(0, 24)}`}
-                      className="flex items-start gap-2 rounded-xl border border-orange-200/80 bg-orange-50/70 px-3 py-2 dark:border-orange-900/50 dark:bg-orange-950/30"
-                    >
-                      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
-                      <p className="min-w-0 flex-1 line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-stone-700 dark:text-stone-300">
-                        {quote}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => removeQuotedSelection(index)}
-                        className="shrink-0 rounded-md p-1 text-stone-400 hover:bg-orange-100 hover:text-stone-700 dark:hover:bg-orange-900/40 dark:hover:text-stone-200"
-                        title={t('clearQuote')}
-                        aria-label={t('clearQuote')}
+                  <div className="space-y-2.5">
+                    {quotedSelections.map((quote, index) => (
+                      <div
+                        key={`${index}-${quote.slice(0, 24)}`}
+                        className="group flex items-start gap-1.5"
                       >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
+                        <blockquote className="min-w-0 flex-1 border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500">
+                          <div className="chat-markdown line-clamp-4 text-[13px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkMath, remarkGfm]}
+                              rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                              components={{
+                                p({ children }: any) {
+                                  return <p className="whitespace-pre-wrap">{children}</p>;
+                                },
+                                code({ children }: any) {
+                                  return (
+                                    <code className="rounded bg-stone-200/60 px-1 py-0.5 font-mono text-[12px] dark:bg-stone-800">
+                                      {children}
+                                    </code>
+                                  );
+                                },
+                              }}
+                            >
+                              {prepareChatMarkdown(quote)}
+                            </ReactMarkdown>
+                          </div>
+                        </blockquote>
+                        <button
+                          type="button"
+                          onClick={() => removeQuotedSelection(index)}
+                          className="mt-0.5 shrink-0 rounded-md p-1 text-stone-400 opacity-70 hover:bg-stone-100 hover:text-stone-700 group-hover:opacity-100 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                          title={t('clearQuote')}
+                          aria-label={t('clearQuote')}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

@@ -69,13 +69,15 @@ export function getClockContext(timeZone = 'Asia/Shanghai', now = new Date()): C
   };
 }
 
-export function timeContextSystemPrompt(ctx: ClockContext = getClockContext()): string {
+/** Explain message stamps only — “now” comes from the latest message prefix. */
+export function timeContextSystemPrompt(timeZone = 'Asia/Shanghai'): string {
   return [
-    `Current date/time (authoritative): ${ctx.displayEn} / ${ctx.displayZh} (${ctx.isoDate}, ${ctx.timeZone}).`,
-    `Each user/assistant message is prefixed with its real send time in ${ctx.timeZone} (e.g. [2026-07-26 13:05 +08:00]).`,
-    `Interpret relative time words (最近/最新/本周/today/this week/recent/latest) relative to the Current date/time and each message’s stamp — never relative to your training cutoff.`,
-    `When citing “recent” facts, prefer sources from ${ctx.year} (ideally the last few weeks).`,
-    `If search hits are clearly stale (e.g. 2023–2024 articles when today is ${ctx.isoDate}), say they are outdated and do not present them as this week’s news.`,
+    `Each USER message is prefixed with its real send time in ${timeZone}, e.g. [2026-07-26 13:05 +08:00].`,
+    `Assistant messages are NOT prefixed. Never start your reply with a [YYYY-MM-DD …] timestamp.`,
+    `Treat the latest user stamp as “now”. Interpret 最近/最新/本周/today/this week/recent relative to those stamps — never your training cutoff.`,
+    `Never echo, repeat, or invent those [timestamp] prefixes in your reply — they are metadata for you only, not part of the answer.`,
+    `After web_search, audit each hit’s publishedAt/age/title/snippet dates against the requested window before citing it as recent.`,
+    `Hits without a date that clearly falls in-window must not be presented as “this week”; say evidence is insufficient instead of filling gaps from memory.`,
   ].join(' ');
 }
 
@@ -103,9 +105,61 @@ export function formatMessageStamp(timestampMs: number, timeZone = 'Asia/Shangha
 
 const STAMP_RE = /^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s*/;
 
-/** Strip a leading [timestamp] prefix if present (for search query extraction). */
+/** Strip a leading [timestamp] prefix if present (for search query extraction / leak cleanup). */
 export function stripMessageStamp(text: string): string {
-  return String(text || '').replace(STAMP_RE, '');
+  let out = String(text || '');
+  // Models sometimes echo one stamp at the start of the reply.
+  while (STAMP_RE.test(out.trimStart())) {
+    out = out.trimStart().replace(STAMP_RE, '');
+  }
+  return out;
+}
+
+/**
+ * Streaming helper: hold early chunks until we can strip a leading time stamp
+ * (or decide the reply does not start with one).
+ */
+export function createStampLeakStripper() {
+  let buf = '';
+  let settled = false;
+  return {
+    push(chunk: string): string {
+      if (!chunk) return '';
+      if (settled) return chunk;
+      buf += chunk;
+      const trimmed = buf.trimStart();
+      // Clearly not a stamp — flush as-is.
+      if (trimmed && trimmed[0] !== '[') {
+        settled = true;
+        const out = buf;
+        buf = '';
+        return out;
+      }
+      // Complete stamp present.
+      if (/^\[\d{4}-\d{2}-\d{2}[^\]]*\]/.test(trimmed)) {
+        settled = true;
+        const out = stripMessageStamp(buf);
+        buf = '';
+        return out;
+      }
+      // Still looking like an incomplete `[YYYY-…` stamp — keep buffering.
+      if (/^\[?\d{0,4}-?\d{0,2}-?\d{0,2}[\d\s:+-]*$/.test(trimmed) && buf.length < 48) {
+        return '';
+      }
+      // Doesn't match stamp shape — flush.
+      settled = true;
+      const out = buf;
+      buf = '';
+      return out;
+    },
+    flush(): string {
+      if (settled || !buf) return '';
+      settled = true;
+      const out = stripMessageStamp(buf);
+      buf = '';
+      return out;
+    },
+  };
 }
 
 /**
@@ -142,6 +196,7 @@ export function freshnessForQuery(text: string): Freshness | null {
   if (/今日|今天|今晚|昨晚|yesterday|today|tonight|过去\s*24|last\s*24|past\s*day/i.test(t)) {
     return 'day';
   }
+  // Only explicit week phrasing → 7-day window (do NOT treat bare 最近 as one week).
   if (
     /本周|这周|上周|一周|7\s*天|this\s+week|last\s+week|past\s+week|past\s+7/i.test(t)
   ) {
@@ -151,7 +206,8 @@ export function freshnessForQuery(text: string): Freshness | null {
     return 'month';
   }
   if (/今年|this\s+year|过去\s*一?年|past\s+year/i.test(t)) return 'year';
-  if (/最近|最新|近期|recent|latest|刚|刚刚/.test(t)) return 'week';
+  // Vague “最近/最新/recent”: prefer fresher docs, but not a hard 7-day claim.
+  if (/最近|最新|近期|recent|latest|刚|刚刚/.test(t)) return 'month';
   return null;
 }
 

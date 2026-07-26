@@ -162,6 +162,15 @@
     border-radius: 0.75rem;
   }
 
+  /* Soften KaTeX parse errors (default is piercing #cc0000). */
+  .katex-error {
+    color: var(--chat-math-error, #a8a29e) !important;
+    background: transparent;
+  }
+  .dark .katex-error {
+    color: var(--chat-math-error, #78716c) !important;
+  }
+
   /* 修复 Tailwind Reset 对 KaTeX 边框和线条的破坏 */
   .katex * {
     border-color: currentColor;

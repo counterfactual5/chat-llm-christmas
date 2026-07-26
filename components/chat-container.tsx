@@ -33,44 +33,19 @@ import {
   createToolCallStripper,
   stripFakeToolMarkup,
 } from '@/lib/tool-tags';
+import { stripMessageStamp } from '@/lib/time-context';
+import {
+  markdownFromDomSelection,
+  prepareChatMarkdown,
+} from '@/lib/markdown-math';
 import { useLocale } from '@/lib/i18n';
 import { useTheme } from '@/components/theme-provider';
 
-const MATH_ENVIRONMENTS = [
-  'aligned', 'align', 'alignat', 'gather', 'gathered', 'split', 'multline',
-  'equation', 'eqnarray', 'cases', 'array',
-  'matrix', 'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'smallmatrix',
-].join('|');
-
-function normalizeMathDelimiters(content: string) {
-  // Fenced code must never be rewritten as math, so park it first.
-  const fences: string[] = [];
-  let working = content.replace(/```[\s\S]*?(?:```|$)/g, (block) => {
-    fences.push(block);
-    return `\u0000F${fences.length - 1}\u0000`;
-  });
-
-  working = working
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => `\n$$\n${expression.trim()}\n$$\n`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => `$${expression.trim()}$`);
-
-  // Models often emit bare \begin{aligned}…\end{aligned} with no delimiters.
-  // Wrap those, but leave environments that already sit inside a $$ block alone.
-  const envPattern = new RegExp(
-    `\\\\begin\\{(${MATH_ENVIRONMENTS})\\*?\\}[\\s\\S]*?\\\\end\\{\\1\\*?\\}`,
-    'g',
-  );
-  working = working
-    .split(/(\$\$[\s\S]*?\$\$)/g)
-    .map((segment) =>
-      segment.startsWith('$$')
-        ? segment
-        : segment.replace(envPattern, (match) => `\n$$\n${match}\n$$\n`),
-    )
-    .join('');
-
-  return working.replace(/\u0000F(\d+)\u0000/g, (_, index) => fences[Number(index)]);
-}
+const KATEX_OPTIONS = {
+  throwOnError: false,
+  // Soft muted errors — never KaTeX's default piercing red.
+  errorColor: 'var(--chat-math-error, #a8a29e)',
+} as const;
 
 /** Natural terminators reported by upstream providers.
  *  Note: tool_calls / function_call are NOT natural here — this chat has no
@@ -368,7 +343,7 @@ function displayAssistantParts(message: Message): { content: string; reasoning: 
     ? extractThinkBlocks(message.content)
     : { content: message.content, reasoning: '' };
   return {
-    content: stripFakeToolMarkup(extracted.content),
+    content: stripMessageStamp(stripFakeToolMarkup(extracted.content)),
     reasoning: [message.reasoning, extracted.reasoning].filter(Boolean).join('\n\n'),
   };
 }
@@ -847,9 +822,11 @@ export default function ChatContainer() {
       prev.map((s) => {
         if (s.id !== sessionId) return s;
         if (!s.messages.some((m) => m.id === assistantId)) return s;
-        const msgs = s.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: m.content + chunk, incomplete: true } : m,
-        );
+        const msgs = s.messages.map((m) => {
+          if (m.id !== assistantId) return m;
+          // Drop model-echoed `[2026-…]` prefixes so they never stick in history.
+          return { ...m, content: stripMessageStamp(m.content + chunk), incomplete: true };
+        });
         return { ...s, messages: msgs, updatedAt: Date.now() };
       }),
     );
@@ -1642,7 +1619,7 @@ export default function ChatContainer() {
         hideToolbar();
         return;
       }
-      const text = sel.toString().replace(/\u00a0/g, ' ').trim();
+      const text = markdownFromDomSelection(sel);
       if (!text) {
         hideToolbar();
         return;
@@ -3105,9 +3082,28 @@ export default function ChatContainer() {
                                 <div className="overflow-hidden rounded-2xl rounded-br-md bg-stone-200/80 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100">
                                   {quote ? (
                                     <blockquote className="mx-4 mt-3 mb-0 border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500">
-                                      <p className="whitespace-pre-wrap text-[13px] leading-5 text-stone-500 dark:text-stone-400">
-                                        {quote}
-                                      </p>
+                                      <div className="chat-markdown text-[13px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                                        <ReactMarkdown
+                                          remarkPlugins={[remarkMath, remarkGfm]}
+                                          rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                                          components={{
+                                            p({ children }: any) {
+                                              return (
+                                                <p className="whitespace-pre-wrap">{children}</p>
+                                              );
+                                            },
+                                            code({ children }: any) {
+                                              return (
+                                                <code className="rounded bg-stone-300/50 px-1 py-0.5 font-mono text-[12px] dark:bg-stone-700/60">
+                                                  {children}
+                                                </code>
+                                              );
+                                            },
+                                          }}
+                                        >
+                                          {prepareChatMarkdown(quote)}
+                                        </ReactMarkdown>
+                                      </div>
                                     </blockquote>
                                   ) : null}
                                   {(body || (message.images && message.images.length > 0)) && (
@@ -3415,8 +3411,8 @@ export default function ChatContainer() {
                         )}
                         {visibleContent && !(message.images?.length && visibleContent === 'Generating image…') && (
                         <ReactMarkdown
-                          remarkPlugins={[remarkGfm, remarkMath]}
-                          rehypePlugins={[rehypeKatex]}
+                          remarkPlugins={[remarkMath, remarkGfm]}
+                          rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
                           components={{
                             p({ children }: any) {
                               return <p className="mb-4 leading-7 last:mb-0">{children}</p>;
@@ -3441,7 +3437,7 @@ export default function ChatContainer() {
                             },
                             blockquote({ children }: any) {
                               return (
-                                <blockquote className="my-3 border-l-[3px] border-stone-300 pl-3 text-[13px] leading-5 text-stone-500 not-italic dark:border-stone-600 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                                <blockquote className="my-3 border-l-[3px] border-stone-300 pl-3 text-[13px] leading-5 text-stone-500 not-italic dark:border-stone-600 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5 [&_.katex]:text-[0.95em] [&_.katex-display]:my-2 [&_.katex-error]:text-inherit">
                                   {children}
                                 </blockquote>
                               );
@@ -3483,7 +3479,12 @@ export default function ChatContainer() {
                             pre({ children }: any) { return <>{children}</>; },
                           }}
                         >
-                          {normalizeMathDelimiters(visibleContent)}
+                          {prepareChatMarkdown(visibleContent, {
+                            streaming:
+                              isActiveLoading &&
+                              message.id === lastMessage?.id &&
+                              message.role === 'assistant',
+                          })}
                         </ReactMarkdown>
                         )}
                       </div>

@@ -14,20 +14,21 @@ import {
   type SearchOutcome,
 } from '@/lib/web-search';
 import {
-  englishRecencyQuery,
-  enrichSearchQuery,
-  freshnessForQuery,
-  getClockContext,
+  createStampLeakStripper,
   stampMessageText,
   stripMessageStamp,
   timeContextSystemPrompt,
+  freshnessForQuery,
+  enrichSearchQuery,
+  englishRecencyQuery,
+  getClockContext,
 } from '@/lib/time-context';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
 
-const MAX_TOOL_ROUNDS = 2;
-const TOOLS_ROUND_TIMEOUT_MS = 20_000;
+const MAX_TOOL_ROUNDS = 3;
+const TOOLS_ROUND_TIMEOUT_MS = 45_000;
 
 function jsonError(message: string, status: number = 500) {
   return new Response(JSON.stringify({ error: message }), {
@@ -40,6 +41,22 @@ function wantsThinking(model: string) {
   return (
     /(^|[-_])(r1|reason|thinking|qwq)([-_]|$)/i.test(model) ||
     /deepseek-v4|glm-5|kimi-k2\.|minimax-m3/i.test(model)
+  );
+}
+
+/** Heuristic: user clearly wants a live lookup (used for cursor-* proactive search). */
+function looksLikeSearchRequest(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  return /查一下|帮我查|搜一下|搜索|查找|找一下|最近.*项目|最新|新闻|行情|融资|目前|现在怎么样|现在怎样|如何了|价格|价位|走势|涨跌|多少钱|price|search|look\s*up|find\s+(me\s+)?(the\s+)?(latest|recent)|what.*(happening|new)|how\s+is\s+|google/i.test(
+    t,
+  );
+}
+
+/** Cursor often narrates “I'll search…” instead of emitting tool_calls. */
+function narratesSearchInsteadOfCalling(text: string): boolean {
+  return /先.{0,10}(查|搜)|正在(查|搜|联网)|让我(去)?(查|搜)|我来(查|搜)|I'll (go )?(and )?(search|look\s*up)|let me (search|look\s*up)|searching (the )?(web|internet)/i.test(
+    String(text || ''),
   );
 }
 
@@ -57,15 +74,6 @@ function extractToolCalls(message: any): Array<{
       arguments: String(tc?.function?.arguments || tc?.arguments || '{}'),
     }))
     .filter((tc) => tc.name);
-}
-
-/** User phrasing that usually needs live web results. */
-function looksLikeSearchRequest(text: string): boolean {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  return /查一下|帮我查|搜一下|搜索|查找|找一下|最近.*项目|最新|新闻|行情|price|search|look\s*up|find\s+(me\s+)?(the\s+)?(latest|recent)|what.*(happening|new)|google/i.test(
-    t,
-  );
 }
 
 function lastUserText(messages: any[]): string {
@@ -96,20 +104,27 @@ function parseTimestampMs(value: unknown): number | null {
   return null;
 }
 
-/** Stamp user/assistant turns with real send time for the model (not shown in UI). */
+/** Stamp user turns only; scrub any leaked stamps from assistant history. */
 function withMessageTimestamps(messages: any[]): any[] {
   return messages.map((m) => {
-    if (m?.role !== 'user' && m?.role !== 'assistant') return m;
     const ts = parseTimestampMs(m.timestamp);
+
+    const mapText = (text: string) => {
+      // Never stamp assistant/tool turns — that teaches the model to echo `[2026-…]`.
+      if (m?.role === 'user') return stampMessageText(text, ts);
+      if (m?.role === 'assistant') return stripMessageStamp(text);
+      return text;
+    };
+
     if (typeof m.content === 'string') {
-      return { ...m, content: stampMessageText(m.content, ts) };
+      return { ...m, content: mapText(m.content) };
     }
     if (Array.isArray(m.content)) {
-      let stamped = false;
+      let touched = false;
       const content = m.content.map((part: any) => {
-        if (stamped || part?.type !== 'text' || typeof part.text !== 'string') return part;
-        stamped = true;
-        return { ...part, text: stampMessageText(part.text, ts) };
+        if (touched || part?.type !== 'text' || typeof part.text !== 'string') return part;
+        touched = true;
+        return { ...part, text: mapText(part.text) };
       });
       return { ...m, content };
     }
@@ -195,7 +210,7 @@ export async function POST(req: NextRequest) {
     if (isCursorStyleModel(requestedModel)) {
       systemParts.push(CURSOR_WEB_CHAT_PROMPT);
     }
-    systemParts.push(timeContextSystemPrompt(getClockContext()));
+    systemParts.push(timeContextSystemPrompt());
     systemParts.push(String(systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT);
     if (threadId) {
       systemParts.push(conversationIsolationPrompt(threadId));
@@ -203,10 +218,12 @@ export async function POST(req: NextRequest) {
     if (searchEnabled) {
       systemParts.push(
         [
-          'Live web search may be provided via the web_search tool, or as injected search results in this request.',
-          'When search results are present, use them and cite title + URL. Do not pretend to search or invent sources.',
+          'You have a web_search tool for live web lookup.',
+          'Call web_search when the user asks to look something up, wants recent/current facts, news, prices, or anything that may have changed after your training data.',
+          'Do not pretend to search — if you need the web, call the tool.',
+          'When building a search query for “recent/latest/this week”, include an explicit calendar anchor from the latest message timestamp (year/month or ISO date).',
+          'After tool results arrive, cite title + URL. Do not invent sources.',
           'Do not claim to read local files, run shell, or scan a workspace.',
-          'Relative time in the user question is relative to the Current date/time above.',
         ].join(' '),
       );
     }
@@ -248,7 +265,6 @@ export async function POST(req: NextRequest) {
     });
 
     const userAsk = lastUserText(normalizedMessages);
-    const proactiveSearch = searchEnabled && looksLikeSearchRequest(userAsk);
 
     const workingMessages: any[] = [
       { role: 'system', content: systemParts.join('\n\n---\n\n') },
@@ -264,11 +280,12 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
 
+        // Model owns the query text; if the user asked for “this week” etc., apply provider freshness only.
         const emitSearch = async (query: string): Promise<SearchOutcome> => {
-          const enriched = enrichSearchQuery(query);
-          const freshness = freshnessForQuery(query) || freshnessForQuery(enriched);
-          send({ tool: { status: 'start', name: 'web_search', query: enriched } });
-          const outcome = await webSearch(enriched, { freshness });
+          const q = String(query || '').trim().slice(0, 500);
+          const freshness = freshnessForQuery(userAsk);
+          send({ tool: { status: 'start', name: 'web_search', query: q } });
+          const outcome = await webSearch(q, { freshness });
           send({
             tool: {
               status: 'done',
@@ -284,24 +301,51 @@ export async function POST(req: NextRequest) {
 
         try {
           let usedTools = false;
+          const cursorModel = isCursorStyleModel(requestedModel);
+          // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
+          // For those models, run search server-side when the ask is clearly a lookup.
+          const cursorProactiveSearch =
+            searchEnabled && cursorModel && looksLikeSearchRequest(userAsk);
 
-          // 1) Reliable path for agent models / gateways that ignore tools:
-          //    run search ourselves when the user clearly asks to look something up.
-          if (proactiveSearch) {
-            let outcome = await emitSearch(userAsk.slice(0, 240));
-            // Chinese “最近/加密” queries often miss on Wikipedia; retry a news-oriented English query.
-            if (!outcome.results.length && /加密|币|项目|最近|最新/.test(userAsk)) {
-              const clock = getClockContext();
+          const injectSearchOutcome = async (outcome: SearchOutcome) => {
+            const callId = `proactive_search_${Date.now()}`;
+            workingMessages.push({
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: callId,
+                  type: 'function',
+                  function: {
+                    name: 'web_search',
+                    arguments: JSON.stringify({ query: outcome.query }),
+                  },
+                },
+              ],
+            });
+            workingMessages.push({
+              role: 'tool',
+              tool_call_id: callId,
+              content: formatSearchResultsForModel(outcome, {
+                freshness: freshnessForQuery(userAsk),
+                userAsk,
+              }),
+            });
+            usedTools = true;
+          };
+
+          const runProactiveSearch = async (): Promise<boolean> => {
+            let outcome = await emitSearch(enrichSearchQuery(userAsk.slice(0, 240)));
+            if (!outcome.results.length && /加密|币|项目|融资|最近|最新/.test(userAsk)) {
               outcome = await emitSearch(
                 englishRecencyQuery(
                   'cryptocurrency crypto funding rounds startups',
-                  clock,
-                  freshnessForQuery(userAsk) || 'week',
+                  getClockContext(),
+                  freshnessForQuery(userAsk) || 'month',
                 ),
               );
             }
             if (!outcome.results.length) {
-              // Do NOT let the model invent "search results" from training memory.
               const detail = outcome.error || 'All search providers failed';
               send({
                 content: [
@@ -309,33 +353,27 @@ export async function POST(req: NextRequest) {
                   '',
                   `查询：${outcome.query || userAsk}`,
                   `原因：${detail}`,
-                  '',
-                  '可选下一步：',
-                  '1. 在 Vercel 配置 `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY` / `SERPER_API_KEY` 后重试',
-                  '2. 换一个更具体的英文关键词再问（例如 `new crypto token launches 2026`）',
-                  '3. 如果你有链接或新闻标题，直接贴给我，我可以基于你提供的材料分析',
                 ].join('\n'),
                 finish_reason: 'stop',
               });
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
-              return;
+              return false;
             }
-            workingMessages.push({
-              role: 'system',
-              content: [
-                'Live web search results (already executed):',
-                formatSearchResultsForModel(outcome),
-                '',
-                'RULES: Answer ONLY from these results. Cite markdown links.',
-                'Do NOT invent projects, funding rounds, or URLs not present above.',
-                'Do NOT fall back to training-memory lists when results are present.',
-                'Treat asOf as today. If a hit is clearly older than the user\'s requested window, label it outdated — do not call it “this week”.',
-              ].join('\n'),
-            });
-            usedTools = true;
-          } else if (searchEnabled) {
-            // 2) Optional OpenAI-style tool loop (short timeout — cursor gateways often hang).
+            await injectSearchOutcome(outcome);
+            return true;
+          };
+
+          if (cursorProactiveSearch) {
+            // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
+            // When the ask clearly needs lookup, search server-side first.
+            if (!(await runProactiveSearch())) return;
+          }
+
+          // Always offer the agent tool loop when search is on and we haven't
+          // already injected results. (Previously cursor missed the regex and
+          // skipped this entire branch — then final stream had no tools at all.)
+          if (searchEnabled && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
               let completion: any;
               try {
@@ -374,10 +412,16 @@ export async function POST(req: NextRequest) {
                 '';
 
               if (reasoning) send({ reasoning: String(reasoning) });
-              if (content) send({ content: String(content) });
 
               if (!toolCalls.length) {
+                // Cursor: narrated “I'll search” with no tool_calls → force real search.
+                if (cursorModel && content && narratesSearchInsteadOfCalling(content)) {
+                  send({ reasoning: String(content) });
+                  if (!(await runProactiveSearch())) return;
+                  break;
+                }
                 // Plain answer without tools — finish (avoid a second stream that can hang).
+                if (content) send({ content: stripMessageStamp(String(content)) });
                 if (content || reasoning) {
                   send({ finish_reason: choice?.finish_reason || 'stop' });
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
@@ -386,6 +430,8 @@ export async function POST(req: NextRequest) {
                 }
                 break;
               }
+
+              if (content) send({ content: stripMessageStamp(String(content)) });
 
               usedTools = true;
               workingMessages.push({
@@ -412,7 +458,10 @@ export async function POST(req: NextRequest) {
                 workingMessages.push({
                   role: 'tool',
                   tool_call_id: tc.id,
-                  content: formatSearchResultsForModel(outcome),
+                  content: formatSearchResultsForModel(outcome, {
+                    freshness: freshnessForQuery(userAsk),
+                    userAsk,
+                  }),
                 });
               }
             }
@@ -423,8 +472,13 @@ export async function POST(req: NextRequest) {
                 ...workingMessages,
                 {
                   role: 'user',
-                  content:
-                    'Using ONLY the search results above, write the final answer now. Cite sources with markdown links. If a claim is not in the results, omit it. Do not invent projects or URLs. Do not call tools. Do not say you are still searching.',
+                  content: [
+                    'Write the final answer now using ONLY the tool results above.',
+                    'The previous tool message contains the search hits — use them. Do not say tools returned nothing when results.length > 0.',
+                    'Follow strictWeek / requestedWindow / staleHint in that payload.',
+                    'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
+                    'Cite markdown links. Do not call tools. Do not say you are still searching.',
+                  ].join(' '),
                 },
               ]
             : workingMessages;
@@ -438,6 +492,7 @@ export async function POST(req: NextRequest) {
           } as any);
 
           let sawText = false;
+          const stampStripper = createStampLeakStripper();
           for await (const chunk of final as any) {
             const choice = chunk?.choices?.[0];
             const delta = choice?.delta || {};
@@ -466,6 +521,12 @@ export async function POST(req: NextRequest) {
               delta.thinking_content ||
               '';
 
+            if (content) content = stampStripper.push(content);
+            if (finish_reason) {
+              const rest = stampStripper.flush();
+              if (rest) content = (content || '') + rest;
+            }
+
             if (content) sawText = true;
             if (reasoning) sawText = true;
             if (content || reasoning || finish_reason) {
@@ -474,6 +535,13 @@ export async function POST(req: NextRequest) {
                 reasoning: reasoning || undefined,
                 finish_reason,
               });
+            }
+          }
+          {
+            const rest = stampStripper.flush();
+            if (rest) {
+              sawText = true;
+              send({ content: rest });
             }
           }
 

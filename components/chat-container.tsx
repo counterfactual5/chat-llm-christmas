@@ -36,6 +36,8 @@ import {
 import { stripMessageStamp } from '@/lib/time-context';
 import {
   compactQuoteMath,
+  hasUnclosedDisplayMath,
+  looksLikeTruncatedMath,
   markdownFromDomSelection,
   prepareChatMarkdown,
 } from '@/lib/markdown-math';
@@ -88,8 +90,15 @@ function analyzeTruncation(
   if ((text.match(/```/g) || []).length % 2 === 1) {
     return { truncated: true, reason: 'Unclosed code block' };
   }
-  if ((text.match(/\$\$/g) || []).length % 2 === 1) {
-    return { truncated: true, reason: 'Unclosed math block' };
+  // Odd $$ is often a false positive when the model *talks about* LaTeX
+  // (“同一个 $$ 块”). Only Continue when the tail still looks like cut-off math,
+  // or the provider did not report a clean natural stop.
+  if (hasUnclosedDisplayMath(text)) {
+    const naturalStop = !finishReason || NATURAL_STOPS.has(finishReason);
+    const endsLikeSentence = /[.!?。！？…]\s*$/.test(text);
+    if (looksLikeTruncatedMath(text) || !naturalStop || !endsLikeSentence) {
+      return { truncated: true, reason: 'Unclosed math block' };
+    }
   }
   // Prefer analyzing the visible answer (think tags stripped); unclosed think
   // means the model never finished its private reasoning block.

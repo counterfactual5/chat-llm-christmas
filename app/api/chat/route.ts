@@ -7,12 +7,7 @@ import {
   conversationIsolationPrompt,
   isCursorStyleModel,
 } from '@/lib/model-specs';
-import {
-  WEB_SEARCH_TOOL,
-  formatSearchResultsForModel,
-  webSearch,
-  type SearchOutcome,
-} from '@/lib/web-search';
+import type { SearchOutcome } from '@/lib/web-search';
 import {
   createStampLeakStripper,
   stampMessageText,
@@ -23,6 +18,15 @@ import {
   englishRecencyQuery,
   getClockContext,
 } from '@/lib/time-context';
+import {
+  executeRegisteredTool,
+  formatWebSearchToolContent,
+  openaiToolDefinitions,
+  resolveEnabledTools,
+  runWebSearch,
+  toolSystemPrompt,
+  type ToolRuntimeContext,
+} from '@/lib/tools';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -146,18 +150,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
-function parseSearchQuery(rawArgs: string, fallback: string): string {
-  try {
-    const args = JSON.parse(rawArgs || '{}');
-    const q = String(args?.query || args?.q || '').trim();
-    if (q) return q;
-  } catch {
-    const bare = rawArgs.replace(/^["']|["']$/g, '').trim();
-    if (bare) return bare;
-  }
-  return fallback.slice(0, 200);
-}
-
 export async function POST(req: NextRequest) {
   try {
     const {
@@ -205,6 +197,9 @@ export async function POST(req: NextRequest) {
     }
 
     const openai = new OpenAI({ apiKey, baseURL });
+    const enabledTools = resolveEnabledTools({ searchEnabled });
+    const toolDefs = openaiToolDefinitions(enabledTools);
+    const toolsGuidance = toolSystemPrompt(enabledTools);
 
     const systemParts: string[] = [];
     if (isCursorStyleModel(requestedModel)) {
@@ -215,17 +210,8 @@ export async function POST(req: NextRequest) {
     if (threadId) {
       systemParts.push(conversationIsolationPrompt(threadId));
     }
-    if (searchEnabled) {
-      systemParts.push(
-        [
-          'You have a web_search tool for live web lookup.',
-          'Call web_search when the user asks to look something up, wants recent/current facts, news, prices, or anything that may have changed after your training data.',
-          'Do not pretend to search — if you need the web, call the tool.',
-          'When building a search query for “recent/latest/this week”, include an explicit calendar anchor from the latest message timestamp (year/month or ISO date).',
-          'After tool results arrive, cite title + URL. Do not invent sources.',
-          'Do not claim to read local files, run shell, or scan a workspace.',
-        ].join(' '),
-      );
+    if (toolsGuidance) {
+      systemParts.push(toolsGuidance);
     }
     if (Array.isArray(skills)) {
       for (const skill of skills) {
@@ -279,25 +265,7 @@ export async function POST(req: NextRequest) {
         const send = (payload: Record<string, unknown>) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
-
-        // Model owns the query text; if the user asked for “this week” etc., apply provider freshness only.
-        const emitSearch = async (query: string): Promise<SearchOutcome> => {
-          const q = String(query || '').trim().slice(0, 500);
-          const freshness = freshnessForQuery(userAsk);
-          send({ tool: { status: 'start', name: 'web_search', query: q } });
-          const outcome = await webSearch(q, { freshness });
-          send({
-            tool: {
-              status: 'done',
-              name: 'web_search',
-              query: outcome.query,
-              provider: outcome.provider,
-              results: outcome.results,
-              error: outcome.error,
-            },
-          });
-          return outcome;
-        };
+        const toolCtx: ToolRuntimeContext = { userAsk, send };
 
         try {
           let usedTools = false;
@@ -326,23 +294,21 @@ export async function POST(req: NextRequest) {
             workingMessages.push({
               role: 'tool',
               tool_call_id: callId,
-              content: formatSearchResultsForModel(outcome, {
-                freshness: freshnessForQuery(userAsk),
-                userAsk,
-              }),
+              content: formatWebSearchToolContent(outcome, userAsk),
             });
             usedTools = true;
           };
 
           const runProactiveSearch = async (): Promise<boolean> => {
-            let outcome = await emitSearch(enrichSearchQuery(userAsk.slice(0, 240)));
+            let outcome = await runWebSearch(enrichSearchQuery(userAsk.slice(0, 240)), toolCtx);
             if (!outcome.results.length && /加密|币|项目|融资|最近|最新/.test(userAsk)) {
-              outcome = await emitSearch(
+              outcome = await runWebSearch(
                 englishRecencyQuery(
                   'cryptocurrency crypto funding rounds startups',
                   getClockContext(),
                   freshnessForQuery(userAsk) || 'month',
                 ),
+                toolCtx,
               );
             }
             if (!outcome.results.length) {
@@ -370,10 +336,8 @@ export async function POST(req: NextRequest) {
             if (!(await runProactiveSearch())) return;
           }
 
-          // Always offer the agent tool loop when search is on and we haven't
-          // already injected results. (Previously cursor missed the regex and
-          // skipped this entire branch — then final stream had no tools at all.)
-          if (searchEnabled && !usedTools) {
+          // Generic tool loop — tools come from the registry (web_search today, MCP later).
+          if (toolDefs.length > 0 && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
               let completion: any;
               try {
@@ -383,7 +347,7 @@ export async function POST(req: NextRequest) {
                     temperature,
                     stream: false,
                     messages: workingMessages,
-                    tools: [WEB_SEARCH_TOOL],
+                    tools: toolDefs,
                     tool_choice: 'auto',
                     ...(thinking ? { enable_thinking: true } : {}),
                   } as any),
@@ -415,7 +379,12 @@ export async function POST(req: NextRequest) {
 
               if (!toolCalls.length) {
                 // Cursor: narrated “I'll search” with no tool_calls → force real search.
-                if (cursorModel && content && narratesSearchInsteadOfCalling(content)) {
+                if (
+                  cursorModel &&
+                  searchEnabled &&
+                  content &&
+                  narratesSearchInsteadOfCalling(content)
+                ) {
                   send({ reasoning: String(content) });
                   if (!(await runProactiveSearch())) return;
                   break;
@@ -445,23 +414,20 @@ export async function POST(req: NextRequest) {
               });
 
               for (const tc of toolCalls) {
-                if (tc.name !== 'web_search') {
-                  workingMessages.push({
-                    role: 'tool',
-                    tool_call_id: tc.id,
-                    content: JSON.stringify({ ok: false, error: `Unknown tool: ${tc.name}` }),
-                  });
-                  continue;
-                }
-                const query = parseSearchQuery(tc.arguments, userAsk || content);
-                const outcome = await emitSearch(query);
+                const result = await executeRegisteredTool(
+                  enabledTools,
+                  {
+                    name: tc.name,
+                    callId: tc.id,
+                    rawArguments: tc.arguments,
+                    fallbackQuery: userAsk || content,
+                  },
+                  toolCtx,
+                );
                 workingMessages.push({
                   role: 'tool',
                   tool_call_id: tc.id,
-                  content: formatSearchResultsForModel(outcome, {
-                    freshness: freshnessForQuery(userAsk),
-                    userAsk,
-                  }),
+                  content: result.content,
                 });
               }
             }

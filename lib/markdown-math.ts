@@ -144,8 +144,15 @@ export function escapeIncompleteInlineMath(text: string): string {
 export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
   let out = normalizeMathDelimiters(String(content || ''));
   out = liftQuotedMathBlocks(out);
-  if (opts?.streaming) {
+
+  // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
+  // rest of the message into one giant math/“quote-looking” block (even after
+  // the stream has ended and Continue is showing “Unclosed math block”).
+  const oddBlockMath = (out.match(/\$\$/g) || []).length % 2 === 1;
+  if (opts?.streaming || oddBlockMath) {
     out = escapeIncompleteBlockMath(out);
+  }
+  if (opts?.streaming) {
     out = escapeIncompleteInlineMath(out);
   }
   return out;

@@ -2741,7 +2741,7 @@ export default function ChatContainer() {
                   <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
                     <Sparkles className="h-4 w-4" />
                   </div>
-                  llm.christmas Chat
+                  Christmas Chat
                 </div>
               </div>
 

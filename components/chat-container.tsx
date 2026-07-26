@@ -450,8 +450,8 @@ export default function ChatContainer() {
   /** Explicit open/closed overrides for reasoning panels (message id → open). */
   const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({});
   const [toolRunOpen, setToolRunOpen] = useState<Record<string, boolean>>({});
-  /** Text quoted from a message selection into the composer. */
-  const [quotedSelection, setQuotedSelection] = useState('');
+  /** Text snippets quoted from message selection into the composer (multi-select). */
+  const [quotedSelections, setQuotedSelections] = useState<string[]>([]);
   const quoteToolbarWrapRef = useRef<HTMLDivElement>(null);
   const quoteToolbarTextRef = useRef('');
 
@@ -726,7 +726,7 @@ export default function ChatContainer() {
   const createNewSession = () => {
     // Switch to a blank composer. The draft is kept in memory only and is
     // omitted from the sidebar until the first message lands.
-    setQuotedSelection('');
+    setQuotedSelections([]);
     setSessions((prev) => {
       const emptyDraft = prev.find((session) => session.messages.length === 0);
       if (emptyDraft) {
@@ -1680,10 +1680,18 @@ export default function ChatContainer() {
     };
   }, []);
 
+  const MAX_QUOTED_SELECTIONS = 8;
+
   const quoteSelectedText = (text: string) => {
     const clean = text.trim();
     if (!clean) return;
-    setQuotedSelection(clean);
+    setQuotedSelections((prev) => {
+      if (prev.some((q) => q === clean)) return prev;
+      if (prev.length >= MAX_QUOTED_SELECTIONS) {
+        return [...prev.slice(1), clean];
+      }
+      return [...prev, clean];
+    });
     quoteToolbarTextRef.current = '';
     const el = quoteToolbarWrapRef.current;
     if (el) el.style.display = 'none';
@@ -1691,39 +1699,67 @@ export default function ChatContainer() {
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
-  const formatQuotedMessage = (userText: string, quote: string) => {
-    const q = quote.trim();
-    const body = userText.trim();
-    if (!q) return body;
-    const block = q
-      .split('\n')
-      .map((line) => `> ${line}`)
-      .join('\n');
-    return body ? `${block}\n\n${body}` : block;
+  const removeQuotedSelection = (index: number) => {
+    setQuotedSelections((prev) => prev.filter((_, i) => i !== index));
   };
 
-  /** Split a sent user message that was built by formatQuotedMessage into quote + body. */
-  const parseQuotedUserMessage = (content: string): { quote: string; body: string } => {
+  /** Encode one or more quotes as Markdown blockquotes ahead of the user body. */
+  const formatQuotedMessage = (userText: string, quotes: string | string[]) => {
+    const list = (Array.isArray(quotes) ? quotes : [quotes])
+      .map((q) => q.trim())
+      .filter(Boolean);
+    const body = userText.trim();
+    if (!list.length) return body;
+    const blocks = list
+      .map((q) =>
+        q
+          .split('\n')
+          .map((line) => `> ${line}`)
+          .join('\n'),
+      )
+      .join('\n\n');
+    return body ? `${blocks}\n\n${body}` : blocks;
+  };
+
+  /** Split a sent user message that was built by formatQuotedMessage into quotes + body. */
+  const parseQuotedUserMessage = (content: string): { quotes: string[]; body: string } => {
     const text = String(content || '');
-    if (!text.startsWith('>')) return { quote: '', body: text };
+    if (!text.startsWith('>')) return { quotes: [], body: text };
     const lines = text.split('\n');
-    const quoteLines: string[] = [];
+    const quotes: string[] = [];
+    let current: string[] = [];
     let i = 0;
+
+    const flush = () => {
+      const q = current.join('\n').trim();
+      if (q) quotes.push(q);
+      current = [];
+    };
+
     for (; i < lines.length; i++) {
       const line = lines[i];
-      if (line.startsWith('> ')) {
-        quoteLines.push(line.slice(2));
+      if (line.startsWith('> ') || line === '>') {
+        current.push(line.startsWith('> ') ? line.slice(2) : '');
         continue;
       }
-      if (line === '>') {
-        quoteLines.push('');
-        continue;
+      if (line.trim() === '') {
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() === '') j += 1;
+        if (j < lines.length && (lines[j].startsWith('> ') || lines[j] === '>')) {
+          flush();
+          i = j - 1;
+          continue;
+        }
+        flush();
+        i = j;
+        break;
       }
+      flush();
       break;
     }
-    while (i < lines.length && lines[i].trim() === '') i++;
+    while (i < lines.length && lines[i].trim() === '') i += 1;
     return {
-      quote: quoteLines.join('\n').trim(),
+      quotes,
       body: lines.slice(i).join('\n'),
     };
   };
@@ -1794,8 +1830,8 @@ export default function ChatContainer() {
   const enqueueOrSubmit = (overrideInput?: string, baseMessagesOverride?: Message[]) => {
     const fromComposer = overrideInput == null;
     const raw = overrideInput ?? input;
-    const quote = fromComposer ? quotedSelection : '';
-    const textToSend = formatQuotedMessage(raw, quote);
+    const quotes = fromComposer ? quotedSelections : [];
+    const textToSend = formatQuotedMessage(raw, quotes);
     const hasPending = fromComposer && attachments.length > 0;
     if (!textToSend.trim() && !hasPending) return;
     const sessionId = activeSessionId;
@@ -1823,11 +1859,11 @@ export default function ChatContainer() {
         },
       ]);
       setInput('');
-      if (fromComposer) setQuotedSelection('');
+      if (fromComposer) setQuotedSelections([]);
       return;
     }
 
-    if (fromComposer) setQuotedSelection('');
+    if (fromComposer) setQuotedSelections([]);
     handleSubmit(textToSend, baseMessagesOverride, false, sessionId);
   };
 
@@ -2742,7 +2778,7 @@ export default function ChatContainer() {
                     <div
                       onClick={() => {
                         setActiveSessionId(session.id);
-                        setQuotedSelection('');
+                        setQuotedSelections([]);
                         setSessionMenuOpenId(null);
                       }}
                       className={cn(
@@ -3073,41 +3109,48 @@ export default function ChatContainer() {
                         ) : (
                           <>
                             {(() => {
-                              const { quote, body } = parseQuotedUserMessage(
+                              const { quotes, body } = parseQuotedUserMessage(
                                 message.content && message.content !== '(image)'
                                   ? message.content
                                   : '',
                               );
                               return (
                                 <div className="overflow-hidden rounded-2xl rounded-br-md bg-stone-200/80 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100">
-                                  {quote ? (
-                                    <blockquote className="mx-4 mt-3 mb-0 border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500">
-                                      <div className="chat-markdown text-[13px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
-                                        <ReactMarkdown
-                                          remarkPlugins={[remarkMath, remarkGfm]}
-                                          rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                                          components={{
-                                            p({ children }: any) {
-                                              return (
-                                                <p className="whitespace-pre-wrap">{children}</p>
-                                              );
-                                            },
-                                            code({ children }: any) {
-                                              return (
-                                                <code className="rounded bg-stone-300/50 px-1 py-0.5 font-mono text-[12px] dark:bg-stone-700/60">
-                                                  {children}
-                                                </code>
-                                              );
-                                            },
-                                          }}
+                                  {quotes.length > 0 ? (
+                                    <div className="mx-4 mt-3 mb-0 space-y-2.5">
+                                      {quotes.map((quote, qi) => (
+                                        <blockquote
+                                          key={qi}
+                                          className="border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500"
                                         >
-                                          {prepareChatMarkdown(quote)}
-                                        </ReactMarkdown>
-                                      </div>
-                                    </blockquote>
+                                          <div className="chat-markdown text-[13px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                                            <ReactMarkdown
+                                              remarkPlugins={[remarkMath, remarkGfm]}
+                                              rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                                              components={{
+                                                p({ children }: any) {
+                                                  return (
+                                                    <p className="whitespace-pre-wrap">{children}</p>
+                                                  );
+                                                },
+                                                code({ children }: any) {
+                                                  return (
+                                                    <code className="rounded bg-stone-300/50 px-1 py-0.5 font-mono text-[12px] dark:bg-stone-700/60">
+                                                      {children}
+                                                    </code>
+                                                  );
+                                                },
+                                              }}
+                                            >
+                                              {prepareChatMarkdown(quote)}
+                                            </ReactMarkdown>
+                                          </div>
+                                        </blockquote>
+                                      ))}
+                                    </div>
                                   ) : null}
                                   {(body || (message.images && message.images.length > 0)) && (
-                                  <div className={cn('px-4 py-3 whitespace-pre-wrap', quote && 'pt-2')}>
+                                  <div className={cn('px-4 py-3 whitespace-pre-wrap', quotes.length > 0 && 'pt-2')}>
                                     {message.images && message.images.length > 0 && (
                                       <div className={cn('flex flex-wrap gap-2', body && 'mb-2')}>
                                         {message.images.map((img, idx) => (
@@ -3716,26 +3759,44 @@ export default function ChatContainer() {
                 </div>
               )}
 
-              {quotedSelection && (
-                <div className="mx-3 mt-3 flex items-start gap-2 rounded-xl border border-orange-200/80 bg-orange-50/70 px-3 py-2 dark:border-orange-900/50 dark:bg-orange-950/30">
-                  <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
-                  <div className="min-w-0 flex-1">
+              {quotedSelections.length > 0 && (
+                <div className="mx-3 mt-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 px-0.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600/80 dark:text-orange-400/80">
-                      {t('quoted')}
+                      {quotedSelections.length === 1
+                        ? t('quoted')
+                        : t('quotedCount', { n: quotedSelections.length })}
                     </div>
-                    <p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-stone-700 dark:text-stone-300">
-                      {quotedSelection}
-                    </p>
+                    {quotedSelections.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setQuotedSelections([])}
+                        className="text-[10px] font-medium text-stone-400 hover:text-stone-700 dark:hover:text-stone-200"
+                      >
+                        {t('clearAllQuotes')}
+                      </button>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setQuotedSelection('')}
-                    className="shrink-0 rounded-md p-1 text-stone-400 hover:bg-orange-100 hover:text-stone-700 dark:hover:bg-orange-900/40 dark:hover:text-stone-200"
-                    title={t('clearQuote')}
-                    aria-label={t('clearQuote')}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  {quotedSelections.map((quote, index) => (
+                    <div
+                      key={`${index}-${quote.slice(0, 24)}`}
+                      className="flex items-start gap-2 rounded-xl border border-orange-200/80 bg-orange-50/70 px-3 py-2 dark:border-orange-900/50 dark:bg-orange-950/30"
+                    >
+                      <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-500" />
+                      <p className="min-w-0 flex-1 line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-stone-700 dark:text-stone-300">
+                        {quote}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => removeQuotedSelection(index)}
+                        className="shrink-0 rounded-md p-1 text-stone-400 hover:bg-orange-100 hover:text-stone-700 dark:hover:bg-orange-900/40 dark:hover:text-stone-200"
+                        title={t('clearQuote')}
+                        aria-label={t('clearQuote')}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -4059,7 +4120,7 @@ export default function ChatContainer() {
                   ) : (
                     <Button 
                       onClick={() => enqueueOrSubmit()}
-                      disabled={(!input.trim() && !quotedSelection.trim() && attachments.length === 0) || isCompacting}
+                      disabled={(!input.trim() && quotedSelections.length === 0 && attachments.length === 0) || isCompacting}
                       size="icon" 
                       title="Send"
                       className={cn(

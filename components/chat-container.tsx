@@ -357,7 +357,8 @@ interface ModelOption {
 }
 
 function messagePlainText(message: Message): string {
-  return message.content || '';
+  // Count visible turn text (answer + thinking) so Context used tracks rollback.
+  return [message.content, message.reasoning].filter(Boolean).join('\n');
 }
 
 /** Strip leaked <think> / fake tool tags for display / export; merge into reasoning panel. */
@@ -778,6 +779,7 @@ export default function ChatContainer() {
   const updateSession = (sessionId: string, newMessages: Message[], title?: string) => {
     setSessions((prev) => {
       const exists = prev.some((s) => s.id === sessionId);
+      let next: ChatSession[];
       if (!exists) {
         // First message on a missing draft — materialize the session now.
         const created: ChatSession = {
@@ -788,10 +790,10 @@ export default function ChatContainer() {
           webSources: collectWebSourcesFromMessages(newMessages),
         };
         if (!sessionId) setActiveSessionId(created.id);
-        return [created, ...prev.filter((s) => s.messages.length > 0)];
-      }
-      return prev.map((s) => {
-        if (s.id === sessionId) {
+        next = [created, ...prev.filter((s) => s.messages.length > 0)];
+      } else {
+        next = prev.map((s) => {
+          if (s.id !== sessionId) return s;
           return {
             ...s,
             messages: newMessages,
@@ -800,9 +802,12 @@ export default function ChatContainer() {
             // Keep Material in sync with history (edit/resend truncates prior tool hits).
             webSources: collectWebSourcesFromMessages(newMessages),
           };
-        }
-        return s;
-      });
+        });
+      }
+      // Same-tick readers (streamChatResponse / queue) must see truncated history
+      // before React paints — otherwise rollback looks like only Material changed.
+      sessionsRef.current = next;
+      return next;
     });
   };
 
@@ -993,9 +998,13 @@ export default function ChatContainer() {
     initialContent = '',
     /** Inserted before the first resumed chunk to keep Markdown structure intact. */
     seamPrefix = '',
+    /** Prefer sources from the truncated thread (edit/resend), not a stale ref. */
+    webSourcesOverride?: WebSearchSource[],
   ) => {
     const sessionSources =
-      sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [];
+      webSourcesOverride ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.webSources ??
+      [];
     const combinedReference = [
       String(referenceText || '').trim(),
       formatWebSourcesForReference(sessionSources),
@@ -2120,6 +2129,28 @@ export default function ChatContainer() {
         + ((textToSend.length > 30) ? '...' : '');
     }
 
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: fullContent || (pendingImages.length ? '(image)' : ''),
+      timestamp: Date.now(),
+      images: pendingImages.map((a) => ({ url: a.dataUrl!, name: a.name })),
+    };
+
+    const historySnapshot = sessionsRef.current.find((s) => s.id === sessionId);
+
+    // Truncate the thread in the UI immediately (edit/resend), so Messages /
+    // Context used / Material update before any await (compact / network).
+    let newMessages = [...baseMessages, userMessage];
+    updateSession(sessionId, newMessages, newTitle);
+    if (sessionId === activeSessionId) {
+      setInput('');
+      attachments.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+      setAttachments([]);
+    }
+
     // Lock the session before await compact so the queue cannot start a second stream.
     if (!opts?.alreadyLoading) beginLoading(sessionId);
 
@@ -2127,6 +2158,15 @@ export default function ChatContainer() {
     // usableLimit already follows selectedModel (context − output reserve).
     const estimateForSend = (history: Message[], nextUserText: string) => {
       // fullContent already embeds pending text files — do not also add files.
+      // Reference must follow the truncated thread, not the pre-edit sidebar snapshot.
+      const threadReference = estimateTokensFromText(
+        [
+          String(referenceText || '').trim(),
+          formatWebSourcesForReference(collectWebSourcesFromMessages(history)),
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      );
       const historyText = history.reduce(
         (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
         0,
@@ -2138,7 +2178,7 @@ export default function ChatContainer() {
       return (
         contextBreakdown.system +
         contextBreakdown.skills +
-        contextBreakdown.reference +
+        threadReference +
         historyText +
         historyImages +
         pendingImages.length * 1000 +
@@ -2146,19 +2186,28 @@ export default function ChatContainer() {
       );
     };
 
+    const restoreHistoryIfNeeded = () => {
+      if (!historySnapshot || !baseMessagesOverride) return;
+      updateSession(sessionId, historySnapshot.messages, historySnapshot.title);
+    };
+
     if (usableLimit != null) {
       let projected = estimateForSend(baseMessages, fullContent);
       if (projected > usableLimit * 0.9) {
         const compacted = await runCompact(baseMessages);
         if (!compacted) {
+          restoreHistoryIfNeeded();
           setAttachError('Context is full. Compact failed — open a new chat or remove attachments.');
           if (!opts?.alreadyLoading) endLoading(sessionId);
           return false;
         }
         baseMessages = compacted;
+        newMessages = [...baseMessages, userMessage];
+        updateSession(sessionId, newMessages, newTitle);
         projected = estimateForSend(baseMessages, fullContent);
         // Still over after compact (huge attachments / short thread): refuse rather than 413 upstream.
         if (projected > usableLimit) {
+          restoreHistoryIfNeeded();
           setAttachError(
             `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
           );
@@ -2168,23 +2217,6 @@ export default function ChatContainer() {
       }
     }
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: fullContent || (pendingImages.length ? '(image)' : ''),
-      timestamp: Date.now(),
-      images: pendingImages.map((a) => ({ url: a.dataUrl!, name: a.name })),
-    };
-
-    const newMessages = [...baseMessages, userMessage];
-    updateSession(sessionId, newMessages, newTitle);
-    if (sessionId === activeSessionId) {
-      setInput('');
-      attachments.forEach((a) => {
-        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-      });
-      setAttachments([]);
-    }
     setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
 
     const assistantMessage: Message = {
@@ -2198,6 +2230,7 @@ export default function ChatContainer() {
 
     const controller = new AbortController();
     abortControllersRef.current.set(sessionId, controller);
+    const threadSources = collectWebSourcesFromMessages(newMessages);
 
     try {
       await streamChatResponse(
@@ -2205,6 +2238,9 @@ export default function ChatContainer() {
         toApiMessages(newMessages),
         assistantMessage.id,
         controller.signal,
+        '',
+        '',
+        threadSources,
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -2452,19 +2488,25 @@ export default function ChatContainer() {
   const saveEditedMessage = async (messageId: string) => {
     const content = editingMessageContent.trim();
     if (!content || isActiveLoading) return;
-    const index = messages.findIndex((message) => message.id === messageId);
+    const sessionId = activeSessionId;
+    const sessionMsgs =
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages || messages;
+    const index = sessionMsgs.findIndex((message) => message.id === messageId);
     if (index < 0) return;
-    const priorMessages = messages.slice(0, index);
+    const priorMessages = sessionMsgs.slice(0, index);
     setEditingMessageId(null);
     setEditingMessageContent('');
-    
+
+    // Truncate immediately so sidebar Messages / Context used shrink before resend.
+    updateSession(sessionId, [...priorMessages, { ...sessionMsgs[index], content }]);
+
     if (isActiveLoading) {
       stopGenerating();
       setTimeout(() => {
-        handleSubmit(content, priorMessages, false, activeSessionId);
+        handleSubmit(content, priorMessages, false, sessionId);
       }, 50);
     } else {
-      await handleSubmit(content, priorMessages, false, activeSessionId);
+      await handleSubmit(content, priorMessages, false, sessionId);
     }
   };
 

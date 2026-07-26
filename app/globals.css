@@ -141,6 +141,15 @@
     white-space: nowrap;
   }
 
+  /* Compact quotes (composer chips + user bubble) — kill display-math air. */
+  .chat-quote .katex-display {
+    margin: 0.15rem 0;
+    padding: 0;
+  }
+  .chat-quote .katex {
+    font-size: 0.95em;
+  }
+
   .chat-markdown a {
     color: #ea580c;
     text-decoration: underline;

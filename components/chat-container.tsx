@@ -35,6 +35,7 @@ import {
 } from '@/lib/tool-tags';
 import { stripMessageStamp } from '@/lib/time-context';
 import {
+  compactQuoteMath,
   markdownFromDomSelection,
   prepareChatMarkdown,
 } from '@/lib/markdown-math';
@@ -3117,13 +3118,13 @@ export default function ChatContainer() {
                               return (
                                 <div className="overflow-hidden rounded-2xl rounded-br-md bg-stone-200/80 text-[15px] leading-7 text-stone-900 dark:bg-stone-800 dark:text-stone-100">
                                   {quotes.length > 0 ? (
-                                    <div className="mx-4 mt-3 mb-0 space-y-2.5">
+                                    <div className="mx-3.5 mt-2.5 mb-0 space-y-1">
                                       {quotes.map((quote, qi) => (
                                         <blockquote
                                           key={qi}
-                                          className="border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500"
+                                          className="border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500"
                                         >
-                                          <div className="chat-markdown text-[13px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                                          <div className="chat-markdown chat-quote text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4">
                                             <ReactMarkdown
                                               remarkPlugins={[remarkMath, remarkGfm]}
                                               rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
@@ -3135,14 +3136,14 @@ export default function ChatContainer() {
                                                 },
                                                 code({ children }: any) {
                                                   return (
-                                                    <code className="rounded bg-stone-300/50 px-1 py-0.5 font-mono text-[12px] dark:bg-stone-700/60">
+                                                    <code className="rounded bg-stone-300/50 px-1 py-0.5 font-mono text-[11px] dark:bg-stone-700/60">
                                                       {children}
                                                     </code>
                                                   );
                                                 },
                                               }}
                                             >
-                                              {prepareChatMarkdown(quote)}
+                                              {prepareChatMarkdown(compactQuoteMath(quote))}
                                             </ReactMarkdown>
                                           </div>
                                         </blockquote>
@@ -3150,7 +3151,7 @@ export default function ChatContainer() {
                                     </div>
                                   ) : null}
                                   {(body || (message.images && message.images.length > 0)) && (
-                                  <div className={cn('px-4 py-3 whitespace-pre-wrap', quotes.length > 0 && 'pt-2')}>
+                                  <div className={cn('px-4 py-2.5 whitespace-pre-wrap', quotes.length > 0 && 'pt-1.5')}>
                                     {message.images && message.images.length > 0 && (
                                       <div className={cn('flex flex-wrap gap-2', body && 'mb-2')}>
                                         {message.images.map((img, idx) => (

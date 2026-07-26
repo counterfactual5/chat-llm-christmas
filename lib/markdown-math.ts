@@ -151,6 +151,19 @@ export function prepareChatMarkdown(content: string, opts?: { streaming?: boolea
   return out;
 }
 
+/**
+ * Shrink quote previews: turn lone $$…$$ formulas into inline $…$
+ * (keeps \begin{…} display blocks). Cuts KaTeX display margins in quote chips.
+ */
+export function compactQuoteMath(content: string): string {
+  return String(content || '').replace(/\$\$([\s\S]*?)\$\$/g, (full, expr) => {
+    const inner = String(expr).trim();
+    if (!inner) return full;
+    if (/\\begin\{/.test(inner)) return `\n$$\n${inner}\n$$\n`;
+    return `$${inner.replace(/\s*\n\s*/g, ' ')}$`;
+  });
+}
+
 /** Recover TeX source from a KaTeX DOM node (annotation / MathML). */
 export function texFromKatexElement(el: Element): string | null {
   const ann =

@@ -3761,7 +3761,7 @@ export default function ChatContainer() {
               )}
 
               {quotedSelections.length > 0 && (
-                <div className="mx-3 mt-3 space-y-2 border-b border-stone-200/80 pb-3 dark:border-stone-700/80">
+                <div className="mx-3 mt-2 space-y-1 border-b border-stone-200/80 pb-2 dark:border-stone-700/80">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400">
                       {quotedSelections.length === 1
@@ -3778,14 +3778,14 @@ export default function ChatContainer() {
                       </button>
                     )}
                   </div>
-                  <div className="space-y-2.5">
+                  <div className="space-y-1">
                     {quotedSelections.map((quote, index) => (
                       <div
                         key={`${index}-${quote.slice(0, 24)}`}
-                        className="group flex items-start gap-1.5"
+                        className="group flex items-start gap-1"
                       >
-                        <blockquote className="min-w-0 flex-1 border-l-[3px] border-stone-400/80 pl-3 dark:border-stone-500">
-                          <div className="chat-markdown line-clamp-4 text-[13px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5">
+                        <blockquote className="min-w-0 flex-1 border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500">
+                          <div className="chat-markdown chat-quote line-clamp-3 text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4">
                             <ReactMarkdown
                               remarkPlugins={[remarkMath, remarkGfm]}
                               rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
@@ -3795,21 +3795,21 @@ export default function ChatContainer() {
                                 },
                                 code({ children }: any) {
                                   return (
-                                    <code className="rounded bg-stone-200/60 px-1 py-0.5 font-mono text-[12px] dark:bg-stone-800">
+                                    <code className="rounded bg-stone-200/60 px-1 py-0.5 font-mono text-[11px] dark:bg-stone-800">
                                       {children}
                                     </code>
                                   );
                                 },
                               }}
                             >
-                              {prepareChatMarkdown(quote)}
+                              {prepareChatMarkdown(compactQuoteMath(quote))}
                             </ReactMarkdown>
                           </div>
                         </blockquote>
                         <button
                           type="button"
                           onClick={() => removeQuotedSelection(index)}
-                          className="mt-0.5 shrink-0 rounded-md p-1 text-stone-400 opacity-70 hover:bg-stone-100 hover:text-stone-700 group-hover:opacity-100 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                          className="mt-0 shrink-0 rounded p-0.5 text-stone-400 opacity-70 hover:bg-stone-100 hover:text-stone-700 group-hover:opacity-100 dark:hover:bg-stone-800 dark:hover:text-stone-200"
                           title={t('clearQuote')}
                           aria-label={t('clearQuote')}
                         >

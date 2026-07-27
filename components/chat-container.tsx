@@ -2904,10 +2904,7 @@ export default function ChatContainer() {
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden pl-2"
                     >
-                      <div className="space-y-1 pb-1">
-                        <p className="px-3 py-0.5 text-[10px] leading-4 text-stone-400">
-                          {t('mcpSidebarHint')}
-                        </p>
+                      <div className="space-y-0.5 pb-1">
                         <div className="rounded-lg px-2 py-1.5 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
                           <div className="flex items-center gap-2 px-1">
                             <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
@@ -2915,11 +2912,11 @@ export default function ChatContainer() {
                               <div className="truncate text-sm text-stone-700 dark:text-stone-200">
                                 Notion
                               </div>
-                              <div className="truncate text-[10px] text-stone-400">
-                                {notionStatus?.connected
-                                  ? notionStatus.label || t('notionConnected')
-                                  : t('notionMcpNeedsConnect')}
-                              </div>
+                              {notionStatus?.connected ? (
+                                <div className="truncate text-[10px] text-stone-400">
+                                  {notionStatus.label || t('notionConnected')}
+                                </div>
+                              ) : null}
                             </div>
                             {notionStatus?.connected ? (
                               <button
@@ -2945,14 +2942,6 @@ export default function ChatContainer() {
                             )}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowAuthModal(true)}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs text-stone-500 hover:bg-stone-200/50 hover:text-stone-700 dark:hover:bg-stone-800/50 dark:hover:text-stone-200"
-                        >
-                          <Settings2 className="h-3.5 w-3.5" />
-                          {t('manageAccount')}
-                        </button>
                       </div>
                     </motion.div>
                   )}

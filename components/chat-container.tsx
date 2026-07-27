@@ -3105,9 +3105,6 @@ export default function ChatContainer() {
                         >
                           <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">Notion</span>
-                          {notionStatus?.connected ? (
-                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-                          ) : null}
                         </button>
                       </div>
                     </motion.div>

@@ -2962,7 +2962,7 @@ export default function ChatContainer() {
                     >
                       <div className="space-y-0.5 pb-1">
                         <div className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
-                          <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm text-stone-700 dark:text-stone-200">
                               Notion
@@ -3542,7 +3542,7 @@ export default function ChatContainer() {
                                 {searching ? (
                                   <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500" />
                                 ) : isNotion ? (
-                                  <Blocks className="h-3 w-3 shrink-0 opacity-60" />
+                                  <NotionLogo className="h-3 w-3 shrink-0 opacity-80" />
                                 ) : (
                                   <Globe className="h-3 w-3 shrink-0 opacity-60" />
                                 )}
@@ -4027,7 +4027,7 @@ export default function ChatContainer() {
                       className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-300 bg-stone-100 pl-2 pr-1 py-0.5 text-[11px] font-medium text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
                       title={t('enableNotionMcpHint')}
                     >
-                      <Blocks className="h-3 w-3 shrink-0" />
+                      <NotionLogo className="h-3 w-3 shrink-0" />
                       <span className="truncate">{t('notionMcpOn')}</span>
                       <button
                         type="button"
@@ -4228,7 +4228,7 @@ export default function ChatContainer() {
                             {t('mcpTools')}
                           </div>
                           <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                            <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
                             <div className="min-w-0 flex-1">
                               <div className="text-sm text-stone-800 dark:text-stone-100">
                                 {t('enableNotionMcp')}

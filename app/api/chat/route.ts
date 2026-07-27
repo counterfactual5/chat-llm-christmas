@@ -204,10 +204,15 @@ export async function POST(req: NextRequest) {
       : [];
     // Intersect client toggles with vault OAuth — never trust integrations alone.
     const authorizedIntegrations: string[] = [];
+    let notionAccessToken: string | undefined;
     if (requestedIntegrations.includes('notion') && isBoundAccount) {
       const ownerId = await resolveOwnerId(req);
-      if (ownerId && (await getNotionAccessToken(req, ownerId))) {
-        authorizedIntegrations.push('notion');
+      if (ownerId) {
+        const token = await getNotionAccessToken(req, ownerId);
+        if (token) {
+          authorizedIntegrations.push('notion');
+          notionAccessToken = token;
+        }
       }
     }
     // Only tools for integrations the user enabled *and* authorized enter the
@@ -283,7 +288,13 @@ export async function POST(req: NextRequest) {
         const send = (payload: Record<string, unknown>) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
-        const toolCtx: ToolRuntimeContext = { userAsk, send };
+        const toolCtx: ToolRuntimeContext = {
+          userAsk,
+          send,
+          credentials: {
+            ...(notionAccessToken ? { notionAccessToken } : {}),
+          },
+        };
 
         try {
           let usedTools = false;
@@ -458,10 +469,10 @@ export async function POST(req: NextRequest) {
                   role: 'user',
                   content: [
                     'Write the final answer now using ONLY the tool results above.',
-                    'The previous tool message contains the search hits — use them. Do not say tools returned nothing when results.length > 0.',
-                    'Follow strictWeek / requestedWindow / staleHint in that payload.',
+                    'Use the tool message payloads (web search and/or Notion). Do not invent facts the tools did not return.',
+                    'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
                     'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
-                    'Cite markdown links. Do not call tools. Do not say you are still searching.',
+                    'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
                   ].join(' '),
                 },
               ]

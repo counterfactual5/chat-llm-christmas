@@ -25,6 +25,10 @@ export type ToolRuntimeContext = {
   userAsk: string;
   /** SSE helper from the chat route. */
   send: (payload: Record<string, unknown>) => void;
+  /** Per-request OAuth tokens for enabled integrations. */
+  credentials?: {
+    notionAccessToken?: string;
+  };
 };
 
 export type ToolCallInput = {

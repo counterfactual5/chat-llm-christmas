@@ -3463,14 +3463,30 @@ export default function ChatContainer() {
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;
+                          const isNotion = run.name.startsWith('notion_');
+                          const isNotionFetch = run.name === 'notion_fetch_page';
                           const failed =
                             run.status === 'done' &&
-                            (!run.results || run.results.length === 0);
+                            (Boolean(run.error) ||
+                              (!run.results || run.results.length === 0));
                           const searching = run.status === 'start';
                           const resultCount = run.results?.length || 0;
                           // Keep result links open by default so search isn't buried.
                           const expanded =
-                            toolRunOpen[run.id] ?? (searching || resultCount > 0);
+                            toolRunOpen[run.id] ?? (searching || resultCount > 0 || Boolean(run.error));
+                          const label = searching
+                            ? isNotionFetch
+                              ? t('readingNotion')
+                              : isNotion
+                                ? t('searchingNotion')
+                                : t('searchingWeb')
+                            : failed
+                              ? t('searchFailed')
+                              : isNotionFetch
+                                ? t('readNotion')
+                                : isNotion
+                                  ? t('searchedNotion')
+                                  : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button
@@ -3479,7 +3495,8 @@ export default function ChatContainer() {
                                   setToolRunOpen((prev) => ({
                                     ...prev,
                                     [run.id]: !(
-                                      prev[run.id] ?? (searching || resultCount > 0)
+                                      prev[run.id] ??
+                                      (searching || resultCount > 0 || Boolean(run.error))
                                     ),
                                   }))
                                 }
@@ -3495,20 +3512,17 @@ export default function ChatContainer() {
                                   )}
                                 />
                                 {searching ? (
-                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-orange-500" />
+                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500" />
+                                ) : isNotion ? (
+                                  <Blocks className="h-3 w-3 shrink-0 opacity-60" />
                                 ) : (
                                   <Globe className="h-3 w-3 shrink-0 opacity-60" />
                                 )}
-                                <span>
-                                  {searching
-                                    ? t('searchingWeb')
-                                    : failed
-                                      ? t('searchFailed')
-                                      : t('searchedWeb')}
-                                </span>
+                                <span>{label}</span>
                                 {run.status === 'done' &&
                                   run.provider &&
-                                  run.provider !== 'none' && (
+                                  run.provider !== 'none' &&
+                                  !isNotion && (
                                     <span className="opacity-50">
                                       {t('searchedVia').replace(
                                         '{provider}',
@@ -3516,11 +3530,16 @@ export default function ChatContainer() {
                                       )}
                                     </span>
                                   )}
+                                {run.query && isNotion && !searching && (
+                                  <span className="min-w-0 truncate opacity-50">
+                                    · {run.query}
+                                  </span>
+                                )}
                                 {searching && (
                                   <span className="ml-1 flex items-center gap-0.5">
-                                    <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
-                                    <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
-                                    <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
+                                    <span className="h-1 w-1 animate-pulse rounded-full bg-stone-400" />
+                                    <span className="h-1 w-1 animate-pulse rounded-full bg-stone-400 [animation-delay:150ms]" />
+                                    <span className="h-1 w-1 animate-pulse rounded-full bg-stone-400 [animation-delay:300ms]" />
                                   </span>
                                 )}
                               </button>
@@ -3535,16 +3554,22 @@ export default function ChatContainer() {
                                   {run.status === 'done' && resultCount > 0 && (
                                     <ul className="space-y-0.5">
                                       {(run.results || []).slice(0, 8).map((r) => (
-                                        <li key={r.url} className="truncate">
-                                          <a
-                                            href={r.url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-stone-600 underline-offset-2 hover:underline dark:text-stone-300"
-                                            title={r.snippet || r.title}
-                                          >
-                                            {r.title || r.url}
-                                          </a>
+                                        <li key={r.url || r.title} className="truncate">
+                                          {r.url ? (
+                                            <a
+                                              href={r.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-stone-600 underline-offset-2 hover:underline dark:text-stone-300"
+                                              title={r.snippet || r.title}
+                                            >
+                                              {r.title || r.url}
+                                            </a>
+                                          ) : (
+                                            <span title={r.snippet || r.title}>
+                                              {r.title}
+                                            </span>
+                                          )}
                                         </li>
                                       ))}
                                     </ul>

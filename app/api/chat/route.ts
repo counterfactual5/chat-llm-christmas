@@ -27,6 +27,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
+import { getNotionAccessToken, resolveOwnerId } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -201,11 +202,19 @@ export async function POST(req: NextRequest) {
     const requestedIntegrations = Array.isArray(integrations)
       ? integrations.map((x: unknown) => String(x || '').trim().toLowerCase()).filter(Boolean)
       : [];
-    // Only tools for integrations the user enabled on this chat enter the
-    // model context (definitions + system guidance). Off ⇒ not included.
+    // Intersect client toggles with vault OAuth — never trust integrations alone.
+    const authorizedIntegrations: string[] = [];
+    if (requestedIntegrations.includes('notion') && isBoundAccount) {
+      const ownerId = await resolveOwnerId(req);
+      if (ownerId && (await getNotionAccessToken(req, ownerId))) {
+        authorizedIntegrations.push('notion');
+      }
+    }
+    // Only tools for integrations the user enabled *and* authorized enter the
+    // model context (definitions + system guidance). Off / unlinked ⇒ not included.
     const enabledTools = resolveEnabledTools({
       searchEnabled,
-      integrations: requestedIntegrations,
+      integrations: authorizedIntegrations,
     });
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);

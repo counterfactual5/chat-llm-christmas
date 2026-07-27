@@ -485,6 +485,7 @@ export default function ChatContainer() {
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
   const skillsRef = useRef(skills);
+  const notionStatusRef = useRef(notionStatus);
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
@@ -492,6 +493,7 @@ export default function ChatContainer() {
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
   skillsRef.current = skills;
+  notionStatusRef.current = notionStatus;
 
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
@@ -502,26 +504,44 @@ export default function ChatContainer() {
   );
   const queuePaused = Boolean(queuePausedBySession[activeSessionId]);
 
+  const scrubNotionMcpFromSessions = () => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        const next = (s.mcpIds || []).filter((id) => id !== 'notion');
+        if (next.length === (s.mcpIds || []).length) return s;
+        return { ...s, mcpIds: next, updatedAt: Date.now() };
+      }),
+    );
+  };
+
   const fetchIntegrations = async () => {
     try {
       const response = await fetch('/api/integrations', { cache: 'no-store' });
       if (!response.ok) {
         setNotionStatus(null);
+        scrubNotionMcpFromSessions();
         return;
       }
       const data = await response.json();
-      const notion = (data?.integrations || []).find((i: any) => i?.provider === 'notion');
+      const notion = (data?.integrations || []).find(
+        (i: { provider?: string }) => i?.provider === 'notion',
+      );
       if (!notion) {
         setNotionStatus(null);
+        scrubNotionMcpFromSessions();
         return;
       }
+      const connected = Boolean(notion.connected);
       setNotionStatus({
-        connected: Boolean(notion.connected),
+        connected,
         available: Boolean(notion.available),
         label: notion.label || undefined,
       });
+      // Stale localStorage mcpIds must not outlive OAuth disconnect / vault expiry.
+      if (!connected) scrubNotionMcpFromSessions();
     } catch {
       setNotionStatus(null);
+      scrubNotionMcpFromSessions();
     }
   };
 
@@ -530,13 +550,6 @@ export default function ChatContainer() {
     try {
       await fetch('/api/integrations/notion', { method: 'DELETE' });
       await fetchIntegrations();
-      // Drop Notion from every chat so tools are not sent after disconnect.
-      setSessions((prev) =>
-        prev.map((s) => ({
-          ...s,
-          mcpIds: (s.mcpIds || []).filter((id) => id !== 'notion'),
-        })),
-      );
     } finally {
       setNotionBusy(false);
     }
@@ -644,7 +657,7 @@ export default function ChatContainer() {
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const webSources = activeSession?.webSources || [];
-  const notionMcpOn = activeMcpIds.includes('notion');
+  const notionMcpOn = Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
 
   // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
   useEffect(() => {
@@ -696,29 +709,28 @@ export default function ChatContainer() {
   };
 
   const toggleNotionMcp = () => {
-    if (!isAccountBound) {
-      setShowAuthModal(true);
+    // Turning off must always work — including clearing stale mcpIds after OAuth expiry.
+    if (activeMcpIds.includes('notion')) {
+      setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
       return;
     }
-    if (!notionStatus?.connected) {
-      setShowAuthModal(true);
-      return;
-    }
-    setActiveMcpIds((prev) =>
-      prev.includes('notion') ? prev.filter((id) => id !== 'notion') : [...prev, 'notion'],
-    );
-  };
-
-  const setNotionMcpEnabled = (enabled: boolean) => {
     if (!isAccountBound || !notionStatus?.connected) {
       setShowAuthModal(true);
       return;
     }
-    setActiveMcpIds((prev) => {
-      const on = prev.includes('notion');
-      if (enabled === on) return prev;
-      return enabled ? [...prev, 'notion'] : prev.filter((id) => id !== 'notion');
-    });
+    setActiveMcpIds((prev) => [...prev, 'notion']);
+  };
+
+  const setNotionMcpEnabled = (enabled: boolean) => {
+    if (!enabled) {
+      setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
+      return;
+    }
+    if (!isAccountBound || !notionStatus?.connected) {
+      setShowAuthModal(true);
+      return;
+    }
+    setActiveMcpIds((prev) => (prev.includes('notion') ? prev : [...prev, 'notion']));
   };
 
   const toggleSkill = (skillId: string) => {
@@ -1121,7 +1133,10 @@ export default function ChatContainer() {
         referenceText: combinedReference,
         skills: skillsPayloadForSession(sessionId),
         conversationId: sessionId,
-        integrations: sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || [],
+        // Never send MCP ids for providers that are not currently OAuth-connected.
+        integrations: (sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || []).filter(
+          (id) => (id === 'notion' ? Boolean(notionStatusRef.current?.connected) : false),
+        ),
       }),
       signal,
     });

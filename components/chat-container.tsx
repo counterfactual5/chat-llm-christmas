@@ -2346,7 +2346,8 @@ export default function ChatContainer() {
               m.id === assistantId
                 ? {
                     ...m,
-                    content: data.revised_prompt || trimmed,
+                    // Image alone is enough — don't echo the prompt under the picture.
+                    content: '',
                     images: [{ url: data.image as string, name: 'generated.png' }],
                     incomplete: false,
                   }
@@ -3829,7 +3830,12 @@ export default function ChatContainer() {
                             ))}
                           </div>
                         )}
-                        {visibleContent && !(message.images?.length && visibleContent === 'Generating image…') && (
+                        {visibleContent &&
+                          !(
+                            message.images?.length &&
+                            (visibleContent === 'Generating image…' ||
+                              !isAssistantError(message))
+                          ) && (
                         <ReactMarkdown
                           remarkPlugins={[remarkMath, remarkGfm]}
                           rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}

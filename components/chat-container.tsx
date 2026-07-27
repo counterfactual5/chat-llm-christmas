@@ -3318,9 +3318,6 @@ export default function ChatContainer() {
                       )}
                     >
                       <Key className="h-3.5 w-3.5" />
-                      {isAccountBound && (
-                        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
-                      )}
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">

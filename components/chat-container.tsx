@@ -662,11 +662,16 @@ export default function ChatContainer() {
       }
 
       void refreshAccountStatus()
-        .then((bound) => {
-          fetchModels();
+        .then(async (bound) => {
+          // One boot pass: models for everyone; skills/integrations only if bound.
+          // Avoid double-fetching skills via fetchModels(authed) or notionOk path.
+          const boot: Array<Promise<unknown>> = [fetchModels()];
           if (bound) {
-            fetchSkills();
-            void fetchIntegrations();
+            boot.push(fetchSkills(), fetchIntegrations());
+          }
+          await Promise.all(boot);
+
+          if (bound) {
             const savedChats = localStorage.getItem('llm_christmas_chats');
             if (savedChats) {
               try {
@@ -715,7 +720,6 @@ export default function ChatContainer() {
             if (bound) {
               setAccountError('');
               setShowAuthModal(false);
-              void fetchIntegrations();
             } else {
               setAuthModalMode('login');
               setAccountError(
@@ -1787,10 +1791,6 @@ export default function ChatContainer() {
         } else {
           setSelectedModel('');
         }
-      }
-
-      if (data?.authed) {
-        fetchSkills();
       }
     } catch (e) {
       console.error('Failed to fetch models', e);

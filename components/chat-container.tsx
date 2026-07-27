@@ -5303,10 +5303,9 @@ export default function ChatContainer() {
                     {notionStatus?.connected ? (
                       <Button
                         type="button"
-                        variant="outline"
                         disabled={notionBusy}
                         onClick={() => void disconnectNotion()}
-                        className="h-11 w-full rounded-xl border-red-200 text-sm text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                        className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800/60 dark:bg-red-950/50 dark:text-red-50 dark:hover:bg-red-950/70 dark:hover:text-white"
                       >
                         {t('disconnectNotion')}
                       </Button>

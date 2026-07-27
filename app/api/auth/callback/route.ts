@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearVaultCookie } from '@/lib/integrations';
+import { usernameFromTokenPayload, fetchUsernameForApiKey } from '@/lib/account-profile';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
 
 const STATE_COOKIE = 'llm_chat_oauth_state';
 const KEY_COOKIE = 'llm_chat_api_key';
+const USERNAME_COOKIE = 'llm_chat_username';
 const CALLBACK = 'https://chat.llm.christmas/api/auth/callback';
 
 function safeEqual(a: string, b: string) {
@@ -52,19 +54,35 @@ export async function GET(req: NextRequest) {
       throw new Error(payload?.message || '无法交换授权码');
     }
 
+    const apiKey = String(payload.data.apiKey);
+    const username =
+      usernameFromTokenPayload(payload.data) ||
+      (await fetchUsernameForApiKey(apiKey));
+
     const home = new URL('/', req.url);
     home.searchParams.set('connected', '1');
     const result = NextResponse.redirect(home);
     clearVaultCookie(result);
     result.cookies.set({
       name: KEY_COOKIE,
-      value: payload.data.apiKey,
+      value: apiKey,
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24 * 30,
     });
+    if (username) {
+      result.cookies.set({
+        name: USERNAME_COOKIE,
+        value: username.slice(0, 120),
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    }
     result.cookies.set({
       name: STATE_COOKIE,
       value: '',

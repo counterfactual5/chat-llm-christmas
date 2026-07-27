@@ -557,7 +557,7 @@ export default function ChatContainer() {
       const data = await response.json();
       const bound = Boolean(data?.bound);
       setIsAccountBound(bound);
-      setAccountUsername(bound && data?.username ? String(data.username) : null);
+      setAccountUsername(bound ? (data?.username ? String(data.username) : null) : null);
       return bound;
     } catch {
       setIsAccountBound(false);
@@ -635,6 +635,7 @@ export default function ChatContainer() {
       if (params.get('connected')) {
         setAccountError('');
         setShowAuthModal(false);
+        void refreshAccountStatus();
       }
       if (notionOk || notionAuthReturn) {
         if (notionOk) setAccountError('');
@@ -1455,6 +1456,7 @@ export default function ChatContainer() {
       if (!response.ok) throw new Error(data?.error || '绑定失败');
       setTempKeyInput('');
       closeAuthModal();
+      if (data?.username) setAccountUsername(String(data.username));
       await refreshAccountStatus();
       await fetchModels();
       await fetchSkills();
@@ -3189,13 +3191,13 @@ export default function ChatContainer() {
                       exit={{ opacity: 0, y: 6 }}
                       className="absolute bottom-full left-3 right-3 mb-2 z-50 overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
                     >
-                      {isAccountBound && accountUsername ? (
+                      {isAccountBound ? (
                         <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
                           <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
-                            {accountUsername}
+                            {accountUsername || '…'}
                           </div>
                         </div>
-                      ) : !isAccountBound ? (
+                      ) : (
                         <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
                           <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
                             {t('connectAccount')}
@@ -3204,7 +3206,7 @@ export default function ChatContainer() {
                             {t('connectAccountHint')}
                           </div>
                         </div>
-                      ) : null}
+                      )}
 
                       <div className="relative">
                         <button
@@ -3305,7 +3307,7 @@ export default function ChatContainer() {
                   <div className="min-w-0 flex-1 pr-2">
                     <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
                       {isAccountBound
-                        ? accountUsername || t('accountConnected')
+                        ? accountUsername || '…'
                         : t('connectAccount')}
                     </div>
                     {!isAccountBound ? (

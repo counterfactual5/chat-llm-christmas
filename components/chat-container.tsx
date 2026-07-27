@@ -22,6 +22,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { CodeBlock } from './markdown/code-block';
 import { BrandMark } from '@/components/brand-mark';
+import { NotionLogo } from '@/components/notion-logo';
 import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -5120,33 +5121,44 @@ export default function ChatContainer() {
 
               <div className="space-y-5">
                 {authModalMode === 'notion' && isAccountBound ? (
-                  <section className="space-y-3">
-                    <p className="text-sm text-stone-500 dark:text-stone-400">
-                      {t('notionConnectHint')}
-                    </p>
-                    <div className="rounded-xl border border-stone-200 p-4 dark:border-stone-700">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
-                            Notion
-                          </div>
-                          {notionStatus?.connected ? (
-                            <div className="mt-0.5 truncate text-[11px] text-stone-500 dark:text-stone-400">
-                              {`${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`}
-                            </div>
-                          ) : notionStatus?.available === false ? (
-                            <div className="mt-0.5 truncate text-[11px] text-stone-500 dark:text-stone-400">
-                              {t('notionNotConfigured')}
-                            </div>
+                  <section className="flex flex-col items-center pt-1 pb-1">
+                    <div className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-6 py-8 text-center dark:border-stone-700 dark:bg-stone-800/40">
+                      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-stone-200 bg-white shadow-sm dark:border-stone-600 dark:bg-stone-900">
+                        <NotionLogo className="h-8 w-8 text-stone-900 dark:text-stone-100" />
+                      </div>
+                      <div className="mt-4 text-lg font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+                        {t('notionConnectCardTitle')}
+                      </div>
+                      {notionStatus?.connected ? (
+                        <div className="mt-1.5 text-sm text-stone-500 dark:text-stone-400">
+                          {t('notionConnected')}
+                          {notionStatus.label ? (
+                            <span className="mt-1 block truncate text-[12px] text-stone-400">
+                              {t('notionWorkspace')} · {notionStatus.label}
+                            </span>
                           ) : null}
                         </div>
+                      ) : notionStatus?.available === false ? (
+                        <p className="mt-1.5 text-sm text-amber-700 dark:text-amber-400">
+                          {t('notionNotConfigured')}
+                        </p>
+                      ) : (
+                        <p className="mt-1.5 text-sm leading-5 text-stone-500 dark:text-stone-400">
+                          {t('notionConnectCardBody')}
+                        </p>
+                      )}
+                      <p className="mt-3 text-[11px] leading-4 text-stone-400">
+                        {t('notionConnectHint')}
+                      </p>
+
+                      <div className="mt-6">
                         {notionStatus?.connected ? (
                           <Button
                             type="button"
                             variant="outline"
                             disabled={notionBusy}
                             onClick={() => void disconnectNotion()}
-                            className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                            className="h-10 w-full rounded-xl border-red-200 text-sm text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
                           >
                             {t('disconnectNotion')}
                           </Button>
@@ -5162,7 +5174,7 @@ export default function ChatContainer() {
                               if (notionStatus?.available === false) e.preventDefault();
                             }}
                             className={cn(
-                              'inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
+                              'inline-flex h-10 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
                               notionStatus?.available === false
                                 ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
                                 : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',

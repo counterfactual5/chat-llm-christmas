@@ -308,9 +308,13 @@ function formatWebSourcesForReference(sources: WebSearchSource[]): string {
   for (const [query, list] of byQuery) {
     const provider = list[0]?.provider;
     const header =
-      query === 'web'
-        ? 'Web search results:'
-        : `Web search results for "${query}"${provider && provider !== 'none' ? ` (${provider})` : ''}:`;
+      provider === 'notion'
+        ? query && query !== 'web'
+          ? `Notion results for "${query}":`
+          : 'Notion pages:'
+        : query === 'web'
+          ? 'Web search results:'
+          : `Web search results for "${query}"${provider && provider !== 'none' ? ` (${provider})` : ''}:`;
     blocks.push(
       [
         header,
@@ -346,6 +350,34 @@ function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
     }
   }
   return out.slice(-40);
+}
+
+function referenceSourcesHeading(
+  sources: WebSearchSource[],
+  t: (key: 'webSearchSources' | 'notionSources' | 'referenceSources') => string,
+): { label: string; useNotionIcon: boolean; providerSuffix?: string } {
+  if (sources.length === 0) {
+    return { label: t('webSearchSources'), useNotionIcon: false };
+  }
+  const providers = [
+    ...new Set(
+      sources.map((s) => s.provider).filter((p): p is string => Boolean(p && p !== 'none')),
+    ),
+  ];
+  if (providers.length === 1 && providers[0] === 'notion') {
+    return { label: t('notionSources'), useNotionIcon: true };
+  }
+  if (providers.length === 1) {
+    return {
+      label: t('webSearchSources'),
+      useNotionIcon: false,
+      providerSuffix: providers[0],
+    };
+  }
+  if (providers.includes('notion')) {
+    return { label: t('referenceSources'), useNotionIcon: false };
+  }
+  return { label: t('webSearchSources'), useNotionIcon: false };
 }
 
 type SkillItem = { id: string; title: string; content: string };
@@ -715,6 +747,10 @@ export default function ChatContainer() {
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const webSources = activeSession?.webSources || [];
+  const referenceSourcesMeta = useMemo(
+    () => referenceSourcesHeading(webSources, t),
+    [webSources, t, locale],
+  );
   const notionMcpPrefOn = readMcpPrefIds().includes('notion');
   const notionMcpOn =
     Boolean(notionStatus?.connected) &&
@@ -1140,6 +1176,12 @@ export default function ChatContainer() {
           const idx = existing.findIndex(
             (r) => r.name === run.name && r.query === run.query && r.status === 'start',
           );
+          const pendingIdx =
+            idx >= 0
+              ? idx
+              : run.status === 'done'
+                ? existing.findIndex((r) => r.name === run.name && r.status === 'start')
+                : -1;
           let toolRuns;
           let activity = [...(m.activity || [])];
           if (run.status === 'start') {
@@ -1158,9 +1200,9 @@ export default function ChatContainer() {
               kind: 'tool',
               toolRunId,
             });
-          } else if (idx >= 0) {
+          } else if (pendingIdx >= 0) {
             toolRuns = existing.map((r, i) =>
-              i === idx
+              i === pendingIdx
                 ? {
                     ...r,
                     status: 'done' as const,
@@ -1327,6 +1369,22 @@ export default function ChatContainer() {
     };
 
     const settle = (unexpectedEnd = false) => {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          const msgs = s.messages.map((m) => {
+            if (m.id !== assistantId || !m.toolRuns?.some((r) => r.status === 'start')) return m;
+            return {
+              ...m,
+              toolRuns: m.toolRuns.map((r) =>
+                r.status === 'start' ? { ...r, status: 'done' as const } : r,
+              ),
+            };
+          });
+          return { ...s, messages: msgs };
+        }),
+      );
+
       const flushed = thinkParser.flush();
       if (flushed.reasoning) appendToAssistantReasoning(sessionId, assistantId, flushed.reasoning);
       if (flushed.content) {
@@ -3622,7 +3680,10 @@ export default function ChatContainer() {
                                   )}
                                 {run.query && isNotion && !searching && (
                                   <span className="min-w-0 truncate opacity-50">
-                                    · {run.query}
+                                    ·{' '}
+                                    {isNotionFetch && run.results?.[0]?.title
+                                      ? run.results[0].title
+                                      : run.query}
                                   </span>
                                 )}
                                 {searching && (
@@ -4684,14 +4745,17 @@ export default function ChatContainer() {
                                 <div className="space-y-1.5">
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                                      <Globe className="h-3 w-3" />
-                                      {t('webSearchSources')}
-                                      {webSources[0]?.provider &&
-                                        webSources[0].provider !== 'none' && (
-                                          <span className="font-medium normal-case tracking-normal opacity-70">
-                                            · {webSources[0].provider}
-                                          </span>
-                                        )}
+                                      {referenceSourcesMeta.useNotionIcon ? (
+                                        <NotionLogo className="h-3 w-3 shrink-0 opacity-80" />
+                                      ) : (
+                                        <Globe className="h-3 w-3" />
+                                      )}
+                                      {referenceSourcesMeta.label}
+                                      {referenceSourcesMeta.providerSuffix && (
+                                        <span className="font-medium normal-case tracking-normal opacity-70">
+                                          · {referenceSourcesMeta.providerSuffix}
+                                        </span>
+                                      )}
                                     </span>
                                     <button
                                       type="button"

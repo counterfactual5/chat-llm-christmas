@@ -201,7 +201,7 @@ export function createNotionFetchPageTool(): ChatTool {
         tool: {
           status: 'done',
           name: 'notion_fetch_page',
-          query: page.title || pageId,
+          query: pageId,
           provider: 'notion',
           results,
           error: page.error,

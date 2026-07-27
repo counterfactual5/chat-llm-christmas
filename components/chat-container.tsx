@@ -21,6 +21,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { CodeBlock } from './markdown/code-block';
+import { BrandMark } from '@/components/brand-mark';
 import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -2792,9 +2793,7 @@ export default function ChatContainer() {
             <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-sm">
-                    <Sparkles className="h-4 w-4" />
-                  </div>
+                  <BrandMark className="h-7 w-7 shadow-sm" />
                   Christmas Chat
                 </div>
               </div>
@@ -3237,8 +3236,8 @@ export default function ChatContainer() {
           <div ref={messagesContentRef} className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
-                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-200 text-stone-700 shadow-sm dark:bg-stone-800 dark:text-stone-200">
-                  <Sparkles className="h-7 w-7" />
+                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm">
+                  <BrandMark className="h-14 w-14" />
                 </div>
                 <h2 className="mb-2 text-2xl font-semibold text-stone-900 dark:text-stone-100">
                   {t('heroTitle')}

@@ -2981,12 +2981,6 @@ export default function ChatContainer() {
                 <div>
                   <button
                     type="button"
-                    onPointerEnter={() => {
-                      if (!isAccountBound) return;
-                      setSkillsExpanded(true);
-                      setMcpExpanded(false);
-                      if (skills.length === 0) fetchSkills();
-                    }}
                     onClick={() => {
                       if (!isAccountBound) {
                         openLoginModal();
@@ -3072,12 +3066,6 @@ export default function ChatContainer() {
                 <div>
                 <button
                   type="button"
-                  onPointerEnter={() => {
-                    if (!isAccountBound) return;
-                    setMcpExpanded(true);
-                    setSkillsExpanded(false);
-                    void fetchIntegrations();
-                  }}
                   onClick={() => {
                     if (!isAccountBound) {
                       openLoginModal();
@@ -4423,23 +4411,6 @@ export default function ChatContainer() {
                                     );
                                   })
                                 )}
-                                {isAccountBound ? (
-                                  <>
-                                    <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsSkillPickerOpen(false);
-                                        setPlusFlyout(null);
-                                        openNewSkillModal();
-                                      }}
-                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                                    >
-                                      <Plus className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                      <span>{t('newSkill')}</span>
-                                    </button>
-                                  </>
-                                ) : null}
                               </motion.div>
                             )}
 

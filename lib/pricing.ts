@@ -42,7 +42,10 @@ export async function fetchFreeModelNames(): Promise<Set<string>> {
   }
 
   try {
-    const res = await fetch(`${mainSiteOrigin()}/api/pricing`, { cache: 'no-store' });
+    const res = await fetch(`${mainSiteOrigin()}/api/pricing`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8_000),
+    });
     if (!res.ok) throw new Error(`pricing HTTP ${res.status}`);
 
     const data = await res.json();

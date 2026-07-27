@@ -1,12 +1,18 @@
 'use client';
 
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Monitor } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/components/theme-provider';
 
 export function ThemeToggle({ className }: { className?: string }) {
-  const { theme, toggleTheme } = useTheme();
-  const isDark = theme === 'dark';
+  const { theme, preference, toggleTheme } = useTheme();
+
+  const label =
+    preference === 'system'
+      ? '跟随系统主题'
+      : theme === 'dark'
+        ? '切换外观'
+        : '切换外观';
 
   return (
     <Button
@@ -14,11 +20,17 @@ export function ThemeToggle({ className }: { className?: string }) {
       variant="ghost"
       size="icon"
       onClick={toggleTheme}
-      title={isDark ? '切换到浅色模式' : '切换到深色模式'}
-      aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
+      title={label}
+      aria-label={label}
       className={className}
     >
-      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      {preference === 'system' ? (
+        <Monitor className="h-4 w-4" />
+      ) : theme === 'dark' ? (
+        <Sun className="h-4 w-4" />
+      ) : (
+        <Moon className="h-4 w-4" />
+      )}
     </Button>
   );
 }

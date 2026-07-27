@@ -7,7 +7,7 @@ import {
   Menu, Plus, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Blocks
+  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -450,7 +450,7 @@ type QueuedTask = {
 
 export default function ChatContainer() {
   const { t, locale, setLocale } = useLocale();
-  const { theme, setTheme } = useTheme();
+  const { theme, preference, toggleTheme } = useTheme();
 
   // State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -1771,16 +1771,14 @@ export default function ChatContainer() {
     try {
       const res = await fetch('/api/models', {
         cache: 'no-store',
+        signal: AbortSignal.timeout(20_000),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data?.success && Array.isArray(data.models)) {
         setAvailableModels(data.models);
-        // Set default selected model: prefer first free or first available
         if (data.models.length > 0) {
           setSelectedModel((prev) => {
-            // Keep an in-session selection if it is still available.
             if (prev && data.models.some((m: ModelOption) => m.id === prev)) return prev;
-            // Restore the last choice from localStorage (prev may be '' on first fetch).
             let saved = '';
             try {
               saved = localStorage.getItem('llm_christmas_selected_model') || '';
@@ -1791,6 +1789,8 @@ export default function ChatContainer() {
         } else {
           setSelectedModel('');
         }
+      } else {
+        console.error('Failed to fetch models', data?.error || res.status);
       }
     } catch (e) {
       console.error('Failed to fetch models', e);
@@ -3287,17 +3287,23 @@ export default function ChatContainer() {
 
                       <button
                         type="button"
-                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        onClick={() => toggleTheme()}
                         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
                       >
-                        {theme === 'dark' ? (
+                        {preference === 'system' ? (
+                          <Monitor className="h-3.5 w-3.5 text-stone-400" />
+                        ) : theme === 'dark' ? (
                           <Sun className="h-3.5 w-3.5 text-stone-400" />
                         ) : (
                           <Moon className="h-3.5 w-3.5 text-stone-400" />
                         )}
                         <span className="flex-1 text-left">{t('theme')}</span>
                         <span className="text-xs text-stone-400">
-                          {theme === 'dark' ? t('themeDark') : t('themeLight')}
+                          {preference === 'system'
+                            ? t('themeSystem')
+                            : preference === 'dark'
+                              ? t('themeDark')
+                              : t('themeLight')}
                         </span>
                       </button>
 
@@ -4279,7 +4285,11 @@ export default function ChatContainer() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={onPasteFiles}
-                placeholder={t('writeMessage', { model: selectedModel || 'AI' })}
+                placeholder={
+                  modelsLoading
+                    ? t('loadingModels')
+                    : t('writeMessage', { model: selectedModel || 'AI' })
+                }
                 className="min-h-[60px] max-h-[300px] w-full resize-none border-0 bg-transparent px-4 py-4 text-base focus-visible:ring-0 placeholder:text-stone-400"
               />
               

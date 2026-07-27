@@ -258,3 +258,54 @@ export async function notionFetchPageContent(
     text: text || '(This page has no readable text blocks shared with the integration.)',
   };
 }
+
+/** Append paragraph blocks to the end of a page (insert/update capability). */
+export async function notionAppendParagraphs(
+  token: string,
+  pageId: string,
+  paragraphs: string[],
+): Promise<{ ok: boolean; id: string; url?: string; appended: number; error?: string }> {
+  const id = pageId.trim();
+  const children = paragraphs
+    .map((p) => String(p || '').trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((text) => ({
+      object: 'block',
+      type: 'paragraph',
+      paragraph: {
+        rich_text: [
+          {
+            type: 'text',
+            text: { content: text.slice(0, 2000) },
+          },
+        ],
+      },
+    }));
+
+  if (children.length === 0) {
+    return { ok: false, id, appended: 0, error: 'No paragraph text to append' };
+  }
+
+  const res = await notionApi<{ results?: unknown[] }>(
+    token,
+    `/blocks/${id}/children`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ children }),
+    },
+  );
+
+  if (!res.ok) {
+    return { ok: false, id, appended: 0, error: res.error };
+  }
+
+  // Best-effort URL for UI chips
+  const page = await notionApi<Record<string, unknown>>(token, `/pages/${id}`);
+  return {
+    ok: true,
+    id,
+    url: page.ok ? String(page.data.url || '') : undefined,
+    appended: children.length,
+  };
+}

@@ -3488,6 +3488,7 @@ export default function ChatContainer() {
                           if (!run) return null;
                           const isNotion = run.name.startsWith('notion_');
                           const isNotionFetch = run.name === 'notion_fetch_page';
+                          const isNotionWrite = run.name === 'notion_append_blocks';
                           const failed =
                             run.status === 'done' &&
                             (Boolean(run.error) ||
@@ -3498,18 +3499,22 @@ export default function ChatContainer() {
                           const expanded =
                             toolRunOpen[run.id] ?? (searching || resultCount > 0 || Boolean(run.error));
                           const label = searching
-                            ? isNotionFetch
-                              ? t('readingNotion')
-                              : isNotion
-                                ? t('searchingNotion')
-                                : t('searchingWeb')
+                            ? isNotionWrite
+                              ? t('writingNotion')
+                              : isNotionFetch
+                                ? t('readingNotion')
+                                : isNotion
+                                  ? t('searchingNotion')
+                                  : t('searchingWeb')
                             : failed
                               ? t('searchFailed')
-                              : isNotionFetch
-                                ? t('readNotion')
-                                : isNotion
-                                  ? t('searchedNotion')
-                                  : t('searchedWeb');
+                              : isNotionWrite
+                                ? t('wroteNotion')
+                                : isNotionFetch
+                                  ? t('readNotion')
+                                  : isNotion
+                                    ? t('searchedNotion')
+                                    : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button
@@ -5147,9 +5152,6 @@ export default function ChatContainer() {
                           {t('notionConnectCardBody')}
                         </p>
                       )}
-                      <p className="mt-3 text-[11px] leading-4 text-stone-400">
-                        {t('notionConnectHint')}
-                      </p>
 
                       <div className="mt-6">
                         {notionStatus?.connected ? (

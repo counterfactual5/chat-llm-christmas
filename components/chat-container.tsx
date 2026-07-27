@@ -416,6 +416,8 @@ export default function ChatContainer() {
   const [isAccountBound, setIsAccountBound] = useState(false);
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState(false);
+  /** `notion` = Notion-only sheet; `account` = main-site login / manage. */
+  const [authModalMode, setAuthModalMode] = useState<'account' | 'notion'>('account');
   const [accountError, setAccountError] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
   const [userBalance, setUserBalance] = useState<string | null>(null);
@@ -571,6 +573,7 @@ export default function ChatContainer() {
       const notionOk = params.get('notion_connected');
       if (authError) {
         setAccountError(authError);
+        setAuthModalMode('account');
         setShowAuthModal(true);
       }
       if (authError || notionOk || params.get('connected')) {
@@ -578,7 +581,10 @@ export default function ChatContainer() {
         clean.search = '';
         window.history.replaceState({}, '', clean.pathname);
       }
-      if (notionOk) setShowAuthModal(true);
+      if (notionOk) {
+        setAuthModalMode('notion');
+        setShowAuthModal(true);
+      }
     } catch {
       // ignore
     }
@@ -708,6 +714,22 @@ export default function ChatContainer() {
     );
   };
 
+  const openAccountModal = () => {
+    setAuthModalMode('account');
+    setShowAuthModal(true);
+  };
+
+  const openNotionModal = () => {
+    // Notion OAuth requires a bound account; if missing, fall back to account login.
+    setAuthModalMode(isAccountBound ? 'notion' : 'account');
+    setShowAuthModal(true);
+  };
+
+  const closeAuthModal = () => {
+    setShowAuthModal(false);
+    setAuthModalMode('account');
+  };
+
   const toggleNotionMcp = () => {
     // Turning off must always work — including clearing stale mcpIds after OAuth expiry.
     if (activeMcpIds.includes('notion')) {
@@ -715,7 +737,7 @@ export default function ChatContainer() {
       return;
     }
     if (!isAccountBound || !notionStatus?.connected) {
-      setShowAuthModal(true);
+      openNotionModal();
       return;
     }
     setActiveMcpIds((prev) => [...prev, 'notion']);
@@ -727,7 +749,7 @@ export default function ChatContainer() {
       return;
     }
     if (!isAccountBound || !notionStatus?.connected) {
-      setShowAuthModal(true);
+      openNotionModal();
       return;
     }
     setActiveMcpIds((prev) => (prev.includes('notion') ? prev : [...prev, 'notion']));
@@ -1343,7 +1365,7 @@ export default function ChatContainer() {
       if (!response.ok) throw new Error(data?.error || '绑定失败');
       setIsAccountBound(true);
       setTempKeyInput('');
-      setShowAuthModal(false);
+      closeAuthModal();
       await fetchModels();
       await fetchSkills();
       await fetchIntegrations();
@@ -1358,7 +1380,7 @@ export default function ChatContainer() {
     await fetch('/api/account', { method: 'DELETE' });
     setIsAccountBound(false);
     setTempKeyInput('');
-    setShowAuthModal(false);
+    closeAuthModal();
     setNotionStatus(null);
     setSessions([]);
     setSkills([]);
@@ -2115,7 +2137,7 @@ export default function ChatContainer() {
     const trimmed = prompt.trim();
     if (!trimmed) return false;
     if (!isAccountBound) {
-      setShowAuthModal(true);
+      openAccountModal();
       return false;
     }
     const sessionId = opts?.sessionId || activeSessionId;
@@ -2827,7 +2849,7 @@ export default function ChatContainer() {
                   type="button"
                   onClick={() => {
                     if (!isAccountBound) {
-                      setShowAuthModal(true);
+                      openAccountModal();
                       return;
                     }
                     setSkillsExpanded((v) => !v);
@@ -2909,7 +2931,7 @@ export default function ChatContainer() {
                   type="button"
                   onClick={() => {
                     if (!isAccountBound) {
-                      setShowAuthModal(true);
+                      openAccountModal();
                       return;
                     }
                     setMcpExpanded((v) => !v);
@@ -2960,7 +2982,7 @@ export default function ChatContainer() {
                           ) : (
                             <button
                               type="button"
-                              onClick={() => setShowAuthModal(true)}
+                              onClick={() => openNotionModal()}
                               className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-200/80 hover:text-stone-800 dark:hover:bg-stone-700 dark:hover:text-stone-100"
                             >
                               {t('connectNotion')}
@@ -3166,7 +3188,7 @@ export default function ChatContainer() {
                           type="button"
                           onClick={() => {
                             setIsAccountMenuOpen(false);
-                            setShowAuthModal(true);
+                            openAccountModal();
                           }}
                           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
                         >
@@ -4164,7 +4186,7 @@ export default function ChatContainer() {
                             onClick={() => {
                               if (!isAccountBound) {
                                 setIsSkillPickerOpen(false);
-                                setShowAuthModal(true);
+                                openAccountModal();
                                 return;
                               }
                               setIsSkillPickerOpen(false);
@@ -4183,7 +4205,7 @@ export default function ChatContainer() {
                             onClick={() => {
                               if (!isAccountBound) {
                                 setIsSkillPickerOpen(false);
-                                setShowAuthModal(true);
+                                openAccountModal();
                                 return;
                               }
                               setIsSkillPickerOpen(false);
@@ -4223,7 +4245,7 @@ export default function ChatContainer() {
                                 type="button"
                                 onClick={() => {
                                   setIsSkillPickerOpen(false);
-                                  setShowAuthModal(true);
+                                  openNotionModal();
                                 }}
                                 className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                               >
@@ -4406,7 +4428,7 @@ export default function ChatContainer() {
                           {!isAccountBound && (
                             <div className="shrink-0 border-t border-stone-100 p-2 dark:border-stone-800">
                               <button 
-                                onClick={() => { setIsModelMenuOpen(false); setModelSearchQuery(''); setShowAuthModal(true); }}
+                                onClick={() => { setIsModelMenuOpen(false); setModelSearchQuery(''); openAccountModal(); }}
                                 className="w-full text-center text-xs font-medium text-orange-600 hover:underline"
                               >
                                 🔓 Sign in to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
@@ -5064,7 +5086,7 @@ export default function ChatContainer() {
         )}
       </AnimatePresence>
 
-      {/* --- Account / MCP Modal --- */}
+      {/* --- Account / Notion Modal --- */}
       <AnimatePresence>
         {showAuthModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -5076,12 +5098,20 @@ export default function ChatContainer() {
             >
               <div className="mb-5 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-lg font-semibold text-stone-900 dark:text-stone-50">
-                  <Key className="h-5 w-5 text-stone-500" />
-                  {isAccountBound ? t('manageAccount') : t('authTitle')}
+                  {authModalMode === 'notion' ? (
+                    <Blocks className="h-5 w-5 text-stone-500" />
+                  ) : (
+                    <Key className="h-5 w-5 text-stone-500" />
+                  )}
+                  {authModalMode === 'notion'
+                    ? t('connectNotion')
+                    : isAccountBound
+                      ? t('manageAccount')
+                      : t('authTitle')}
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowAuthModal(false)}
+                  onClick={closeAuthModal}
                   className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200"
                 >
                   <X className="h-5 w-5" />
@@ -5089,104 +5119,26 @@ export default function ChatContainer() {
               </div>
 
               <div className="space-y-5">
-                {/* Layer 1: main-site account */}
-                <section className="space-y-3">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">
-                      {t('accountSection')}
-                    </div>
-                    <p className="mt-1 text-[11px] leading-4 text-stone-400">
-                      {t('accountSectionHint')}
+                {authModalMode === 'notion' && isAccountBound ? (
+                  <section className="space-y-3">
+                    <p className="text-sm text-stone-500 dark:text-stone-400">
+                      {t('notionConnectHint')}
                     </p>
-                  </div>
-
-                  {isAccountBound ? (
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-3 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/30">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
-                          {t('accountConnected')}
-                        </div>
-                        <div className="truncate text-[11px] text-emerald-700/80 dark:text-emerald-400/80">
-                          {t('accountConnectedHint')}
-                        </div>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={disconnectAccount}
-                        className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
-                      >
-                        {t('signOutAccount')}
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-sm text-stone-500 dark:text-stone-400">
-                        {t('authSignInHint')}
-                      </p>
-                      <a
-                        href="/api/auth/start"
-                        className="flex h-11 w-full items-center justify-center rounded-xl bg-stone-900 font-semibold text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-                      >
-                        {t('continueWithSite')}
-                      </a>
-
-                      <div className="flex items-center gap-3 text-xs text-stone-400">
-                        <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
-                        {t('manualApiKeyFallback')}
-                        <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-stone-700 dark:text-stone-300">
-                          {t('apiTokenLabel')}
-                        </label>
-                        <input
-                          type="password"
-                          value={tempKeyInput}
-                          onChange={(e) => setTempKeyInput(e.target.value)}
-                          placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                          className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-stone-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
-                        />
-                      </div>
-
-                      <Button
-                        onClick={saveUserKey}
-                        disabled={accountSaving || !tempKeyInput.trim()}
-                        className="w-full rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-                      >
-                        {accountSaving ? t('validating') : t('saveAndConnect')}
-                      </Button>
-                    </>
-                  )}
-                </section>
-
-                {/* Layer 2: MCP OAuth — only after main account is bound */}
-                {isAccountBound ? (
-                  <section className="space-y-3 border-t border-stone-200 pt-5 dark:border-stone-800">
-                    <div>
-                      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-                        <Blocks className="h-3.5 w-3.5" />
-                        {t('mcpSection')}
-                      </div>
-                      <p className="mt-1 text-[11px] leading-4 text-stone-400">
-                        {t('mcpSectionHint')}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className="rounded-xl border border-stone-200 p-4 dark:border-stone-700">
+                      <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
                             Notion
                           </div>
-                          <div className="truncate text-[11px] text-stone-500 dark:text-stone-400">
-                            {notionStatus?.connected
-                              ? `${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`
-                              : notionStatus?.available === false
-                                ? t('notionNotConfigured')
-                                : t('notionConnectHint')}
-                          </div>
+                          {notionStatus?.connected ? (
+                            <div className="mt-0.5 truncate text-[11px] text-stone-500 dark:text-stone-400">
+                              {`${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`}
+                            </div>
+                          ) : notionStatus?.available === false ? (
+                            <div className="mt-0.5 truncate text-[11px] text-stone-500 dark:text-stone-400">
+                              {t('notionNotConfigured')}
+                            </div>
+                          ) : null}
                         </div>
                         {notionStatus?.connected ? (
                           <Button
@@ -5210,7 +5162,7 @@ export default function ChatContainer() {
                               if (notionStatus?.available === false) e.preventDefault();
                             }}
                             className={cn(
-                              'inline-flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
+                              'inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
                               notionStatus?.available === false
                                 ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
                                 : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
@@ -5222,7 +5174,144 @@ export default function ChatContainer() {
                       </div>
                     </div>
                   </section>
-                ) : null}
+                ) : (
+                  <>
+                    {/* Layer 1: main-site account */}
+                    <section className="space-y-3">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                          {t('accountSection')}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-4 text-stone-400">
+                          {t('accountSectionHint')}
+                        </p>
+                      </div>
+
+                      {isAccountBound ? (
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-3 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/30">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
+                              {t('accountConnected')}
+                            </div>
+                            <div className="truncate text-[11px] text-emerald-700/80 dark:text-emerald-400/80">
+                              {t('accountConnectedHint')}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={disconnectAccount}
+                            className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                          >
+                            {t('signOutAccount')}
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm text-stone-500 dark:text-stone-400">
+                            {t('authSignInHint')}
+                          </p>
+                          <a
+                            href="/api/auth/start"
+                            className="flex h-11 w-full items-center justify-center rounded-xl bg-stone-900 font-semibold text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                          >
+                            {t('continueWithSite')}
+                          </a>
+
+                          <div className="flex items-center gap-3 text-xs text-stone-400">
+                            <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                            {t('manualApiKeyFallback')}
+                            <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-stone-700 dark:text-stone-300">
+                              {t('apiTokenLabel')}
+                            </label>
+                            <input
+                              type="password"
+                              value={tempKeyInput}
+                              onChange={(e) => setTempKeyInput(e.target.value)}
+                              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                              className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-stone-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
+                            />
+                          </div>
+
+                          <Button
+                            onClick={saveUserKey}
+                            disabled={accountSaving || !tempKeyInput.trim()}
+                            className="w-full rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                          >
+                            {accountSaving ? t('validating') : t('saveAndConnect')}
+                          </Button>
+                        </>
+                      )}
+                    </section>
+
+                    {/* Layer 2: MCP — only in full account manage view */}
+                    {isAccountBound ? (
+                      <section className="space-y-3 border-t border-stone-200 pt-5 dark:border-stone-800">
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                            <Blocks className="h-3.5 w-3.5" />
+                            {t('mcpSection')}
+                          </div>
+                          <p className="mt-1 text-[11px] leading-4 text-stone-400">
+                            {t('mcpSectionHint')}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
+                                Notion
+                              </div>
+                              <div className="truncate text-[11px] text-stone-500 dark:text-stone-400">
+                                {notionStatus?.connected
+                                  ? `${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`
+                                  : notionStatus?.available === false
+                                    ? t('notionNotConfigured')
+                                    : t('notionConnectHint')}
+                              </div>
+                            </div>
+                            {notionStatus?.connected ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={notionBusy}
+                                onClick={() => void disconnectNotion()}
+                                className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                              >
+                                {t('disconnectNotion')}
+                              </Button>
+                            ) : (
+                              <a
+                                href={
+                                  notionStatus?.available === false
+                                    ? undefined
+                                    : '/api/integrations/notion/start'
+                                }
+                                aria-disabled={notionStatus?.available === false}
+                                onClick={(e) => {
+                                  if (notionStatus?.available === false) e.preventDefault();
+                                }}
+                                className={cn(
+                                  'inline-flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
+                                  notionStatus?.available === false
+                                    ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
+                                    : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
+                                )}
+                              >
+                                {t('connectNotion')}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </section>
+                    ) : null}
+                  </>
+                )}
 
                 {accountError ? (
                   <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>

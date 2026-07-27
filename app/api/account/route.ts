@@ -21,9 +21,35 @@ async function validateKey(apiKey: string) {
   }
 }
 
+async function fetchAccountUsername(apiKey: string): Promise<string | null> {
+  try {
+    const response = await fetch('https://llm.christmas/api/user/self', {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const user = payload?.data ?? payload?.user ?? payload;
+    if (!user || typeof user !== 'object') return null;
+    const name =
+      user.username || user.display_name || user.email || (user.id != null ? `User #${user.id}` : '');
+    return name ? String(name) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
-  const bound = Boolean(req.cookies.get(COOKIE_NAME)?.value);
-  return NextResponse.json({ bound });
+  const apiKey = req.cookies.get(COOKIE_NAME)?.value?.trim() || '';
+  const bound = apiKey.startsWith('sk-') && apiKey.length >= 20;
+  if (!bound) {
+    return NextResponse.json({ bound: false, username: null });
+  }
+  const username = await fetchAccountUsername(apiKey);
+  return NextResponse.json({ bound: true, username });
 }
 
 export async function POST(req: NextRequest) {

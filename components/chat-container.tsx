@@ -422,7 +422,7 @@ export default function ChatContainer() {
   const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
-  const [userBalance, setUserBalance] = useState<string | null>(null);
+  const [accountUsername, setAccountUsername] = useState<string | null>(null);
   const [notionStatus, setNotionStatus] = useState<{
     connected: boolean;
     available: boolean;
@@ -518,6 +518,21 @@ export default function ChatContainer() {
     );
   };
 
+  const refreshAccountStatus = async () => {
+    try {
+      const response = await fetch('/api/account', { cache: 'no-store' });
+      const data = await response.json();
+      const bound = Boolean(data?.bound);
+      setIsAccountBound(bound);
+      setAccountUsername(bound && data?.username ? String(data.username) : null);
+      return bound;
+    } catch {
+      setIsAccountBound(false);
+      setAccountUsername(null);
+      return false;
+    }
+  };
+
   const fetchIntegrations = async () => {
     try {
       const response = await fetch('/api/integrations', { cache: 'no-store' });
@@ -598,11 +613,7 @@ export default function ChatContainer() {
     }
 
     // Detect whether a personal API key is already bound in the HttpOnly cookie.
-    fetch('/api/account', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => {
-        const bound = Boolean(data?.bound);
-        setIsAccountBound(bound);
+    void refreshAccountStatus().then((bound) => {
         fetchModels();
         if (bound) {
           fetchSkills();
@@ -1376,9 +1387,9 @@ export default function ChatContainer() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || '绑定失败');
-      setIsAccountBound(true);
       setTempKeyInput('');
       closeAuthModal();
+      await refreshAccountStatus();
       await fetchModels();
       await fetchSkills();
       await fetchIntegrations();
@@ -1392,6 +1403,7 @@ export default function ChatContainer() {
   const disconnectAccount = async () => {
     await fetch('/api/account', { method: 'DELETE' });
     setIsAccountBound(false);
+    setAccountUsername(null);
     setTempKeyInput('');
     closeAuthModal();
     setNotionStatus(null);
@@ -3116,14 +3128,22 @@ export default function ChatContainer() {
                       exit={{ opacity: 0, y: 6 }}
                       className="absolute bottom-full left-3 right-3 mb-2 z-50 overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
                     >
-                      <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
-                        <div className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
-                          {isAccountBound ? t('accountConnected') : t('connectAccount')}
+                      {isAccountBound && accountUsername ? (
+                        <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
+                          <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
+                            {accountUsername}
+                          </div>
                         </div>
-                        <div className="text-[11px] text-stone-400 truncate">
-                          {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
+                      ) : !isAccountBound ? (
+                        <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
+                          <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
+                            {t('connectAccount')}
+                          </div>
+                          <div className="truncate text-[11px] text-stone-400">
+                            {t('connectAccountHint')}
+                          </div>
                         </div>
-                      </div>
+                      ) : null}
 
                       <div className="relative">
                         <button
@@ -3221,31 +3241,17 @@ export default function ChatContainer() {
                   }}
                   className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 hover:border-stone-300 focus-visible:ring-2 focus-visible:ring-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80 dark:hover:border-stone-600 dark:focus-visible:ring-stone-600"
                 >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div
-                      className={cn(
-                        'relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg',
-                      )}
-                    >
-                      {isAccountBound ? (
-                        <BrandMark className="h-7 w-7" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center rounded-lg border border-stone-200 bg-stone-100 text-stone-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200">
-                          <Key className="h-3.5 w-3.5" />
-                        </div>
-                      )}
-                      {isAccountBound && (
-                        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
-                      )}
+                  <div className="min-w-0 flex-1 pr-2">
+                    <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
+                      {isAccountBound
+                        ? accountUsername || t('accountConnected')
+                        : t('connectAccount')}
                     </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold">
-                        {isAccountBound ? t('accountConnected') : t('connectAccount')}
-                      </div>
+                    {!isAccountBound ? (
                       <div className="truncate text-[10px] text-stone-400">
-                        {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
+                        {t('connectAccountHint')}
                       </div>
-                    </div>
+                    ) : null}
                   </div>
                   <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
                 </button>

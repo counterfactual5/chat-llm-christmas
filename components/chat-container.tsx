@@ -4025,7 +4025,7 @@ export default function ChatContainer() {
             </AnimatePresence>
 
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-stone-400/20 focus-within:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-500 transition-all relative">
-              {(activeSkills.length > 0 || notionMcpOn) && (
+              {activeSkills.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 px-3 pt-3">
                   {activeSkills.map((skill) => (
                     <span
@@ -4045,23 +4045,6 @@ export default function ChatContainer() {
                       </button>
                     </span>
                   ))}
-                  {notionMcpOn && (
-                    <span
-                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-300 bg-stone-100 pl-2 pr-1 py-0.5 text-[11px] font-medium text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
-                      title={t('enableNotionMcpHint')}
-                    >
-                      <NotionLogo className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{t('notionMcpOn')}</span>
-                      <button
-                        type="button"
-                        onClick={() => toggleNotionMcp()}
-                        className="rounded-full p-0.5 hover:bg-stone-200 dark:hover:bg-stone-700"
-                        title={t('disableNotionMcp')}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -4195,7 +4178,7 @@ export default function ChatContainer() {
                       title="Add"
                       className={cn(
                         'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
-                        isSkillPickerOpen || activeSkills.length > 0 || notionMcpOn
+                        isSkillPickerOpen || activeSkills.length > 0
                           ? 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-100'
                           : 'text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800',
                       )}

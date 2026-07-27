@@ -653,82 +653,98 @@ export default function ChatContainer() {
       const authError = params.get('auth_error');
       const notionOk = params.get('notion_connected');
       const notionAuthReturn = params.get('notion_auth');
-      if (authError) {
-        setAccountError(authError);
-        setAuthModalMode(notionAuthReturn || notionOk ? 'notion' : 'login');
-        setShowAuthModal(true);
-      }
-      if (authError || notionOk || params.get('connected') || notionAuthReturn) {
+      const mainConnected = params.get('connected');
+
+      if (authError || notionOk || mainConnected || notionAuthReturn) {
         const clean = new URL(window.location.href);
         clean.search = '';
         window.history.replaceState({}, '', clean.pathname);
       }
-      if (params.get('connected')) {
-        setAccountError('');
-        setShowAuthModal(false);
-        void refreshAccountStatus();
-      }
-      if (notionOk || notionAuthReturn) {
-        if (notionOk) setAccountError('');
-        setAuthModalMode('notion');
-        setShowAuthModal(true);
-      }
-    } catch {
-      // ignore
-    }
 
-    // Detect whether a personal API key is already bound in the HttpOnly cookie.
-    void refreshAccountStatus().then((bound) => {
-        fetchModels();
-        if (bound) {
-          fetchSkills();
-          void fetchIntegrations();
-          // Connected user: load their chats from localStorage
-          const savedChats = localStorage.getItem('llm_christmas_chats');
-          if (savedChats) {
-            try {
-              const parsed = JSON.parse(savedChats) as ChatSession[];
-              // Only restore conversations that already have messages.
-              // Empty drafts are never persisted / shown in the sidebar.
-              const nonEmpty = parsed
-                .filter((session) => session.messages?.length > 0)
-                .map((session) => ({
-                  ...session,
-                  // Scrub leaked <think> / fake tool tags from older Cursor Auto replies.
-                  messages: session.messages.map((m) => {
-                    if (
-                      m.role !== 'assistant' ||
-                      (!contentHasThinkMarkup(m.content) && !contentHasToolMarkup(m.content))
-                    ) {
-                      return m;
-                    }
-                    const parts = displayAssistantParts(m);
-                    return {
-                      ...m,
-                      content: parts.content,
-                      reasoning: parts.reasoning || undefined,
-                    };
-                  }),
-                }));
-              if (nonEmpty.length > 0) {
-                setSessions(nonEmpty);
-                setActiveSessionId(nonEmpty[0].id);
-              } else {
+      void refreshAccountStatus()
+        .then((bound) => {
+          fetchModels();
+          if (bound) {
+            fetchSkills();
+            void fetchIntegrations();
+            const savedChats = localStorage.getItem('llm_christmas_chats');
+            if (savedChats) {
+              try {
+                const parsed = JSON.parse(savedChats) as ChatSession[];
+                const nonEmpty = parsed
+                  .filter((session) => session.messages?.length > 0)
+                  .map((session) => ({
+                    ...session,
+                    messages: session.messages.map((m) => {
+                      if (
+                        m.role !== 'assistant' ||
+                        (!contentHasThinkMarkup(m.content) && !contentHasToolMarkup(m.content))
+                      ) {
+                        return m;
+                      }
+                      const parts = displayAssistantParts(m);
+                      return {
+                        ...m,
+                        content: parts.content,
+                        reasoning: parts.reasoning || undefined,
+                      };
+                    }),
+                  }));
+                if (nonEmpty.length > 0) {
+                  setSessions(nonEmpty);
+                  setActiveSessionId(nonEmpty[0].id);
+                } else {
+                  createNewSession();
+                }
+              } catch {
                 createNewSession();
               }
-            } catch (e) { createNewSession(); }
+            } else {
+              createNewSession();
+            }
           } else {
             createNewSession();
           }
-        } else {
-          // Guest user: start with a fresh memory-only session. Ignore anything saved.
+
+          if (mainConnected) {
+            setAccountError('');
+            setShowAuthModal(false);
+          }
+
+          if (notionOk) {
+            if (bound) {
+              setAccountError('');
+              setShowAuthModal(false);
+              void fetchIntegrations();
+            } else {
+              setAuthModalMode('login');
+              setAccountError(
+                'Notion 已授权，但 llm.christmas 登录已失效。请先登录主站账号，再在 MCP 里重新连接 Notion。',
+              );
+              setShowAuthModal(true);
+            }
+            return;
+          }
+
+          if (authError) {
+            setAccountError(authError);
+            setAuthModalMode(bound ? 'notion' : 'login');
+            setShowAuthModal(true);
+            return;
+          }
+
+          if (notionAuthReturn && bound) {
+            setAuthModalMode('notion');
+            setShowAuthModal(true);
+          }
+        })
+        .catch(() => {
+          fetchModels();
           createNewSession();
-        }
-      })
-      .catch(() => {
-        fetchModels();
-        createNewSession();
-      });
+        });
+    } catch {
+      // ignore
+    }
   }, []);
 
   // Save Sessions ONLY if account is bound — never persist empty drafts

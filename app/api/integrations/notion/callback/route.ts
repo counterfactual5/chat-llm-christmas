@@ -21,9 +21,15 @@ function safeEqual(a: string, b: string) {
   return result === 0;
 }
 
-function redirectHome(req: NextRequest, params: Record<string, string>) {
+function redirectHome(
+  req: NextRequest,
+  params: Record<string, string>,
+  opts?: { openNotionModal?: boolean },
+) {
   const url = new URL('/', req.url);
-  url.searchParams.set('notion_auth', '1');
+  if (opts?.openNotionModal !== false) {
+    url.searchParams.set('notion_auth', '1');
+  }
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return NextResponse.redirect(url);
 }
@@ -87,7 +93,7 @@ export async function GET(req: NextRequest) {
       // non-fatal
     }
 
-    const home = redirectHome(req, { notion_connected: '1' });
+    const home = redirectHome(req, { notion_connected: '1' }, { openNotionModal: false });
     await upsertNotionConnection(req, home, ownerId, notion);
     clearOauthCookies(home);
     return home;

@@ -474,7 +474,9 @@ export default function ChatContainer() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [skillsExpanded, setSkillsExpanded] = useState(false);
-  const [isMcpMenuOpen, setIsMcpMenuOpen] = useState(false);
+  const [mcpExpanded, setMcpExpanded] = useState(false);
+  const [plusSkillsExpanded, setPlusSkillsExpanded] = useState(true);
+  const [plusMcpExpanded, setPlusMcpExpanded] = useState(true);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
   const [skillDraftContent, setSkillDraftContent] = useState('');
@@ -518,7 +520,6 @@ export default function ChatContainer() {
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
-  const mcpMenuRef = useRef<HTMLDivElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
@@ -1608,28 +1609,6 @@ export default function ChatContainer() {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [isAccountMenuOpen]);
-
-  // Close MCP manage menu on outside click / Escape.
-  useEffect(() => {
-    if (!isMcpMenuOpen) return;
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-      if (mcpMenuRef.current && target && !mcpMenuRef.current.contains(target)) {
-        setIsMcpMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsMcpMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [isMcpMenuOpen]);
 
   // Close session "more" menu on outside click / Escape.
   useEffect(() => {
@@ -3080,94 +3059,55 @@ export default function ChatContainer() {
                   )}
                 </AnimatePresence>
 
-                {/* MCP — account connection card (enable per chat in the + menu) */}
-                <div className="relative pt-1" ref={mcpMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!isAccountBound) {
-                        openLoginModal();
-                        return;
-                      }
-                      setIsMcpMenuOpen((v) => !v);
-                      void fetchIntegrations();
-                    }}
-                    className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 hover:border-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80 dark:hover:border-stone-600"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-600 dark:bg-stone-900">
-                        <Blocks className="h-4 w-4 text-stone-500" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
-                          {t('mcpTools')}
-                        </div>
-                        <div className="truncate text-[10px] text-stone-400">
-                          {notionStatus?.connected
-                            ? notionStatus.label || t('notionConnected')
-                            : t('mcpSidebarHint')}
-                        </div>
-                      </div>
-                    </div>
-                    <ChevronDown
-                      className={cn(
-                        'h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform',
-                        isMcpMenuOpen && 'rotate-180',
-                      )}
-                    />
-                  </button>
-
-                  <AnimatePresence>
-                    {isAccountBound && isMcpMenuOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                      >
-                        <div className="flex items-center gap-2 px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
-                          <NotionLogo className="h-4 w-4 shrink-0 text-stone-800 dark:text-stone-100" />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
-                              Notion
-                            </div>
-                            <div className="truncate text-[11px] text-stone-400">
-                              {notionStatus?.connected
-                                ? notionStatus.label || t('notionConnected')
-                                : t('notionConnectCardBody')}
-                            </div>
-                          </div>
-                        </div>
-                        {notionStatus?.connected ? (
-                          <button
-                            type="button"
-                            disabled={notionBusy}
-                            onClick={() => {
-                              setIsMcpMenuOpen(false);
-                              void disconnectNotion();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                          >
-                            <LogOut className="h-3.5 w-3.5" />
-                            {t('disconnectNotion')}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsMcpMenuOpen(false);
-                              openNotionModal();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                          >
-                            <Blocks className="h-3.5 w-3.5 text-stone-400" />
-                            {t('connectNotion')}
-                          </button>
-                        )}
-                      </motion.div>
+                {/* MCP — same collapsible pattern as Skills; click Notion for connect/disconnect card */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAccountBound) {
+                      openLoginModal();
+                      return;
+                    }
+                    setMcpExpanded((v) => !v);
+                    void fetchIntegrations();
+                  }}
+                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <Blocks className="h-4 w-4 text-stone-500" />
+                    {t('mcpTools')}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      'h-3.5 w-3.5 text-stone-400 transition-transform',
+                      mcpExpanded && isAccountBound ? 'rotate-180' : '',
                     )}
-                  </AnimatePresence>
-                </div>
+                  />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isAccountBound && mcpExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="space-y-0.5 pb-1">
+                        <button
+                          type="button"
+                          onClick={() => openNotionModal()}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
+                          <span className="min-w-0 flex-1 truncate">Notion</span>
+                          {notionStatus?.connected ? (
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                          ) : null}
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
@@ -4355,89 +4295,115 @@ export default function ChatContainer() {
                           </button>
 
                           <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                          <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                            {t('skills')}
-                          </div>
-                          {!isAccountBound ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsSkillPickerOpen(false);
-                                openLoginModal();
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
-                            >
-                              {t('connectAccount')}
-                            </button>
-                          ) : skills.length === 0 ? (
-                            <div className="px-2.5 py-2 text-xs text-stone-400">
-                              {t('noSkillsYet')}
-                            </div>
-                          ) : (
-                            skills.map((skill) => {
-                              const on = activeSkillIds.includes(skill.id);
-                              return (
-                                <button
-                                  key={skill.id}
-                                  type="button"
-                                  onClick={() => toggleSkill(skill.id)}
-                                  className={cn(
-                                    'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
-                                    on
-                                      ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                      : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
-                                  )}
-                                >
-                                  <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                  <span className="min-w-0 flex-1 truncate">{skill.title}</span>
-                                  {on ? (
-                                    <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                  ) : (
-                                    <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                                      /{skillSlashName(skill.title)}
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })
-                          )}
-
-                          <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                          <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                            {t('mcpTools')}
-                          </div>
-                          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                            <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('enableNotionMcp')}
-                              </div>
-                              <div className="truncate text-[10px] text-stone-400">
-                                {notionStatus?.connected
-                                  ? t('useInThisChat')
-                                  : t('notionMcpNeedsConnect')}
-                              </div>
-                            </div>
-                            {notionStatus?.connected ? (
-                              <Switch
-                                size="sm"
-                                checked={notionMcpOn}
-                                onCheckedChange={setNotionMcpEnabled}
-                                aria-label={t('enableNotionMcp')}
-                              />
-                            ) : (
+                          <button
+                            type="button"
+                            onClick={() => setPlusSkillsExpanded((v) => !v)}
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
+                          >
+                            <span>{t('skills')}</span>
+                            <ChevronDown
+                              className={cn(
+                                'h-3 w-3 transition-transform',
+                                plusSkillsExpanded ? 'rotate-180' : '',
+                              )}
+                            />
+                          </button>
+                          {plusSkillsExpanded &&
+                            (!isAccountBound ? (
                               <button
                                 type="button"
                                 onClick={() => {
                                   setIsSkillPickerOpen(false);
-                                  openNotionModal();
+                                  openLoginModal();
                                 }}
-                                className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
                               >
-                                {t('connectNotion')}
+                                {t('connectAccount')}
                               </button>
-                            )}
-                          </div>
+                            ) : skills.length === 0 ? (
+                              <div className="px-2.5 py-2 text-xs text-stone-400">
+                                {t('noSkillsYet')}
+                              </div>
+                            ) : (
+                              skills.map((skill) => {
+                                const on = activeSkillIds.includes(skill.id);
+                                return (
+                                  <button
+                                    key={skill.id}
+                                    type="button"
+                                    onClick={() => toggleSkill(skill.id)}
+                                    className={cn(
+                                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                      on
+                                        ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                        : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
+                                    )}
+                                  >
+                                    <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    <span className="min-w-0 flex-1 truncate">{skill.title}</span>
+                                    {on ? (
+                                      <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    ) : (
+                                      <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                        /{skillSlashName(skill.title)}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })
+                            ))}
+
+                          <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlusMcpExpanded((v) => !v);
+                              void fetchIntegrations();
+                            }}
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
+                          >
+                            <span>{t('mcpTools')}</span>
+                            <ChevronDown
+                              className={cn(
+                                'h-3 w-3 transition-transform',
+                                plusMcpExpanded ? 'rotate-180' : '',
+                              )}
+                            />
+                          </button>
+                          {plusMcpExpanded && (
+                            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                              <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm text-stone-800 dark:text-stone-100">
+                                  Notion
+                                </div>
+                                <div className="truncate text-[10px] text-stone-400">
+                                  {notionStatus?.connected
+                                    ? t('useInThisChat')
+                                    : t('notionMcpNeedsConnect')}
+                                </div>
+                              </div>
+                              {notionStatus?.connected ? (
+                                <Switch
+                                  size="sm"
+                                  checked={notionMcpOn}
+                                  onCheckedChange={setNotionMcpEnabled}
+                                  aria-label={t('enableNotionMcp')}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsSkillPickerOpen(false);
+                                    openNotionModal();
+                                  }}
+                                  className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                >
+                                  {t('connectNotion')}
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </motion.div>
                       )}
                     </AnimatePresence>

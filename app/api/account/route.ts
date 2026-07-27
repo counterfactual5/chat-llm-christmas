@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearVaultCookie } from '@/lib/integrations';
-import {
-  fetchUsernameForApiKey,
-} from '@/lib/account-profile';
 
 export const runtime = 'edge';
 export const maxDuration = 20;
@@ -25,19 +22,6 @@ async function validateKey(apiKey: string) {
   }
 }
 
-function setUsernameCookie(response: NextResponse, username: string | null) {
-  if (!username) return;
-  response.cookies.set({
-    name: USERNAME_COOKIE,
-    value: username.slice(0, 120),
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 30,
-  });
-}
-
 function clearUsernameCookie(response: NextResponse) {
   response.cookies.set({
     name: USERNAME_COOKIE,
@@ -50,17 +34,18 @@ function clearUsernameCookie(response: NextResponse) {
   });
 }
 
+/**
+ * Bound status only — no username probing against the main site.
+ * Optional display name comes from an existing cookie if SSO already set one.
+ */
 export async function GET(req: NextRequest) {
   const apiKey = req.cookies.get(COOKIE_NAME)?.value?.trim() || '';
   const bound = apiKey.startsWith('sk-') && apiKey.length >= 20;
   if (!bound) {
     return NextResponse.json({ bound: false, username: null });
   }
-  const cached = req.cookies.get(USERNAME_COOKIE)?.value?.trim() || '';
-  let username = (await fetchUsernameForApiKey(apiKey)) || cached || null;
-  const res = NextResponse.json({ bound: true, username });
-  if (username && username !== cached) setUsernameCookie(res, username);
-  return res;
+  const username = req.cookies.get(USERNAME_COOKIE)?.value?.trim() || null;
+  return NextResponse.json({ bound: true, username });
 }
 
 export async function POST(req: NextRequest) {
@@ -74,10 +59,7 @@ export async function POST(req: NextRequest) {
 
     await validateKey(normalized);
 
-    const username =
-      (await fetchUsernameForApiKey(normalized)) || null;
-
-    const response = NextResponse.json({ bound: true, username });
+    const response = NextResponse.json({ bound: true, username: null });
     // Switching accounts must drop the previous owner's Notion/GitHub tokens.
     clearVaultCookie(response);
     clearUsernameCookie(response);
@@ -90,7 +72,6 @@ export async function POST(req: NextRequest) {
       path: '/',
       maxAge: 60 * 60 * 24 * 30,
     });
-    if (username) setUsernameCookie(response, username);
     return response;
   } catch (error: any) {
     return NextResponse.json(

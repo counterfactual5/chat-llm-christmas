@@ -775,12 +775,6 @@ export default function ChatContainer() {
   const accountDisplayName =
     accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
 
-  // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
-  useEffect(() => {
-    if (!isAccountBound || accountUsername) return;
-    void refreshAccountStatus();
-  }, [isAccountBound, accountUsername]);
-
   useEffect(() => {
     if (!notionStatus?.connected) return;
     if (!readMcpPrefIds().includes('notion')) return;

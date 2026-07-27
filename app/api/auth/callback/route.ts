@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearVaultCookie } from '@/lib/integrations';
-import { usernameFromTokenPayload, fetchUsernameForApiKey } from '@/lib/account-profile';
+import { usernameFromTokenPayload } from '@/lib/account-profile';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -55,10 +55,9 @@ export async function GET(req: NextRequest) {
     }
 
     const apiKey = String(payload.data.apiKey);
+    // Only use username if the SSO token payload already includes it — no outbound probes.
     const username =
-      usernameFromTokenPayload(payload.data) ||
-      usernameFromTokenPayload(payload) ||
-      (await fetchUsernameForApiKey(apiKey));
+      usernameFromTokenPayload(payload.data) || usernameFromTokenPayload(payload);
 
     const home = new URL('/', req.url);
     home.searchParams.set('connected', '1');

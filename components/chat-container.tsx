@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, Bot, User, Loader2, RefreshCw, Copy, Check, Trash2, 
   Menu, Plus, Settings2, Image as ImageIcon, 
-  Mic, Square, Download, Key, Sparkles, ChevronDown, LogOut, X,
+  Mic, Square, Download, Key, Sparkles, ChevronDown, ChevronRight, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
   Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks
 } from 'lucide-react';
@@ -475,8 +475,7 @@ export default function ChatContainer() {
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
-  const [plusSkillsExpanded, setPlusSkillsExpanded] = useState(false);
-  const [plusMcpExpanded, setPlusMcpExpanded] = useState(false);
+  const [plusFlyout, setPlusFlyout] = useState<null | 'skills' | 'mcp'>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
   const [skillDraftContent, setSkillDraftContent] = useState('');
@@ -1885,6 +1884,7 @@ export default function ChatContainer() {
       const target = event.target as Node | null;
       if (skillPickerRef.current && target && !skillPickerRef.current.contains(target)) {
         setIsSkillPickerOpen(false);
+        setPlusFlyout(null);
       }
     };
     document.addEventListener('mousedown', onPointerDown);
@@ -4273,9 +4273,7 @@ export default function ChatContainer() {
                       onClick={() => {
                         setIsSkillPickerOpen((v) => {
                           const next = !v;
-                          // Always start collapsed; expand only after hovering/clicking a section.
-                          setPlusSkillsExpanded(false);
-                          setPlusMcpExpanded(false);
+                          setPlusFlyout(null);
                           return next;
                         });
                         setIsModelMenuOpen(false);
@@ -4293,157 +4291,204 @@ export default function ChatContainer() {
                     </button>
                     <AnimatePresence>
                       {isSkillPickerOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 5 }}
-                          className="absolute left-0 bottom-10 z-30 w-72 max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setInput('/image ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                        <div className="absolute left-0 bottom-10 z-30 flex items-end gap-1.5">
+                          <motion.div
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            className="w-56 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                           >
-                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('generateImage')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">/image</span>
-                          </button>
-
-                          <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                          <button
-                            type="button"
-                            onPointerEnter={() => {
-                              setPlusSkillsExpanded(true);
-                              setPlusMcpExpanded(false);
-                              if (isAccountBound && skills.length === 0) fetchSkills();
-                            }}
-                            onClick={() => {
-                              setPlusSkillsExpanded((v) => !v);
-                              setPlusMcpExpanded(false);
-                              if (isAccountBound && skills.length === 0) fetchSkills();
-                            }}
-                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
-                          >
-                            <span>{t('skills')}</span>
-                            <ChevronDown
-                              className={cn(
-                                'h-3 w-3 transition-transform',
-                                plusSkillsExpanded ? 'rotate-180' : '',
-                              )}
-                            />
-                          </button>
-                          {plusSkillsExpanded &&
-                            (!isAccountBound ? (
-                              <button
-                                type="button"
-                                onClick={() => {
+                            <button
+                              type="button"
+                              onPointerEnter={() => setPlusFlyout(null)}
+                              onClick={() => {
+                                if (!isAccountBound) {
                                   setIsSkillPickerOpen(false);
+                                  setPlusFlyout(null);
                                   openLoginModal();
-                                }}
-                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
-                              >
-                                {t('connectAccount')}
-                              </button>
-                            ) : skills.length === 0 ? (
-                              <div className="px-2.5 py-2 text-xs text-stone-400">
-                                {t('noSkillsYet')}
-                              </div>
-                            ) : (
-                              skills.map((skill) => {
-                                const on = activeSkillIds.includes(skill.id);
-                                return (
-                                  <button
-                                    key={skill.id}
-                                    type="button"
-                                    onClick={() => toggleSkill(skill.id)}
-                                    className={cn(
-                                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
-                                      on
-                                        ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                        : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
-                                    )}
-                                  >
-                                    <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                    <span className="min-w-0 flex-1 truncate">{skill.title}</span>
-                                    {on ? (
-                                      <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                    ) : (
-                                      <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                                        /{skillSlashName(skill.title)}
-                                      </span>
-                                    )}
-                                  </button>
-                                );
-                              })
-                            ))}
+                                  return;
+                                }
+                                setIsSkillPickerOpen(false);
+                                setPlusFlyout(null);
+                                setInput('/image ');
+                                textareaRef.current?.focus();
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                            >
+                              <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1">{t('generateImage')}</span>
+                              <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                /image
+                              </span>
+                            </button>
 
-                          <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-                          <button
-                            type="button"
-                            onPointerEnter={() => {
-                              setPlusMcpExpanded(true);
-                              setPlusSkillsExpanded(false);
-                              void fetchIntegrations();
-                            }}
-                            onClick={() => {
-                              setPlusMcpExpanded((v) => !v);
-                              setPlusSkillsExpanded(false);
-                              void fetchIntegrations();
-                            }}
-                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
-                          >
-                            <span>{t('mcpTools')}</span>
-                            <ChevronDown
+                            <button
+                              type="button"
+                              onPointerEnter={() => {
+                                setPlusFlyout('skills');
+                                if (isAccountBound && skills.length === 0) fetchSkills();
+                              }}
+                              onClick={() => {
+                                setPlusFlyout((v) => (v === 'skills' ? null : 'skills'));
+                                if (isAccountBound && skills.length === 0) fetchSkills();
+                              }}
                               className={cn(
-                                'h-3 w-3 transition-transform',
-                                plusMcpExpanded ? 'rotate-180' : '',
+                                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                plusFlyout === 'skills'
+                                  ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                  : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
                               )}
-                            />
-                          </button>
-                          {plusMcpExpanded && (
-                            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                              <NotionLogo className="h-3.5 w-3.5 shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm text-stone-800 dark:text-stone-100">
-                                  Notion
-                                </div>
-                                <div className="truncate text-[10px] text-stone-400">
-                                  {notionStatus?.connected
-                                    ? t('useInThisChat')
-                                    : t('notionMcpNeedsConnect')}
-                                </div>
-                              </div>
-                              {notionStatus?.connected ? (
-                                <Switch
-                                  size="sm"
-                                  checked={notionMcpOn}
-                                  onCheckedChange={setNotionMcpEnabled}
-                                  aria-label={t('enableNotionMcp')}
-                                />
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsSkillPickerOpen(false);
-                                    openNotionModal();
-                                  }}
-                                  className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
-                                >
-                                  {t('connectNotion')}
-                                </button>
+                            >
+                              <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1">{t('skills')}</span>
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onPointerEnter={() => {
+                                setPlusFlyout('mcp');
+                                void fetchIntegrations();
+                              }}
+                              onClick={() => {
+                                setPlusFlyout((v) => (v === 'mcp' ? null : 'mcp'));
+                                void fetchIntegrations();
+                              }}
+                              className={cn(
+                                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                plusFlyout === 'mcp'
+                                  ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                  : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
                               )}
-                            </div>
-                          )}
-                        </motion.div>
+                            >
+                              <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1">{t('mcpTools')}</span>
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                            </button>
+                          </motion.div>
+
+                          <AnimatePresence>
+                            {plusFlyout === 'skills' && (
+                              <motion.div
+                                key="plus-skills-flyout"
+                                initial={{ opacity: 0, x: -4 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -4 }}
+                                onPointerEnter={() => setPlusFlyout('skills')}
+                                className="max-h-72 w-60 overflow-y-auto rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                              >
+                                {!isAccountBound ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsSkillPickerOpen(false);
+                                      setPlusFlyout(null);
+                                      openLoginModal();
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                                  >
+                                    {t('connectAccount')}
+                                  </button>
+                                ) : skills.length === 0 ? (
+                                  <div className="px-2.5 py-2 text-xs leading-5 text-stone-400">
+                                    {t('noSkillsYet')}
+                                  </div>
+                                ) : (
+                                  skills.map((skill) => {
+                                    const on = activeSkillIds.includes(skill.id);
+                                    return (
+                                      <button
+                                        key={skill.id}
+                                        type="button"
+                                        onClick={() => toggleSkill(skill.id)}
+                                        className={cn(
+                                          'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                          on
+                                            ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                            : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
+                                        )}
+                                      >
+                                        <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                        <span className="min-w-0 flex-1 truncate">
+                                          {skill.title}
+                                        </span>
+                                        {on ? (
+                                          <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                        ) : (
+                                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                            /{skillSlashName(skill.title)}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                                {isAccountBound ? (
+                                  <>
+                                    <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsSkillPickerOpen(false);
+                                        setPlusFlyout(null);
+                                        openNewSkillModal();
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                                    >
+                                      <Plus className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                      <span>{t('newSkill')}</span>
+                                    </button>
+                                  </>
+                                ) : null}
+                              </motion.div>
+                            )}
+
+                            {plusFlyout === 'mcp' && (
+                              <motion.div
+                                key="plus-mcp-flyout"
+                                initial={{ opacity: 0, x: -4 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -4 }}
+                                onPointerEnter={() => setPlusFlyout('mcp')}
+                                className="w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                              >
+                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                  <NotionLogo className="h-3.5 w-3.5 shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-sm text-stone-800 dark:text-stone-100">
+                                      Notion
+                                    </div>
+                                    <div className="truncate text-[10px] text-stone-400">
+                                      {notionStatus?.connected
+                                        ? t('useInThisChat')
+                                        : t('notionMcpNeedsConnect')}
+                                    </div>
+                                  </div>
+                                  {notionStatus?.connected ? (
+                                    <Switch
+                                      size="sm"
+                                      checked={notionMcpOn}
+                                      onCheckedChange={setNotionMcpEnabled}
+                                      aria-label={t('enableNotionMcp')}
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsSkillPickerOpen(false);
+                                        setPlusFlyout(null);
+                                        openNotionModal();
+                                      }}
+                                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                    >
+                                      {t('connectNotion')}
+                                    </button>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
                       )}
                     </AnimatePresence>
                   </div>

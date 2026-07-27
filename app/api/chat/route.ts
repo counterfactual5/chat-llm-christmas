@@ -161,6 +161,7 @@ export async function POST(req: NextRequest) {
       skills = [],
       conversationId = '',
       enableSearch = true,
+      integrations = [],
     } = await req.json();
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
     const isBoundAccount = Boolean(boundUserKey);
@@ -200,6 +201,11 @@ export async function POST(req: NextRequest) {
     const enabledTools = resolveEnabledTools({ searchEnabled });
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
+    const requestedIntegrations = Array.isArray(integrations)
+      ? integrations.map((x: unknown) => String(x || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+    // Reserved for Notion MCP tool registration once the bridge is wired.
+    void requestedIntegrations;
 
     const systemParts: string[] = [];
     if (isCursorStyleModel(requestedModel)) {

@@ -7,7 +7,7 @@ import {
   Menu, Plus, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon
+  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Blocks
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -254,6 +254,8 @@ interface ChatSession {
   updatedAt: number;
   /** Attached Skill ids for this chat — additive, not a System Prompt replacement. */
   skillIds?: string[];
+  /** Per-chat MCP providers enabled for tool use (e.g. notion). */
+  mcpIds?: string[];
   /** Latest web search hits for this chat — shown in Reference Material. */
   webSources?: WebSearchSource[];
 }
@@ -626,7 +628,9 @@ export default function ChatContainer() {
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const activeSkillIds = activeSession?.skillIds || [];
+  const activeMcpIds = activeSession?.mcpIds || [];
   const webSources = activeSession?.webSources || [];
+  const notionMcpOn = activeMcpIds.includes('notion');
 
   // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
   useEffect(() => {
@@ -664,6 +668,30 @@ export default function ChatContainer() {
         const next = typeof updater === 'function' ? updater(s.skillIds || []) : updater;
         return { ...s, skillIds: next, updatedAt: Date.now() };
       }),
+    );
+  };
+
+  const setActiveMcpIds = (updater: string[] | ((prev: string[]) => string[])) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const next = typeof updater === 'function' ? updater(s.mcpIds || []) : updater;
+        return { ...s, mcpIds: next, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const toggleNotionMcp = () => {
+    if (!isAccountBound) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (!notionStatus?.connected) {
+      setShowAuthModal(true);
+      return;
+    }
+    setActiveMcpIds((prev) =>
+      prev.includes('notion') ? prev.filter((id) => id !== 'notion') : [...prev, 'notion'],
     );
   };
 
@@ -1067,6 +1095,7 @@ export default function ChatContainer() {
         referenceText: combinedReference,
         skills: skillsPayloadForSession(sessionId),
         conversationId: sessionId,
+        integrations: sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || [],
       }),
       signal,
     });
@@ -3806,7 +3835,7 @@ export default function ChatContainer() {
             </AnimatePresence>
 
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all relative">
-              {activeSkills.length > 0 && (
+              {(activeSkills.length > 0 || notionMcpOn) && (
                 <div className="flex flex-wrap gap-1.5 px-3 pt-3">
                   {activeSkills.map((skill) => (
                     <span
@@ -3826,6 +3855,23 @@ export default function ChatContainer() {
                       </button>
                     </span>
                   ))}
+                  {notionMcpOn && (
+                    <span
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-300 bg-stone-100 pl-2 pr-1 py-0.5 text-[11px] font-medium text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
+                      title={t('enableNotionMcpHint')}
+                    >
+                      <Blocks className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{t('notionMcpOn')}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleNotionMcp()}
+                        className="rounded-full p-0.5 hover:bg-stone-200 dark:hover:bg-stone-700"
+                        title={t('disableNotionMcp')}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -3959,7 +4005,7 @@ export default function ChatContainer() {
                       title="Add"
                       className={cn(
                         'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
-                        isSkillPickerOpen || activeSkills.length > 0
+                        isSkillPickerOpen || activeSkills.length > 0 || notionMcpOn
                           ? 'bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300'
                           : 'text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800',
                       )}
@@ -4008,6 +4054,46 @@ export default function ChatContainer() {
                           >
                             <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                             <span className="min-w-0 flex-1">{t('newSkill')}</span>
+                          </button>
+
+                          <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
+                          <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                            {t('mcpTools')}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsSkillPickerOpen(false);
+                              if (!isAccountBound || !notionStatus?.connected) {
+                                setShowAuthModal(true);
+                                return;
+                              }
+                              toggleNotionMcp();
+                            }}
+                            className={cn(
+                              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                              notionMcpOn
+                                ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
+                            )}
+                            title={
+                              notionStatus?.connected
+                                ? t('enableNotionMcpHint')
+                                : t('notionMcpNeedsConnect')
+                            }
+                          >
+                            <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block">{t('enableNotionMcp')}</span>
+                              <span className="block text-[10px] font-normal text-stone-400">
+                                {notionStatus?.connected
+                                  ? notionStatus.label || t('enableNotionMcpHint')
+                                  : t('notionMcpNeedsConnect')}
+                              </span>
+                            </span>
+                            {notionMcpOn ? (
+                              <Check className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                            ) : null}
                           </button>
 
                           {isAccountBound && skills.length > 0 && (

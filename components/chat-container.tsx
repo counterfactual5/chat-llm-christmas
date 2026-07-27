@@ -475,8 +475,8 @@ export default function ChatContainer() {
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
-  const [plusSkillsExpanded, setPlusSkillsExpanded] = useState(true);
-  const [plusMcpExpanded, setPlusMcpExpanded] = useState(true);
+  const [plusSkillsExpanded, setPlusSkillsExpanded] = useState(false);
+  const [plusMcpExpanded, setPlusMcpExpanded] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
   const [skillDraftContent, setSkillDraftContent] = useState('');
@@ -2978,96 +2978,113 @@ export default function ChatContainer() {
 
               {/* Skills entry under New Chat (ChatGPT-style tools area) */}
               <div className="space-y-1 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isAccountBound) {
-                      openLoginModal();
-                      return;
-                    }
-                    setSkillsExpanded((v) => !v);
-                    if (skills.length === 0) fetchSkills();
-                  }}
-                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2 font-medium">
-                    <ScrollText className="h-4 w-4 text-stone-500" />
-                    {t('skills')}
-                  </span>
-                  <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', skillsExpanded && isAccountBound ? 'rotate-180' : '')} />
-                </button>
+                <div>
+                  <button
+                    type="button"
+                    onPointerEnter={() => {
+                      if (!isAccountBound) return;
+                      setSkillsExpanded(true);
+                      setMcpExpanded(false);
+                      if (skills.length === 0) fetchSkills();
+                    }}
+                    onClick={() => {
+                      if (!isAccountBound) {
+                        openLoginModal();
+                        return;
+                      }
+                      setSkillsExpanded((v) => !v);
+                      setMcpExpanded(false);
+                      if (skills.length === 0) fetchSkills();
+                    }}
+                    className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 font-medium">
+                      <ScrollText className="h-4 w-4 text-stone-500" />
+                      {t('skills')}
+                    </span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', skillsExpanded && isAccountBound ? 'rotate-180' : '')} />
+                  </button>
 
-                <AnimatePresence initial={false}>
-                  {isAccountBound && skillsExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden pl-2"
-                    >
-                      <div className="space-y-0.5 pb-1">
-                        <button
-                          type="button"
-                          onClick={openNewSkillModal}
-                          className="mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-stone-500 hover:bg-stone-200/50 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-200"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          {t('newSkill')}
-                        </button>
-                        {skills.length === 0 ? null : (
-                          skills.map((skill) => (
-                            <div
-                              key={skill.id}
-                              className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  toggleSkill(skill.id);
-                                }}
-                                className={cn(
-                                  'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
-                                  activeSkillIds.includes(skill.id)
-                                    ? 'text-stone-900 dark:text-stone-100'
-                                    : 'text-stone-600 dark:text-stone-300',
-                                )}
-                                title={
-                                  activeSkillIds.includes(skill.id)
-                                    ? `已启用 /${skillSlashName(skill.title)} — 再点取消`
-                                    : `启用 Skill · /${skillSlashName(skill.title)}`
-                                }
+                  <AnimatePresence initial={false}>
+                    {isAccountBound && skillsExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden pl-2"
+                      >
+                        <div className="space-y-0.5 pb-1">
+                          <button
+                            type="button"
+                            onClick={openNewSkillModal}
+                            className="mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-stone-500 hover:bg-stone-200/50 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-200"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            {t('newSkill')}
+                          </button>
+                          {skills.length === 0 ? null : (
+                            skills.map((skill) => (
+                              <div
+                                key={skill.id}
+                                className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
                               >
-                                <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                <span className="truncate">{skill.title}</span>
-                                {activeSkillIds.includes(skill.id) && (
-                                  <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => requestDeleteSkill(skill.id, e)}
-                                className="mr-1 rounded p-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/20"
-                                title="Delete skill"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    toggleSkill(skill.id);
+                                  }}
+                                  className={cn(
+                                    'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
+                                    activeSkillIds.includes(skill.id)
+                                      ? 'text-stone-900 dark:text-stone-100'
+                                      : 'text-stone-600 dark:text-stone-300',
+                                  )}
+                                  title={
+                                    activeSkillIds.includes(skill.id)
+                                      ? `已启用 /${skillSlashName(skill.title)} — 再点取消`
+                                      : `启用 Skill · /${skillSlashName(skill.title)}`
+                                  }
+                                >
+                                  <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                  <span className="truncate">{skill.title}</span>
+                                  {activeSkillIds.includes(skill.id) && (
+                                    <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => requestDeleteSkill(skill.id, e)}
+                                  className="mr-1 rounded p-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/20"
+                                  title="Delete skill"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
                 {/* MCP — same collapsible pattern as Skills; click Notion for connect/disconnect card */}
+                <div>
                 <button
                   type="button"
+                  onPointerEnter={() => {
+                    if (!isAccountBound) return;
+                    setMcpExpanded(true);
+                    setSkillsExpanded(false);
+                    void fetchIntegrations();
+                  }}
                   onClick={() => {
                     if (!isAccountBound) {
                       openLoginModal();
                       return;
                     }
                     setMcpExpanded((v) => !v);
+                    setSkillsExpanded(false);
                     void fetchIntegrations();
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -3098,7 +3115,7 @@ export default function ChatContainer() {
                           onClick={() => openNotionModal()}
                           className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
                         >
-                          <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
+                          <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">Notion</span>
                           {notionStatus?.connected ? (
                             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
@@ -3108,6 +3125,7 @@ export default function ChatContainer() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+                </div>
               </div>
             </div>
 
@@ -3638,9 +3656,9 @@ export default function ChatContainer() {
                                   )}
                                 />
                                 {searching ? (
-                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500" />
+                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
                                 ) : isNotion ? (
-                                  <NotionLogo className="h-3 w-3 shrink-0 opacity-80" />
+                                  <NotionLogo className="h-3 w-3 shrink-0" />
                                 ) : (
                                   <Globe className="h-3 w-3 shrink-0 opacity-60" />
                                 )}
@@ -4253,7 +4271,13 @@ export default function ChatContainer() {
                     <button
                       type="button"
                       onClick={() => {
-                        setIsSkillPickerOpen((v) => !v);
+                        setIsSkillPickerOpen((v) => {
+                          const next = !v;
+                          // Always start collapsed; expand only after hovering/clicking a section.
+                          setPlusSkillsExpanded(false);
+                          setPlusMcpExpanded(false);
+                          return next;
+                        });
                         setIsModelMenuOpen(false);
                         if (isAccountBound && skills.length === 0) fetchSkills();
                       }}
@@ -4297,7 +4321,16 @@ export default function ChatContainer() {
                           <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
                           <button
                             type="button"
-                            onClick={() => setPlusSkillsExpanded((v) => !v)}
+                            onPointerEnter={() => {
+                              setPlusSkillsExpanded(true);
+                              setPlusMcpExpanded(false);
+                              if (isAccountBound && skills.length === 0) fetchSkills();
+                            }}
+                            onClick={() => {
+                              setPlusSkillsExpanded((v) => !v);
+                              setPlusMcpExpanded(false);
+                              if (isAccountBound && skills.length === 0) fetchSkills();
+                            }}
                             className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
                           >
                             <span>{t('skills')}</span>
@@ -4356,8 +4389,14 @@ export default function ChatContainer() {
                           <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
                           <button
                             type="button"
+                            onPointerEnter={() => {
+                              setPlusMcpExpanded(true);
+                              setPlusSkillsExpanded(false);
+                              void fetchIntegrations();
+                            }}
                             onClick={() => {
                               setPlusMcpExpanded((v) => !v);
+                              setPlusSkillsExpanded(false);
                               void fetchIntegrations();
                             }}
                             className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800"
@@ -4372,7 +4411,7 @@ export default function ChatContainer() {
                           </button>
                           {plusMcpExpanded && (
                             <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                              <NotionLogo className="h-3.5 w-3.5 shrink-0 text-stone-800 dark:text-stone-100" />
+                              <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                               <div className="min-w-0 flex-1">
                                 <div className="text-sm text-stone-800 dark:text-stone-100">
                                   Notion
@@ -4753,7 +4792,7 @@ export default function ChatContainer() {
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
                                       {referenceSourcesMeta.useNotionIcon ? (
-                                        <NotionLogo className="h-3 w-3 shrink-0 opacity-80" />
+                                        <NotionLogo className="h-3 w-3 shrink-0" />
                                       ) : (
                                         <Globe className="h-3 w-3" />
                                       )}
@@ -5147,7 +5186,7 @@ export default function ChatContainer() {
                       className="shrink-0 rounded-xl"
                     >
                       {isGeneratingSkill ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin text-stone-600 dark:text-stone-300" />
                       ) : (
                         <Sparkles className="h-4 w-4 text-orange-500" />
                       )}
@@ -5228,69 +5267,60 @@ export default function ChatContainer() {
               </button>
 
               {authModalMode === 'notion' && isAccountBound ? (
-                <section className="flex flex-col items-center pt-2 pb-1">
-                  <div className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-6 py-8 text-center dark:border-stone-700 dark:bg-stone-800/40">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-stone-200 bg-white shadow-sm dark:border-stone-600 dark:bg-stone-900">
-                      <NotionLogo className="h-8 w-8 text-stone-900 dark:text-stone-100" />
-                    </div>
-                    <div className="mt-4 text-lg font-semibold tracking-tight text-stone-900 dark:text-stone-50">
-                      {t('notionConnectCardTitle')}
-                    </div>
-                    {notionStatus?.connected ? (
-                      <div className="mt-1.5 text-sm text-stone-500 dark:text-stone-400">
-                        {t('notionConnected')}
-                        {notionStatus.label ? (
-                          <span className="mt-1 block truncate text-[12px] text-stone-400">
-                            {t('notionWorkspace')} · {notionStatus.label}
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : notionStatus?.available === false ? (
-                      <p className="mt-1.5 text-sm text-amber-700 dark:text-amber-400">
-                        {t('notionNotConfigured')}
-                      </p>
-                    ) : (
-                      <p className="mt-1.5 text-sm leading-5 text-stone-500 dark:text-stone-400">
-                        {t('notionConnectCardBody')}
-                      </p>
-                    )}
+                <section className="flex flex-col items-center px-1 pt-2 pb-1 text-center">
+                  <NotionLogo className="mx-auto h-14 w-14 rounded-2xl shadow-sm" />
+                  <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+                    {t('notionConnectCardTitle')}
+                  </h2>
+                  {notionStatus?.connected ? (
+                    <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
+                      {t('notionConnected')}
+                    </p>
+                  ) : notionStatus?.available === false ? (
+                    <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+                      {t('notionNotConfigured')}
+                    </p>
+                  ) : (
+                    <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">
+                      {t('notionConnectCardBody')}
+                    </p>
+                  )}
 
-                    <div className="mt-6">
-                      {notionStatus?.connected ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={notionBusy}
-                          onClick={() => void disconnectNotion()}
-                          className="h-10 w-full rounded-xl border-red-200 text-sm text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
-                        >
-                          {t('disconnectNotion')}
-                        </Button>
-                      ) : (
-                        <a
-                          href={
-                            notionStatus?.available === false
-                              ? undefined
-                              : '/api/integrations/notion/start'
-                          }
-                          aria-disabled={notionStatus?.available === false}
-                          onClick={(e) => {
-                            if (notionStatus?.available === false) e.preventDefault();
-                          }}
-                          className={cn(
-                            'inline-flex h-10 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
-                            notionStatus?.available === false
-                              ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
-                              : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
-                          )}
-                        >
-                          {t('connectNotion')}
-                        </a>
-                      )}
-                    </div>
+                  <div className="mt-6 w-full max-w-sm">
+                    {notionStatus?.connected ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={notionBusy}
+                        onClick={() => void disconnectNotion()}
+                        className="h-11 w-full rounded-xl border-red-200 text-sm text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                      >
+                        {t('disconnectNotion')}
+                      </Button>
+                    ) : (
+                      <a
+                        href={
+                          notionStatus?.available === false
+                            ? undefined
+                            : '/api/integrations/notion/start'
+                        }
+                        aria-disabled={notionStatus?.available === false}
+                        onClick={(e) => {
+                          if (notionStatus?.available === false) e.preventDefault();
+                        }}
+                        className={cn(
+                          'inline-flex h-11 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
+                          notionStatus?.available === false
+                            ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
+                            : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
+                        )}
+                      >
+                        {t('connectNotion')}
+                      </a>
+                    )}
                   </div>
                   {accountError ? (
-                    <p className="mt-4 w-full text-center text-sm text-red-600 dark:text-red-400">
+                    <p className="mt-4 w-full text-sm text-red-600 dark:text-red-400">
                       {accountError}
                     </p>
                   ) : null}

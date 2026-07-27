@@ -5305,7 +5305,7 @@ export default function ChatContainer() {
                         type="button"
                         disabled={notionBusy}
                         onClick={() => void disconnectNotion()}
-                        className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800/60 dark:bg-red-950/50 dark:text-red-50 dark:hover:bg-red-950/70 dark:hover:text-white"
+                        className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
                       >
                         {t('disconnectNotion')}
                       </Button>

@@ -7,11 +7,12 @@ import {
   Menu, Plus, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Blocks
+  Play, ListOrdered, ScrollText, Search, Globe, Blocks
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
 import ReactMarkdown from 'react-markdown';
@@ -42,7 +43,6 @@ import {
   prepareChatMarkdown,
 } from '@/lib/markdown-math';
 import { useLocale } from '@/lib/i18n';
-import { useTheme } from '@/components/theme-provider';
 
 const KATEX_OPTIONS = {
   throwOnError: false,
@@ -384,7 +384,6 @@ type QueuedTask = {
 
 export default function ChatContainer() {
   const { t, locale, setLocale } = useLocale();
-  const { theme, setTheme } = useTheme();
 
   // State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -699,6 +698,18 @@ export default function ChatContainer() {
     setActiveMcpIds((prev) =>
       prev.includes('notion') ? prev.filter((id) => id !== 'notion') : [...prev, 'notion'],
     );
+  };
+
+  const setNotionMcpEnabled = (enabled: boolean) => {
+    if (!isAccountBound || !notionStatus?.connected) {
+      setShowAuthModal(true);
+      return;
+    }
+    setActiveMcpIds((prev) => {
+      const on = prev.includes('notion');
+      if (enabled === on) return prev;
+      return enabled ? [...prev, 'notion'] : prev.filter((id) => id !== 'notion');
+    });
   };
 
   const toggleSkill = (skillId: string) => {
@@ -2773,7 +2784,7 @@ export default function ChatContainer() {
             <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white shadow-sm">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900">
                     <Sparkles className="h-4 w-4" />
                   </div>
                   Christmas Chat
@@ -2840,7 +2851,7 @@ export default function ChatContainer() {
                                 className={cn(
                                   'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
                                   activeSkillIds.includes(skill.id)
-                                    ? 'text-orange-700 dark:text-orange-300'
+                                    ? 'text-stone-900 dark:text-stone-100'
                                     : 'text-stone-600 dark:text-stone-300',
                                 )}
                                 title={
@@ -2849,10 +2860,10 @@ export default function ChatContainer() {
                                     : `启用 Skill · /${skillSlashName(skill.title)}`
                                 }
                               >
-                                <ScrollText className="h-3.5 w-3.5 shrink-0 text-orange-500/80" />
+                                <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                                 <span className="truncate">{skill.title}</span>
                                 {activeSkillIds.includes(skill.id) && (
-                                  <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                  <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />
                                 )}
                               </button>
                               <button
@@ -2905,42 +2916,34 @@ export default function ChatContainer() {
                       className="overflow-hidden pl-2"
                     >
                       <div className="space-y-0.5 pb-1">
-                        <div className="rounded-lg px-2 py-1.5 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
-                          <div className="flex items-center gap-2 px-1">
-                            <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                                Notion
-                              </div>
-                              {notionStatus?.connected ? (
-                                <div className="truncate text-[10px] text-stone-400">
-                                  {notionStatus.label || t('notionConnected')}
-                                </div>
-                              ) : null}
+                        <div className="flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
+                          <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                              Notion
                             </div>
-                            {notionStatus?.connected ? (
-                              <button
-                                type="button"
-                                onClick={() => toggleNotionMcp()}
-                                className={cn(
-                                  'shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
-                                  notionMcpOn
-                                    ? 'bg-orange-500 text-white'
-                                    : 'bg-stone-200 text-stone-600 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200',
-                                )}
-                              >
-                                {notionMcpOn ? t('notionMcpOn') : t('useInThisChat')}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setShowAuthModal(true)}
-                                className="shrink-0 rounded-md bg-orange-500 px-2 py-1 text-[10px] font-semibold text-white hover:bg-orange-600"
-                              >
-                                {t('connectNotion')}
-                              </button>
-                            )}
+                            {notionStatus?.connected && notionStatus.label ? (
+                              <div className="truncate text-[10px] text-stone-400">
+                                {notionStatus.label}
+                              </div>
+                            ) : null}
                           </div>
+                          {notionStatus?.connected ? (
+                            <Switch
+                              size="sm"
+                              checked={notionMcpOn}
+                              onCheckedChange={setNotionMcpEnabled}
+                              aria-label={t('enableNotionMcp')}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setShowAuthModal(true)}
+                              className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-200/80 hover:text-stone-800 dark:hover:bg-stone-700 dark:hover:text-stone-100"
+                            >
+                              {t('connectNotion')}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -3094,7 +3097,7 @@ export default function ChatContainer() {
                                 className={cn(
                                   'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs',
                                   locale === opt.id
-                                    ? 'bg-orange-50 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300'
+                                    ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
                                     : 'text-stone-600 hover:bg-stone-50 dark:text-stone-400 dark:hover:bg-stone-800',
                                 )}
                               >
@@ -3105,22 +3108,6 @@ export default function ChatContainer() {
                           </div>
                         )}
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                      >
-                        {theme === 'dark' ? (
-                          <Sun className="h-3.5 w-3.5 text-stone-400" />
-                        ) : (
-                          <Moon className="h-3.5 w-3.5 text-stone-400" />
-                        )}
-                        <span className="flex-1 text-left">{t('theme')}</span>
-                        <span className="text-xs text-stone-400">
-                          {theme === 'dark' ? t('themeDark') : t('themeLight')}
-                        </span>
-                      </button>
 
                       <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
 
@@ -3143,7 +3130,7 @@ export default function ChatContainer() {
                             setIsAccountMenuOpen(false);
                             setShowAuthModal(true);
                           }}
-                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-orange-700 hover:bg-orange-50 dark:text-orange-300 dark:hover:bg-orange-950/30"
+                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
                         >
                           <Key className="h-3.5 w-3.5" />
                           {t('connect')}
@@ -3153,29 +3140,37 @@ export default function ChatContainer() {
                   )}
                 </AnimatePresence>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAccountMenuOpen((v) => !v);
-                    setIsLanguageMenuOpen(false);
-                  }}
-                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-50 dark:hover:bg-stone-700/80 transition-colors text-left"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg text-white", isAccountBound ? "bg-orange-500" : "bg-stone-400")}>
-                      <Key className="h-3.5 w-3.5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold truncate">
-                        {isAccountBound ? t('accountConnected') : t('connectAccount')}
+                <div className="flex items-center gap-1.5">
+                  <ThemeToggle className="h-10 w-10 shrink-0 rounded-xl text-stone-500 hover:bg-white dark:hover:bg-stone-800" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAccountMenuOpen((v) => !v);
+                      setIsLanguageMenuOpen(false);
+                    }}
+                    className="flex min-w-0 flex-1 items-center justify-between rounded-xl border border-stone-200 bg-white p-2 text-left transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div
+                        className={cn(
+                          'flex h-7 w-7 items-center justify-center rounded-lg text-white',
+                          isAccountBound ? 'bg-stone-700 dark:bg-stone-300 dark:text-stone-900' : 'bg-stone-400',
+                        )}
+                      >
+                        <Key className="h-3.5 w-3.5" />
                       </div>
-                      <div className="text-[10px] text-stone-400 truncate">
-                        {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-semibold">
+                          {isAccountBound ? t('accountConnected') : t('connectAccount')}
+                        </div>
+                        <div className="truncate text-[10px] text-stone-400">
+                          {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
-                </button>
+                    <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -3195,7 +3190,6 @@ export default function ChatContainer() {
           </div>
 
           <div className="flex items-center gap-1">
-            <ThemeToggle className="h-8 w-8 text-stone-500 hover:bg-stone-200/50 dark:hover:bg-stone-800/50" />
             <Button 
               variant="ghost" 
               size="sm" 
@@ -3222,7 +3216,7 @@ export default function ChatContainer() {
           <div ref={messagesContentRef} className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
             {messages.length === 0 ? (
               <div className="mt-16 flex flex-col items-center text-center">
-                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-600 shadow-sm dark:bg-orange-900/30 dark:text-orange-400">
+                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-200 text-stone-700 shadow-sm dark:bg-stone-800 dark:text-stone-200">
                   <Sparkles className="h-7 w-7" />
                 </div>
                 <h2 className="mb-2 text-2xl font-semibold text-stone-900 dark:text-stone-100">
@@ -3242,7 +3236,7 @@ export default function ChatContainer() {
                     <button 
                       key={hint}
                       onClick={() => handleSubmit(hint)}
-                      className="rounded-xl border border-stone-200/80 bg-white p-4 text-left text-sm text-stone-700 transition-all hover:border-orange-300 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-700"
+                      className="rounded-xl border border-stone-200/80 bg-white p-4 text-left text-sm text-stone-700 transition-all hover:border-stone-400 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-600"
                     >
                       <div className="font-medium">{hint}</div>
                       <div className="mt-1 text-xs text-stone-400">{t('clickToAsk')}</div>
@@ -3257,7 +3251,7 @@ export default function ChatContainer() {
                     <div key={message.id} className="group flex w-full justify-end">
                       <div className="max-w-[82%] sm:max-w-[72%]">
                         {editingMessageId === message.id ? (
-                          <div className="rounded-2xl border border-orange-300 bg-white p-3 shadow-sm dark:border-orange-800 dark:bg-stone-900 w-full">
+                          <div className="rounded-2xl border border-stone-300 bg-white p-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 w-full">
                             <Textarea
                               value={editingMessageContent}
                               onChange={(event) => setEditingMessageContent(event.target.value)}
@@ -3281,7 +3275,7 @@ export default function ChatContainer() {
                               <button
                                 type="button"
                                 onClick={() => saveEditedMessage(message.id)}
-                                className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                                className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900"
                               >
                                 Save & resend
                               </button>
@@ -3916,13 +3910,13 @@ export default function ChatContainer() {
               )}
             </AnimatePresence>
 
-            <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-orange-500 dark:border-stone-700 dark:bg-stone-900 transition-all relative">
+            <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-stone-400/20 focus-within:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-500 transition-all relative">
               {(activeSkills.length > 0 || notionMcpOn) && (
                 <div className="flex flex-wrap gap-1.5 px-3 pt-3">
                   {activeSkills.map((skill) => (
                     <span
                       key={skill.id}
-                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-orange-200 bg-orange-50 pl-2 pr-1 py-0.5 text-[11px] font-medium text-orange-800 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300"
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-300 bg-stone-100 pl-2 pr-1 py-0.5 text-[11px] font-medium text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
                       title={`/${skillSlashName(skill.title)}`}
                     >
                       <ScrollText className="h-3 w-3 shrink-0" />
@@ -3930,7 +3924,7 @@ export default function ChatContainer() {
                       <button
                         type="button"
                         onClick={() => toggleSkill(skill.id)}
-                        className="rounded-full p-0.5 hover:bg-orange-100 dark:hover:bg-orange-900/50"
+                        className="rounded-full p-0.5 hover:bg-stone-200 dark:hover:bg-stone-700"
                         title="移除 Skill"
                       >
                         <X className="h-3 w-3" />
@@ -4088,7 +4082,7 @@ export default function ChatContainer() {
                       className={cn(
                         'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
                         isSkillPickerOpen || activeSkills.length > 0 || notionMcpOn
-                          ? 'bg-orange-50 text-orange-600 dark:bg-orange-950/40 dark:text-orange-300'
+                          ? 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-100'
                           : 'text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800',
                       )}
                     >
@@ -4100,7 +4094,7 @@ export default function ChatContainer() {
                           initial={{ opacity: 0, y: 5 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: 5 }}
-                          className="absolute left-0 bottom-10 z-30 w-64 max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                          className="absolute left-0 bottom-10 z-30 w-72 max-h-72 overflow-y-auto rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
                         >
                           <button
                             type="button"
@@ -4142,41 +4136,38 @@ export default function ChatContainer() {
                           <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
                             {t('mcpTools')}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsSkillPickerOpen(false);
-                              if (!isAccountBound || !notionStatus?.connected) {
-                                setShowAuthModal(true);
-                                return;
-                              }
-                              toggleNotionMcp();
-                            }}
-                            className={cn(
-                              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
-                              notionMcpOn
-                                ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
-                            )}
-                            title={
-                              notionStatus?.connected
-                                ? t('enableNotionMcpHint')
-                                : t('notionMcpNeedsConnect')
-                            }
-                          >
+                          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                             <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block">{t('enableNotionMcp')}</span>
-                              <span className="block text-[10px] font-normal text-stone-400">
-                                {notionStatus?.connected
-                                  ? notionStatus.label || t('enableNotionMcpHint')
-                                  : t('notionMcpNeedsConnect')}
-                              </span>
-                            </span>
-                            {notionMcpOn ? (
-                              <Check className="h-3.5 w-3.5 shrink-0 text-orange-500" />
-                            ) : null}
-                          </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('enableNotionMcp')}
+                              </div>
+                              {notionStatus?.connected && notionStatus.label ? (
+                                <div className="truncate text-[10px] text-stone-400">
+                                  {notionStatus.label}
+                                </div>
+                              ) : null}
+                            </div>
+                            {notionStatus?.connected ? (
+                              <Switch
+                                size="sm"
+                                checked={notionMcpOn}
+                                onCheckedChange={setNotionMcpEnabled}
+                                aria-label={t('enableNotionMcp')}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsSkillPickerOpen(false);
+                                  setShowAuthModal(true);
+                                }}
+                                className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                              >
+                                {t('connectNotion')}
+                              </button>
+                            )}
+                          </div>
 
                           {isAccountBound && skills.length > 0 && (
                             <>
@@ -4191,14 +4182,14 @@ export default function ChatContainer() {
                                     className={cn(
                                       'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
                                       on
-                                        ? 'bg-orange-50 text-orange-900 dark:bg-orange-950/40 dark:text-orange-300'
+                                        ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
                                         : 'text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
                                     )}
                                   >
                                     <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                                     <span className="min-w-0 flex-1 truncate">{skill.title}</span>
                                     {on ? (
-                                      <Check className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                      <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                                     ) : (
                                       <span className="shrink-0 font-mono text-[10px] text-stone-400">
                                         /{skillSlashName(skill.title)}
@@ -4384,7 +4375,7 @@ export default function ChatContainer() {
                       className={cn(
                         "h-8 w-8 rounded-full transition-all active:scale-95",
                         (input.trim() || attachments.length > 0)
-                          ? "bg-orange-500 hover:bg-orange-600 text-white shadow-sm" 
+                          ? "bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                           : "bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500"
                       )}
                     >
@@ -4999,7 +4990,7 @@ export default function ChatContainer() {
                     type="button"
                     onClick={() => createSkill(skillDraftTitle, skillDraftContent)}
                     disabled={isSavingSkill || !skillDraftTitle.trim() || !skillDraftContent.trim()}
-                    className="rounded-xl bg-orange-500 text-white hover:bg-orange-600"
+                    className="rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                   >
                     {isSavingSkill ? '保存中…' : '保存到账号'}
                   </Button>
@@ -5022,7 +5013,7 @@ export default function ChatContainer() {
             >
               <div className="mb-5 flex items-center justify-between">
                 <div className="flex items-center gap-2 text-lg font-semibold text-stone-900 dark:text-stone-50">
-                  <Key className="h-5 w-5 text-orange-500" />
+                  <Key className="h-5 w-5 text-stone-500" />
                   {isAccountBound ? t('manageAccount') : t('authTitle')}
                 </div>
                 <button
@@ -5072,7 +5063,7 @@ export default function ChatContainer() {
                       </p>
                       <a
                         href="/api/auth/start"
-                        className="flex h-11 w-full items-center justify-center rounded-xl bg-orange-500 font-semibold text-white hover:bg-orange-600"
+                        className="flex h-11 w-full items-center justify-center rounded-xl bg-stone-900 font-semibold text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                       >
                         {t('continueWithSite')}
                       </a>
@@ -5092,14 +5083,14 @@ export default function ChatContainer() {
                           value={tempKeyInput}
                           onChange={(e) => setTempKeyInput(e.target.value)}
                           placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                          className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-orange-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
+                          className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-stone-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
                         />
                       </div>
 
                       <Button
                         onClick={saveUserKey}
                         disabled={accountSaving || !tempKeyInput.trim()}
-                        className="w-full rounded-xl bg-orange-500 text-white hover:bg-orange-600"
+                        className="w-full rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                       >
                         {accountSaving ? t('validating') : t('saveAndConnect')}
                       </Button>
@@ -5159,7 +5150,7 @@ export default function ChatContainer() {
                               'inline-flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
                               notionStatus?.available === false
                                 ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
-                                : 'bg-orange-500 text-white hover:bg-orange-600',
+                                : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
                             )}
                           >
                             {t('connectNotion')}

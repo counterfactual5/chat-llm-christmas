@@ -3169,16 +3169,19 @@ export default function ChatContainer() {
                     setIsAccountMenuOpen((v) => !v);
                     setIsLanguageMenuOpen(false);
                   }}
-                  className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80"
+                  className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 hover:border-stone-300 focus-visible:ring-2 focus-visible:ring-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80 dark:hover:border-stone-600 dark:focus-visible:ring-stone-600"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <div
                       className={cn(
-                        'flex h-7 w-7 items-center justify-center rounded-lg text-white',
-                        isAccountBound ? 'bg-stone-700 dark:bg-stone-300 dark:text-stone-900' : 'bg-stone-400',
+                        'relative flex h-7 w-7 items-center justify-center rounded-lg border bg-stone-100 text-stone-700',
+                        'border-stone-200 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200',
                       )}
                     >
                       <Key className="h-3.5 w-3.5" />
+                      {isAccountBound && (
+                        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
+                      )}
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-xs font-semibold">

@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
 import {
   CURSOR_WEB_CHAT_PROMPT,
@@ -22,12 +22,16 @@ import {
   executeRegisteredTool,
   formatWebSearchToolContent,
   openaiToolDefinitions,
-  resolveEnabledTools,
+  resolveEnabledToolsAsync,
   runWebSearch,
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { getNotionAccessToken, resolveOwnerId } from '@/lib/integrations';
+import {
+  getNotionMcpAccessToken,
+  resolveOwnerId,
+  upsertNotionConnection,
+} from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -205,22 +209,30 @@ export async function POST(req: NextRequest) {
     // Intersect client toggles with vault OAuth — never trust integrations alone.
     const authorizedIntegrations: string[] = [];
     let notionAccessToken: string | undefined;
+    let notionOwnerId: string | null = null;
+    let notionVaultUpdate: Awaited<
+      ReturnType<typeof getNotionMcpAccessToken>
+    >['updatedNotion'];
     if (requestedIntegrations.includes('notion') && isBoundAccount) {
-      const ownerId = await resolveOwnerId(req);
-      if (ownerId) {
-        const token = await getNotionAccessToken(req, ownerId);
-        if (token) {
+      notionOwnerId = await resolveOwnerId(req);
+      if (notionOwnerId) {
+        const mcp = await getNotionMcpAccessToken(req, notionOwnerId);
+        if (mcp.token) {
           authorizedIntegrations.push('notion');
-          notionAccessToken = token;
+          notionAccessToken = mcp.token;
+          notionVaultUpdate = mcp.updatedNotion;
         }
       }
     }
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
-    const enabledTools = resolveEnabledTools({
-      searchEnabled,
-      integrations: authorizedIntegrations,
-    });
+    const enabledTools = await resolveEnabledToolsAsync(
+      {
+        searchEnabled,
+        integrations: authorizedIntegrations,
+      },
+      { notionAccessToken },
+    );
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
 
@@ -565,14 +577,20 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'X-Vercel-AI-Data-Stream': 'v1',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      },
-    });
+    const responseHeaders = {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Vercel-AI-Data-Stream': 'v1',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    };
+
+    if (notionVaultUpdate && notionOwnerId) {
+      const cookieCarrier = new NextResponse(stream, { headers: responseHeaders });
+      await upsertNotionConnection(req, cookieCarrier, notionOwnerId, notionVaultUpdate);
+      return cookieCarrier;
+    }
+
+    return new NextResponse(stream, { headers: responseHeaders });
   } catch (err: any) {
     console.error('chat route error:', err);
     const status = err?.status || err?.statusCode || err?.response?.status;

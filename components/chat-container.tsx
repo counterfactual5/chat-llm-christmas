@@ -3604,9 +3604,17 @@ export default function ChatContainer() {
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;
-                          const isNotion = run.name.startsWith('notion_');
-                          const isNotionFetch = run.name === 'notion_fetch_page';
-                          const isNotionWrite = run.name === 'notion_append_blocks';
+                          const isNotion =
+                            run.name.startsWith('notion_') ||
+                            run.name.startsWith('notion-') ||
+                            run.provider === 'notion';
+                          const isNotionFetch =
+                            /fetch/i.test(run.name) && isNotion;
+                          const isNotionWrite =
+                            isNotion &&
+                            /create|update|move|duplicate|append|delete|trash|comment|write/i.test(
+                              run.name,
+                            );
                           const failed = run.status === 'done' && Boolean(run.error);
                           const emptyResults =
                             run.status === 'done' &&

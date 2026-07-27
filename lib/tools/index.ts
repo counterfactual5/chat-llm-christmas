@@ -1,19 +1,11 @@
 import type { ChatTool, ToolRuntimeFlags } from '@/lib/tools/registry';
 import { selectTools } from '@/lib/tools/registry';
 import { createWebSearchTool } from '@/lib/tools/web-search-tool';
-import { createNotionTools } from '@/lib/tools/notion-tools';
+import { createNotionMcpTools } from '@/lib/tools/notion-tools';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
   return [createWebSearchTool()];
-}
-
-/**
- * MCP / OAuth-backed tools. Each tool must gate on `flags.integrations`
- * so toggling off in the composer removes them from the model context.
- */
-export function mcpToolRegistry(): ChatTool[] {
-  return createNotionTools();
 }
 
 export function resolveEnabledTools(flags: ToolRuntimeFlags): ChatTool[] {
@@ -23,7 +15,28 @@ export function resolveEnabledTools(flags: ToolRuntimeFlags): ChatTool[] {
       ? flags.integrations.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean)
       : [],
   };
-  return selectTools([...builtinToolRegistry(), ...mcpToolRegistry()], normalized);
+  // Notion tools are loaded async via resolveEnabledToolsAsync (MCP listTools).
+  return selectTools([...builtinToolRegistry()], normalized);
+}
+
+/**
+ * Resolve enabled tools including live Notion MCP catalog when authorized.
+ */
+export async function resolveEnabledToolsAsync(
+  flags: ToolRuntimeFlags,
+  opts?: { notionAccessToken?: string },
+): Promise<ChatTool[]> {
+  const base = resolveEnabledTools(flags);
+  if (!flags.integrations.includes('notion') || !opts?.notionAccessToken) {
+    return base;
+  }
+  try {
+    const notionTools = await createNotionMcpTools(opts.notionAccessToken);
+    return [...base, ...notionTools];
+  } catch (err) {
+    console.warn('Notion MCP listTools failed:', err);
+    return base;
+  }
 }
 
 export {
@@ -43,3 +56,5 @@ export {
   formatWebSearchToolContent,
   parseSearchQuery,
 } from '@/lib/tools/web-search-tool';
+
+export { createNotionMcpTools } from '@/lib/tools/notion-tools';

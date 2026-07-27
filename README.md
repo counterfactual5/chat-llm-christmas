@@ -16,6 +16,20 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Notion (hosted MCP)
+
+Per-user Notion access uses [Notion's hosted MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp) (`https://mcp.notion.com/mcp`), not a Public Integration token. Users connect via **Connect Notion** in the app (OAuth + PKCE).
+
+Optional environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `INTEGRATIONS_ENCRYPTION_KEY` or `CHAT_SSO_SECRET` | Encrypts integration tokens in the HttpOnly vault cookie |
+| `NOTION_MCP_CLIENT_ID` | Stable OAuth client id from dynamic registration (recommended for production refresh) |
+| `NOTION_MCP_REDIRECT_URI` | Override callback URL (default: `{origin}/api/integrations/notion/callback`) |
+
+`NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` are **not** used anymore.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

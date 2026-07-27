@@ -1,9 +1,17 @@
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 import {
-  notionAppendParagraphs,
-  notionFetchPageContent,
-  notionSearch,
-} from '@/lib/notion/client';
+  callNotionMcpTool,
+  listNotionMcpTools,
+  type McpToolDefinition,
+} from '@/lib/notion/mcp-client';
+
+const NOTION_SYSTEM_PROMPT = [
+  "You have Notion MCP tools for the user's connected workspace (full page access matching their Notion permissions).",
+  'Prefer notion-search to find pages, notion-fetch to read content (or id "self" for workspace/user identity), and create/update tools to write.',
+  'Do not invent Notion page IDs, titles, or content — only use tool results.',
+  'Ask before making large destructive edits when the user intent is ambiguous.',
+  'Cite page titles and URLs from tool results when answering.',
+].join(' ');
 
 function notionToken(ctx: ToolRuntimeContext): string | null {
   const token = ctx.credentials?.notionAccessToken?.trim();
@@ -19,39 +27,87 @@ function parseArgs(raw: string): Record<string, unknown> {
   }
 }
 
-const NOTION_SYSTEM_PROMPT = [
-  "You have Notion tools for the user's connected workspace (only pages/databases shared with the integration).",
-  'Use notion_search to find pages, notion_fetch_page to read content, and notion_append_blocks to add text to a page.',
-  'Do not invent Notion page IDs, titles, or content — only use tool results.',
-  'Ask before making large edits when the user intent is ambiguous.',
-  'If search returns nothing, say the page may not be shared with the integration.',
-  'Cite page titles and URLs from tool results when answering.',
-].join(' ');
+function sanitizeToolName(name: string): string {
+  // OpenAI-compatible function names: letters, digits, underscore, hyphen.
+  return String(name || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 64);
+}
 
-export function createNotionSearchTool(): ChatTool {
+function queryHint(name: string, args: Record<string, unknown>): string {
+  const candidates = [
+    args.query,
+    args.id,
+    args.page_id,
+    args.pageId,
+    args.url,
+    args.title,
+    args.new_str,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim().slice(0, 120);
+  }
+  if (Array.isArray(args.pages) && args.pages.length) {
+    return `${args.pages.length} page(s)`;
+  }
+  return name.replace(/^notion-/, '').replace(/_/g, ' ');
+}
+
+function isWriteTool(name: string): boolean {
+  return /create|update|move|duplicate|append|delete|trash|comment|view/i.test(name);
+}
+
+function extractUiResults(
+  name: string,
+  content: string,
+): Array<{ title: string; url: string; snippet: string }> {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    // Search-like payloads
+    const results = parsed.results || parsed.pages || parsed.items;
+    if (Array.isArray(results)) {
+      return results.slice(0, 8).map((item) => {
+        const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        return {
+          title: String(row.title || row.name || row.id || 'Result').slice(0, 120),
+          url: String(row.url || row.page_url || ''),
+          snippet: String(row.snippet || row.text || row.id || '').slice(0, 240),
+        };
+      });
+    }
+    if (parsed.title || parsed.url || parsed.id) {
+      return [
+        {
+          title: String(parsed.title || name).slice(0, 120),
+          url: String(parsed.url || ''),
+          snippet: String(parsed.text || parsed.id || '').slice(0, 240),
+        },
+      ];
+    }
+  } catch {
+    // plain text
+  }
+  const snippet = content.replace(/\s+/g, ' ').trim().slice(0, 240);
+  if (!snippet) return [];
+  return [{ title: name, url: '', snippet }];
+}
+
+function mcpToolToChatTool(def: McpToolDefinition): ChatTool {
+  const name = sanitizeToolName(def.name);
+  const parameters =
+    def.inputSchema && typeof def.inputSchema === 'object'
+      ? (def.inputSchema as Record<string, unknown>)
+      : { type: 'object', properties: {} };
+
   return {
-    name: 'notion_search',
+    name,
     definition: {
       type: 'function',
       function: {
-        name: 'notion_search',
-        description:
-          "Search the user's Notion workspace for pages or databases by keyword. Only returns items shared with the connected integration.",
-        parameters: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: 'Search keywords (page or database title / content).',
-            },
-            filter: {
-              type: 'string',
-              enum: ['page', 'database'],
-              description: 'Optional: limit results to pages or databases.',
-            },
-          },
-          required: ['query'],
-        },
+        name,
+        description: String(def.description || `Notion MCP tool: ${name}`).slice(0, 1024),
+        parameters,
       },
     },
     systemPrompt: NOTION_SYSTEM_PROMPT,
@@ -62,279 +118,82 @@ export function createNotionSearchTool(): ChatTool {
         return {
           content: JSON.stringify({
             ok: false,
-            error: 'Notion is not connected for this account.',
+            error: 'Notion MCP is not connected for this account.',
           }),
         };
       }
 
       const args = parseArgs(rawArguments);
-      const query = String(args.query || fallbackQuery || ctx.userAsk || '')
-        .trim()
-        .slice(0, 200);
-      const filter =
-        args.filter === 'page' || args.filter === 'database' ? args.filter : undefined;
+      // Soft fallback for search-like tools when model omits query.
+      if (
+        /search/i.test(name) &&
+        !args.query &&
+        (fallbackQuery || ctx.userAsk)
+      ) {
+        args.query = String(fallbackQuery || ctx.userAsk).slice(0, 200);
+      }
 
+      const query = queryHint(name, args);
       ctx.send({
-        tool: { status: 'start', name: 'notion_search', query, provider: 'notion' },
+        tool: {
+          status: 'start',
+          name,
+          query,
+          provider: 'notion',
+          write: isWriteTool(name),
+        },
       });
 
-      if (!query) {
-        const error = 'Missing search query';
+      try {
+        const outcome = await callNotionMcpTool(token, def.name, args);
+        const results = extractUiResults(name, outcome.content);
+        const error = outcome.isError
+          ? outcome.content.slice(0, 280) || 'Notion MCP tool returned an error'
+          : undefined;
+
         ctx.send({
           tool: {
             status: 'done',
-            name: 'notion_search',
+            name,
             query,
             provider: 'notion',
-            results: [],
+            write: isWriteTool(name),
+            results,
             error,
           },
         });
-        return { content: JSON.stringify({ ok: false, error, results: [] }) };
-      }
 
-      const outcome = await notionSearch(token, query, { filter, pageSize: 10 });
-      const results = outcome.results.map((r) => ({
-        title: r.title,
-        url: r.url,
-        snippet: `${r.object}${r.lastEditedTime ? ` · edited ${r.lastEditedTime}` : ''} · id ${r.id}`,
-      }));
-
-      ctx.send({
-        tool: {
-          status: 'done',
-          name: 'notion_search',
-          query,
-          provider: 'notion',
-          results,
-          error: outcome.error,
-        },
-      });
-
-      return {
-        content: JSON.stringify({
-          ok: outcome.ok,
-          query,
-          count: outcome.results.length,
-          results: outcome.results,
-          error: outcome.error,
-          hint: outcome.results.length
-            ? 'Call notion_fetch_page with a result id to read, or notion_append_blocks to write.'
-            : 'No shared pages matched. Ask the user to share the page with the integration.',
-        }),
-      };
-    },
-  };
-}
-
-export function createNotionFetchPageTool(): ChatTool {
-  return {
-    name: 'notion_fetch_page',
-    definition: {
-      type: 'function',
-      function: {
-        name: 'notion_fetch_page',
-        description:
-          'Read the title and text content of a Notion page by ID (from notion_search results).',
-        parameters: {
-          type: 'object',
-          properties: {
-            page_id: {
-              type: 'string',
-              description: 'Notion page ID (UUID from notion_search).',
-            },
-          },
-          required: ['page_id'],
-        },
-      },
-    },
-    enabled: (flags) => flags.integrations.includes('notion'),
-    async execute({ rawArguments }, ctx) {
-      const token = notionToken(ctx);
-      if (!token) {
         return {
-          content: JSON.stringify({
-            ok: false,
-            error: 'Notion is not connected for this account.',
-          }),
+          content: outcome.isError
+            ? JSON.stringify({ ok: false, error: outcome.content })
+            : outcome.content,
         };
-      }
-
-      const args = parseArgs(rawArguments);
-      const pageId = String(args.page_id || args.pageId || args.id || '').trim();
-      ctx.send({
-        tool: {
-          status: 'start',
-          name: 'notion_fetch_page',
-          query: pageId || 'page',
-          provider: 'notion',
-        },
-      });
-
-      if (!pageId) {
-        const error = 'Missing page_id';
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err || 'Notion MCP call failed');
         ctx.send({
           tool: {
             status: 'done',
-            name: 'notion_fetch_page',
-            query: pageId,
+            name,
+            query,
             provider: 'notion',
+            write: isWriteTool(name),
             results: [],
-            error,
+            error: message,
           },
         });
-        return { content: JSON.stringify({ ok: false, error }) };
+        return { content: JSON.stringify({ ok: false, error: message }) };
       }
-
-      const page = await notionFetchPageContent(token, pageId);
-      const results = page.ok
-        ? [
-            {
-              title: page.title,
-              url: page.url,
-              snippet: page.text.slice(0, 240),
-            },
-          ]
-        : [];
-
-      ctx.send({
-        tool: {
-          status: 'done',
-          name: 'notion_fetch_page',
-          query: pageId,
-          provider: 'notion',
-          results,
-          error: page.error,
-        },
-      });
-
-      return {
-        content: JSON.stringify({
-          ok: page.ok,
-          id: page.id,
-          title: page.title,
-          url: page.url,
-          text: page.text,
-          error: page.error,
-        }),
-      };
     },
   };
 }
 
-export function createNotionAppendBlocksTool(): ChatTool {
-  return {
-    name: 'notion_append_blocks',
-    definition: {
-      type: 'function',
-      function: {
-        name: 'notion_append_blocks',
-        description:
-          'Append one or more paragraph blocks to the end of a Notion page (write/edit). Use a page_id from notion_search.',
-        parameters: {
-          type: 'object',
-          properties: {
-            page_id: {
-              type: 'string',
-              description: 'Notion page ID to append content to.',
-            },
-            paragraphs: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Paragraphs to append, in order (max 20).',
-            },
-            text: {
-              type: 'string',
-              description: 'Optional single paragraph if paragraphs array is omitted.',
-            },
-          },
-          required: ['page_id'],
-        },
-      },
-    },
-    enabled: (flags) => flags.integrations.includes('notion'),
-    async execute({ rawArguments }, ctx) {
-      const token = notionToken(ctx);
-      if (!token) {
-        return {
-          content: JSON.stringify({
-            ok: false,
-            error: 'Notion is not connected for this account.',
-          }),
-        };
-      }
-
-      const args = parseArgs(rawArguments);
-      const pageId = String(args.page_id || args.pageId || args.id || '').trim();
-      const fromArray = Array.isArray(args.paragraphs)
-        ? args.paragraphs.map((p) => String(p ?? ''))
-        : [];
-      const single = String(args.text || args.content || '').trim();
-      const paragraphs = fromArray.length > 0 ? fromArray : single ? [single] : [];
-
-      ctx.send({
-        tool: {
-          status: 'start',
-          name: 'notion_append_blocks',
-          query: pageId || 'page',
-          provider: 'notion',
-        },
-      });
-
-      if (!pageId) {
-        const error = 'Missing page_id';
-        ctx.send({
-          tool: {
-            status: 'done',
-            name: 'notion_append_blocks',
-            query: pageId,
-            provider: 'notion',
-            results: [],
-            error,
-          },
-        });
-        return { content: JSON.stringify({ ok: false, error }) };
-      }
-
-      const outcome = await notionAppendParagraphs(token, pageId, paragraphs);
-      const results = outcome.ok
-        ? [
-            {
-              title: `Appended ${outcome.appended} paragraph(s)`,
-              url: outcome.url || '',
-              snippet: paragraphs.slice(0, 2).join(' · ').slice(0, 240),
-            },
-          ]
-        : [];
-
-      ctx.send({
-        tool: {
-          status: 'done',
-          name: 'notion_append_blocks',
-          query: pageId,
-          provider: 'notion',
-          results,
-          error: outcome.error,
-        },
-      });
-
-      return {
-        content: JSON.stringify({
-          ok: outcome.ok,
-          id: outcome.id,
-          url: outcome.url,
-          appended: outcome.appended,
-          error: outcome.error,
-        }),
-      };
-    },
-  };
-}
-
-export function createNotionTools(): ChatTool[] {
-  return [
-    createNotionSearchTool(),
-    createNotionFetchPageTool(),
-    createNotionAppendBlocksTool(),
-  ];
+/**
+ * Build ChatTools by listing the live Notion hosted MCP tool catalog.
+ * Falls back to an empty list on failure (caller should surface reconnect).
+ */
+export async function createNotionMcpTools(accessToken: string): Promise<ChatTool[]> {
+  const tools = await listNotionMcpTools(accessToken);
+  if (!tools.length) return [];
+  // Attach system prompt once via first tool; duplicates are fine (joined uniquely enough).
+  return tools.map(mcpToolToChatTool);
 }

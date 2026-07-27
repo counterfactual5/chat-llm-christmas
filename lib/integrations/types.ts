@@ -1,14 +1,25 @@
 /**
- * Per-user third-party integrations (Notion / GitHub MCP later).
+ * Per-user third-party integrations (Notion MCP / GitHub MCP later).
  * Tokens are encrypted and stored in an HttpOnly cookie keyed by owner id
  * (hash of the bound llm.christmas API key) — no shared workspace secret.
  */
 
 export type IntegrationProvider = 'notion';
 
+/** Notion hosted MCP OAuth connection (per user, in vault cookie). */
 export type NotionConnection = {
+  /** MCP access token (Bearer for mcp.notion.com). */
   accessToken: string;
-  botId?: string;
+  refreshToken?: string;
+  /** Epoch ms when accessToken expires (best-effort). */
+  expiresAt?: number;
+  tokenType?: string;
+  scope?: string;
+  /** Public OAuth client_id used for this connection (needed for refresh). */
+  mcpClientId?: string;
+  /** Always `mcp` for hosted Notion MCP connections. */
+  authKind: 'mcp';
+  userId?: string;
   workspaceId?: string;
   workspaceName?: string;
   workspaceIcon?: string | null;
@@ -32,3 +43,5 @@ export type IntegrationPublicStatus = {
 
 export const INTEGRATIONS_COOKIE = 'llm_chat_integrations';
 export const NOTION_OAUTH_STATE_COOKIE = 'llm_chat_notion_oauth_state';
+/** Short-lived PKCE verifier (+ client_id) for MCP OAuth callback. */
+export const NOTION_MCP_PKCE_COOKIE = 'llm_chat_notion_mcp_pkce';

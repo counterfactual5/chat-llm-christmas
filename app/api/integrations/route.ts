@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  notionOAuthConfigured,
+  notionMcpOAuthConfigured,
+  notionPublicConnected,
+  purgeLegacyNotionFromVault,
   readVault,
   resolveOwnerId,
-  type IntegrationPublicStatus,
+  writeVaultCookie,
 } from '@/lib/integrations';
+import type { IntegrationPublicStatus } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 20;
@@ -12,20 +15,28 @@ export const maxDuration = 20;
 export async function GET(req: NextRequest) {
   const ownerId = await resolveOwnerId(req);
   if (!ownerId) {
-    return NextResponse.json({ error: 'Connect your llm.christmas account first.' }, { status: 401 });
+    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
-  const vault = await readVault(req, ownerId);
-  const notionAvailable = notionOAuthConfigured();
+  let vault = await readVault(req, ownerId);
+  const purged = purgeLegacyNotionFromVault(vault);
+  vault = purged.vault;
+
+  const notionAvailable = notionMcpOAuthConfigured();
+  const connected = notionPublicConnected(vault);
   const integrations: IntegrationPublicStatus[] = [
     {
       provider: 'notion',
       available: notionAvailable,
-      connected: Boolean(vault.notion?.accessToken),
-      label: vault.notion?.workspaceName || undefined,
-      connectedAt: vault.notion?.connectedAt,
+      connected,
+      label: connected ? vault.notion?.workspaceName || undefined : undefined,
+      connectedAt: connected ? vault.notion?.connectedAt : undefined,
     },
   ];
 
-  return NextResponse.json({ integrations });
+  const response = NextResponse.json({ integrations });
+  if (purged.changed) {
+    await writeVaultCookie(response, vault);
+  }
+  return response;
 }

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  NOTION_MCP_PKCE_COOKIE,
   NOTION_OAUTH_STATE_COOKIE,
-  exchangeNotionCode,
-  notionConnectionFromToken,
-  notionRedirectUri,
+  decodePkceCookie,
+  exchangeNotionMcpCode,
+  notionConnectionFromMcpToken,
+  notionMcpRedirectUri,
   resolveOwnerId,
   upsertNotionConnection,
 } from '@/lib/integrations';
+import { NotionMcpClient } from '@/lib/notion/mcp-client';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -25,17 +28,33 @@ function redirectHome(req: NextRequest, params: Record<string, string>) {
   return NextResponse.redirect(url);
 }
 
+function clearOauthCookies(response: NextResponse) {
+  for (const name of [NOTION_OAUTH_STATE_COOKIE, NOTION_MCP_PKCE_COOKIE]) {
+    response.cookies.set({
+      name,
+      value: '',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    });
+  }
+}
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code') || '';
   const state = req.nextUrl.searchParams.get('state') || '';
   const error = req.nextUrl.searchParams.get('error') || '';
   const expected = req.cookies.get(NOTION_OAUTH_STATE_COOKIE)?.value || '';
+  const pkceRaw = req.cookies.get(NOTION_MCP_PKCE_COOKIE)?.value || '';
+  const pkce = decodePkceCookie(pkceRaw);
 
   if (error) {
     return redirectHome(req, { auth_error: `Notion 授权取消或失败：${error}`.slice(0, 180) });
   }
 
-  if (!code || !safeEqual(state, expected)) {
+  if (!code || !pkce || !safeEqual(state, expected) || !safeEqual(state, pkce.state)) {
     return redirectHome(req, { auth_error: 'Notion 授权状态无效，请重试。' });
   }
 
@@ -45,26 +64,37 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const token = await exchangeNotionCode({
+    const token = await exchangeNotionMcpCode({
+      tokenEndpoint: pkce.tokenEndpoint,
       code,
-      redirectUri: notionRedirectUri(req.url),
+      codeVerifier: pkce.codeVerifier,
+      clientId: pkce.clientId,
+      redirectUri: notionMcpRedirectUri(req.url),
     });
-    const notion = notionConnectionFromToken(token);
+
+    let notion = notionConnectionFromMcpToken(token, undefined, {
+      mcpClientId: pkce.clientId,
+    });
+
+    // Best-effort workspace label via MCP fetch(self) — MCP tokens are not REST-compatible.
+    try {
+      const client = new NotionMcpClient(notion.accessToken);
+      const label = await client.fetchSelfLabel();
+      if (label.workspaceName) {
+        notion = { ...notion, workspaceName: label.workspaceName };
+      }
+    } catch {
+      // non-fatal
+    }
+
     const home = redirectHome(req, { notion_connected: '1' });
     await upsertNotionConnection(req, home, ownerId, notion);
-    home.cookies.set({
-      name: NOTION_OAUTH_STATE_COOKIE,
-      value: '',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 0,
-    });
+    clearOauthCookies(home);
     return home;
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Notion 授权失败';
     return redirectHome(req, {
-      auth_error: String(err?.message || 'Notion 授权失败').slice(0, 180),
+      auth_error: message.slice(0, 180),
     });
   }
 }

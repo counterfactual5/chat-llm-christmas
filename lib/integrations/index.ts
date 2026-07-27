@@ -9,14 +9,25 @@ export {
   upsertNotionConnection,
   removeNotionConnection,
   getNotionAccessToken,
+  getNotionMcpAccessToken,
+  notionPublicConnected,
+  purgeLegacyNotionFromVault,
 } from '@/lib/integrations/store';
 export {
-  notionOAuthConfigured,
-  notionRedirectUri,
-  buildNotionAuthorizeUrl,
-  exchangeNotionCode,
-  notionConnectionFromToken,
-} from '@/lib/integrations/notion-oauth';
+  notionMcpOAuthConfigured,
+  notionMcpOAuthConfigured as notionOAuthConfigured,
+  notionMcpRedirectUri,
+  discoverNotionMcpOAuthMetadata,
+  generatePkcePair,
+  generateOAuthState,
+  resolveNotionMcpClientId,
+  buildNotionMcpAuthorizeUrl,
+  exchangeNotionMcpCode,
+  notionConnectionFromMcpToken,
+  encodePkceCookie,
+  decodePkceCookie,
+  NOTION_MCP_SERVER_URL,
+} from '@/lib/integrations/notion-mcp-oauth';
 export type {
   IntegrationProvider,
   IntegrationVault,
@@ -26,4 +37,5 @@ export type {
 export {
   INTEGRATIONS_COOKIE,
   NOTION_OAUTH_STATE_COOKIE,
+  NOTION_MCP_PKCE_COOKIE,
 } from '@/lib/integrations/types';

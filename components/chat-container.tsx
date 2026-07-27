@@ -3549,10 +3549,11 @@ export default function ChatContainer() {
                           const isNotion = run.name.startsWith('notion_');
                           const isNotionFetch = run.name === 'notion_fetch_page';
                           const isNotionWrite = run.name === 'notion_append_blocks';
-                          const failed =
+                          const failed = run.status === 'done' && Boolean(run.error);
+                          const emptyResults =
                             run.status === 'done' &&
-                            (Boolean(run.error) ||
-                              (!run.results || run.results.length === 0));
+                            !run.error &&
+                            (!run.results || run.results.length === 0);
                           const searching = run.status === 'start';
                           const resultCount = run.results?.length || 0;
                           // Keep result links open by default so search isn't buried.
@@ -3662,7 +3663,7 @@ export default function ChatContainer() {
                                       ))}
                                     </ul>
                                   )}
-                                  {run.status === 'done' && failed && !run.error && (
+                                  {run.status === 'done' && emptyResults && (
                                     <div>{t('searchNoResults')}</div>
                                   )}
                                 </div>

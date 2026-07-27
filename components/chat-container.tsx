@@ -873,42 +873,46 @@ export default function ChatContainer() {
 
   /** Trailing `/query` at start of input or after a newline — slash-command mode. */
   const slashMatch = input.match(/(?:^|\n)\/([^\n]*)$/);
-  const slashQuery = slashMatch ? slashMatch[1].trim().toLowerCase() : null;
+  const slashRaw = slashMatch ? slashMatch[1] : null;
+  const slashQuery = slashRaw != null ? slashRaw.trim().toLowerCase() : null;
+  /** True once the user typed a space after `/cmd` (arguments started). */
+  const slashHasArgs = slashRaw != null && /\s/.test(slashRaw);
 
   type SlashMenuItem =
     | { kind: 'command'; id: string; title: string; insert: string; hint: string }
     | { kind: 'skill'; skill: SkillItem };
 
   const slashMenuItems = useMemo((): SlashMenuItem[] => {
-    if (slashQuery == null) return [];
+    // Hide once a command is complete (`/image`) or args started (`/image …`).
+    if (slashQuery == null || slashHasArgs) return [];
     const items: SlashMenuItem[] = [];
-    if (
-      !slashQuery ||
-      'image'.startsWith(slashQuery) ||
-      'img'.startsWith(slashQuery)
-    ) {
+    const imagePrefix =
+      slashQuery === '' ||
+      ('image'.startsWith(slashQuery) && slashQuery !== 'image') ||
+      ('img'.startsWith(slashQuery) && slashQuery !== 'img');
+    if (imagePrefix) {
       items.push({
         kind: 'command',
         id: 'image',
-                        title: t('generateImage'),
-                        insert: '/image ',
-                        hint: t('imageHint'),
-                      });
+        title: t('generateImage'),
+        insert: '/image ',
+        hint: t('imageHint'),
+      });
     }
     if (isAccountBound) {
       for (const s of skills) {
         const name = skillSlashName(s.title);
         if (
-          !slashQuery ||
-          name.includes(slashQuery) ||
-          s.title.toLowerCase().includes(slashQuery)
+          slashQuery === '' ||
+          (name.startsWith(slashQuery) && name !== slashQuery) ||
+          (s.title.toLowerCase().includes(slashQuery) && name !== slashQuery)
         ) {
           items.push({ kind: 'skill', skill: s });
         }
       }
     }
     return items.slice(0, 8);
-  }, [slashQuery, skills, isAccountBound]);
+  }, [slashQuery, slashHasArgs, skills, isAccountBound]);
 
   const consumeSlashItem = (item: SlashMenuItem) => {
     if (item.kind === 'command') {
@@ -2875,7 +2879,13 @@ export default function ChatContainer() {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setInput((prev) => prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? '\n' : '')));
+        // Dismiss the menu without wiping the typed command.
+        setInput((prev) =>
+          prev.replace(/(?:^|\n)\/([^\n]*)$/, (seg, body: string) => {
+            const prefix = seg.startsWith('\n') ? '\n' : '';
+            return `${prefix}/${body}${body.endsWith(' ') ? '' : ' '}`;
+          }),
+        );
         return;
       }
       if (e.key === 'Tab') {
@@ -4213,14 +4223,14 @@ export default function ChatContainer() {
                         className={cn(
                           'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
                           idx === slashHighlight
-                            ? 'bg-orange-50 text-orange-900 dark:bg-orange-950/40 dark:text-orange-300'
+                            ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
                             : 'text-stone-700 hover:bg-stone-50 dark:text-stone-300 dark:hover:bg-stone-800',
                         )}
                       >
                         {item.kind === 'command' ? (
-                          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         ) : (
-                          <ScrollText className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                          <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         )}
                         <span className="min-w-0 flex-1 truncate font-medium">
                           {item.kind === 'command' ? item.title : item.skill.title}
@@ -4557,7 +4567,7 @@ export default function ChatContainer() {
                                 "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
                                 blocked && "opacity-40 cursor-not-allowed",
                                 selectedModel === m.id 
-                                  ? "bg-orange-50 text-orange-900 font-medium dark:bg-orange-950/40 dark:text-orange-300" 
+                                  ? "bg-stone-100 text-stone-900 font-medium dark:bg-stone-800 dark:text-stone-100" 
                                   : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
                               )}
                               title={blocked ? 'Text-only — this conversation has images' : undefined}
@@ -4591,7 +4601,7 @@ export default function ChatContainer() {
                                   Free
                                 </span>
                               )}
-                              {selectedModel === m.id && <Check className="h-3.5 w-3.5 text-orange-500 shrink-0" />}
+                              {selectedModel === m.id && <Check className="h-3.5 w-3.5 text-stone-500 shrink-0" />}
                             </button>
                             );
                           })}

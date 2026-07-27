@@ -14,6 +14,11 @@ export type OpenAIToolDefinition = {
 
 export type ToolRuntimeFlags = {
   searchEnabled: boolean;
+  /**
+   * Per-chat MCP / OAuth integrations the user turned on for this request
+   * (e.g. `notion`). Empty ⇒ no MCP tools or MCP guidance enter the context.
+   */
+  integrations: string[];
 };
 
 export type ToolRuntimeContext = {

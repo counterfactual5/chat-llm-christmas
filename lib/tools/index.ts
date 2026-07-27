@@ -2,13 +2,29 @@ import type { ChatTool, ToolRuntimeFlags } from '@/lib/tools/registry';
 import { selectTools } from '@/lib/tools/registry';
 import { createWebSearchTool } from '@/lib/tools/web-search-tool';
 
-/** Built-in tools shipped with the chat app (MCP tools register elsewhere later). */
+/** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
   return [createWebSearchTool()];
 }
 
+/**
+ * MCP / OAuth-backed tools. Each tool must gate on `flags.integrations`
+ * so toggling off in the composer removes them from the model context.
+ */
+export function mcpToolRegistry(): ChatTool[] {
+  // Notion (and other MCP hosts) register here later, e.g.:
+  // enabled: (flags) => flags.integrations.includes('notion')
+  return [];
+}
+
 export function resolveEnabledTools(flags: ToolRuntimeFlags): ChatTool[] {
-  return selectTools(builtinToolRegistry(), flags);
+  const normalized: ToolRuntimeFlags = {
+    searchEnabled: Boolean(flags.searchEnabled),
+    integrations: Array.isArray(flags.integrations)
+      ? flags.integrations.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean)
+      : [],
+  };
+  return selectTools([...builtinToolRegistry(), ...mcpToolRegistry()], normalized);
 }
 
 export {

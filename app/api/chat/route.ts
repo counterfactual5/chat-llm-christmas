@@ -198,14 +198,17 @@ export async function POST(req: NextRequest) {
     }
 
     const openai = new OpenAI({ apiKey, baseURL });
-    const enabledTools = resolveEnabledTools({ searchEnabled });
-    const toolDefs = openaiToolDefinitions(enabledTools);
-    const toolsGuidance = toolSystemPrompt(enabledTools);
     const requestedIntegrations = Array.isArray(integrations)
       ? integrations.map((x: unknown) => String(x || '').trim().toLowerCase()).filter(Boolean)
       : [];
-    // Reserved for Notion MCP tool registration once the bridge is wired.
-    void requestedIntegrations;
+    // Only tools for integrations the user enabled on this chat enter the
+    // model context (definitions + system guidance). Off ⇒ not included.
+    const enabledTools = resolveEnabledTools({
+      searchEnabled,
+      integrations: requestedIntegrations,
+    });
+    const toolDefs = openaiToolDefinitions(enabledTools);
+    const toolsGuidance = toolSystemPrompt(enabledTools);
 
     const systemParts: string[] = [];
     if (isCursorStyleModel(requestedModel)) {

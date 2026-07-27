@@ -7,14 +7,14 @@ import {
   Menu, Plus, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered, ScrollText, Search, Globe, Blocks
+  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Blocks
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { ThemeToggle } from '@/components/theme-toggle';
+import { useTheme } from '@/components/theme-provider';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -384,6 +384,7 @@ type QueuedTask = {
 
 export default function ChatContainer() {
   const { t, locale, setLocale } = useLocale();
+  const { theme, setTheme } = useTheme();
 
   // State
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -528,6 +529,13 @@ export default function ChatContainer() {
     try {
       await fetch('/api/integrations/notion', { method: 'DELETE' });
       await fetchIntegrations();
+      // Drop Notion from every chat so tools are not sent after disconnect.
+      setSessions((prev) =>
+        prev.map((s) => ({
+          ...s,
+          mcpIds: (s.mcpIds || []).filter((id) => id !== 'notion'),
+        })),
+      );
     } finally {
       setNotionBusy(false);
     }
@@ -2784,7 +2792,7 @@ export default function ChatContainer() {
             <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-800 text-white dark:bg-stone-200 dark:text-stone-900">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-sm">
                     <Sparkles className="h-4 w-4" />
                   </div>
                   Christmas Chat
@@ -3109,6 +3117,22 @@ export default function ChatContainer() {
                         )}
                       </div>
 
+                      <button
+                        type="button"
+                        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                      >
+                        {theme === 'dark' ? (
+                          <Sun className="h-3.5 w-3.5 text-stone-400" />
+                        ) : (
+                          <Moon className="h-3.5 w-3.5 text-stone-400" />
+                        )}
+                        <span className="flex-1 text-left">{t('theme')}</span>
+                        <span className="text-xs text-stone-400">
+                          {theme === 'dark' ? t('themeDark') : t('themeLight')}
+                        </span>
+                      </button>
+
                       <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
 
                       {isAccountBound ? (
@@ -3140,37 +3164,34 @@ export default function ChatContainer() {
                   )}
                 </AnimatePresence>
 
-                <div className="flex items-center gap-1.5">
-                  <ThemeToggle className="h-10 w-10 shrink-0 rounded-xl text-stone-500 hover:bg-white dark:hover:bg-stone-800" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsAccountMenuOpen((v) => !v);
-                      setIsLanguageMenuOpen(false);
-                    }}
-                    className="flex min-w-0 flex-1 items-center justify-between rounded-xl border border-stone-200 bg-white p-2 text-left transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <div
-                        className={cn(
-                          'flex h-7 w-7 items-center justify-center rounded-lg text-white',
-                          isAccountBound ? 'bg-stone-700 dark:bg-stone-300 dark:text-stone-900' : 'bg-stone-400',
-                        )}
-                      >
-                        <Key className="h-3.5 w-3.5" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAccountMenuOpen((v) => !v);
+                    setIsLanguageMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div
+                      className={cn(
+                        'flex h-7 w-7 items-center justify-center rounded-lg text-white',
+                        isAccountBound ? 'bg-stone-700 dark:bg-stone-300 dark:text-stone-900' : 'bg-stone-400',
+                      )}
+                    >
+                      <Key className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-semibold">
+                        {isAccountBound ? t('accountConnected') : t('connectAccount')}
                       </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-semibold">
-                          {isAccountBound ? t('accountConnected') : t('connectAccount')}
-                        </div>
-                        <div className="truncate text-[10px] text-stone-400">
-                          {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
-                        </div>
+                      <div className="truncate text-[10px] text-stone-400">
+                        {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
                       </div>
                     </div>
-                    <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
-                  </button>
-                </div>
+                  </div>
+                  <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
+                </button>
               </div>
             </motion.div>
           )}
@@ -3896,12 +3917,12 @@ export default function ChatContainer() {
                     type="button"
                     onClick={() => resumeIncompleteReply()}
                     title={truncationInfo.reason || 'Continue the previous reply'}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-xs font-medium text-amber-800 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-950/80"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3.5 py-1.5 text-xs font-medium text-stone-700 shadow-sm transition-colors hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800"
                   >
                     <Play className="h-3 w-3 fill-current" />
                     Continue
                     {truncationInfo.reason && (
-                      <span className="hidden sm:inline font-normal text-amber-600/80 dark:text-amber-400/70">
+                      <span className="hidden sm:inline font-normal text-stone-500 dark:text-stone-400">
                         · {truncationInfo.reason}
                       </span>
                     )}

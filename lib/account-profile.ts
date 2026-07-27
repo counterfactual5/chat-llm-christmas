@@ -12,8 +12,11 @@ export function pickUsername(user: unknown): string | null {
   const u = user as Record<string, unknown>;
   const name =
     u.username ||
+    u.user_name ||
     u.display_name ||
     u.displayName ||
+    u.real_name ||
+    u.nickname ||
     u.name ||
     u.email ||
     (u.id != null ? `User #${u.id}` : '');
@@ -24,6 +27,7 @@ export async function fetchUsernameForApiKey(apiKey: string): Promise<string | n
   const origin = mainApiOrigin();
   const urls = [
     `${origin}/api/user/self`,
+    `${origin}/api/user/profile`,
     'https://llm.christmas/api/user/self',
     'https://llm.christmas/portal/chat/user',
   ];
@@ -41,7 +45,11 @@ export async function fetchUsernameForApiKey(apiKey: string): Promise<string | n
       const payload = await response.json();
       if (payload?.success === false) continue;
       const user = payload?.data ?? payload?.user ?? payload;
-      const name = pickUsername(user);
+      let name = pickUsername(user);
+      if (!name && user && typeof user === 'object') {
+        const nested = (user as Record<string, unknown>).data;
+        name = pickUsername(nested);
+      }
       if (name) return name;
     } catch {
       // try next URL

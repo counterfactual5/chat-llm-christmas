@@ -294,6 +294,16 @@ function mcpIdsFromPrefs(notionConnected: boolean): string[] {
   return readMcpPrefIds().filter((id) => (id === 'notion' ? notionConnected : false));
 }
 
+function nameFromNotionWorkspaceLabel(label?: string): string | null {
+  if (!label?.trim()) return null;
+  const trimmed = label.trim();
+  const en = trimmed.match(/^(.+?)'s Notion$/i);
+  if (en?.[1]) return en[1].trim();
+  const zh = trimmed.match(/^(.+?)的 Notion$/);
+  if (zh?.[1]) return zh[1].trim();
+  return null;
+}
+
 function formatWebSourcesForReference(sources: WebSearchSource[]): string {
   if (!sources.length) return '';
   const byQuery = new Map<string, WebSearchSource[]>();
@@ -429,7 +439,6 @@ export default function ChatContainer() {
   const [waitingBySession, setWaitingBySession] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
-  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageContent, setEditingMessageContent] = useState('');
   
@@ -721,7 +730,17 @@ export default function ChatContainer() {
     Boolean(notionStatus?.connected) &&
     (notionMcpPrefOn || activeMcpIds.includes('notion'));
 
+  const accountDisplayName =
+    accountUsername ||
+    nameFromNotionWorkspaceLabel(notionStatus?.label) ||
+    (isAccountBound ? t('accountConnected') : t('connectAccount'));
+
   // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
+  useEffect(() => {
+    if (!isAccountBound || accountUsername) return;
+    void refreshAccountStatus();
+  }, [isAccountBound, accountUsername, notionStatus?.label]);
+
   useEffect(() => {
     if (!notionStatus?.connected) return;
     if (!readMcpPrefIds().includes('notion')) return;
@@ -1547,13 +1566,11 @@ export default function ChatContainer() {
       const target = event.target as Node | null;
       if (accountMenuRef.current && target && !accountMenuRef.current.contains(target)) {
         setIsAccountMenuOpen(false);
-        setIsLanguageMenuOpen(false);
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsAccountMenuOpen(false);
-        setIsLanguageMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', onPointerDown);
@@ -3191,62 +3208,40 @@ export default function ChatContainer() {
                       exit={{ opacity: 0, y: 6 }}
                       className="absolute bottom-full left-3 right-3 mb-2 z-50 overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
                     >
-                      {isAccountBound ? (
-                        <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
-                          <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
-                            {accountUsername || '…'}
-                          </div>
+                      <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
+                        <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
+                          {accountDisplayName}
                         </div>
-                      ) : (
-                        <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
-                          <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
-                            {t('connectAccount')}
-                          </div>
-                          <div className="truncate text-[11px] text-stone-400">
-                            {t('connectAccountHint')}
-                          </div>
+                        <div className="truncate text-[11px] text-stone-400">
+                          {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
                         </div>
-                      )}
+                      </div>
 
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setIsLanguageMenuOpen((v) => !v)}
-                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                        >
-                          <Globe className="h-3.5 w-3.5 text-stone-400" />
-                          <span className="flex-1 text-left">{t('language')}</span>
-                          <span className="text-xs text-stone-400">
-                            {locale === 'zh' ? t('languageZh') : t('languageEn')}
-                          </span>
-                          <ChevronDown className={cn('h-3 w-3 text-stone-400 transition-transform', isLanguageMenuOpen && 'rotate-180')} />
-                        </button>
-                        {isLanguageMenuOpen && (
-                          <div className="mb-1 ml-6 mr-1 space-y-0.5 rounded-lg border border-stone-100 p-1 dark:border-stone-800">
-                            {([
-                              { id: 'zh' as const, label: t('languageZh') },
-                              { id: 'en' as const, label: t('languageEn') },
-                            ]).map((opt) => (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                onClick={() => {
-                                  setLocale(opt.id);
-                                  setIsLanguageMenuOpen(false);
-                                }}
-                                className={cn(
-                                  'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs',
-                                  locale === opt.id
-                                    ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                    : 'text-stone-600 hover:bg-stone-50 dark:text-stone-400 dark:hover:bg-stone-800',
-                                )}
-                              >
-                                {opt.label}
-                                {locale === opt.id && <Check className="h-3 w-3" />}
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                      <div className="px-2.5 py-2">
+                        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                          {t('language')}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1">
+                          {([
+                            { id: 'zh' as const, label: t('languageZh') },
+                            { id: 'en' as const, label: t('languageEn') },
+                          ]).map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setLocale(opt.id)}
+                              className={cn(
+                                'flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors',
+                                locale === opt.id
+                                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700',
+                              )}
+                            >
+                              {opt.label}
+                              {locale === opt.id ? <Check className="h-3 w-3" /> : null}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       <button
@@ -3298,23 +3293,29 @@ export default function ChatContainer() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsAccountMenuOpen((v) => !v);
-                    setIsLanguageMenuOpen(false);
-                  }}
+                  onClick={() => setIsAccountMenuOpen((v) => !v)}
                   className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 hover:border-stone-300 focus-visible:ring-2 focus-visible:ring-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80 dark:hover:border-stone-600 dark:focus-visible:ring-stone-600"
                 >
-                  <div className="min-w-0 flex-1 pr-2">
-                    <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
-                      {isAccountBound
-                        ? accountUsername || '…'
-                        : t('connectAccount')}
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div
+                      className={cn(
+                        'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border bg-stone-100 text-stone-700',
+                        'border-stone-200 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200',
+                      )}
+                    >
+                      <Key className="h-3.5 w-3.5" />
+                      {isAccountBound && (
+                        <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
+                      )}
                     </div>
-                    {!isAccountBound ? (
-                      <div className="truncate text-[10px] text-stone-400">
-                        {t('connectAccountHint')}
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
+                        {accountDisplayName}
                       </div>
-                    ) : null}
+                      <div className="truncate text-[10px] text-stone-400">
+                        {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
+                      </div>
+                    </div>
                   </div>
                   <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
                 </button>

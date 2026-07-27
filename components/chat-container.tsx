@@ -3591,7 +3591,8 @@ export default function ChatContainer() {
                                 }
                                 className={cn(
                                   'flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
-                                  failed && 'text-amber-700 dark:text-amber-400',
+                                  failed &&
+                                    'text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300',
                                 )}
                               >
                                 <ChevronDown
@@ -3636,7 +3637,7 @@ export default function ChatContainer() {
                                 <div className="space-y-1 pb-1 pl-5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
                                   {searching && <div>{t('fetchingResults')}</div>}
                                   {run.error && (
-                                    <div className="text-amber-700 dark:text-amber-400">
+                                    <div className="text-red-600 dark:text-red-400">
                                       {run.error}
                                     </div>
                                   )}

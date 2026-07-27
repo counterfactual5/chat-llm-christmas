@@ -572,17 +572,19 @@ export default function ChatContainer() {
       const params = new URLSearchParams(window.location.search);
       const authError = params.get('auth_error');
       const notionOk = params.get('notion_connected');
+      const notionAuthReturn = params.get('notion_auth');
       if (authError) {
         setAccountError(authError);
-        setAuthModalMode('account');
+        setAuthModalMode(notionAuthReturn || notionOk ? 'notion' : 'account');
         setShowAuthModal(true);
       }
-      if (authError || notionOk || params.get('connected')) {
+      if (authError || notionOk || params.get('connected') || notionAuthReturn) {
         const clean = new URL(window.location.href);
         clean.search = '';
         window.history.replaceState({}, '', clean.pathname);
       }
-      if (notionOk) {
+      if (notionOk || notionAuthReturn) {
+        if (notionOk) setAccountError('');
         setAuthModalMode('notion');
         setShowAuthModal(true);
       }

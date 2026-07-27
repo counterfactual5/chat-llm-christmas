@@ -20,6 +20,7 @@ function safeEqual(a: string, b: string) {
 
 function redirectHome(req: NextRequest, params: Record<string, string>) {
   const url = new URL('/', req.url);
+  url.searchParams.set('notion_auth', '1');
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return NextResponse.redirect(url);
 }

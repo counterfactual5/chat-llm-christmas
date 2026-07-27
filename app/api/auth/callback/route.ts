@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
       value: payload.data.apiKey,
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24 * 30,
     });

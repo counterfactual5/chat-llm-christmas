@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       value: normalized,
       httpOnly: true,
       secure: true,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24 * 30,
     });
@@ -66,7 +66,7 @@ export async function DELETE() {
     value: '',
     httpOnly: true,
     secure: true,
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: '/',
     maxAge: 0,
   });

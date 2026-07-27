@@ -492,6 +492,8 @@ export default function ChatContainer() {
     label?: string;
   } | null>(null);
   const [notionBusy, setNotionBusy] = useState(false);
+  /** Gate localStorage writes until boot has restored (or decided there is nothing). */
+  const [chatsHydrated, setChatsHydrated] = useState(false);
 
   // Settings State
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
@@ -663,14 +665,8 @@ export default function ChatContainer() {
 
       void refreshAccountStatus()
         .then(async (bound) => {
-          // One boot pass: models for everyone; skills/integrations only if bound.
-          // Avoid double-fetching skills via fetchModels(authed) or notionOk path.
-          const boot: Array<Promise<unknown>> = [fetchModels()];
-          if (bound) {
-            boot.push(fetchSkills(), fetchIntegrations());
-          }
-          await Promise.all(boot);
-
+          // Restore chats BEFORE waiting on models — and before any persist effect
+          // runs with an empty sessions array (that used to wipe localStorage).
           if (bound) {
             const savedChats = localStorage.getItem('llm_christmas_chats');
             if (savedChats) {
@@ -710,6 +706,13 @@ export default function ChatContainer() {
           } else {
             createNewSession();
           }
+          setChatsHydrated(true);
+
+          const boot: Array<Promise<unknown>> = [fetchModels()];
+          if (bound) {
+            boot.push(fetchSkills(), fetchIntegrations());
+          }
+          await Promise.all(boot);
 
           if (mainConnected) {
             setAccountError('');
@@ -745,22 +748,25 @@ export default function ChatContainer() {
         .catch(() => {
           fetchModels();
           createNewSession();
+          setChatsHydrated(true);
         });
     } catch {
       // ignore
     }
   }, []);
 
-  // Save Sessions ONLY if account is bound — never persist empty drafts
+  // Save Sessions ONLY if account is bound — never persist empty drafts.
+  // Wait until boot hydration finishes; otherwise isAccountBound flips true while
+  // sessions is still [] and we wipe llm_christmas_chats from localStorage.
   useEffect(() => {
-    if (!isAccountBound) return;
+    if (!isAccountBound || !chatsHydrated) return;
     const persisted = sessions.filter((session) => session.messages.length > 0);
     if (persisted.length > 0) {
       localStorage.setItem('llm_christmas_chats', JSON.stringify(persisted));
     } else {
       localStorage.removeItem('llm_christmas_chats');
     }
-  }, [sessions, isAccountBound]);
+  }, [sessions, isAccountBound, chatsHydrated]);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];

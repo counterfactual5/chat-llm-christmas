@@ -436,6 +436,7 @@ export default function ChatContainer() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [skillsExpanded, setSkillsExpanded] = useState(false);
+  const [mcpExpanded, setMcpExpanded] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
   const [skillDraftContent, setSkillDraftContent] = useState('');
@@ -532,6 +533,11 @@ export default function ChatContainer() {
       setNotionBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!showAuthModal || !isAccountBound) return;
+    void fetchIntegrations();
+  }, [showAuthModal, isAccountBound]);
 
   // Load Saved State
   useEffect(() => {
@@ -2864,6 +2870,93 @@ export default function ChatContainer() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* MCP — connections live on the account; per-chat use toggles here */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAccountBound) {
+                      setShowAuthModal(true);
+                      return;
+                    }
+                    setMcpExpanded((v) => !v);
+                    void fetchIntegrations();
+                  }}
+                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <Blocks className="h-4 w-4 text-stone-500" />
+                    {t('mcpTools')}
+                    {notionStatus?.connected ? (
+                      <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        1
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', mcpExpanded && isAccountBound ? 'rotate-180' : '')} />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isAccountBound && mcpExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="space-y-1 pb-1">
+                        <p className="px-3 py-0.5 text-[10px] leading-4 text-stone-400">
+                          {t('mcpSidebarHint')}
+                        </p>
+                        <div className="rounded-lg px-2 py-1.5 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
+                          <div className="flex items-center gap-2 px-1">
+                            <Blocks className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                                Notion
+                              </div>
+                              <div className="truncate text-[10px] text-stone-400">
+                                {notionStatus?.connected
+                                  ? notionStatus.label || t('notionConnected')
+                                  : t('notionMcpNeedsConnect')}
+                              </div>
+                            </div>
+                            {notionStatus?.connected ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleNotionMcp()}
+                                className={cn(
+                                  'shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold transition-colors',
+                                  notionMcpOn
+                                    ? 'bg-orange-500 text-white'
+                                    : 'bg-stone-200 text-stone-600 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200',
+                                )}
+                              >
+                                {notionMcpOn ? t('notionMcpOn') : t('useInThisChat')}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setShowAuthModal(true)}
+                                className="shrink-0 rounded-md bg-orange-500 px-2 py-1 text-[10px] font-semibold text-white hover:bg-orange-600"
+                              >
+                                {t('connectNotion')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAuthModal(true)}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs text-stone-500 hover:bg-stone-200/50 hover:text-stone-700 dark:hover:bg-stone-800/50 dark:hover:text-stone-200"
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                          {t('manageAccount')}
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
@@ -4928,7 +5021,7 @@ export default function ChatContainer() {
         )}
       </AnimatePresence>
 
-      {/* --- Key / Auth Modal --- */}
+      {/* --- Account / MCP Modal --- */}
       <AnimatePresence>
         {showAuthModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -4938,133 +5031,159 @@ export default function ChatContainer() {
               exit={{ scale: 0.95, opacity: 0 }}
               className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
             >
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2 font-semibold text-lg">
+              <div className="mb-5 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-lg font-semibold text-stone-900 dark:text-stone-50">
                   <Key className="h-5 w-5 text-orange-500" />
-                  Connect llm.christmas Account
+                  {isAccountBound ? t('manageAccount') : t('authTitle')}
                 </div>
-                <button onClick={() => setShowAuthModal(false)} className="text-stone-400 hover:text-stone-600">
+                <button
+                  type="button"
+                  onClick={() => setShowAuthModal(false)}
+                  className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200"
+                >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <p className="text-sm text-stone-500 mb-4">
-                {isAccountBound
-                  ? 'Your llm.christmas account is connected. Balance and paid-model access are shared automatically.'
-                  : 'Sign in on the main site and authorize Chat. Your balance and paid-model access will be shared automatically.'}
-              </p>
+              <div className="space-y-5">
+                {/* Layer 1: main-site account */}
+                <section className="space-y-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                      {t('accountSection')}
+                    </div>
+                    <p className="mt-1 text-[11px] leading-4 text-stone-400">
+                      {t('accountSectionHint')}
+                    </p>
+                  </div>
 
-              <div className="space-y-4">
-                {isAccountBound ? (
-                  <>
-                    <div className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
-                      <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                        {t('integrations')}
-                      </div>
-                      <p className="mt-0.5 text-[11px] leading-4 text-stone-500 dark:text-stone-400">
-                        {t('integrationsHint')}
-                      </p>
-                      <div className="mt-3 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
-                              Notion
-                            </div>
-                            <div className="truncate text-[11px] text-stone-500 dark:text-stone-400">
-                              {notionStatus?.connected
-                                ? `${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`
-                                : notionStatus?.available === false
-                                  ? t('notionNotConfigured')
-                                  : t('notionConnectHint')}
-                            </div>
-                          </div>
-                          {notionStatus?.connected ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              disabled={notionBusy}
-                              onClick={() => void disconnectNotion()}
-                              className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50"
-                            >
-                              {t('disconnectNotion')}
-                            </Button>
-                          ) : (
-                            <a
-                              href={
-                                notionStatus?.available === false
-                                  ? undefined
-                                  : '/api/integrations/notion/start'
-                              }
-                              aria-disabled={notionStatus?.available === false}
-                              onClick={(e) => {
-                                if (notionStatus?.available === false) e.preventDefault();
-                              }}
-                              className={cn(
-                                'inline-flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
-                                notionStatus?.available === false
-                                  ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
-                                  : 'bg-orange-500 text-white hover:bg-orange-600',
-                              )}
-                            >
-                              {t('connectNotion')}
-                            </a>
-                          )}
+                  {isAccountBound ? (
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-3 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/30">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
+                          {t('accountConnected')}
+                        </div>
+                        <div className="truncate text-[11px] text-emerald-700/80 dark:text-emerald-400/80">
+                          {t('accountConnectedHint')}
                         </div>
                       </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={disconnectAccount}
+                        className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                      >
+                        {t('signOutAccount')}
+                      </Button>
                     </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-stone-500 dark:text-stone-400">
+                        {t('authSignInHint')}
+                      </p>
+                      <a
+                        href="/api/auth/start"
+                        className="flex h-11 w-full items-center justify-center rounded-xl bg-orange-500 font-semibold text-white hover:bg-orange-600"
+                      >
+                        {t('continueWithSite')}
+                      </a>
 
-                    <Button
-                      variant="outline"
-                      onClick={disconnectAccount}
-                      className="w-full rounded-xl border-red-200 text-red-600 hover:bg-red-50"
-                    >
-                      Disconnect
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <a
-                      href="/api/auth/start"
-                      className="flex h-11 w-full items-center justify-center rounded-xl bg-orange-500 font-semibold text-white hover:bg-orange-600"
-                    >
-                      Continue with llm.christmas
-                    </a>
+                      <div className="flex items-center gap-3 text-xs text-stone-400">
+                        <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                        {t('manualApiKeyFallback')}
+                        <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
+                      </div>
 
-                    <div className="flex items-center gap-3 text-xs text-stone-400">
-                      <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
-                      Manual API Key fallback
-                      <span className="h-px flex-1 bg-stone-200 dark:bg-stone-700" />
-                    </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-stone-700 dark:text-stone-300">
+                          {t('apiTokenLabel')}
+                        </label>
+                        <input
+                          type="password"
+                          value={tempKeyInput}
+                          onChange={(e) => setTempKeyInput(e.target.value)}
+                          placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                          className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-orange-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
+                        />
+                      </div>
 
+                      <Button
+                        onClick={saveUserKey}
+                        disabled={accountSaving || !tempKeyInput.trim()}
+                        className="w-full rounded-xl bg-orange-500 text-white hover:bg-orange-600"
+                      >
+                        {accountSaving ? t('validating') : t('saveAndConnect')}
+                      </Button>
+                    </>
+                  )}
+                </section>
+
+                {/* Layer 2: MCP OAuth — only after main account is bound */}
+                {isAccountBound ? (
+                  <section className="space-y-3 border-t border-stone-200 pt-5 dark:border-stone-800">
                     <div>
-                      <label className="block text-xs font-medium text-stone-700 dark:text-stone-300 mb-1">
-                        API Token (sk-...)
-                      </label>
-                      <input
-                        type="password"
-                        value={tempKeyInput}
-                        onChange={(e) => setTempKeyInput(e.target.value)}
-                        placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                        className="w-full rounded-xl border border-stone-300 p-3 text-sm focus:border-orange-500 focus:outline-none dark:border-stone-700 dark:bg-stone-800"
-                      />
+                      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                        <Blocks className="h-3.5 w-3.5" />
+                        {t('mcpSection')}
+                      </div>
+                      <p className="mt-1 text-[11px] leading-4 text-stone-400">
+                        {t('mcpSectionHint')}
+                      </p>
                     </div>
 
-                    {accountError && (
-                      <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>
-                    )}
+                    <div className="rounded-xl border border-stone-200 p-3 dark:border-stone-700">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
+                            Notion
+                          </div>
+                          <div className="truncate text-[11px] text-stone-500 dark:text-stone-400">
+                            {notionStatus?.connected
+                              ? `${t('notionConnected')}${notionStatus.label ? ` · ${notionStatus.label}` : ''}`
+                              : notionStatus?.available === false
+                                ? t('notionNotConfigured')
+                                : t('notionConnectHint')}
+                          </div>
+                        </div>
+                        {notionStatus?.connected ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={notionBusy}
+                            onClick={() => void disconnectNotion()}
+                            className="shrink-0 rounded-lg border-red-200 text-xs text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                          >
+                            {t('disconnectNotion')}
+                          </Button>
+                        ) : (
+                          <a
+                            href={
+                              notionStatus?.available === false
+                                ? undefined
+                                : '/api/integrations/notion/start'
+                            }
+                            aria-disabled={notionStatus?.available === false}
+                            onClick={(e) => {
+                              if (notionStatus?.available === false) e.preventDefault();
+                            }}
+                            className={cn(
+                              'inline-flex h-8 shrink-0 items-center rounded-lg px-3 text-xs font-semibold',
+                              notionStatus?.available === false
+                                ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
+                                : 'bg-orange-500 text-white hover:bg-orange-600',
+                            )}
+                          >
+                            {t('connectNotion')}
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
 
-                    <Button
-                      onClick={saveUserKey}
-                      disabled={accountSaving || !tempKeyInput.trim()}
-                      className="w-full bg-orange-500 hover:bg-orange-600 text-white rounded-xl"
-                    >
-                      {accountSaving ? 'Validating…' : 'Save & Connect'}
-                    </Button>
-                  </>
-                )}
-                {isAccountBound && accountError && (
+                {accountError ? (
                   <p className="text-sm text-red-600 dark:text-red-400">{accountError}</p>
-                )}
+                ) : null}
               </div>
             </motion.div>
           </div>

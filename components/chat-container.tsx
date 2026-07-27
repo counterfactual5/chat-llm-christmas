@@ -294,16 +294,6 @@ function mcpIdsFromPrefs(notionConnected: boolean): string[] {
   return readMcpPrefIds().filter((id) => (id === 'notion' ? notionConnected : false));
 }
 
-function nameFromNotionWorkspaceLabel(label?: string): string | null {
-  if (!label?.trim()) return null;
-  const trimmed = label.trim();
-  const en = trimmed.match(/^(.+?)'s Notion$/i);
-  if (en?.[1]) return en[1].trim();
-  const zh = trimmed.match(/^(.+?)的 Notion$/);
-  if (zh?.[1]) return zh[1].trim();
-  return null;
-}
-
 function formatWebSourcesForReference(sources: WebSearchSource[]): string {
   if (!sources.length) return '';
   const byQuery = new Map<string, WebSearchSource[]>();
@@ -731,15 +721,13 @@ export default function ChatContainer() {
     (notionMcpPrefOn || activeMcpIds.includes('notion'));
 
   const accountDisplayName =
-    accountUsername ||
-    nameFromNotionWorkspaceLabel(notionStatus?.label) ||
-    (isAccountBound ? t('accountConnected') : t('connectAccount'));
+    accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
 
   // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
   useEffect(() => {
     if (!isAccountBound || accountUsername) return;
     void refreshAccountStatus();
-  }, [isAccountBound, accountUsername, notionStatus?.label]);
+  }, [isAccountBound, accountUsername]);
 
   useEffect(() => {
     if (!notionStatus?.connected) return;
@@ -3217,32 +3205,17 @@ export default function ChatContainer() {
                         </div>
                       </div>
 
-                      <div className="px-2.5 py-2">
-                        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                          {t('language')}
-                        </div>
-                        <div className="grid grid-cols-2 gap-1">
-                          {([
-                            { id: 'zh' as const, label: t('languageZh') },
-                            { id: 'en' as const, label: t('languageEn') },
-                          ]).map((opt) => (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => setLocale(opt.id)}
-                              className={cn(
-                                'flex items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors',
-                                locale === opt.id
-                                  ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
-                                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700',
-                              )}
-                            >
-                              {opt.label}
-                              {locale === opt.id ? <Check className="h-3 w-3" /> : null}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                      >
+                        <Globe className="h-3.5 w-3.5 text-stone-400" />
+                        <span className="flex-1 text-left">{t('language')}</span>
+                        <span className="text-xs text-stone-400">
+                          {locale === 'zh' ? t('languageZh') : t('languageEn')}
+                        </span>
+                      </button>
 
                       <button
                         type="button"

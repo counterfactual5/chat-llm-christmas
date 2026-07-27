@@ -23,13 +23,46 @@ export function pickUsername(user: unknown): string | null {
   return name ? String(name).trim().slice(0, 120) : null;
 }
 
+export async function fetchUsernameViaPortalSso(apiKey: string): Promise<string | null> {
+  const secret = (process.env.CHAT_SSO_SECRET || '').trim();
+  if (!secret) return null;
+
+  const attempts: Array<{ url: string; method: 'GET' | 'POST'; body?: string }> = [
+    { url: 'https://llm.christmas/portal/chat/user', method: 'GET' },
+    { url: 'https://llm.christmas/portal/chat/user', method: 'POST', body: JSON.stringify({ apiKey }) },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const response = await fetch(attempt.url, {
+        method: attempt.method,
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-Chat-SSO-Secret': secret,
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: attempt.method === 'POST' ? attempt.body : undefined,
+        cache: 'no-store',
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      if (payload?.success === false) continue;
+      const name = usernameFromTokenPayload(payload?.data ?? payload);
+      if (name) return name;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
 export async function fetchUsernameForApiKey(apiKey: string): Promise<string | null> {
   const origin = mainApiOrigin();
   const urls = [
+    'https://llm.christmas/api/user/self',
     `${origin}/api/user/self`,
     `${origin}/api/user/profile`,
-    'https://llm.christmas/api/user/self',
-    'https://llm.christmas/portal/chat/user',
   ];
 
   for (const url of urls) {
@@ -55,11 +88,20 @@ export async function fetchUsernameForApiKey(apiKey: string): Promise<string | n
       // try next URL
     }
   }
-  return null;
+
+  return fetchUsernameViaPortalSso(apiKey);
 }
 
 export function usernameFromTokenPayload(data: unknown): string | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
-  return pickUsername(d) || pickUsername(d.user) || pickUsername(d.profile);
+  const direct = pickUsername(d) || pickUsername(d.user) || pickUsername(d.profile) || pickUsername(d.account);
+  if (direct) return direct;
+  for (const value of Object.values(d)) {
+    if (value && typeof value === 'object') {
+      const nested = pickUsername(value);
+      if (nested) return nested;
+    }
+  }
+  return null;
 }

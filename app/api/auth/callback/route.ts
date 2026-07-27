@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
     const apiKey = String(payload.data.apiKey);
     const username =
       usernameFromTokenPayload(payload.data) ||
+      usernameFromTokenPayload(payload) ||
       (await fetchUsernameForApiKey(apiKey));
 
     const home = new URL('/', req.url);

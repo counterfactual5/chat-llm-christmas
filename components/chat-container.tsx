@@ -262,6 +262,38 @@ interface ChatSession {
   webSources?: WebSearchSource[];
 }
 
+const MCP_PREFS_STORAGE_KEY = 'llm_christmas_mcp_prefs';
+
+function readMcpPrefIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(MCP_PREFS_STORAGE_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw) as { enabled?: unknown };
+    return Array.isArray(data?.enabled)
+      ? data.enabled.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeMcpPrefIds(enabled: string[]) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(MCP_PREFS_STORAGE_KEY, JSON.stringify({ enabled }));
+}
+
+function setMcpPrefEnabled(id: string, on: boolean) {
+  const next = new Set(readMcpPrefIds());
+  if (on) next.add(id);
+  else next.delete(id);
+  writeMcpPrefIds([...next]);
+}
+
+function mcpIdsFromPrefs(notionConnected: boolean): string[] {
+  return readMcpPrefIds().filter((id) => (id === 'notion' ? notionConnected : false));
+}
+
 function formatWebSourcesForReference(sources: WebSearchSource[]): string {
   if (!sources.length) return '';
   const byQuery = new Map<string, WebSearchSource[]>();
@@ -509,6 +541,7 @@ export default function ChatContainer() {
   const queuePaused = Boolean(queuePausedBySession[activeSessionId]);
 
   const scrubNotionMcpFromSessions = () => {
+    setMcpPrefEnabled('notion', false);
     setSessions((prev) =>
       prev.map((s) => {
         const next = (s.mcpIds || []).filter((id) => id !== 'notion');
@@ -682,9 +715,26 @@ export default function ChatContainer() {
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const webSources = activeSession?.webSources || [];
-  const notionMcpOn = Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
+  const notionMcpPrefOn = readMcpPrefIds().includes('notion');
+  const notionMcpOn =
+    Boolean(notionStatus?.connected) &&
+    (notionMcpPrefOn || activeMcpIds.includes('notion'));
 
   // Keep Material sources aligned with current history (grow on search, shrink on edit/resend).
+  useEffect(() => {
+    if (!notionStatus?.connected) return;
+    if (!readMcpPrefIds().includes('notion')) return;
+    setActiveMcpIds((prev) => (prev.includes('notion') ? prev : [...prev, 'notion']));
+  }, [notionStatus?.connected, activeSessionId]);
+
+  useEffect(() => {
+    if (!isAccountBound || !notionStatus?.connected) return;
+    if (readMcpPrefIds().includes('notion')) return;
+    if (sessions.some((s) => s.mcpIds?.includes('notion'))) {
+      setMcpPrefEnabled('notion', true);
+    }
+  }, [isAccountBound, notionStatus?.connected, sessions]);
+
   useEffect(() => {
     if (!activeSessionId) return;
     const collected = collectWebSourcesFromMessages(messages);
@@ -755,8 +805,8 @@ export default function ChatContainer() {
   };
 
   const toggleNotionMcp = () => {
-    // Turning off must always work — including clearing stale mcpIds after OAuth expiry.
-    if (activeMcpIds.includes('notion')) {
+    if (notionMcpOn) {
+      setMcpPrefEnabled('notion', false);
       setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
       return;
     }
@@ -764,11 +814,13 @@ export default function ChatContainer() {
       openNotionModal();
       return;
     }
-    setActiveMcpIds((prev) => [...prev, 'notion']);
+    setMcpPrefEnabled('notion', true);
+    setActiveMcpIds((prev) => (prev.includes('notion') ? prev : [...prev, 'notion']));
   };
 
   const setNotionMcpEnabled = (enabled: boolean) => {
     if (!enabled) {
+      setMcpPrefEnabled('notion', false);
       setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
       return;
     }
@@ -776,6 +828,7 @@ export default function ChatContainer() {
       openNotionModal();
       return;
     }
+    setMcpPrefEnabled('notion', true);
     setActiveMcpIds((prev) => (prev.includes('notion') ? prev : [...prev, 'notion']));
   };
 
@@ -908,12 +961,20 @@ export default function ChatContainer() {
     // omitted from the sidebar until the first message lands.
     setQuotedSelections([]);
     setSessions((prev) => {
+      const prefMcp = mcpIdsFromPrefs(Boolean(notionStatusRef.current?.connected));
       const emptyDraft = prev.find((session) => session.messages.length === 0);
+
       if (emptyDraft) {
         setActiveSessionId(emptyDraft.id);
-        return prev.filter(
-          (session) => session.messages.length > 0 || session.id === emptyDraft.id,
-        );
+        return prev
+          .filter(
+            (session) => session.messages.length > 0 || session.id === emptyDraft.id,
+          )
+          .map((session) =>
+            session.id === emptyDraft.id && prefMcp.length
+              ? { ...session, mcpIds: prefMcp, updatedAt: Date.now() }
+              : session,
+          );
       }
 
       const newSession: ChatSession = {
@@ -921,6 +982,7 @@ export default function ChatContainer() {
         title: 'New Conversation',
         messages: [],
         updatedAt: Date.now(),
+        ...(prefMcp.length ? { mcpIds: prefMcp } : {}),
       };
       setActiveSessionId(newSession.id);
       // Drop any stray empty drafts while creating a fresh one.
@@ -1169,6 +1231,13 @@ export default function ChatContainer() {
       .filter(Boolean)
       .join('\n\n');
 
+    const notionConnected = Boolean(notionStatusRef.current?.connected);
+    const prefIntegrations = mcpIdsFromPrefs(notionConnected);
+    const sessionIntegrations = (
+      sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || []
+    ).filter((id) => (id === 'notion' ? notionConnected : false));
+    const integrations = prefIntegrations.length ? prefIntegrations : sessionIntegrations;
+
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1179,10 +1248,7 @@ export default function ChatContainer() {
         referenceText: combinedReference,
         skills: skillsPayloadForSession(sessionId),
         conversationId: sessionId,
-        // Never send MCP ids for providers that are not currently OAuth-connected.
-        integrations: (sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || []).filter(
-          (id) => (id === 'notion' ? Boolean(notionStatusRef.current?.connected) : false),
-        ),
+        integrations,
       }),
       signal,
     });
@@ -2967,11 +3033,6 @@ export default function ChatContainer() {
                   <span className="flex items-center gap-2 font-medium">
                     <Blocks className="h-4 w-4 text-stone-500" />
                     {t('mcpTools')}
-                    {notionStatus?.connected ? (
-                      <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                        1
-                      </span>
-                    ) : null}
                   </span>
                   <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', mcpExpanded && isAccountBound ? 'rotate-180' : '')} />
                 </button>

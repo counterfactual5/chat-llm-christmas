@@ -4,11 +4,12 @@ import {
   listMcpTools,
   type McpToolDefinition,
 } from '@/lib/mcp/http-client';
-import { GITHUB_MCP_SERVER_URL } from '@/lib/integrations/github-oauth';
+import { githubMcpServerUrl } from '@/lib/integrations/github-oauth';
 
 const GITHUB_SYSTEM_PROMPT = [
   "You have GitHub MCP tools for the user's connected account (repos, issues, PRs, Actions, etc.).",
   'Use search/list tools before mutating when the user only asked to explore.',
+  'For write actions (create issue, comment, merge, etc.), confirm intent from the user message before calling.',
   'Do not invent repository names, issue numbers, or URLs — only use tool results.',
   'Cite repo/issue/PR links from tool results when answering.',
 ].join(' ');
@@ -20,7 +21,7 @@ function githubToken(ctx: ToolRuntimeContext): string | null {
 
 function mcpOpts(accessToken: string) {
   return {
-    serverUrl: `${GITHUB_MCP_SERVER_URL.replace(/\/$/, '')}/readonly`,
+    serverUrl: githubMcpServerUrl(),
     accessToken,
     userAgent: 'ChristmasChat-GitHubMCP/1.0',
   };

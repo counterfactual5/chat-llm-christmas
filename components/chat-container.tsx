@@ -725,7 +725,12 @@ export default function ChatContainer() {
               try {
                 const parsed = JSON.parse(savedChats) as ChatSession[];
                 const nonEmpty = parsed
-                  .filter((session) => session.messages?.length > 0)
+                  .filter(
+                    (session) =>
+                      session.messages?.length > 0 ||
+                      (session.mcpIds && session.mcpIds.length > 0) ||
+                      (session.skillIds && session.skillIds.length > 0),
+                  )
                   .map((session) => ({
                     ...session,
                     messages: session.messages.map((m) => {
@@ -833,7 +838,14 @@ export default function ChatContainer() {
   // sessions is still [] and we wipe llm_christmas_chats from localStorage.
   useEffect(() => {
     if (!isAccountBound || !chatsHydrated) return;
-    const persisted = sessions.filter((session) => session.messages.length > 0);
+    // Persist chats with messages, or drafts that already have per-chat MCP/Skills
+    // enabled — otherwise toggling GitHub/Notion before the first send is lost on refresh.
+    const persisted = sessions.filter(
+      (session) =>
+        session.messages.length > 0 ||
+        (session.mcpIds && session.mcpIds.length > 0) ||
+        (session.skillIds && session.skillIds.length > 0),
+    );
     if (persisted.length > 0) {
       localStorage.setItem('llm_christmas_chats', JSON.stringify(persisted));
     } else {
@@ -858,9 +870,13 @@ export default function ChatContainer() {
   const accountDisplayName =
     accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
 
-  // If Notion OAuth is gone, strip it from every chat's mcpIds.
+  // If Notion/GitHub OAuth is gone, strip it from every chat's mcpIds.
+  // Important: status starts as null (not yet fetched). Do NOT treat null as
+  // "disconnected" or we wipe per-chat mcpIds before integrations load / on
+  // transient fetch failures — which looks like the MCP toggle "won't save".
   useEffect(() => {
-    if (notionStatus?.connected) return;
+    if (notionStatus === null) return; // still loading
+    if (notionStatus.connected) return;
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {
@@ -870,11 +886,11 @@ export default function ChatContainer() {
       });
       return changed ? next : prev;
     });
-    setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
-  }, [notionStatus?.connected]);
+  }, [notionStatus]);
 
   useEffect(() => {
-    if (githubStatus?.connected) return;
+    if (githubStatus === null) return; // still loading
+    if (githubStatus.connected) return;
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {
@@ -884,8 +900,7 @@ export default function ChatContainer() {
       });
       return changed ? next : prev;
     });
-    setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
-  }, [githubStatus?.connected]);
+  }, [githubStatus]);
 
   useEffect(() => {
     if (!activeSessionId) return;

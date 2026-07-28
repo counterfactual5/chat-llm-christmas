@@ -3,6 +3,28 @@ import type { GitHubConnection } from '@/lib/integrations/types';
 /** GitHub hosted remote MCP (default toolset). */
 export const GITHUB_MCP_SERVER_URL = 'https://api.githubcopilot.com/mcp/';
 
+/**
+ * Resolve MCP endpoint from `GITHUB_MCP_TOOLSET`.
+ * See: https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md
+ *
+ * - `readonly` (code default if unset): default toolset, read-only
+ * - `default` / `write`: default toolset with writes (issues/PRs/etc.)
+ * - `full` / `all`: every toolset (`/x/all`)
+ * - `x/issues`, `x/pull_requests`, `x/repos`, ...: single toolset path
+ */
+export function githubMcpServerUrl(): string {
+  const base = GITHUB_MCP_SERVER_URL.replace(/\/$/, '');
+  const toolset = (process.env.GITHUB_MCP_TOOLSET || 'readonly').trim().toLowerCase();
+
+  if (!toolset || toolset === 'readonly') return `${base}/readonly`;
+  if (toolset === 'default' || toolset === 'write') return `${base}/`;
+  // Official “all tools” path is /x/all — not bare /
+  if (toolset === 'full' || toolset === 'all' || toolset === 'x/all') return `${base}/x/all`;
+
+  const segment = toolset.startsWith('/') ? toolset : `/${toolset}`;
+  return `${base}${segment}`;
+}
+
 export function githubOAuthConfigured(): boolean {
   return Boolean(
     process.env.GITHUB_OAUTH_CLIENT_ID?.trim() &&

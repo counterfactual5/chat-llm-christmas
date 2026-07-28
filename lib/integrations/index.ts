@@ -41,6 +41,7 @@ export {
   fetchGitHubLogin,
   githubConnectionFromToken,
   GITHUB_MCP_SERVER_URL,
+  githubMcpServerUrl,
 } from '@/lib/integrations/github-oauth';
 export type {
   IntegrationProvider,

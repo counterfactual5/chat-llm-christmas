@@ -41,7 +41,7 @@ const dict = {
     githubNotConfigured: 'GitHub OAuth is unavailable on this server',
     githubConnectCardTitle: 'GitHub',
     githubConnectCardBody:
-      'Connect via GitHub MCP (read-only) to search repos, issues, and pull requests you can access.',
+      'Connect via GitHub MCP to search repos, issues, and PRs — and create issues or comments when allowed by server settings.',
     githubMcpNeedsConnect: 'Connect GitHub in MCP settings first',
     enableGitHubMcp: 'GitHub',
     searchingGitHub: 'Running GitHub tool…',
@@ -211,7 +211,7 @@ const dict = {
     githubNotConfigured: '服务器 GitHub OAuth 暂不可用',
     githubConnectCardTitle: 'GitHub',
     githubConnectCardBody:
-      '通过 GitHub 官方远程 MCP（只读）搜索你有权限的仓库、Issue 与 Pull Request。',
+      '通过 GitHub 官方远程 MCP 搜索仓库、Issue 与 PR；在服务端开启写入时也可创建 Issue 或评论。',
     githubMcpNeedsConnect: '请先在 MCP 设置中连接 GitHub',
     enableGitHubMcp: 'GitHub',
     searchingGitHub: '正在调用 GitHub…',

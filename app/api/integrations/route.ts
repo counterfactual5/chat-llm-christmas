@@ -6,6 +6,8 @@ import {
   readVault,
   resolveOwnerId,
   writeVaultCookie,
+  githubOAuthConfigured,
+  githubPublicConnected,
 } from '@/lib/integrations';
 import type { IntegrationPublicStatus } from '@/lib/integrations';
 
@@ -31,6 +33,17 @@ export async function GET(req: NextRequest) {
       connected,
       label: connected ? vault.notion?.workspaceName || undefined : undefined,
       connectedAt: connected ? vault.notion?.connectedAt : undefined,
+    },
+    {
+      provider: 'github',
+      available: githubOAuthConfigured(),
+      connected: githubPublicConnected(vault),
+      label: githubPublicConnected(vault)
+        ? vault.github?.login
+          ? `@${vault.github.login}`
+          : 'GitHub'
+        : undefined,
+      connectedAt: githubPublicConnected(vault) ? vault.github?.connectedAt : undefined,
     },
   ];
 

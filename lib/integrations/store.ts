@@ -10,6 +10,7 @@ import {
   INTEGRATIONS_COOKIE,
   type IntegrationVault,
   type NotionConnection,
+  type GitHubConnection,
 } from '@/lib/integrations/types';
 
 export async function readVault(
@@ -70,9 +71,49 @@ export async function removeNotionConnection(
   response: NextResponse,
   ownerId: string,
 ): Promise<IntegrationVault> {
-  const next: IntegrationVault = { ownerId };
+  const vault = await readVault(req, ownerId);
+  const { notion: _removed, ...rest } = vault;
+  const next: IntegrationVault = { ...rest, ownerId };
   await writeVaultCookie(response, next);
   return next;
+}
+
+export async function upsertGitHubConnection(
+  req: NextRequest,
+  response: NextResponse,
+  ownerId: string,
+  github: GitHubConnection,
+): Promise<IntegrationVault> {
+  const vault = await readVault(req, ownerId);
+  const next: IntegrationVault = { ...vault, ownerId, github };
+  await writeVaultCookie(response, next);
+  return next;
+}
+
+export async function removeGitHubConnection(
+  req: NextRequest,
+  response: NextResponse,
+  ownerId: string,
+): Promise<IntegrationVault> {
+  const vault = await readVault(req, ownerId);
+  const { github: _removed, ...rest } = vault;
+  const next: IntegrationVault = { ...rest, ownerId };
+  await writeVaultCookie(response, next);
+  return next;
+}
+
+export function githubPublicConnected(vault: IntegrationVault): boolean {
+  return Boolean(vault.github?.accessToken && vault.github.authKind === 'oauth');
+}
+
+export async function getGitHubAccessToken(
+  req: NextRequest,
+  ownerId: string,
+): Promise<string | null> {
+  const vault = await readVault(req, ownerId);
+  const github = vault.github;
+  if (!github?.accessToken || github.authKind !== 'oauth') return null;
+  return github.accessToken;
 }
 
 function isMcpConnection(notion: NotionConnection | undefined): notion is NotionConnection {

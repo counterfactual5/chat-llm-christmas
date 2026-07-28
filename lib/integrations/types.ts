@@ -4,7 +4,7 @@
  * (hash of the bound llm.christmas API key) — no shared workspace secret.
  */
 
-export type IntegrationProvider = 'notion';
+export type IntegrationProvider = 'notion' | 'github';
 
 /** Notion hosted MCP OAuth connection (per user, in vault cookie). */
 export type NotionConnection = {
@@ -26,10 +26,21 @@ export type NotionConnection = {
   connectedAt: number;
 };
 
+/** GitHub OAuth token for remote MCP (api.githubcopilot.com). */
+export type GitHubConnection = {
+  accessToken: string;
+  tokenType?: string;
+  scope?: string;
+  authKind: 'oauth';
+  login?: string;
+  connectedAt: number;
+};
+
 export type IntegrationVault = {
   /** sha-256 of bound API key — must match current request owner. */
   ownerId: string;
   notion?: NotionConnection;
+  github?: GitHubConnection;
 };
 
 export type IntegrationPublicStatus = {
@@ -45,3 +56,4 @@ export const INTEGRATIONS_COOKIE = 'llm_chat_integrations';
 export const NOTION_OAUTH_STATE_COOKIE = 'llm_chat_notion_oauth_state';
 /** Short-lived PKCE verifier (+ client_id) for MCP OAuth callback. */
 export const NOTION_MCP_PKCE_COOKIE = 'llm_chat_notion_mcp_pkce';
+export const GITHUB_OAUTH_STATE_COOKIE = 'llm_chat_github_oauth_state';

@@ -9,6 +9,7 @@ import {
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
   Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks
 } from 'lucide-react';
+import { GitHubLogo } from '@/components/github-logo';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -461,8 +462,8 @@ export default function ChatContainer() {
   const [isAccountBound, setIsAccountBound] = useState(false);
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState(false);
-  /** `notion` = Notion connect sheet; `login` = first-time sign-in only. */
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'notion'>('login');
+  /** `notion` | `github` = MCP connect sheet; `login` = first-time sign-in only. */
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'notion' | 'github'>('login');
   const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
@@ -473,6 +474,12 @@ export default function ChatContainer() {
     label?: string;
   } | null>(null);
   const [notionBusy, setNotionBusy] = useState(false);
+  const [githubStatus, setGitHubStatus] = useState<{
+    connected: boolean;
+    available: boolean;
+    label?: string;
+  } | null>(null);
+  const [githubBusy, setGitHubBusy] = useState(false);
   /** Gate localStorage writes until boot has restored (or decided there is nothing). */
   const [chatsHydrated, setChatsHydrated] = useState(false);
 
@@ -545,6 +552,7 @@ export default function ChatContainer() {
   const activeSessionIdRef = useRef(activeSessionId);
   const skillsRef = useRef(skills);
   const notionStatusRef = useRef(notionStatus);
+  const githubStatusRef = useRef(githubStatus);
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
@@ -553,6 +561,7 @@ export default function ChatContainer() {
   activeSessionIdRef.current = activeSessionId;
   skillsRef.current = skills;
   notionStatusRef.current = notionStatus;
+  githubStatusRef.current = githubStatus;
 
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
@@ -572,6 +581,17 @@ export default function ChatContainer() {
       }),
     );
     setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
+  };
+
+  const scrubGitHubMcpFromSessions = () => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        const next = (s.mcpIds || []).filter((id) => id !== 'github');
+        if (next.length === (s.mcpIds || []).length) return s;
+        return { ...s, mcpIds: next, updatedAt: Date.now() };
+      }),
+    );
+    setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
   };
 
   const refreshAccountStatus = async () => {
@@ -594,29 +614,51 @@ export default function ChatContainer() {
       const response = await fetch('/api/integrations', { cache: 'no-store' });
       if (!response.ok) {
         setNotionStatus(null);
+        setGitHubStatus(null);
         scrubNotionMcpFromSessions();
+        scrubGitHubMcpFromSessions();
         return;
       }
       const data = await response.json();
-      const notion = (data?.integrations || []).find(
-        (i: { provider?: string }) => i?.provider === 'notion',
-      );
+      const list = (data?.integrations || []) as Array<{
+        provider?: string;
+        connected?: boolean;
+        available?: boolean;
+        label?: string;
+      }>;
+      const notion = list.find((i) => i?.provider === 'notion');
+      const github = list.find((i) => i?.provider === 'github');
+
       if (!notion) {
         setNotionStatus(null);
         scrubNotionMcpFromSessions();
-        return;
+      } else {
+        const connected = Boolean(notion.connected);
+        setNotionStatus({
+          connected,
+          available: Boolean(notion.available),
+          label: notion.label || undefined,
+        });
+        if (!connected) scrubNotionMcpFromSessions();
       }
-      const connected = Boolean(notion.connected);
-      setNotionStatus({
-        connected,
-        available: Boolean(notion.available),
-        label: notion.label || undefined,
-      });
-      // Stale localStorage mcpIds must not outlive OAuth disconnect / vault expiry.
-      if (!connected) scrubNotionMcpFromSessions();
+
+      if (!github) {
+        setGitHubStatus(null);
+        scrubGitHubMcpFromSessions();
+      } else {
+        const connected = Boolean(github.connected);
+        setGitHubStatus({
+          connected,
+          available: Boolean(github.available),
+          label: github.label || undefined,
+        });
+        if (!connected) scrubGitHubMcpFromSessions();
+      }
     } catch {
       setNotionStatus(null);
+      setGitHubStatus(null);
       scrubNotionMcpFromSessions();
+      scrubGitHubMcpFromSessions();
     }
   };
 
@@ -630,8 +672,19 @@ export default function ChatContainer() {
     }
   };
 
+  const disconnectGitHub = async () => {
+    setGitHubBusy(true);
+    try {
+      await fetch('/api/integrations/github', { method: 'DELETE' });
+      await fetchIntegrations();
+    } finally {
+      setGitHubBusy(false);
+    }
+  };
+
   useEffect(() => {
-    if (!showAuthModal || authModalMode !== 'notion' || !isAccountBound) return;
+    if (!showAuthModal || !isAccountBound) return;
+    if (authModalMode !== 'notion' && authModalMode !== 'github') return;
     void fetchIntegrations();
   }, [showAuthModal, authModalMode, isAccountBound]);
 
@@ -645,9 +698,18 @@ export default function ChatContainer() {
       const authError = params.get('auth_error');
       const notionOk = params.get('notion_connected');
       const notionAuthReturn = params.get('notion_auth');
+      const githubOk = params.get('github_connected');
+      const githubAuthReturn = params.get('github_auth');
       const mainConnected = params.get('connected');
 
-      if (authError || notionOk || mainConnected || notionAuthReturn) {
+      if (
+        authError ||
+        notionOk ||
+        githubOk ||
+        mainConnected ||
+        notionAuthReturn ||
+        githubAuthReturn
+      ) {
         const clean = new URL(window.location.href);
         clean.search = '';
         window.history.replaceState({}, '', clean.pathname);
@@ -723,15 +785,36 @@ export default function ChatContainer() {
             return;
           }
 
+          if (githubOk) {
+            if (bound) {
+              setAccountError('');
+              setShowAuthModal(false);
+            } else {
+              setAuthModalMode('login');
+              setAccountError(
+                'GitHub 已授权，但 llm.christmas 登录已失效。请先登录主站账号，再在 MCP 里重新连接 GitHub。',
+              );
+              setShowAuthModal(true);
+            }
+            return;
+          }
+
           if (authError) {
             setAccountError(authError);
-            setAuthModalMode(bound ? 'notion' : 'login');
+            if (githubAuthReturn) setAuthModalMode('github');
+            else if (notionAuthReturn) setAuthModalMode('notion');
+            else setAuthModalMode(bound ? 'notion' : 'login');
             setShowAuthModal(true);
             return;
           }
 
           if (notionAuthReturn && bound) {
             setAuthModalMode('notion');
+            setShowAuthModal(true);
+          }
+
+          if (githubAuthReturn && bound) {
+            setAuthModalMode('github');
             setShowAuthModal(true);
           }
         })
@@ -769,6 +852,8 @@ export default function ChatContainer() {
   );
   const notionMcpOn =
     Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
+  const githubMcpOn =
+    Boolean(githubStatus?.connected) && activeMcpIds.includes('github');
 
   const accountDisplayName =
     accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
@@ -787,6 +872,20 @@ export default function ChatContainer() {
     });
     setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
   }, [notionStatus?.connected]);
+
+  useEffect(() => {
+    if (githubStatus?.connected) return;
+    setSessions((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (!(s.mcpIds || []).includes('github')) return s;
+        changed = true;
+        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => id !== 'github') };
+      });
+      return changed ? next : prev;
+    });
+    setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
+  }, [githubStatus?.connected]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -954,6 +1053,15 @@ export default function ChatContainer() {
     setShowAuthModal(true);
   };
 
+  const openGitHubModal = () => {
+    if (!isAccountBound) {
+      openLoginModal();
+      return;
+    }
+    setAuthModalMode('github');
+    setShowAuthModal(true);
+  };
+
   const closeAuthModal = () => {
     setShowAuthModal(false);
     setShowApiKeyLogin(false);
@@ -982,6 +1090,18 @@ export default function ChatContainer() {
       return;
     }
     setActiveMcpIds((prev) => (prev.includes('notion') ? prev : [...prev, 'notion']));
+  };
+
+  const setGitHubMcpEnabled = (enabled: boolean) => {
+    if (!enabled) {
+      setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
+      return;
+    }
+    if (!isAccountBound || !githubStatus?.connected) {
+      openGitHubModal();
+      return;
+    }
+    setActiveMcpIds((prev) => (prev.includes('github') ? prev : [...prev, 'github']));
   };
 
   const toggleSkill = (skillId: string) => {
@@ -1392,9 +1512,14 @@ export default function ChatContainer() {
       .join('\n\n');
 
     const notionConnected = Boolean(notionStatusRef.current?.connected);
+    const githubConnected = Boolean(githubStatusRef.current?.connected);
     const integrations = (
       sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || []
-    ).filter((id) => (id === 'notion' ? notionConnected : false));
+    ).filter((id) => {
+      if (id === 'notion') return notionConnected;
+      if (id === 'github') return githubConnected;
+      return false;
+    });
 
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -3350,6 +3475,14 @@ export default function ChatContainer() {
                           <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">Notion</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => openGitHubModal()}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <GitHubLogo className="h-3.5 w-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">GitHub</span>
+                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -3824,6 +3957,9 @@ export default function ChatContainer() {
                             run.name.startsWith('notion_') ||
                             run.name.startsWith('notion-') ||
                             run.provider === 'notion';
+                          const isGitHub =
+                            run.provider === 'github' ||
+                            /^github[-_]/i.test(run.name);
                           const isNotionFetch =
                             /fetch/i.test(run.name) && isNotion;
                           const isNotionWrite =
@@ -3848,7 +3984,9 @@ export default function ChatContainer() {
                                 ? t('readingNotion')
                                 : isNotion
                                   ? t('searchingNotion')
-                                  : t('searchingWeb')
+                                  : isGitHub
+                                    ? t('searchingGitHub')
+                                    : t('searchingWeb')
                             : failed
                               ? t('searchFailed')
                               : isNotionWrite
@@ -3857,7 +3995,9 @@ export default function ChatContainer() {
                                   ? t('readNotion')
                                   : isNotion
                                     ? t('searchedNotion')
-                                    : t('searchedWeb');
+                                    : isGitHub
+                                      ? t('searchedGitHub')
+                                      : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button
@@ -4705,6 +4845,39 @@ export default function ChatContainer() {
                                       className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                                     >
                                       {t('connectNotion')}
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                  <GitHubLogo className="h-3.5 w-3.5 shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-sm text-stone-800 dark:text-stone-100">
+                                      GitHub
+                                    </div>
+                                    <div className="truncate text-[10px] text-stone-400">
+                                      {githubStatus?.connected
+                                        ? t('useInThisChat')
+                                        : t('githubMcpNeedsConnect')}
+                                    </div>
+                                  </div>
+                                  {githubStatus?.connected ? (
+                                    <Switch
+                                      size="sm"
+                                      checked={githubMcpOn}
+                                      onCheckedChange={setGitHubMcpEnabled}
+                                      aria-label={t('enableGitHubMcp')}
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsSkillPickerOpen(false);
+                                        setPlusFlyout(null);
+                                        openGitHubModal();
+                                      }}
+                                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                    >
+                                      {t('connectGitHub')}
                                     </button>
                                   )}
                                 </div>
@@ -5694,6 +5867,7 @@ export default function ChatContainer() {
                   {notionStatus?.connected ? (
                     <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
                       {t('notionConnected')}
+                      {notionStatus.label ? ` · ${notionStatus.label}` : ''}
                     </p>
                   ) : notionStatus?.available === false ? (
                     <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
@@ -5734,6 +5908,65 @@ export default function ChatContainer() {
                         )}
                       >
                         {t('connectNotion')}
+                      </a>
+                    )}
+                  </div>
+                  {accountError ? (
+                    <p className="mt-4 w-full text-sm text-red-600 dark:text-red-400">
+                      {accountError}
+                    </p>
+                  ) : null}
+                </section>
+              ) : authModalMode === 'github' && isAccountBound ? (
+                <section className="flex flex-col items-center px-1 pt-2 pb-1 text-center">
+                  <GitHubLogo className="mx-auto h-14 w-14 rounded-2xl p-2 shadow-sm" />
+                  <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+                    {t('githubConnectCardTitle')}
+                  </h2>
+                  {githubStatus?.connected ? (
+                    <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
+                      {t('githubConnected')}
+                      {githubStatus.label ? ` · ${githubStatus.label}` : ''}
+                    </p>
+                  ) : githubStatus?.available === false ? (
+                    <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+                      {t('githubNotConfigured')}
+                    </p>
+                  ) : (
+                    <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">
+                      {t('githubConnectCardBody')}
+                    </p>
+                  )}
+
+                  <div className="mt-6 w-full max-w-sm">
+                    {githubStatus?.connected ? (
+                      <Button
+                        type="button"
+                        disabled={githubBusy}
+                        onClick={() => void disconnectGitHub()}
+                        className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
+                      >
+                        {t('disconnectGitHub')}
+                      </Button>
+                    ) : (
+                      <a
+                        href={
+                          githubStatus?.available === false
+                            ? undefined
+                            : '/api/integrations/github/start'
+                        }
+                        aria-disabled={githubStatus?.available === false}
+                        onClick={(e) => {
+                          if (githubStatus?.available === false) e.preventDefault();
+                        }}
+                        className={cn(
+                          'inline-flex h-11 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
+                          githubStatus?.available === false
+                            ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
+                            : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
+                        )}
+                      >
+                        {t('connectGitHub')}
                       </a>
                     )}
                   </div>

@@ -28,6 +28,7 @@ export type ToolRuntimeContext = {
   /** Per-request OAuth tokens for enabled integrations. */
   credentials?: {
     notionAccessToken?: string;
+    githubAccessToken?: string;
   };
 };
 

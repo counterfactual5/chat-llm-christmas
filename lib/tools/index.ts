@@ -2,6 +2,7 @@ import type { ChatTool, ToolRuntimeFlags } from '@/lib/tools/registry';
 import { selectTools } from '@/lib/tools/registry';
 import { createWebSearchTool } from '@/lib/tools/web-search-tool';
 import { createNotionMcpTools } from '@/lib/tools/notion-tools';
+import { createGitHubMcpTools } from '@/lib/tools/github-tools';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
@@ -24,19 +25,26 @@ export function resolveEnabledTools(flags: ToolRuntimeFlags): ChatTool[] {
  */
 export async function resolveEnabledToolsAsync(
   flags: ToolRuntimeFlags,
-  opts?: { notionAccessToken?: string },
+  opts?: { notionAccessToken?: string; githubAccessToken?: string },
 ): Promise<ChatTool[]> {
-  const base = resolveEnabledTools(flags);
-  if (!flags.integrations.includes('notion') || !opts?.notionAccessToken) {
-    return base;
+  let tools = resolveEnabledTools(flags);
+  if (flags.integrations.includes('notion') && opts?.notionAccessToken) {
+    try {
+      const notionTools = await createNotionMcpTools(opts.notionAccessToken);
+      tools = [...tools, ...notionTools];
+    } catch (err) {
+      console.warn('Notion MCP listTools failed:', err);
+    }
   }
-  try {
-    const notionTools = await createNotionMcpTools(opts.notionAccessToken);
-    return [...base, ...notionTools];
-  } catch (err) {
-    console.warn('Notion MCP listTools failed:', err);
-    return base;
+  if (flags.integrations.includes('github') && opts?.githubAccessToken) {
+    try {
+      const githubTools = await createGitHubMcpTools(opts.githubAccessToken);
+      tools = [...tools, ...githubTools];
+    } catch (err) {
+      console.warn('GitHub MCP listTools failed:', err);
+    }
   }
+  return tools;
 }
 
 export {
@@ -58,3 +66,4 @@ export {
 } from '@/lib/tools/web-search-tool';
 
 export { createNotionMcpTools } from '@/lib/tools/notion-tools';
+export { createGitHubMcpTools } from '@/lib/tools/github-tools';

@@ -29,6 +29,7 @@ import {
 } from '@/lib/tools';
 import {
   getNotionMcpAccessToken,
+  getGitHubAccessToken,
   resolveOwnerId,
   upsertNotionConnection,
 } from '@/lib/integrations';
@@ -215,6 +216,7 @@ export async function POST(req: NextRequest) {
     // Intersect client toggles with vault OAuth — never trust integrations alone.
     const authorizedIntegrations: string[] = [];
     let notionAccessToken: string | undefined;
+    let githubAccessToken: string | undefined;
     let notionOwnerId: string | null = null;
     let notionVaultUpdate: Awaited<
       ReturnType<typeof getNotionMcpAccessToken>
@@ -230,6 +232,16 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    if (requestedIntegrations.includes('github') && isBoundAccount) {
+      const ownerId = notionOwnerId ?? (await resolveOwnerId(req));
+      if (ownerId) {
+        const token = await getGitHubAccessToken(req, ownerId);
+        if (token) {
+          authorizedIntegrations.push('github');
+          githubAccessToken = token;
+        }
+      }
+    }
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
     const enabledTools = await resolveEnabledToolsAsync(
@@ -237,7 +249,7 @@ export async function POST(req: NextRequest) {
         searchEnabled,
         integrations: authorizedIntegrations,
       },
-      { notionAccessToken },
+      { notionAccessToken, githubAccessToken },
     );
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
@@ -418,6 +430,7 @@ export async function POST(req: NextRequest) {
           send,
           credentials: {
             ...(notionAccessToken ? { notionAccessToken } : {}),
+            ...(githubAccessToken ? { githubAccessToken } : {}),
           },
         };
 

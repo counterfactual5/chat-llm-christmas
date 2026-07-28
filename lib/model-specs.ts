@@ -31,6 +31,12 @@ const VISION_IDS = new Set([
   'openrouter-free',
   'cursor-auto',
   'nemotron-3-nano-omni-free',
+  'mistral-large-latest',
+  'mistral-medium-latest',
+  'minimax-m2.5',
+  'minimax-m2.7',
+  'minimax-m3',
+  'minimax-m3-free',
 ]);
 
 const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = {
@@ -87,7 +93,9 @@ const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = 
 };
 
 function looksVisionByName(id: string): boolean {
-  return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter/i.test(id);
+  return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter|minimax-m\d|mistral-(large|medium)-latest/i.test(
+    id,
+  );
 }
 
 /**

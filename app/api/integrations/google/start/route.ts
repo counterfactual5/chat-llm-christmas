@@ -4,10 +4,9 @@ import {
   generateGoogleOAuthState,
   googleOAuthConfigured,
   googleOAuthRedirectUri,
-  readVault,
   resolveOwnerId,
-  writeVaultCookie,
 } from '@/lib/integrations';
+import { GOOGLE_OAUTH_STATE_COOKIE } from '@/lib/integrations/types';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -51,8 +50,14 @@ export async function GET(req: NextRequest) {
       maxAge: 60 * 60 * 24 * 30,
     });
   }
-
-  const vault = await readVault(req, ownerId);
-  await writeVaultCookie(response, { ...vault, ownerId, googleOAuthState: state });
+  response.cookies.set({
+    name: GOOGLE_OAUTH_STATE_COOKIE,
+    value: state,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 10,
+  });
   return response;
 }

@@ -4,10 +4,10 @@ import {
   fetchGoogleEmail,
   googleConnectionFromToken,
   googleOAuthRedirectUri,
-  readVault,
   resolveOwnerId,
-  writeVaultCookie,
+  upsertGoogleConnection,
 } from '@/lib/integrations';
+import { GOOGLE_OAUTH_STATE_COOKIE } from '@/lib/integrations/types';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -30,9 +30,19 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code') || '';
   const state = req.nextUrl.searchParams.get('state') || '';
   const error = req.nextUrl.searchParams.get('error') || '';
+  const expected = req.cookies.get(GOOGLE_OAUTH_STATE_COOKIE)?.value || '';
 
   if (error) {
     return redirectHome(req, { auth_error: `Google 授权取消或失败：${error}`.slice(0, 180) });
+  }
+
+  if (!code || !safeEqual(state, expected)) {
+    const detail = !code
+      ? 'code 为空'
+      : !expected
+        ? 'state cookie 已丢失（请检查浏览器是否途径 cookie）'
+        : 'state 值不匹配';
+    return redirectHome(req, { auth_error: `Google 授权状态无效（${detail}），请重试。` });
   }
 
   const ownerId = await resolveOwnerId(req);
@@ -40,13 +50,6 @@ export async function GET(req: NextRequest) {
     return redirectHome(req, {
       auth_error: '授权回来时账号会话已失效，请重新连接后再绑定 Google。',
     });
-  }
-
-  const vault = await readVault(req, ownerId);
-  const expected = vault.googleOAuthState || '';
-
-  if (!code || !safeEqual(state, expected)) {
-    return redirectHome(req, { auth_error: 'Google 授权状态无效，请重试。' });
   }
 
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || '';
@@ -66,8 +69,16 @@ export async function GET(req: NextRequest) {
     const google = googleConnectionFromToken(token, email);
 
     const home = redirectHome(req, { google_connected: '1' });
-    const { googleOAuthState: _cleared, ...rest } = vault;
-    await writeVaultCookie(home, { ...rest, ownerId, google });
+    await upsertGoogleConnection(req, home, ownerId, google);
+    home.cookies.set({
+      name: GOOGLE_OAUTH_STATE_COOKIE,
+      value: '',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+    });
     return home;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Google 授权失败';

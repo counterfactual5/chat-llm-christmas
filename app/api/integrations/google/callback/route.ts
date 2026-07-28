@@ -5,9 +5,11 @@ import {
   googleConnectionFromToken,
   googleOAuthRedirectUri,
   resolveOwnerId,
-  upsertGoogleConnection,
   verifySignedGoogleOAuthState,
 } from '@/lib/integrations';
+import { encryptJson } from '@/lib/integrations/crypto';
+import { integrationsSecret } from '@/lib/integrations/identity';
+import type { GoogleConnection } from '@/lib/integrations/types';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -19,19 +21,23 @@ function redirectHome(req: NextRequest, params: Record<string, string>) {
   return NextResponse.redirect(url);
 }
 
-/** 200 HTML bridge so Set-Cookie is not dropped on a redirect response. */
-function htmlRedirect(targetPath: string, responseInit?: ResponseInit) {
-  const safeJs = JSON.stringify(targetPath);
-  const safeMeta = targetPath.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safeMeta}"><title>Redirecting…</title></head><body><p>Redirecting…</p><script>location.replace(${safeJs})</script></body></html>`;
-  return new NextResponse(html, {
-    status: 200,
-    ...responseInit,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      ...(responseInit?.headers || {}),
-    },
-  });
+/**
+ * After exchanging the code, hand the encrypted connection to a same-origin POST.
+ * Document form POST + Set-Cookie is far more reliable than Set-Cookie on an OAuth
+ * callback response (browsers often drop cookies on the Google return navigation).
+ */
+function handoffFormHtml(payload: string) {
+  const safePayload = payload
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Connecting Google…</title></head><body>
+<p>Connecting Google…</p>
+<form id="f" method="POST" action="/api/integrations/google/finish">
+<input type="hidden" name="payload" value="${safePayload}" />
+</form>
+<script>document.getElementById('f').submit()</script>
+</body></html>`;
 }
 
 export async function GET(req: NextRequest) {
@@ -77,11 +83,27 @@ export async function GET(req: NextRequest) {
     const email = await fetchGoogleEmail(token.access_token);
     const google = googleConnectionFromToken(token, email);
 
-    // Use a 200 HTML page to set the encrypted Google cookie, then jump home.
-    // Avoids browsers dropping Set-Cookie on 302 redirect responses.
-    const home = htmlRedirect('/?google_connected=1&google_auth=1');
-    await upsertGoogleConnection(req, home, ownerId, google);
-    return home;
+    if (!google.refreshToken && !google.accessToken) {
+      return redirectHome(req, { auth_error: 'Google 未返回可用 token，请重试。' });
+    }
+
+    // Short-lived encrypted handoff blob (owner-bound). Consumed by /finish via form POST.
+    const handoff = await encryptJson(
+      {
+        ownerId,
+        google,
+        exp: Date.now() + 5 * 60 * 1000,
+      } satisfies { ownerId: string; google: GoogleConnection; exp: number },
+      integrationsSecret(),
+    );
+
+    return new NextResponse(handoffFormHtml(handoff), {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Google 授权失败';
     return redirectHome(req, { auth_error: message.slice(0, 180) });

@@ -60,13 +60,38 @@ export async function writeVaultCookie(
   });
 }
 
+/** Persist a compact Google connection (prefer refresh token; drop bulky access token if needed). */
+function compactGoogleConnection(google: GoogleConnection): GoogleConnection {
+  const compact: GoogleConnection = {
+    authKind: 'oauth',
+    accessToken: google.accessToken || '',
+    refreshToken: google.refreshToken,
+    expiresAt: google.expiresAt,
+    tokenType: google.tokenType || 'Bearer',
+    // scopes string can be long; not required after connect
+    scope: undefined,
+    email: google.email,
+    connectedAt: google.connectedAt,
+  };
+  return compact;
+}
+
 async function writeGoogleCookie(
   response: NextResponse,
   ownerId: string,
   google: GoogleConnection,
 ): Promise<void> {
   const secret = integrationsSecret();
-  const value = await encryptJson({ ownerId, google } satisfies GoogleVault, secret);
+  let toStore = compactGoogleConnection(google);
+  let value = await encryptJson({ ownerId, google: toStore } satisfies GoogleVault, secret);
+  // Browsers reject cookies roughly above 4KB; keep well under that.
+  if (value.length > 3500 && toStore.refreshToken) {
+    toStore = { ...toStore, accessToken: '', expiresAt: 0 };
+    value = await encryptJson({ ownerId, google: toStore } satisfies GoogleVault, secret);
+  }
+  if (value.length > 3500) {
+    throw new Error(`Google cookie too large (${value.length} bytes). Disconnect Notion/GitHub and retry.`);
+  }
   response.cookies.set({
     name: GOOGLE_INTEGRATION_COOKIE,
     value,
@@ -165,9 +190,10 @@ export async function removeGoogleConnection(
   return next;
 }
 
-/** Public status: only OAuth connections (with access token) count as connected. */
+/** Public status: OAuth connection with access or refresh token counts as connected. */
 export function googlePublicConnected(vault: IntegrationVault): boolean {
-  return Boolean(vault.google?.accessToken && vault.google.authKind === 'oauth');
+  const g = vault.google;
+  return Boolean(g?.authKind === 'oauth' && (g.accessToken || g.refreshToken));
 }
 
 /**
@@ -180,9 +206,12 @@ export async function getGoogleAccessToken(
 ): Promise<{ token: string | null; updatedGoogle?: GoogleConnection }> {
   const vault = await readVault(req, ownerId);
   const google = vault.google;
-  if (!google?.accessToken || google.authKind !== 'oauth') return { token: null };
+  if (!google || google.authKind !== 'oauth') return { token: null };
+  if (!google.accessToken && !google.refreshToken) return { token: null };
 
-  const stillFresh = !google.expiresAt || google.expiresAt > Date.now() + 60_000;
+  const stillFresh =
+    Boolean(google.accessToken) &&
+    (!google.expiresAt || google.expiresAt > Date.now() + 60_000);
   if (stillFresh) return { token: google.accessToken };
 
   if (!google.refreshToken) return { token: null };

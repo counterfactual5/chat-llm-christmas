@@ -460,7 +460,10 @@ export async function POST(req: NextRequest) {
           // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
           // For those models, run search server-side when the ask is clearly a lookup.
           const cursorProactiveSearch =
-            searchEnabled && cursorModel && looksLikeSearchRequest(userAsk);
+            searchEnabled &&
+            cursorModel &&
+            authorizedIntegrations.length === 0 &&
+            looksLikeSearchRequest(userAsk);
 
           const injectSearchOutcome = async (outcome: SearchOutcome) => {
             const callId = `proactive_search_${Date.now()}`;
@@ -627,7 +630,7 @@ export async function POST(req: NextRequest) {
                   role: 'user',
                   content: [
                     'Write the final answer now using ONLY the tool results above.',
-                    'Use the tool message payloads (web search and/or Notion). Do not invent facts the tools did not return.',
+                    'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
                     'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
                     'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
                     'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',

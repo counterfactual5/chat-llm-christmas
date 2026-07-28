@@ -1651,11 +1651,13 @@ export default function ChatContainer() {
 
     const notionConnected = Boolean(notionStatusRef.current?.connected);
     const githubConnected = Boolean(githubStatusRef.current?.connected);
+    const googleConnected = Boolean(googleStatusRef.current?.connected);
     const integrations = (
       sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || []
     ).filter((id) => {
       if (id === 'notion') return notionConnected;
       if (id === 'github') return githubConnected;
+      if (id === 'google') return googleConnected;
       return false;
     });
 

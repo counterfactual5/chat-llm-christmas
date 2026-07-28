@@ -106,14 +106,15 @@ function extractUiResults(
   return [{ title: name, url: '', snippet }];
 }
 
-function makeExecutors(
+function makeExecutor(
   service: GoogleService,
-  def: McpToolDefinition,
+  remoteDef: McpToolDefinition,
 ): ChatTool {
-  const name = sanitizeToolName(def.name);
+  const remoteName = remoteDef.name;
+  const name = sanitizeToolName(`${service}_${remoteName}`);
   const parameters =
-    def.inputSchema && typeof def.inputSchema === 'object'
-      ? (def.inputSchema as Record<string, unknown>)
+    remoteDef.inputSchema && typeof remoteDef.inputSchema === 'object'
+      ? (remoteDef.inputSchema as Record<string, unknown>)
       : { type: 'object', properties: {} };
 
   return {
@@ -122,7 +123,9 @@ function makeExecutors(
       type: 'function',
       function: {
         name,
-        description: String(def.description || `Google ${service} MCP tool: ${name}`).slice(0, 1024),
+        description: String(
+          remoteDef.description || `Google ${service} MCP tool: ${remoteName}`,
+        ).slice(0, 1024),
         parameters,
       },
     },
@@ -140,17 +143,19 @@ function makeExecutors(
       }
 
       const args = parseArgs(rawArguments);
-      if (
-        /search|list|query/i.test(def.name) &&
-        !args.query &&
-        !args.q &&
-        (fallbackQuery || ctx.userAsk)
-      ) {
-        args.query = String(fallbackQuery || ctx.userAsk).slice(0, 200);
+      const schemaProperties =
+        parameters.properties && typeof parameters.properties === 'object'
+          ? (parameters.properties as Record<string, unknown>)
+          : {};
+      const fallback = String(fallbackQuery || ctx.userAsk || '').trim().slice(0, 200);
+      if (fallback) {
+        if ('query' in schemaProperties && !args.query) args.query = fallback;
+        else if ('q' in schemaProperties && !args.q) args.q = fallback;
+        else if ('fullText' in schemaProperties && !args.fullText) args.fullText = fallback;
       }
 
       const query = queryHint(name, args);
-      const write = isWriteTool(def.name);
+      const write = isWriteTool(remoteName);
       ctx.send({
         tool: {
           status: 'start',
@@ -162,7 +167,9 @@ function makeExecutors(
       });
 
       try {
-        const outcome = await callMcpTool(mcpOpts(token, service), def.name, args);
+        // The model-facing name is namespaced (gmail_search_threads), while
+        // Google's MCP server expects the original name (search_threads).
+        const outcome = await callMcpTool(mcpOpts(token, service), remoteName, args);
         const results = extractUiResults(name, outcome.content);
         const error = outcome.isError
           ? outcome.content.slice(0, 280) || 'Google MCP tool returned an error'
@@ -216,12 +223,7 @@ export async function createGoogleMcpTools(accessToken: string): Promise<ChatToo
     try {
       const defs = await listMcpTools(mcpOpts(accessToken, service));
       for (const def of defs) {
-        // Prefix tool name with service to keep Gmail/Calendar/Drive unique.
-        const namespaced: McpToolDefinition = {
-          ...def,
-          name: `${service}_${def.name}`,
-        };
-        tools.push(makeExecutors(service, namespaced));
+        tools.push(makeExecutor(service, def));
       }
     } catch (err) {
       console.warn(`Google MCP listTools failed for ${service}:`, err);

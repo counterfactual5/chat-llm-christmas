@@ -65,10 +65,13 @@ export function openaiToolDefinitions(tools: ChatTool[]): OpenAIToolDefinition[]
 }
 
 export function toolSystemPrompt(tools: ChatTool[]): string {
-  return tools
-    .map((t) => String(t.systemPrompt || '').trim())
-    .filter(Boolean)
-    .join(' ');
+  return [
+    ...new Set(
+      tools
+        .map((t) => String(t.systemPrompt || '').trim())
+        .filter(Boolean),
+    ),
+  ].join(' ');
 }
 
 export function findTool(tools: ChatTool[], name: string): ChatTool | undefined {

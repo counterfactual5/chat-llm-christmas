@@ -262,43 +262,90 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const normalizedMessages = (messages as any[]).map((m) => {
+    const normalizedMessages: any[] = [];
+    /** Generated pics can't ride on assistant turns — attach to the next user turn. */
+    let pendingAssistantImages: string[] = [];
+
+    for (const m of messages as any[]) {
       const role = m.role;
       const timestamp = m.timestamp;
       if (Array.isArray(m.content)) {
-        return { role, content: m.content, timestamp };
+        if (pendingAssistantImages.length && role === 'user') {
+          const extra = pendingAssistantImages.map((url) => ({
+            type: 'image_url',
+            image_url: { url },
+          }));
+          pendingAssistantImages = [];
+          const content = Array.isArray(m.content) ? [...extra, ...m.content] : m.content;
+          normalizedMessages.push({ role, content, timestamp });
+        } else {
+          normalizedMessages.push({ role, content: m.content, timestamp });
+        }
+        continue;
       }
+
       const text = typeof m.content === 'string' ? m.content : '';
       const images: string[] = Array.isArray(m.images)
         ? m.images.map((img: any) => (typeof img === 'string' ? img : img?.url)).filter(Boolean)
         : [];
 
-      // Assistant turns cannot carry `image_url` parts (OpenAI / gateway schema).
-      // Generated pictures are UI-only; summarize them as text for follow-up chat.
       if (role === 'assistant') {
+        // OpenAI-compatible assistants reject image_url parts (vision or not).
         if (images.length > 0) {
-          return {
+          pendingAssistantImages.push(...images);
+          const promptHint = images
+            .map((_, i) => {
+              const meta = Array.isArray(m.images) ? m.images[i] : null;
+              const p = meta && typeof meta === 'object' ? meta.prompt : null;
+              return p ? String(p) : null;
+            })
+            .filter(Boolean);
+          const summary =
+            text.trim() ||
+            (promptHint.length
+              ? `[Generated an image: ${promptHint.join('; ')}]`
+              : '[Generated an image]');
+          normalizedMessages.push({ role, timestamp, content: summary });
+        } else {
+          // Empty string fails some gateways' ChatCompletionRequestAssistantMessageContent.
+          normalizedMessages.push({
             role,
+            content: text.length > 0 ? text : null,
             timestamp,
-            content: text.trim() || '[Generated an image]',
-          };
+          });
         }
-        // Empty string fails some gateways' ChatCompletionRequestAssistantMessageContent.
-        return { role, content: text.length > 0 ? text : null, timestamp };
+        continue;
       }
 
-      if (images.length === 0) {
-        return { role, content: text, timestamp };
+      const carried = pendingAssistantImages;
+      pendingAssistantImages = [];
+      const allImages = [...carried, ...images];
+      if (allImages.length === 0) {
+        normalizedMessages.push({ role, content: text, timestamp });
+      } else {
+        normalizedMessages.push({
+          role,
+          timestamp,
+          content: [
+            ...(carried.length
+              ? [
+                  {
+                    type: 'text',
+                    text: '[Previously generated image attached for reference]',
+                  },
+                ]
+              : []),
+            ...(text ? [{ type: 'text', text }] : []),
+            ...allImages.map((url) => ({ type: 'image_url', image_url: { url } })),
+          ],
+        });
       }
-      return {
-        role,
-        timestamp,
-        content: [
-          ...(text ? [{ type: 'text', text }] : []),
-          ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
-        ],
-      };
-    });
+    }
+
+    // No following user turn yet — keep a text stub only (can't put images on assistant).
+    if (pendingAssistantImages.length > 0) {
+      pendingAssistantImages = [];
+    }
 
     const userAsk = lastUserText(normalizedMessages);
 

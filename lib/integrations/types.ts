@@ -4,7 +4,7 @@
  * (hash of the bound llm.christmas API key) — no shared workspace secret.
  */
 
-export type IntegrationProvider = 'notion' | 'github';
+export type IntegrationProvider = 'notion' | 'github' | 'google';
 
 /** Notion hosted MCP OAuth connection (per user, in vault cookie). */
 export type NotionConnection = {
@@ -26,6 +26,19 @@ export type NotionConnection = {
   connectedAt: number;
 };
 
+/** Google OAuth token for Workspace MCP (Gmail + Calendar + Drive). */
+export type GoogleConnection = {
+  accessToken: string;
+  refreshToken?: string;
+  /** Epoch ms when accessToken expires (best-effort). */
+  expiresAt?: number;
+  tokenType?: string;
+  scope?: string;
+  authKind: 'oauth';
+  email?: string;
+  connectedAt: number;
+};
+
 /** GitHub OAuth token for remote MCP (api.githubcopilot.com). */
 export type GitHubConnection = {
   accessToken: string;
@@ -41,6 +54,7 @@ export type IntegrationVault = {
   ownerId: string;
   notion?: NotionConnection;
   github?: GitHubConnection;
+  google?: GoogleConnection;
 };
 
 export type IntegrationPublicStatus = {
@@ -57,3 +71,4 @@ export const NOTION_OAUTH_STATE_COOKIE = 'llm_chat_notion_oauth_state';
 /** Short-lived PKCE verifier (+ client_id) for MCP OAuth callback. */
 export const NOTION_MCP_PKCE_COOKIE = 'llm_chat_notion_mcp_pkce';
 export const GITHUB_OAUTH_STATE_COOKIE = 'llm_chat_github_oauth_state';
+export const GOOGLE_OAUTH_STATE_COOKIE = 'llm_chat_google_oauth_state';

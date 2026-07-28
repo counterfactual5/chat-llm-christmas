@@ -30,8 +30,10 @@ import {
 import {
   getNotionMcpAccessToken,
   getGitHubAccessToken,
+  getGoogleAccessToken,
   resolveOwnerId,
   upsertNotionConnection,
+  upsertGoogleConnection,
 } from '@/lib/integrations';
 import {
   gatewayBaseURL as filesBaseURL,
@@ -217,10 +219,15 @@ export async function POST(req: NextRequest) {
     const authorizedIntegrations: string[] = [];
     let notionAccessToken: string | undefined;
     let githubAccessToken: string | undefined;
+    let googleAccessToken: string | undefined;
     let notionOwnerId: string | null = null;
+    let googleOwnerId: string | null = null;
     let notionVaultUpdate: Awaited<
       ReturnType<typeof getNotionMcpAccessToken>
     >['updatedNotion'];
+    let googleVaultUpdate: Awaited<
+      ReturnType<typeof getGoogleAccessToken>
+    >['updatedGoogle'];
     if (requestedIntegrations.includes('notion') && isBoundAccount) {
       notionOwnerId = await resolveOwnerId(req);
       if (notionOwnerId) {
@@ -242,6 +249,18 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    if (requestedIntegrations.includes('google') && isBoundAccount) {
+      const ownerId = notionOwnerId ?? (await resolveOwnerId(req));
+      if (ownerId) {
+        const mcp = await getGoogleAccessToken(req, ownerId);
+        if (mcp.token) {
+          authorizedIntegrations.push('google');
+          googleAccessToken = mcp.token;
+          googleVaultUpdate = mcp.updatedGoogle;
+          googleOwnerId = ownerId;
+        }
+      }
+    }
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
     const enabledTools = await resolveEnabledToolsAsync(
@@ -249,7 +268,7 @@ export async function POST(req: NextRequest) {
         searchEnabled,
         integrations: authorizedIntegrations,
       },
-      { notionAccessToken, githubAccessToken },
+      { notionAccessToken, githubAccessToken, googleAccessToken },
     );
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
@@ -431,6 +450,7 @@ export async function POST(req: NextRequest) {
           credentials: {
             ...(notionAccessToken ? { notionAccessToken } : {}),
             ...(githubAccessToken ? { githubAccessToken } : {}),
+            ...(googleAccessToken ? { googleAccessToken } : {}),
           },
         };
 
@@ -713,6 +733,15 @@ export async function POST(req: NextRequest) {
     if (notionVaultUpdate && notionOwnerId) {
       const cookieCarrier = new NextResponse(stream, { headers: responseHeaders });
       await upsertNotionConnection(req, cookieCarrier, notionOwnerId, notionVaultUpdate);
+      if (googleVaultUpdate && googleOwnerId) {
+        await upsertGoogleConnection(req, cookieCarrier, googleOwnerId, googleVaultUpdate);
+      }
+      return cookieCarrier;
+    }
+
+    if (googleVaultUpdate && googleOwnerId) {
+      const cookieCarrier = new NextResponse(stream, { headers: responseHeaders });
+      await upsertGoogleConnection(req, cookieCarrier, googleOwnerId, googleVaultUpdate);
       return cookieCarrier;
     }
 

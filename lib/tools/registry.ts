@@ -29,6 +29,7 @@ export type ToolRuntimeContext = {
   credentials?: {
     notionAccessToken?: string;
     githubAccessToken?: string;
+    googleAccessToken?: string;
   };
 };
 

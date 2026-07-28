@@ -10,6 +10,7 @@ import {
   Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks
 } from 'lucide-react';
 import { GitHubLogo } from '@/components/github-logo';
+import { GoogleLogo } from '@/components/google-logo';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -463,7 +464,7 @@ export default function ChatContainer() {
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState(false);
   /** `notion` | `github` = MCP connect sheet; `login` = first-time sign-in only. */
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'notion' | 'github'>('login');
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'notion' | 'github' | 'google'>('login');
   const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
@@ -480,6 +481,12 @@ export default function ChatContainer() {
     label?: string;
   } | null>(null);
   const [githubBusy, setGitHubBusy] = useState(false);
+  const [googleStatus, setGoogleStatus] = useState<{
+    connected: boolean;
+    available: boolean;
+    label?: string;
+  } | null>(null);
+  const [googleBusy, setGoogleBusy] = useState(false);
   /** Gate localStorage writes until boot has restored (or decided there is nothing). */
   const [chatsHydrated, setChatsHydrated] = useState(false);
 
@@ -553,6 +560,7 @@ export default function ChatContainer() {
   const skillsRef = useRef(skills);
   const notionStatusRef = useRef(notionStatus);
   const githubStatusRef = useRef(githubStatus);
+  const googleStatusRef = useRef(googleStatus);
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
@@ -562,6 +570,7 @@ export default function ChatContainer() {
   skillsRef.current = skills;
   notionStatusRef.current = notionStatus;
   githubStatusRef.current = githubStatus;
+  googleStatusRef.current = googleStatus;
 
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
@@ -594,6 +603,17 @@ export default function ChatContainer() {
     setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
   };
 
+  const scrubGoogleMcpFromSessions = () => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        const next = (s.mcpIds || []).filter((id) => id !== 'google');
+        if (next.length === (s.mcpIds || []).length) return s;
+        return { ...s, mcpIds: next, updatedAt: Date.now() };
+      }),
+    );
+    setActiveMcpIds((prev) => prev.filter((id) => id !== 'google'));
+  };
+
   const refreshAccountStatus = async () => {
     try {
       const response = await fetch('/api/account', { cache: 'no-store' });
@@ -615,8 +635,10 @@ export default function ChatContainer() {
       if (!response.ok) {
         setNotionStatus(null);
         setGitHubStatus(null);
+        setGoogleStatus(null);
         scrubNotionMcpFromSessions();
         scrubGitHubMcpFromSessions();
+        scrubGoogleMcpFromSessions();
         return;
       }
       const data = await response.json();
@@ -628,6 +650,7 @@ export default function ChatContainer() {
       }>;
       const notion = list.find((i) => i?.provider === 'notion');
       const github = list.find((i) => i?.provider === 'github');
+      const google = list.find((i) => i?.provider === 'google');
 
       if (!notion) {
         setNotionStatus(null);
@@ -657,8 +680,10 @@ export default function ChatContainer() {
     } catch {
       setNotionStatus(null);
       setGitHubStatus(null);
+      setGoogleStatus(null);
       scrubNotionMcpFromSessions();
       scrubGitHubMcpFromSessions();
+      scrubGoogleMcpFromSessions();
     }
   };
 
@@ -682,9 +707,19 @@ export default function ChatContainer() {
     }
   };
 
+  const disconnectGoogle = async () => {
+    setGoogleBusy(true);
+    try {
+      await fetch('/api/integrations/google', { method: 'DELETE' });
+      await fetchIntegrations();
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (!showAuthModal || !isAccountBound) return;
-    if (authModalMode !== 'notion' && authModalMode !== 'github') return;
+    if (authModalMode !== 'notion' && authModalMode !== 'github' && authModalMode !== 'google') return;
     void fetchIntegrations();
   }, [showAuthModal, authModalMode, isAccountBound]);
 
@@ -700,15 +735,19 @@ export default function ChatContainer() {
       const notionAuthReturn = params.get('notion_auth');
       const githubOk = params.get('github_connected');
       const githubAuthReturn = params.get('github_auth');
+      const googleOk = params.get('google_connected');
+      const googleAuthReturn = params.get('google_auth');
       const mainConnected = params.get('connected');
 
       if (
         authError ||
         notionOk ||
         githubOk ||
+        googleOk ||
         mainConnected ||
         notionAuthReturn ||
-        githubAuthReturn
+        githubAuthReturn ||
+        googleAuthReturn
       ) {
         const clean = new URL(window.location.href);
         clean.search = '';
@@ -804,9 +843,24 @@ export default function ChatContainer() {
             return;
           }
 
+          if (googleOk) {
+            if (bound) {
+              setAccountError('');
+              setShowAuthModal(false);
+            } else {
+              setAuthModalMode('login');
+              setAccountError(
+                'Google 已授权，但 llm.christmas 登录已失效。请先登录主站账号，再在 MCP 里重新连接 Google。',
+              );
+              setShowAuthModal(true);
+            }
+            return;
+          }
+
           if (authError) {
             setAccountError(authError);
             if (githubAuthReturn) setAuthModalMode('github');
+            else if (googleAuthReturn) setAuthModalMode('google');
             else if (notionAuthReturn) setAuthModalMode('notion');
             else setAuthModalMode(bound ? 'notion' : 'login');
             setShowAuthModal(true);
@@ -820,6 +874,11 @@ export default function ChatContainer() {
 
           if (githubAuthReturn && bound) {
             setAuthModalMode('github');
+            setShowAuthModal(true);
+          }
+
+          if (googleAuthReturn && bound) {
+            setAuthModalMode('google');
             setShowAuthModal(true);
           }
         })
@@ -866,11 +925,13 @@ export default function ChatContainer() {
     Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
   const githubMcpOn =
     Boolean(githubStatus?.connected) && activeMcpIds.includes('github');
+  const googleMcpOn =
+    Boolean(googleStatus?.connected) && activeMcpIds.includes('google');
 
   const accountDisplayName =
     accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
 
-  // If Notion/GitHub OAuth is gone, strip it from every chat's mcpIds.
+  // If Notion/GitHub/Google OAuth is gone, strip it from every chat's mcpIds.
   // Important: status starts as null (not yet fetched). Do NOT treat null as
   // "disconnected" or we wipe per-chat mcpIds before integrations load / on
   // transient fetch failures — which looks like the MCP toggle "won't save".
@@ -901,6 +962,20 @@ export default function ChatContainer() {
       return changed ? next : prev;
     });
   }, [githubStatus]);
+
+  useEffect(() => {
+    if (googleStatus === null) return; // still loading
+    if (googleStatus.connected) return;
+    setSessions((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (!(s.mcpIds || []).includes('google')) return s;
+        changed = true;
+        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => id !== 'google') };
+      });
+      return changed ? next : prev;
+    });
+  }, [googleStatus]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -1077,6 +1152,15 @@ export default function ChatContainer() {
     setShowAuthModal(true);
   };
 
+  const openGoogleModal = () => {
+    if (!isAccountBound) {
+      openLoginModal();
+      return;
+    }
+    setAuthModalMode('google');
+    setShowAuthModal(true);
+  };
+
   const closeAuthModal = () => {
     setShowAuthModal(false);
     setShowApiKeyLogin(false);
@@ -1117,6 +1201,30 @@ export default function ChatContainer() {
       return;
     }
     setActiveMcpIds((prev) => (prev.includes('github') ? prev : [...prev, 'github']));
+  };
+
+  const toggleGoogleMcp = () => {
+    if (googleMcpOn) {
+      setActiveMcpIds((prev) => prev.filter((id) => id !== 'google'));
+      return;
+    }
+    if (!isAccountBound || !googleStatus?.connected) {
+      openGoogleModal();
+      return;
+    }
+    setActiveMcpIds((prev) => (prev.includes('google') ? prev : [...prev, 'google']));
+  };
+
+  const setGoogleMcpEnabled = (enabled: boolean) => {
+    if (!enabled) {
+      setActiveMcpIds((prev) => prev.filter((id) => id !== 'google'));
+      return;
+    }
+    if (!isAccountBound || !googleStatus?.connected) {
+      openGoogleModal();
+      return;
+    }
+    setActiveMcpIds((prev) => (prev.includes('google') ? prev : [...prev, 'google']));
   };
 
   const toggleSkill = (skillId: string) => {
@@ -1788,6 +1896,8 @@ export default function ChatContainer() {
     setTempKeyInput('');
     closeAuthModal();
     setNotionStatus(null);
+    setGitHubStatus(null);
+    setGoogleStatus(null);
     setSessions([]);
     setSkills([]);
     createNewSession();
@@ -3498,6 +3608,14 @@ export default function ChatContainer() {
                           <GitHubLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">GitHub</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => openGoogleModal()}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Google</span>
+                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -4896,7 +5014,40 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
-                                </motion.div>
+                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                  <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-sm text-stone-800 dark:text-stone-100">
+                                      Google
+                                    </div>
+                                    <div className="truncate text-[10px] text-stone-400">
+                                      {googleStatus?.connected
+                                        ? t('useInThisChat')
+                                        : t('googleMcpNeedsConnect')}
+                                    </div>
+                                  </div>
+                                  {googleStatus?.connected ? (
+                                    <Switch
+                                      size="sm"
+                                      checked={googleMcpOn}
+                                      onCheckedChange={setGoogleMcpEnabled}
+                                      aria-label={t('enableGoogleMcp')}
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsSkillPickerOpen(false);
+                                        setPlusFlyout(null);
+                                        openGoogleModal();
+                                      }}
+                                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                    >
+                                      {t('connectGoogle')}
+                                    </button>
+                                  )}
+                                </div>
+                              </motion.div>
                               )}
                             </AnimatePresence>
                           </motion.div>
@@ -5982,6 +6133,65 @@ export default function ChatContainer() {
                         )}
                       >
                         {t('connectGitHub')}
+                      </a>
+                    )}
+                  </div>
+                  {accountError ? (
+                    <p className="mt-4 w-full text-sm text-red-600 dark:text-red-400">
+                      {accountError}
+                    </p>
+                  ) : null}
+                </section>
+              ) : authModalMode === 'google' && isAccountBound ? (
+                <section className="flex flex-col items-center px-1 pt-2 pb-1 text-center">
+                  <GoogleLogo className="mx-auto h-14 w-14 rounded-2xl p-2 shadow-sm" />
+                  <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
+                    {t('googleConnectCardTitle')}
+                  </h2>
+                  {googleStatus?.connected ? (
+                    <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
+                      {t('googleConnected')}
+                      {googleStatus.label ? ` · ${googleStatus.label}` : ''}
+                    </p>
+                  ) : googleStatus?.available === false ? (
+                    <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+                      {t('googleNotConfigured')}
+                    </p>
+                  ) : (
+                    <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">
+                      {t('googleConnectCardBody')}
+                    </p>
+                  )}
+
+                  <div className="mt-6 w-full max-w-sm">
+                    {googleStatus?.connected ? (
+                      <Button
+                        type="button"
+                        disabled={googleBusy}
+                        onClick={() => void disconnectGoogle()}
+                        className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
+                      >
+                        {t('disconnectGoogle')}
+                      </Button>
+                    ) : (
+                      <a
+                        href={
+                          googleStatus?.available === false
+                            ? undefined
+                            : '/api/integrations/google/start'
+                        }
+                        aria-disabled={googleStatus?.available === false}
+                        onClick={(e) => {
+                          if (googleStatus?.available === false) e.preventDefault();
+                        }}
+                        className={cn(
+                          'inline-flex h-11 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
+                          googleStatus?.available === false
+                            ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
+                            : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
+                        )}
+                      >
+                        {t('connectGoogle')}
                       </a>
                     )}
                   </div>

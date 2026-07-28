@@ -16,6 +16,10 @@ export {
   removeGitHubConnection,
   getGitHubAccessToken,
   githubPublicConnected,
+  upsertGoogleConnection,
+  removeGoogleConnection,
+  getGoogleAccessToken,
+  googlePublicConnected,
 } from '@/lib/integrations/store';
 export {
   notionMcpOAuthConfigured,
@@ -43,12 +47,25 @@ export {
   GITHUB_MCP_SERVER_URL,
   githubMcpServerUrl,
 } from '@/lib/integrations/github-oauth';
+export {
+  googleOAuthConfigured,
+  googleOAuthRedirectUri,
+  buildGoogleAuthorizeUrl,
+  generateOAuthState as generateGoogleOAuthState,
+  exchangeGoogleCode,
+  refreshGoogleToken,
+  fetchGoogleEmail,
+  googleConnectionFromToken,
+  GOOGLE_MCP_SERVERS,
+  googleOAuthScopes,
+} from '@/lib/integrations/google-oauth';
 export type {
   IntegrationProvider,
   IntegrationVault,
   IntegrationPublicStatus,
   NotionConnection,
   GitHubConnection,
+  GoogleConnection,
 } from '@/lib/integrations/types';
 export {
   INTEGRATIONS_COOKIE,

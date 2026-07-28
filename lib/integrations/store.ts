@@ -11,6 +11,7 @@ import {
   type IntegrationVault,
   type NotionConnection,
   type GitHubConnection,
+  type GoogleConnection,
 } from '@/lib/integrations/types';
 
 export async function readVault(
@@ -100,6 +101,72 @@ export async function removeGitHubConnection(
   const next: IntegrationVault = { ...rest, ownerId };
   await writeVaultCookie(response, next);
   return next;
+}
+
+export async function upsertGoogleConnection(
+  req: NextRequest,
+  response: NextResponse,
+  ownerId: string,
+  google: GoogleConnection,
+): Promise<IntegrationVault> {
+  const vault = await readVault(req, ownerId);
+  const next: IntegrationVault = { ...vault, ownerId, google };
+  await writeVaultCookie(response, next);
+  return next;
+}
+
+export async function removeGoogleConnection(
+  req: NextRequest,
+  response: NextResponse,
+  ownerId: string,
+): Promise<IntegrationVault> {
+  const vault = await readVault(req, ownerId);
+  const { google: _removed, ...rest } = vault;
+  const next: IntegrationVault = { ...rest, ownerId };
+  await writeVaultCookie(response, next);
+  return next;
+}
+
+/** Public status: only OAuth connections (with access token) count as connected. */
+export function googlePublicConnected(vault: IntegrationVault): boolean {
+  return Boolean(vault.google?.accessToken && vault.google.authKind === 'oauth');
+}
+
+/**
+ * Return a fresh Google access token for this owner.
+ * Refreshes with the long-lived refresh token when expired.
+ */
+export async function getGoogleAccessToken(
+  req: NextRequest,
+  ownerId: string,
+): Promise<{ token: string | null; updatedGoogle?: GoogleConnection }> {
+  const vault = await readVault(req, ownerId);
+  const google = vault.google;
+  if (!google?.accessToken || google.authKind !== 'oauth') return { token: null };
+
+  const stillFresh = !google.expiresAt || google.expiresAt > Date.now() + 60_000;
+  if (stillFresh) return { token: google.accessToken };
+
+  if (!google.refreshToken) return { token: null };
+
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) return { token: null };
+
+  try {
+    const { refreshGoogleToken, googleConnectionFromToken } = await import(
+      '@/lib/integrations/google-oauth'
+    );
+    const token = await refreshGoogleToken({
+      refreshToken: google.refreshToken,
+      clientId,
+      clientSecret,
+    });
+    const updated = googleConnectionFromToken(token, google.email, google);
+    return { token: updated.accessToken, updatedGoogle: updated };
+  } catch {
+    return { token: null };
+  }
 }
 
 export function githubPublicConnected(vault: IntegrationVault): boolean {

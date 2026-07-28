@@ -8,6 +8,8 @@ import {
   writeVaultCookie,
   githubOAuthConfigured,
   githubPublicConnected,
+  googleOAuthConfigured,
+  googlePublicConnected,
 } from '@/lib/integrations';
 import type { IntegrationPublicStatus } from '@/lib/integrations';
 
@@ -44,6 +46,17 @@ export async function GET(req: NextRequest) {
           : 'GitHub'
         : undefined,
       connectedAt: githubPublicConnected(vault) ? vault.github?.connectedAt : undefined,
+    },
+    {
+      provider: 'google',
+      available: googleOAuthConfigured(),
+      connected: googlePublicConnected(vault),
+      label: googlePublicConnected(vault)
+        ? vault.google?.email
+          ? (vault.google.email as string)
+          : 'Google'
+        : undefined,
+      connectedAt: googlePublicConnected(vault) ? vault.google?.connectedAt : undefined,
     },
   ];
 

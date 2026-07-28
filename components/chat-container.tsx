@@ -500,6 +500,7 @@ export default function ChatContainer() {
   const [isSkillPickerOpen, setIsSkillPickerOpen] = useState(false);
   const [slashHighlight, setSlashHighlight] = useState(0);
   const skillPickerRef = useRef<HTMLDivElement>(null);
+  const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
   const [picturesExpanded, setPicturesExpanded] = useState(false);
@@ -2038,6 +2039,7 @@ export default function ChatContainer() {
       if (skillPickerRef.current && target && !skillPickerRef.current.contains(target)) {
         setIsSkillPickerOpen(false);
         setPlusFlyout(null);
+        plusMenuButtonRef.current?.blur();
       }
     };
     document.addEventListener('mousedown', onPointerDown);
@@ -4501,25 +4503,41 @@ export default function ChatContainer() {
                 <div className="flex items-center gap-1.5">
                   <div className="relative" ref={skillPickerRef}>
                     <button
+                      ref={plusMenuButtonRef}
                       type="button"
                       onClick={() => {
                         setIsSkillPickerOpen((v) => {
                           const next = !v;
                           setPlusFlyout(null);
+                          if (!next) {
+                            queueMicrotask(() => plusMenuButtonRef.current?.blur());
+                          }
                           return next;
                         });
                         setIsModelMenuOpen(false);
                         if (isAccountBound && skills.length === 0) fetchSkills();
                       }}
                       title="Add"
+                      aria-expanded={isSkillPickerOpen}
                       className={cn(
-                        'flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
-                        isSkillPickerOpen || activeSkills.length > 0 || notionMcpOn
+                        'relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/40',
+                        isSkillPickerOpen
                           ? 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-100'
-                          : 'text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800',
+                          : cn(
+                              'text-stone-500 dark:text-stone-400',
+                              (activeSkills.length > 0 || notionMcpOn) &&
+                                'text-stone-700 dark:text-stone-200',
+                              '[@media(hover:hover)]:hover:bg-stone-100 dark:[@media(hover:hover)]:hover:bg-stone-800',
+                            ),
                       )}
                     >
                       <Plus className="h-4 w-4" />
+                      {!isSkillPickerOpen && (activeSkills.length > 0 || notionMcpOn) ? (
+                        <span
+                          className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-stone-400 dark:bg-stone-500"
+                          aria-hidden
+                        />
+                      ) : null}
                     </button>
                     <AnimatePresence>
                       {isSkillPickerOpen && (

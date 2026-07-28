@@ -12,11 +12,12 @@ export const GOOGLE_MCP_SERVERS = {
   gmail: {
     name: 'Gmail',
     url: 'https://gmailmcp.googleapis.com/mcp/v1',
-    /** Read + compose/send + labels (modify). Drop `gmail.send` for read-only. */
+    /** Read + compose + send + labels (modify). Remove `gmail.send` for drafts-only. */
     scopes: [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.compose',
       'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/gmail.send',
     ],
   },
   calendar: {

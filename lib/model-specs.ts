@@ -10,7 +10,9 @@ export interface ModelSpec {
   vision: boolean;
 }
 
-/** Models known to accept image inputs via OpenAI-compatible chat. */
+/** Models known to accept image inputs via OpenAI-compatible chat.
+ *  Pricing API has no vision bit — maintain explicitly + narrow name rules.
+ *  Verified against vendor docs (not live image probes on every id). */
 const VISION_IDS = new Set([
   'claude-sonnet-4-6',
   'claude-opus-4-6',
@@ -37,6 +39,11 @@ const VISION_IDS = new Set([
   /** Mistral Large 3 / Medium 3.1 (`*-latest` aliases on the gateway). */
   'mistral-large-latest',
   'mistral-medium-latest',
+  /** Moonshot Kimi vision family — https://platform.kimi.ai/docs/guide/use-kimi-vision-model */
+  'kimi-k3',
+  'kimi-k2.5',
+  'kimi-k2.6',
+  'kimi-k2.7',
 ]);
 
 const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = {
@@ -96,6 +103,7 @@ function looksVisionByName(id: string): boolean {
   const normalized = String(id || '').toLowerCase();
   if (/^minimax-m3(-free)?$/.test(normalized)) return true;
   if (/^mistral-(large|medium)-latest$/.test(normalized)) return true;
+  if (/^kimi-k(3|2\.(5|6|7))$/.test(normalized)) return true;
   return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter/i.test(normalized);
 }
 

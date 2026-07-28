@@ -929,7 +929,7 @@ export default function ChatContainer() {
   };
 
   const isAssistantError = (m?: Message) =>
-    Boolean(m && m.role === 'assistant' && m.content.trim().startsWith('Error:'));
+    Boolean(m && m.role === 'assistant' && (m.content || '').trim().startsWith('Error:'));
   const lastMessage = messages[messages.length - 1];
   const truncationInfo = useMemo(() => {
     if (!lastMessage || lastMessage.role !== 'assistant') {

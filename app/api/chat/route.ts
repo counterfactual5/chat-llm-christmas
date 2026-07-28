@@ -272,6 +272,21 @@ export async function POST(req: NextRequest) {
       const images: string[] = Array.isArray(m.images)
         ? m.images.map((img: any) => (typeof img === 'string' ? img : img?.url)).filter(Boolean)
         : [];
+
+      // Assistant turns cannot carry `image_url` parts (OpenAI / gateway schema).
+      // Generated pictures are UI-only; summarize them as text for follow-up chat.
+      if (role === 'assistant') {
+        if (images.length > 0) {
+          return {
+            role,
+            timestamp,
+            content: text.trim() || '[Generated an image]',
+          };
+        }
+        // Empty string fails some gateways' ChatCompletionRequestAssistantMessageContent.
+        return { role, content: text.length > 0 ? text : null, timestamp };
+      }
+
       if (images.length === 0) {
         return { role, content: text, timestamp };
       }

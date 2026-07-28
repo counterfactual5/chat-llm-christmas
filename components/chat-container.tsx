@@ -677,6 +677,19 @@ export default function ChatContainer() {
         });
         if (!connected) scrubGitHubMcpFromSessions();
       }
+
+      if (!google) {
+        setGoogleStatus(null);
+        scrubGoogleMcpFromSessions();
+      } else {
+        const connected = Boolean(google.connected);
+        setGoogleStatus({
+          connected,
+          available: Boolean(google.available),
+          label: google.label || undefined,
+        });
+        if (!connected) scrubGoogleMcpFromSessions();
+      }
     } catch {
       setNotionStatus(null);
       setGitHubStatus(null);

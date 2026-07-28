@@ -24,6 +24,20 @@ function redirectHome(req: NextRequest, params: Record<string, string>) {
   return NextResponse.redirect(url, 303);
 }
 
+/** Prefer 200 + Set-Cookie over redirect Set-Cookie (more reliable across browsers). */
+function htmlHome(targetPath: string) {
+  const safeJs = JSON.stringify(targetPath);
+  const safeMeta = targetPath.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safeMeta}"><title>Connected</title></head><body><p>Google connected. Redirecting…</p><script>location.replace(${safeJs})</script></body></html>`;
+  return new NextResponse(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   const ownerId = await resolveOwnerId(req);
   if (!ownerId) {
@@ -60,8 +74,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Success: go home with google_connected only (no google_auth modal reopen).
-    const home = NextResponse.redirect(new URL('/?google_connected=1', req.url), 303);
+    const home = htmlHome('/?google_connected=1');
     await upsertGoogleConnection(req, home, ownerId, handoff.google);
     return home;
   } catch (err: unknown) {

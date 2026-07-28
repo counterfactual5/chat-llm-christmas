@@ -26,6 +26,7 @@ const VISION_IDS = new Set([
   'gpt-5.6-terra',
   'gpt-5.6-luna',
   'gpt-5.5',
+  'grok-4.5',
   'gemini-3.1-pro-preview',
   'gemini-3.6-flash',
   'gemini-3.5-flash',

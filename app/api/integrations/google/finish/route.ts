@@ -20,7 +20,8 @@ function redirectHome(req: NextRequest, params: Record<string, string>) {
   const url = new URL('/', req.url);
   url.searchParams.set('google_auth', '1');
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  return NextResponse.redirect(url);
+  // POST handlers must use 303 so the browser follows with GET, not POST.
+  return NextResponse.redirect(url, 303);
 }
 
 export async function POST(req: NextRequest) {
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // Success: go home with google_connected only (no google_auth modal reopen).
-    const home = NextResponse.redirect(new URL('/?google_connected=1', req.url));
+    const home = NextResponse.redirect(new URL('/?google_connected=1', req.url), 303);
     await upsertGoogleConnection(req, home, ownerId, handoff.google);
     return home;
   } catch (err: unknown) {

@@ -210,7 +210,7 @@ interface Message {
   content: string;
   timestamp: number;
   /** data: URLs embedded in this turn (multimodal). */
-  images?: Array<{ url: string; name?: string }>;
+  images?: Array<{ url: string; name?: string; prompt?: string; model?: string }>;
   /** Marks a synthetic compacted-history bubble. */
   compacted?: boolean;
   /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */
@@ -489,6 +489,7 @@ export default function ChatContainer() {
   const skillPickerRef = useRef<HTMLDivElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
+  const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -794,6 +795,109 @@ export default function ChatContainer() {
         .filter((s): s is SkillItem => Boolean(s)),
     [activeSkillIds, skills],
   );
+
+  type GeneratedImageEntry = {
+    messageId: string;
+    imageIndex: number;
+    url: string;
+    prompt: string;
+    model: string;
+    timestamp: number;
+  };
+
+  const generatedImageHistory = useMemo((): GeneratedImageEntry[] => {
+    const out: GeneratedImageEntry[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role !== 'assistant' || !m.images?.length) continue;
+      const prev = messages[i - 1];
+      const fromCmd =
+        prev?.role === 'user' ? parseImageCommand(prev.content) : null;
+      m.images.forEach((img, imageIndex) => {
+        // Assistant images in this app are from /image; user uploads sit on user turns.
+        out.push({
+          messageId: m.id,
+          imageIndex,
+          url: img.url,
+          prompt: img.prompt || fromCmd || img.name || 'Image',
+          model: img.model || 'GPT Image',
+          timestamp: m.timestamp,
+        });
+      });
+    }
+    return out.slice().reverse();
+  }, [messages]);
+
+  const formatGeneratedAt = (ts: number) => {
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  const downloadGeneratedImage = async (entry: GeneratedImageEntry) => {
+    try {
+      const res = await fetch(entry.url);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = `image-${entry.timestamp}.png`;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(entry.url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const removeGeneratedImage = (entry: GeneratedImageEntry) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const nextMessages = s.messages
+          .map((m) => {
+            if (m.id !== entry.messageId || !m.images?.length) return m;
+            const images = m.images.filter((_, idx) => idx !== entry.imageIndex);
+            return { ...m, images: images.length ? images : undefined };
+          })
+          .filter(
+            (m) =>
+              !(
+                m.role === 'assistant' &&
+                !m.content?.trim() &&
+                !m.images?.length &&
+                !m.reasoning &&
+                !m.toolRuns?.length
+              ),
+          );
+        return { ...s, messages: nextMessages, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const clearGeneratedImages = () => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const nextMessages = s.messages
+          .map((m) =>
+            m.role === 'assistant' && m.images?.length
+              ? { ...m, images: undefined }
+              : m,
+          )
+          .filter(
+            (m) =>
+              !(
+                m.role === 'assistant' &&
+                !m.content?.trim() &&
+                !m.images?.length &&
+                !m.reasoning &&
+                !m.toolRuns?.length
+              ),
+          );
+        return { ...s, messages: nextMessages, updatedAt: Date.now() };
+      }),
+    );
+  };
 
   const setActiveSkillIds = (updater: string[] | ((prev: string[]) => string[])) => {
     setSessions((prev) =>
@@ -2348,7 +2452,14 @@ export default function ChatContainer() {
                     ...m,
                     // Image alone is enough — don't echo the prompt under the picture.
                     content: '',
-                    images: [{ url: data.image as string, name: 'generated.png' }],
+                    images: [
+                      {
+                        url: data.image as string,
+                        name: 'generated.png',
+                        prompt: trimmed,
+                        model: 'GPT Image 1.5',
+                      },
+                    ],
                     incomplete: false,
                   }
                 : m,
@@ -2357,6 +2468,10 @@ export default function ChatContainer() {
           };
         }),
       );
+      if (sessionId === activeSessionIdRef.current) {
+        setPicturesExpanded(true);
+        setIsContextPanelOpen(true);
+      }
     } catch (error: any) {
       setSessions((prev) =>
         prev.map((s) => {
@@ -4737,6 +4852,117 @@ export default function ChatContainer() {
                                     >
                                       <X className="h-3 w-3" />
                                     </button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Generated pictures — collapsible history bars */}
+                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setPicturesExpanded((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
+                          <ImageIcon className="h-3.5 w-3.5" />
+                          {t('generationHistory')}
+                          <span className="font-mono font-normal normal-case tracking-normal text-stone-400">
+                            ({generatedImageHistory.length})
+                          </span>
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {generatedImageHistory.length > 0 && (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                clearGeneratedImages();
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.stopPropagation();
+                                  clearGeneratedImages();
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-400 hover:text-red-500"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              {t('clearHistory')}
+                            </span>
+                          )}
+                          <ChevronDown
+                            className={cn(
+                              'h-3.5 w-3.5 text-stone-400 transition-transform',
+                              picturesExpanded && 'rotate-180',
+                            )}
+                          />
+                        </div>
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {picturesExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="max-h-72 space-y-2 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+                              {generatedImageHistory.length === 0 ? (
+                                <div className="py-2 text-xs text-stone-400">
+                                  {t('noGeneratedImages')}
+                                </div>
+                              ) : (
+                                generatedImageHistory.map((entry) => (
+                                  <div
+                                    key={`${entry.messageId}-${entry.imageIndex}`}
+                                    className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-700 dark:bg-stone-900/40"
+                                  >
+                                    <a
+                                      href={entry.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
+                                    >
+                                      <img
+                                        src={entry.url}
+                                        alt=""
+                                        className="h-full w-full object-cover"
+                                      />
+                                    </a>
+                                    <div className="min-w-0 flex-1 py-0.5">
+                                      <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
+                                        {formatGeneratedAt(entry.timestamp)}
+                                        <span className="mx-1 text-stone-600">·</span>
+                                        {entry.model}
+                                      </div>
+                                      <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
+                                        {entry.prompt}
+                                      </div>
+                                    </div>
+                                    <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                      <button
+                                        type="button"
+                                        title={t('download')}
+                                        onClick={() => void downloadGeneratedImage(entry)}
+                                        className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                      >
+                                        <Download className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        title={t('delete')}
+                                        onClick={() => removeGeneratedImage(entry)}
+                                        className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
                                 ))
                               )}

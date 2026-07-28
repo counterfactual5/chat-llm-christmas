@@ -31,12 +31,12 @@ const VISION_IDS = new Set([
   'openrouter-free',
   'cursor-auto',
   'nemotron-3-nano-omni-free',
-  'mistral-large-latest',
-  'mistral-medium-latest',
-  'minimax-m2.5',
-  'minimax-m2.7',
+  /** MiniMax: only M3 is native multimodal (M2.5/M2.7 are text-only). */
   'minimax-m3',
   'minimax-m3-free',
+  /** Mistral Large 3 / Medium 3.1 (`*-latest` aliases on the gateway). */
+  'mistral-large-latest',
+  'mistral-medium-latest',
 ]);
 
 const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = {
@@ -93,9 +93,10 @@ const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = 
 };
 
 function looksVisionByName(id: string): boolean {
-  return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter|minimax-m\d|mistral-(large|medium)-latest/i.test(
-    id,
-  );
+  const normalized = String(id || '').toLowerCase();
+  if (/^minimax-m3(-free)?$/.test(normalized)) return true;
+  if (/^mistral-(large|medium)-latest$/.test(normalized)) return true;
+  return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter/i.test(normalized);
 }
 
 /**

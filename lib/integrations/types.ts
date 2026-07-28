@@ -67,6 +67,8 @@ export type IntegrationPublicStatus = {
 };
 
 export const INTEGRATIONS_COOKIE = 'llm_chat_integrations';
+/** Google tokens live separately to keep each encrypted cookie below browser limits. */
+export const GOOGLE_INTEGRATION_COOKIE = 'llm_chat_google';
 export const NOTION_OAUTH_STATE_COOKIE = 'llm_chat_notion_oauth_state';
 /** Short-lived PKCE verifier (+ client_id) for MCP OAuth callback. */
 export const NOTION_MCP_PKCE_COOKIE = 'llm_chat_notion_mcp_pkce';

@@ -7,6 +7,7 @@ import {
   refreshNotionMcpToken,
 } from '@/lib/integrations/notion-mcp-oauth';
 import {
+  GOOGLE_INTEGRATION_COOKIE,
   INTEGRATIONS_COOKIE,
   type IntegrationVault,
   type NotionConnection,
@@ -14,16 +15,35 @@ import {
   type GoogleConnection,
 } from '@/lib/integrations/types';
 
+type GoogleVault = {
+  ownerId: string;
+  google: GoogleConnection;
+};
+
+const secureCookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax' as const,
+  path: '/',
+  maxAge: 60 * 60 * 24 * 90,
+};
+
 export async function readVault(
   req: NextRequest,
   ownerId: string,
 ): Promise<IntegrationVault> {
-  const raw = req.cookies.get(INTEGRATIONS_COOKIE)?.value || '';
-  if (!raw) return { ownerId };
   const secret = integrationsSecret();
-  const vault = await decryptJson<IntegrationVault>(raw, secret);
-  if (!vault || vault.ownerId !== ownerId) return { ownerId };
-  return vault;
+  const raw = req.cookies.get(INTEGRATIONS_COOKIE)?.value || '';
+  const base = raw
+    ? await decryptJson<IntegrationVault>(raw, secret)
+    : null;
+  const vault: IntegrationVault = base?.ownerId === ownerId ? base : { ownerId };
+
+  const googleRaw = req.cookies.get(GOOGLE_INTEGRATION_COOKIE)?.value || '';
+  if (!googleRaw) return vault;
+  const googleVault = await decryptJson<GoogleVault>(googleRaw, secret);
+  if (!googleVault || googleVault.ownerId !== ownerId) return vault;
+  return { ...vault, ownerId, google: googleVault.google };
 }
 
 export async function writeVaultCookie(
@@ -31,15 +51,35 @@ export async function writeVaultCookie(
   vault: IntegrationVault,
 ): Promise<void> {
   const secret = integrationsSecret();
-  const value = await encryptJson(vault, secret);
+  const { google: _google, ...baseVault } = vault;
+  const value = await encryptJson(baseVault, secret);
   response.cookies.set({
     name: INTEGRATIONS_COOKIE,
     value,
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 90,
+    ...secureCookieOptions,
+  });
+}
+
+async function writeGoogleCookie(
+  response: NextResponse,
+  ownerId: string,
+  google: GoogleConnection,
+): Promise<void> {
+  const secret = integrationsSecret();
+  const value = await encryptJson({ ownerId, google } satisfies GoogleVault, secret);
+  response.cookies.set({
+    name: GOOGLE_INTEGRATION_COOKIE,
+    value,
+    ...secureCookieOptions,
+  });
+}
+
+function clearGoogleCookie(response: NextResponse): void {
+  response.cookies.set({
+    name: GOOGLE_INTEGRATION_COOKIE,
+    value: '',
+    ...secureCookieOptions,
+    maxAge: 0,
   });
 }
 
@@ -47,12 +87,10 @@ export function clearVaultCookie(response: NextResponse): void {
   response.cookies.set({
     name: INTEGRATIONS_COOKIE,
     value: '',
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    path: '/',
+    ...secureCookieOptions,
     maxAge: 0,
   });
+  clearGoogleCookie(response);
 }
 
 export async function upsertNotionConnection(
@@ -111,7 +149,7 @@ export async function upsertGoogleConnection(
 ): Promise<IntegrationVault> {
   const vault = await readVault(req, ownerId);
   const next: IntegrationVault = { ...vault, ownerId, google };
-  await writeVaultCookie(response, next);
+  await writeGoogleCookie(response, ownerId, google);
   return next;
 }
 
@@ -123,7 +161,7 @@ export async function removeGoogleConnection(
   const vault = await readVault(req, ownerId);
   const { google: _removed, ...rest } = vault;
   const next: IntegrationVault = { ...rest, ownerId };
-  await writeVaultCookie(response, next);
+  clearGoogleCookie(response);
   return next;
 }
 

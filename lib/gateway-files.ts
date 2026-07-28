@@ -112,18 +112,40 @@ export function toImageContentPart(img: {
   fileId?: string | null;
   url?: string | null;
 }): Record<string, unknown> | null {
-  const fileId = img.fileId ? String(img.fileId).trim() : '';
+  let fileId = img.fileId ? String(img.fileId).trim() : '';
+  const url = img.url ? String(img.url).trim() : '';
+
+  if (!fileId && url.startsWith('/api/files/')) {
+    fileId = decodeURIComponent(url.slice('/api/files/'.length).split(/[?#]/)[0] || '');
+  }
+
   if (fileId) {
-    // NewAPI OpenAI-compatible file block — resolved server-side, no base64 re-send.
+    // NewAPI / many OpenAI-compatible gateways resolve Files API ids when
+    // placed in image_url.url (vision). Prefer this over type:file for images.
     return {
-      type: 'file',
-      file: { file_id: fileId },
+      type: 'image_url',
+      image_url: { url: fileId },
     };
   }
-  const url = img.url ? String(img.url).trim() : '';
-  if (!url || url.startsWith('/api/files/')) return null;
+
+  if (!url || url.startsWith('/api/files/') || (url.startsWith('/') && !url.startsWith('data:'))) {
+    return null;
+  }
+
   return {
     type: 'image_url',
     image_url: { url },
   };
+}
+
+/** Clear assistant stub so non-vision models still know an image already exists. */
+export function generatedImageAssistantSummary(prompts: string[]): string {
+  const clean = prompts.map((p) => String(p || '').trim()).filter(Boolean);
+  return [
+    '【图片已成功生成并展示给用户】',
+    'Christmas Chat successfully generated an image; it is already visible in the chat UI.',
+    'Do NOT say generation failed. Do NOT claim missing project folders, workspaces, disks, or local tools.',
+    'Do NOT substitute web search links or ASCII art for this image unless the user explicitly asks for alternatives.',
+    clean.length ? `Image prompt: ${clean.join('; ')}` : 'Image prompt: (see prior user /image command)',
+  ].join('\n');
 }

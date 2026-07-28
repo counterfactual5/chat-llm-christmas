@@ -52,6 +52,8 @@ export {
   googleOAuthRedirectUri,
   buildGoogleAuthorizeUrl,
   generateOAuthState as generateGoogleOAuthState,
+  createSignedGoogleOAuthState,
+  verifySignedGoogleOAuthState,
   exchangeGoogleCode,
   refreshGoogleToken,
   fetchGoogleEmail,

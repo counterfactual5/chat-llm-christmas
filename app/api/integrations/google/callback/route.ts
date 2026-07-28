@@ -6,18 +6,11 @@ import {
   googleOAuthRedirectUri,
   resolveOwnerId,
   upsertGoogleConnection,
+  verifySignedGoogleOAuthState,
 } from '@/lib/integrations';
-import { GOOGLE_OAUTH_STATE_COOKIE } from '@/lib/integrations/types';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
-
-function safeEqual(a: string, b: string) {
-  if (!a || !b || a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return result === 0;
-}
 
 function redirectHome(req: NextRequest, params: Record<string, string>) {
   const url = new URL('/', req.url);
@@ -26,29 +19,45 @@ function redirectHome(req: NextRequest, params: Record<string, string>) {
   return NextResponse.redirect(url);
 }
 
+/** 200 HTML bridge so Set-Cookie is not dropped on a redirect response. */
+function htmlRedirect(targetPath: string, responseInit?: ResponseInit) {
+  const safeJs = JSON.stringify(targetPath);
+  const safeMeta = targetPath.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safeMeta}"><title>Redirecting…</title></head><body><p>Redirecting…</p><script>location.replace(${safeJs})</script></body></html>`;
+  return new NextResponse(html, {
+    status: 200,
+    ...responseInit,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      ...(responseInit?.headers || {}),
+    },
+  });
+}
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code') || '';
   const state = req.nextUrl.searchParams.get('state') || '';
   const error = req.nextUrl.searchParams.get('error') || '';
-  const expected = req.cookies.get(GOOGLE_OAUTH_STATE_COOKIE)?.value || '';
 
   if (error) {
     return redirectHome(req, { auth_error: `Google 授权取消或失败：${error}`.slice(0, 180) });
   }
 
-  if (!code || !safeEqual(state, expected)) {
-    const detail = !code
-      ? 'code 为空'
-      : !expected
-        ? 'state cookie 已丢失（请检查浏览器是否途径 cookie）'
-        : 'state 值不匹配';
-    return redirectHome(req, { auth_error: `Google 授权状态无效（${detail}），请重试。` });
+  if (!code) {
+    return redirectHome(req, { auth_error: 'Google 授权状态无效（code 为空），请重试。' });
   }
 
   const ownerId = await resolveOwnerId(req);
   if (!ownerId) {
     return redirectHome(req, {
       auth_error: '授权回来时账号会话已失效，请重新连接后再绑定 Google。',
+    });
+  }
+
+  const verified = await verifySignedGoogleOAuthState(state, ownerId);
+  if (!verified.ok) {
+    return redirectHome(req, {
+      auth_error: `Google 授权状态无效（${verified.reason}），请重试。`,
     });
   }
 
@@ -68,17 +77,10 @@ export async function GET(req: NextRequest) {
     const email = await fetchGoogleEmail(token.access_token);
     const google = googleConnectionFromToken(token, email);
 
-    const home = redirectHome(req, { google_connected: '1' });
+    // Use a 200 HTML page to set the encrypted Google cookie, then jump home.
+    // Avoids browsers dropping Set-Cookie on 302 redirect responses.
+    const home = htmlRedirect('/?google_connected=1&google_auth=1');
     await upsertGoogleConnection(req, home, ownerId, google);
-    home.cookies.set({
-      name: GOOGLE_OAUTH_STATE_COOKIE,
-      value: '',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 0,
-    });
     return home;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Google 授权失败';

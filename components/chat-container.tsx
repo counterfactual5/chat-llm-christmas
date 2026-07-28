@@ -847,6 +847,8 @@ export default function ChatContainer() {
             if (bound) {
               setAccountError('');
               setShowAuthModal(false);
+              // Cookie was just set by the OAuth callback — refresh status.
+              await fetchIntegrations();
             } else {
               setAuthModalMode('login');
               setAccountError(

@@ -66,6 +66,93 @@ export function generateOAuthState(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlToBytes(value: string): Uint8Array {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = padded.length % 4 === 0 ? '' : '='.repeat(4 - (padded.length % 4));
+  const binary = atob(padded + pad);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function oauthStateSecret(): string {
+  return (
+    process.env.INTEGRATIONS_ENCRYPTION_KEY ||
+    process.env.CHAT_SSO_SECRET ||
+    process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    ''
+  ).trim();
+}
+
+async function hmacSha256Base64Url(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
+  return bytesToBase64Url(new Uint8Array(sig));
+}
+
+/**
+ * Signed OAuth state that embeds ownerId. Survives the Google round-trip without
+ * relying on a browser cookie (many browsers drop Set-Cookie on cross-site 302).
+ */
+export async function createSignedGoogleOAuthState(ownerId: string): Promise<string> {
+  const secret = oauthStateSecret();
+  if (!secret || secret.length < 16) {
+    throw new Error('OAuth state signing secret is missing.');
+  }
+  const nonce = generateOAuthState().slice(0, 24);
+  const payload = bytesToBase64Url(
+    new TextEncoder().encode(
+      JSON.stringify({ o: ownerId, t: Date.now(), n: nonce }),
+    ),
+  );
+  const sig = await hmacSha256Base64Url(secret, payload);
+  return `${payload}.${sig}`;
+}
+
+export async function verifySignedGoogleOAuthState(
+  state: string,
+  ownerId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const secret = oauthStateSecret();
+  if (!secret || secret.length < 16) {
+    return { ok: false, reason: 'signing secret missing' };
+  }
+  const parts = state.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return { ok: false, reason: 'state format invalid' };
+  }
+  const [payload, sig] = parts;
+  const expected = await hmacSha256Base64Url(secret, payload);
+  if (sig.length !== expected.length) return { ok: false, reason: 'state signature mismatch' };
+  let diff = 0;
+  for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+  if (diff !== 0) return { ok: false, reason: 'state signature mismatch' };
+
+  try {
+    const raw = new TextDecoder().decode(base64UrlToBytes(payload));
+    const data = JSON.parse(raw) as { o?: string; t?: number };
+    if (!data.o || data.o !== ownerId) return { ok: false, reason: 'state owner mismatch' };
+    if (typeof data.t !== 'number' || Date.now() - data.t > 10 * 60 * 1000) {
+      return { ok: false, reason: 'state expired' };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'state payload invalid' };
+  }
+}
+
 export function buildGoogleAuthorizeUrl(opts: {
   clientId: string;
   redirectUri: string;

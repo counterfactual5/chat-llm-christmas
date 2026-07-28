@@ -55,6 +55,8 @@ export type IntegrationVault = {
   notion?: NotionConnection;
   github?: GitHubConnection;
   google?: GoogleConnection;
+  /** Short-lived OAuth state for Google connect (stored encrypted in vault). */
+  googleOAuthState?: string;
 };
 
 export type IntegrationPublicStatus = {

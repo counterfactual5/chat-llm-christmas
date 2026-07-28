@@ -4946,7 +4946,7 @@ export default function ChatContainer() {
                                   exit={{ opacity: 0 }}
                                   transition={{ duration: 0.1 }}
                                   onPointerEnter={() => setPlusFlyout('mcp')}
-                                  className="absolute left-[calc(100%+6px)] top-[4.65rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                                  className="absolute left-[calc(100%+6px)] bottom-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95 max-h-[60vh] overflow-y-auto"
                                 >
                                 <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                   <NotionLogo className="h-3.5 w-3.5 shrink-0" />

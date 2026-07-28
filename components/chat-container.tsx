@@ -4457,12 +4457,12 @@ export default function ChatContainer() {
                     </button>
                     <AnimatePresence>
                       {isSkillPickerOpen && (
-                        <div className="absolute left-0 bottom-10 z-30 flex items-end gap-1.5">
+                        <div className="absolute left-0 bottom-10 z-30">
                           <motion.div
                             initial={{ opacity: 0, y: 5 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: 5 }}
-                            className="w-56 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                            className="relative w-56 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                           >
                             <button
                               type="button"
@@ -4531,18 +4531,18 @@ export default function ChatContainer() {
                               <span className="min-w-0 flex-1">{t('mcpTools')}</span>
                               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                             </button>
-                          </motion.div>
 
-                          <AnimatePresence>
-                            {plusFlyout === 'skills' && (
-                              <motion.div
-                                key="plus-skills-flyout"
-                                initial={{ opacity: 0, x: -4 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -4 }}
-                                onPointerEnter={() => setPlusFlyout('skills')}
-                                className="max-h-72 w-60 overflow-y-auto rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
-                              >
+                            <AnimatePresence>
+                              {plusFlyout === 'skills' && (
+                                <motion.div
+                                  key="plus-skills-flyout"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.1 }}
+                                  onPointerEnter={() => setPlusFlyout('skills')}
+                                  className="absolute left-[calc(100%+6px)] top-[2.35rem] z-10 max-h-72 w-60 overflow-y-auto rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                                >
                                 {!isAccountBound ? (
                                   <button
                                     type="button"
@@ -4589,18 +4589,19 @@ export default function ChatContainer() {
                                     );
                                   })
                                 )}
-                              </motion.div>
-                            )}
+                                </motion.div>
+                              )}
 
-                            {plusFlyout === 'mcp' && (
-                              <motion.div
-                                key="plus-mcp-flyout"
-                                initial={{ opacity: 0, x: -4 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -4 }}
-                                onPointerEnter={() => setPlusFlyout('mcp')}
-                                className="w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
-                              >
+                              {plusFlyout === 'mcp' && (
+                                <motion.div
+                                  key="plus-mcp-flyout"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.1 }}
+                                  onPointerEnter={() => setPlusFlyout('mcp')}
+                                  className="absolute left-[calc(100%+6px)] top-[4.65rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                                >
                                 <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                   <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                                   <div className="min-w-0 flex-1">
@@ -4634,9 +4635,10 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.div>
                         </div>
                       )}
                     </AnimatePresence>

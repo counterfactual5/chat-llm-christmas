@@ -210,7 +210,14 @@ interface Message {
   content: string;
   timestamp: number;
   /** data: URLs embedded in this turn (multimodal). */
-  images?: Array<{ url: string; name?: string; prompt?: string; model?: string }>;
+  images?: Array<{
+    url: string;
+    name?: string;
+    prompt?: string;
+    model?: string;
+    /** Gateway Files API id — prefer this over re-sending base64. */
+    fileId?: string;
+  }>;
   /** Marks a synthetic compacted-history bubble. */
   compacted?: boolean;
   /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */
@@ -403,7 +410,13 @@ function toApiMessages(messages: Message[]) {
   return messages.map((m) => ({
     role: m.role,
     content: m.content,
-    images: m.images?.map((img) => img.url) || [],
+    images:
+      m.images?.map((img) => ({
+        url: img.url,
+        fileId: img.fileId,
+        prompt: img.prompt,
+        name: img.name,
+      })) || [],
     timestamp: m.timestamp as number | undefined,
   }));
 }
@@ -1637,8 +1650,34 @@ export default function ChatContainer() {
   const addIngestedFiles = async (files: FileList | File[]) => {
     setAttachError('');
     const { attachments: next, errors } = await ingestFiles(files);
-    if (next.length > 0) {
-      setAttachments((prev) => [...prev, ...next]);
+    const enriched: IngestedAttachment[] = [];
+    for (const a of next) {
+      if (a.dataUrl && isAccountBound) {
+        try {
+          const res = await fetch('/api/files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
+          });
+          const data = await res.json();
+          if (res.ok && data?.id) {
+            enriched.push({
+              ...a,
+              fileId: String(data.id),
+              // Keep a short local preview; chat uses fileId.
+              dataUrl: a.dataUrl,
+              previewUrl: a.previewUrl || String(data.url || ''),
+            });
+            continue;
+          }
+        } catch {
+          // Fall through to local dataUrl.
+        }
+      }
+      enriched.push(a);
+    }
+    if (enriched.length > 0) {
+      setAttachments((prev) => [...prev, ...enriched]);
       setAttachmentsExpanded(true);
     }
     if (errors.length > 0) setAttachError(errors.join(' · '));
@@ -2458,6 +2497,7 @@ export default function ChatContainer() {
                         name: 'generated.png',
                         prompt: trimmed,
                         model: 'GPT Image 1.5',
+                        fileId: data.fileId ? String(data.fileId) : undefined,
                       },
                     ],
                     incomplete: false,
@@ -2562,7 +2602,13 @@ export default function ChatContainer() {
       role: 'user',
       content: fullContent || (pendingImages.length ? '(image)' : ''),
       timestamp: Date.now(),
-      images: pendingImages.map((a) => ({ url: a.dataUrl!, name: a.name })),
+      images: pendingImages.map((a) => ({
+        url: a.fileId
+          ? `/api/files/${encodeURIComponent(a.fileId)}`
+          : a.dataUrl!,
+        name: a.name,
+        fileId: a.fileId,
+      })),
     };
 
     const historySnapshot = sessionsRef.current.find((s) => s.id === sessionId);
@@ -2773,7 +2819,13 @@ export default function ChatContainer() {
             'Do not continue any other chat\'s tasks, workspace scans, refactors, or tool plans.',
             'Do not mention filesystems, shell, or scanning a workspace.',
           ].join('\n'),
-          images: lastUser.images?.map((img) => img.url) || [],
+          images:
+            lastUser.images?.map((img) => ({
+              url: img.url,
+              fileId: img.fileId,
+              prompt: img.prompt,
+              name: img.name,
+            })) || [],
           timestamp: lastUser.timestamp || Date.now(),
         },
       ];

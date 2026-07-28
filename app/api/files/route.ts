@@ -1,0 +1,82 @@
+import { NextRequest } from 'next/server';
+import {
+  gatewayBaseURL,
+  uploadGatewayDataUrl,
+  uploadGatewayFile,
+} from '@/lib/gateway-files';
+
+export const runtime = 'edge';
+export const maxDuration = 60;
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/**
+ * Upload an image/file to the llm.christmas Files API and return a reusable file id.
+ * Body: multipart form (`file`) or JSON `{ dataUrl, filename? }`.
+ */
+export async function POST(req: NextRequest) {
+  const apiKey = req.cookies.get('llm_chat_api_key')?.value || '';
+  if (!apiKey) {
+    return json({ error: 'Sign in to upload files to the gateway.' }, 401);
+  }
+
+  try {
+    const contentType = req.headers.get('content-type') || '';
+    let uploaded;
+
+    if (contentType.includes('multipart/form-data')) {
+      const form = await req.formData();
+      const file = form.get('file');
+      if (!(file instanceof File)) {
+        return json({ error: 'Missing file.' }, 400);
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      uploaded = await uploadGatewayFile({
+        apiKey,
+        bytes,
+        filename: file.name || 'upload.bin',
+        mime: file.type || 'application/octet-stream',
+      });
+    } else {
+      const body = await req.json();
+      const dataUrl = String(body?.dataUrl || '').trim();
+      if (!dataUrl.startsWith('data:')) {
+        return json({ error: 'Expected dataUrl or multipart file.' }, 400);
+      }
+      uploaded = await uploadGatewayDataUrl({
+        apiKey,
+        dataUrl,
+        filename: String(body?.filename || 'upload.bin'),
+      });
+    }
+
+    return json({
+      success: true,
+      id: uploaded.id,
+      filename: uploaded.filename,
+      bytes: uploaded.bytes,
+      purpose: uploaded.purpose,
+      /** App-local display URL (proxied). */
+      url: `/api/files/${encodeURIComponent(uploaded.id)}`,
+    });
+  } catch (err: any) {
+    return json({ error: err?.message || 'Upload failed' }, 502);
+  }
+}
+
+/** List is unused by the UI; keep a light health-style probe. */
+export async function GET(req: NextRequest) {
+  const apiKey = req.cookies.get('llm_chat_api_key')?.value || '';
+  if (!apiKey) return json({ error: 'Unauthorized' }, 401);
+  const baseURL = gatewayBaseURL();
+  const res = await fetch(`${baseURL}/files?limit=1`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  return json(data, res.status);
+}

@@ -32,6 +32,11 @@ import {
   resolveOwnerId,
   upsertNotionConnection,
 } from '@/lib/integrations';
+import {
+  gatewayBaseURL as filesBaseURL,
+  toImageContentPart,
+  uploadGatewayDataUrl,
+} from '@/lib/gateway-files';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -262,21 +267,53 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    type ImageRef = { url?: string; fileId?: string; prompt?: string };
+
+    const resolveImageRef = async (raw: any): Promise<ImageRef> => {
+      if (typeof raw === 'string') return { url: raw };
+      const url = raw?.url ? String(raw.url) : '';
+      const fileId = raw?.fileId ? String(raw.fileId) : '';
+      const prompt = raw?.prompt ? String(raw.prompt) : undefined;
+      if (fileId) return { url, fileId, prompt };
+      // Legacy local data URLs: upload once per request so follow-ups use file_id.
+      if (url.startsWith('data:') && apiKey) {
+        try {
+          const uploaded = await uploadGatewayDataUrl({
+            apiKey,
+            baseURL: filesBaseURL(),
+            dataUrl: url,
+            filename: `chat-${Date.now()}.png`,
+          });
+          return {
+            fileId: uploaded.id,
+            url: `/api/files/${encodeURIComponent(uploaded.id)}`,
+            prompt,
+          };
+        } catch {
+          return { url, prompt };
+        }
+      }
+      return { url, prompt };
+    };
+
+    const toVisionPart = (img: ImageRef) => toImageContentPart(img);
+
     const normalizedMessages: any[] = [];
     /** Generated pics can't ride on assistant turns — attach to the next user turn. */
-    let pendingAssistantImages: string[] = [];
+    let pendingAssistantImages: ImageRef[] = [];
 
     for (const m of messages as any[]) {
       const role = m.role;
       const timestamp = m.timestamp;
       if (Array.isArray(m.content)) {
         if (pendingAssistantImages.length && role === 'user') {
-          const extra = pendingAssistantImages.map((url) => ({
-            type: 'image_url',
-            image_url: { url },
-          }));
+          const extra = pendingAssistantImages
+            .map((img) => toVisionPart(img))
+            .filter(Boolean);
           pendingAssistantImages = [];
-          const content = Array.isArray(m.content) ? [...extra, ...m.content] : m.content;
+          const content = Array.isArray(m.content)
+            ? [...extra, ...m.content]
+            : m.content;
           normalizedMessages.push({ role, content, timestamp });
         } else {
           normalizedMessages.push({ role, content: m.content, timestamp });
@@ -285,21 +322,17 @@ export async function POST(req: NextRequest) {
       }
 
       const text = typeof m.content === 'string' ? m.content : '';
-      const images: string[] = Array.isArray(m.images)
-        ? m.images.map((img: any) => (typeof img === 'string' ? img : img?.url)).filter(Boolean)
-        : [];
+      const rawImages: any[] = Array.isArray(m.images) ? m.images : [];
+      const images: ImageRef[] = [];
+      for (const raw of rawImages) {
+        images.push(await resolveImageRef(raw));
+      }
 
       if (role === 'assistant') {
         // OpenAI-compatible assistants reject image_url parts (vision or not).
         if (images.length > 0) {
           pendingAssistantImages.push(...images);
-          const promptHint = images
-            .map((_, i) => {
-              const meta = Array.isArray(m.images) ? m.images[i] : null;
-              const p = meta && typeof meta === 'object' ? meta.prompt : null;
-              return p ? String(p) : null;
-            })
-            .filter(Boolean);
+          const promptHint = images.map((img) => img.prompt).filter(Boolean);
           const summary =
             text.trim() ||
             (promptHint.length
@@ -323,29 +356,29 @@ export async function POST(req: NextRequest) {
       if (allImages.length === 0) {
         normalizedMessages.push({ role, content: text, timestamp });
       } else {
+        const parts = [
+          ...(carried.length
+            ? [
+                {
+                  type: 'text',
+                  text: '[Previously generated image attached for reference]',
+                },
+              ]
+            : []),
+          ...(text ? [{ type: 'text', text }] : []),
+          ...allImages.map((img) => toVisionPart(img)).filter(Boolean),
+        ];
         normalizedMessages.push({
           role,
           timestamp,
-          content: [
-            ...(carried.length
-              ? [
-                  {
-                    type: 'text',
-                    text: '[Previously generated image attached for reference]',
-                  },
-                ]
-              : []),
-            ...(text ? [{ type: 'text', text }] : []),
-            ...allImages.map((url) => ({ type: 'image_url', image_url: { url } })),
-          ],
+          content: parts,
         });
       }
     }
 
     // No following user turn yet — keep a text stub only (can't put images on assistant).
-    if (pendingAssistantImages.length > 0) {
-      pendingAssistantImages = [];
-    }
+    pendingAssistantImages = [];
+
 
     const userAsk = lastUserText(normalizedMessages);
 

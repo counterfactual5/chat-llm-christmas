@@ -4,9 +4,11 @@ export type IngestedAttachment = {
   type: string;
   size: number;
   text?: string;
-  /** data: URL for images sent as multimodal content */
+  /** data: URL for images (legacy / offline fallback) */
   dataUrl?: string;
   previewUrl?: string;
+  /** Gateway Files API id after upload — preferred for chat. */
+  fileId?: string;
 };
 
 function readAsDataUrl(file: File): Promise<string> {

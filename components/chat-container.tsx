@@ -531,6 +531,11 @@ export default function ChatContainer() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerImeComposingRef = useRef(false);
+  /** Suppress Enter-to-send right after IME commits (same key often confirms composition). */
+  const composerImeEnterLockRef = useRef(false);
+  const editImeComposingRef = useRef(false);
+  const editImeEnterLockRef = useRef(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -2301,13 +2306,23 @@ export default function ChatContainer() {
           enqueueTime: now,
         },
       ]);
-      setInput('');
-      if (fromComposer) setQuotedSelections([]);
+      if (fromComposer) {
+        setInput('');
+        setQuotedSelections([]);
+      }
       return;
     }
 
-    if (fromComposer) setQuotedSelections([]);
-    handleSubmit(textToSend, baseMessagesOverride, false, sessionId);
+    if (fromComposer) {
+      setInput('');
+      setQuotedSelections([]);
+    }
+    beginLoading(sessionId);
+    void handleSubmit(textToSend, baseMessagesOverride, false, sessionId, {
+      alreadyLoading: true,
+    }).then((ok) => {
+      if (!ok) endLoading(sessionId);
+    });
   };
 
   const cancelQueuedMessage = (id: string) => {
@@ -3006,6 +3021,32 @@ export default function ChatContainer() {
     setSessionMenuOpenId(null);
   };
 
+  const isEnterSubmitBlockedByIme = (
+    e: React.KeyboardEvent,
+    composingRef: React.MutableRefObject<boolean>,
+    enterLockRef: React.MutableRefObject<boolean>,
+  ) =>
+    e.nativeEvent.isComposing ||
+    composingRef.current ||
+    enterLockRef.current ||
+    e.keyCode === 229;
+
+  const bindImeGuards = (
+    composingRef: React.MutableRefObject<boolean>,
+    enterLockRef: React.MutableRefObject<boolean>,
+  ) => ({
+    onCompositionStart: () => {
+      composingRef.current = true;
+    },
+    onCompositionEnd: () => {
+      composingRef.current = false;
+      enterLockRef.current = true;
+      window.setTimeout(() => {
+        enterLockRef.current = false;
+      }, 30);
+    },
+  });
+
   const stopGenerating = (opts?: { pauseQueue?: boolean; sessionId?: string }) => {
     const pauseQueue = opts?.pauseQueue ?? true;
     const sessionId = opts?.sessionId || activeSessionIdRef.current;
@@ -3041,6 +3082,9 @@ export default function ChatContainer() {
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey) {
+        if (isEnterSubmitBlockedByIme(e, composerImeComposingRef, composerImeEnterLockRef)) {
+          return;
+        }
         e.preventDefault();
         const pick = slashMenuItems[slashHighlight] || slashMenuItems[0];
         if (pick) consumeSlashItem(pick);
@@ -3066,10 +3110,29 @@ export default function ChatContainer() {
     }
 
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (isEnterSubmitBlockedByIme(e, composerImeComposingRef, composerImeEnterLockRef)) {
+        return;
+      }
       e.preventDefault();
       // Prevent holding down Enter to spawn dozens of identical tasks
       if (e.repeat) return;
       enqueueOrSubmit();
+    }
+  };
+
+  const handleEditMessageKeyDown = (e: React.KeyboardEvent, messageId: string) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      if (isEnterSubmitBlockedByIme(e, editImeComposingRef, editImeEnterLockRef)) {
+        return;
+      }
+      e.preventDefault();
+      if (e.repeat) return;
+      void saveEditedMessage(messageId);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEditMessage();
     }
   };
 
@@ -3583,6 +3646,8 @@ export default function ChatContainer() {
                             <Textarea
                               value={editingMessageContent}
                               onChange={(event) => setEditingMessageContent(event.target.value)}
+                              onKeyDown={(e) => handleEditMessageKeyDown(e, message.id)}
+                              {...bindImeGuards(editImeComposingRef, editImeEnterLockRef)}
                               className="min-h-[40px] max-h-[400px] w-full resize-none border-0 bg-transparent p-0 text-[15px] leading-7 focus-visible:ring-0"
                               style={{ height: 'auto' }}
                               onInput={(e) => {
@@ -4422,6 +4487,7 @@ export default function ChatContainer() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
+                {...bindImeGuards(composerImeComposingRef, composerImeEnterLockRef)}
                 onPaste={onPasteFiles}
                 placeholder={
                   modelsLoading

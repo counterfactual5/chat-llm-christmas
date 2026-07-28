@@ -37,7 +37,14 @@ export async function GET(req: NextRequest) {
   const redirectUri = googleOAuthRedirectUri(req.url);
   const authorize = buildGoogleAuthorizeUrl({ clientId, redirectUri, state });
 
-  const response = NextResponse.redirect(authorize);
+  // Return an HTML page that sets the cookie via a 200 response, then redirects.
+  // Some browsers (Safari, Arc, Brave) silently drop Set-Cookie on 302 redirects
+  // to a cross-origin destination (Google). A 200 response is always honoured.
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${authorize}"><title>Redirecting…</title></head><body><p>Redirecting to Google…</p><script>location.replace(${JSON.stringify(authorize)})</script></body></html>`;
+  const response = new NextResponse(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
   const apiKey = req.cookies.get(API_KEY_COOKIE)?.value?.trim() || '';
   if (apiKey.startsWith('sk-') && apiKey.length >= 20) {
     response.cookies.set({

@@ -215,7 +215,7 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('zhipu-vision')) {
     lines.push(
-      '- Image Understand MCP (image_understand): when the chat model is text-only, GLM-4.6V writes a short plain-text [Image description] from the user\'s message intent before you answer (billed to the user). Vision chat models skip this; do not call image_understand unless you need another pass on a URL.',
+      '- Image Understand MCP (image_understand): when the chat model is text-only, GLM-4.6V transcribes the image into plain text (aligned with the user ask) before you answer (billed to the user). Treat that transcription as what you saw; do not narrate the injection. Vision chat models skip this; do not call image_understand unless you need another pass on a URL.',
     );
   }
   // Legacy combined toggle (should already be expanded server-side).

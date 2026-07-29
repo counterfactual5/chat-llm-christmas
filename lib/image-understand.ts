@@ -1,8 +1,8 @@
 /**
  * Image understanding via GLM-4.6V through CPA gateway.
  *
- * Vision model runs with a system prompt (brief plain-text output, aligned with the
- * user's chat message). The text-only chat model receives that text instead of pixels.
+ * Vision model runs with a system prompt (enough detail for the text model, aligned with the
+ * user's chat message). The text-only chat model receives that transcription instead of pixels.
  */
 
 import OpenAI from 'openai';
@@ -45,15 +45,18 @@ export function buildImageUnderstandSystemPrompt(userPrompt: string): string {
   const focus = userPrompt.trim();
   const intentBlock = focus
     ? focus
-    : '（用户未附带文字 — 请用简短语言概括图片的主要内容。）';
+    : '（用户未附带文字 — 请按开放式描述处理：按区域写清主要场景/界面与关键可见文字。）';
 
   return [
-    '你是图像理解助手，为「无法直接看图」的文本对话模型提供纯文本说明。',
-    '只输出纯文本：不要开场白、不要 Markdown 标题、不要重复用户原话。',
-    '篇幅要短：通常几句话或很短的分点即可，只写与用户问题相关的可见信息。',
-    '根据用户意图选择重点：问文字就尽量转录可见文字；问物体/界面就列关键元素；问数据就读图表/表格中的关键数字。',
+    '你是图像理解助手。下游是文本模型，看不到像素，只能靠你的转写作答。',
     '',
-    '用户在对话中的消息（请按此意图看图）：',
+    '输出要求：',
+    '- 纯文本；可用简短编号分点，不要长篇开场白，不要复述用户原话。',
+    '- 信息要够用：开放式问题（如「有什么」「描述一下」）按区域写清主要 UI/场景、关键可见文字与布局关系；具体问题（读字、读数、找某物）紧扣问题，可更详细。',
+    '- 可见文字尽量原样转录；看不清就写「模糊/不可辨」。',
+    '- 不要臆造图中没有的内容；不要评论「这是截图」「用户在问什么」。',
+    '',
+    '用户消息（看图时以此为意图）：',
     intentBlock,
   ].join('\n');
 }
@@ -135,7 +138,10 @@ function textPartsFromMessageContent(parts: any[]): string {
 }
 
 function formatInjectionText(description: string): string {
-  return `[Image description]\n${description}`;
+  return [
+    '以下是图片内容（由视觉模型转写，请当作你已看到该图，直接据此回答用户；不要解释这段转写本身，也不要复述「Image description」标签）：',
+    description,
+  ].join('\n');
 }
 
 /**

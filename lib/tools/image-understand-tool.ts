@@ -10,9 +10,9 @@ import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 const SYSTEM_PROMPT = [
   'You have an image_understand tool powered by GLM-4.6V.',
-  'For text-only chat models, the server usually injects short [Image description] text before you reply — use that.',
+  'For text-only chat models, the server usually injects a plain-text image transcription before you reply — treat it as what you saw in the image and answer the user directly.',
   'Call image_understand only if you need a fresh read of a specific image URL; pass instruction aligned with the user ask.',
-  'Do not invent image contents — only use injected descriptions or tool results.',
+  'Do not invent image contents — only use the injected transcription or tool results.',
 ].join(' ');
 
 export function parseImageUnderstandArgs(

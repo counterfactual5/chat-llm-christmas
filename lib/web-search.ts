@@ -1,6 +1,6 @@
 /**
  * Multi-provider web search with fallback chain.
- * Order: Tavily → Brave → Serper → Google News RSS → DuckDuckGo → Wikipedia.
+ * Order: Zhipu → Tavily → Brave → Serper → Google News RSS → DuckDuckGo → Wikipedia.
  */
 
 import {
@@ -86,6 +86,92 @@ export function annotateHitFreshness(
     staleHint = newestMentioned <= asOfYear - 2;
   }
   return { ...hit, yearHints, staleHint: staleHint || undefined };
+}
+
+function zhipuApiKey(): string | undefined {
+  return (
+    process.env.ZHIPU_API_KEY?.trim() ||
+    process.env.ZHIPUAI_API_KEY?.trim() ||
+    process.env.BIGMODEL_API_KEY?.trim() ||
+    undefined
+  );
+}
+
+function zhipuSearchEngine(): string {
+  const fromEnv = process.env.ZHIPU_SEARCH_ENGINE?.trim();
+  if (fromEnv) return fromEnv;
+  // search_pro = 高阶版（会员额度）；也可 search_std / search_pro_sogou / search_pro_quark
+  return 'search_pro';
+}
+
+function zhipuRecency(freshness?: Freshness | null): string {
+  if (freshness === 'day') return 'oneDay';
+  if (freshness === 'week') return 'oneWeek';
+  if (freshness === 'month') return 'oneMonth';
+  if (freshness === 'year') return 'oneYear';
+  return 'noLimit';
+}
+
+/**
+ * 智谱开放平台 Web Search API（专给大模型用的联网搜索）。
+ * docs: https://docs.bigmodel.cn/api-reference/工具-api/网络搜索
+ */
+async function searchZhipu(query: string, freshness?: Freshness | null): Promise<SearchHit[]> {
+  const key = zhipuApiKey();
+  if (!key) throw new Error('ZHIPU_API_KEY missing');
+
+  // 官方建议 query ≤ 70 字符
+  const searchQuery = query.slice(0, 70);
+  const res = await fetch('https://open.bigmodel.cn/api/paas/v4/web_search', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      search_query: searchQuery,
+      search_engine: zhipuSearchEngine(),
+      // 工具已被显式调用时跳过意图识别，直接搜
+      search_intent: false,
+      count: Math.min(MAX_RESULTS, 10),
+      search_recency_filter: zhipuRecency(freshness),
+      content_size: 'medium',
+    }),
+    cache: 'no-store',
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    search_result?: Array<{
+      title?: string;
+      content?: string;
+      link?: string;
+      media?: string;
+      publish_date?: string;
+    }>;
+    error?: { code?: string; message?: string };
+  };
+
+  if (!res.ok) {
+    throw new Error(
+      data.error?.message ||
+        data.error?.code ||
+        `Zhipu web_search HTTP ${res.status}`,
+    );
+  }
+
+  const hits = (data.search_result || [])
+    .map((r) =>
+      trimHit({
+        title: r.title || r.media || '',
+        url: r.link || '',
+        snippet: r.content || '',
+        publishedAt: r.publish_date,
+      }),
+    )
+    .filter((h) => h.url);
+
+  if (!hits.length) throw new Error('Zhipu web_search returned no results');
+  return hits.slice(0, MAX_RESULTS);
 }
 
 async function searchTavily(query: string, freshness?: Freshness | null): Promise<SearchHit[]> {
@@ -338,6 +424,11 @@ type Provider = {
 };
 
 const PROVIDERS: Provider[] = [
+  {
+    name: 'zhipu',
+    available: () => Boolean(zhipuApiKey()),
+    search: searchZhipu,
+  },
   { name: 'tavily', available: () => Boolean(process.env.TAVILY_API_KEY), search: searchTavily },
   {
     name: 'brave',

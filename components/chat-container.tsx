@@ -5007,7 +5007,7 @@ export default function ChatContainer() {
                             onClick={() =>
                               setReasoningOpen((prev) => ({
                                 ...prev,
-                                [message.id]: !(prev[message.id] ?? (processLive || toolCount > 0)),
+                                [message.id]: !(prev[message.id] ?? true),
                               }))
                             }
                             className={cn(

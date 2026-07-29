@@ -4749,25 +4749,9 @@ export default function ChatContainer() {
                           Boolean(message.incomplete && !visibleContent) &&
                           (Boolean(visibleReasoning) || anyToolSearching || toolCount > 0);
                         // Keep open by default when tools ran — otherwise search UI
-                        // disappears inside a collapsed「思考过程」after streaming ends.
+                        // disappears inside a collapsed Process panel after streaming ends.
                         const processOpen =
                           reasoningOpen[message.id] ?? (processLive || toolCount > 0);
-                        const reasoningInActivity = activitySteps.some(
-                          (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
-                        );
-                        const onlyImageUnderstandProcess =
-                          toolCount > 0 &&
-                          !reasoningInActivity &&
-                          activitySteps
-                            .filter((s): s is ToolStep => s.kind === 'tool')
-                            .every((s) => {
-                              const run = toolById.get(s.toolRunId);
-                              return (
-                                run?.name === 'image_understand' ||
-                                run?.provider === 'zhipu-vision'
-                              );
-                            });
-
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;
@@ -5066,13 +5050,7 @@ export default function ChatContainer() {
                                 processOpen ? 'rotate-0' : '-rotate-90',
                               )}
                             />
-                            <span>
-                              {processLive
-                                ? t('thinking')
-                                : onlyImageUnderstandProcess
-                                  ? t('imageUnderstandProcess')
-                                  : t('thoughtProcess')}
-                            </span>
+                            <span>{t('process')}</span>
                             {toolCount > 0 && (
                               <span className="opacity-50">· {toolCount}</span>
                             )}

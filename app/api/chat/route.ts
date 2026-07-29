@@ -29,7 +29,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { hasPersistedImageTranscription, rewriteMessagesWithImageDescriptions } from '@/lib/image-understand';
+import { hasPersistedImageTranscription, rewriteMessagesWithImageDescriptions, stripPersistedImageTranscription } from '@/lib/image-understand';
 import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
@@ -154,6 +154,24 @@ function withMessageTimestamps(messages: any[]): any[] {
       return { ...m, content };
     }
     return m;
+  });
+}
+
+/**
+ * OpenAI-compatible gateways (incl. some GLM routes) reject unknown message
+ * fields like `timestamp` / `images`. Keep only chat-completion schema keys.
+ */
+function sanitizeChatMessages(messages: any[]): any[] {
+  return messages.map((m) => {
+    const role = m?.role;
+    const out: Record<string, unknown> = { role };
+    if (m?.content !== undefined) out.content = m.content;
+    if (Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
+      out.tool_calls = m.tool_calls;
+    }
+    if (m?.tool_call_id != null) out.tool_call_id = m.tool_call_id;
+    if (typeof m?.name === 'string' && m.name) out.name = m.name;
+    return out;
   });
 }
 
@@ -412,7 +430,31 @@ export async function POST(req: NextRequest) {
       if (role === 'user' && hasPersistedImageTranscription(text)) {
         const carried = carryAssistantImages ? pendingAssistantImages : [];
         pendingAssistantImages = [];
-        if (carried.length > 0) {
+        // Vision models should still receive the original pixels even after a
+        // text-model turn persisted a transcription into content.
+        if (modelIsVision && (images.length > 0 || carried.length > 0)) {
+          const visibleText =
+            stripPersistedImageTranscription(text).trim() ||
+            (images.length || carried.length ? '(image)' : text);
+          const parts = [
+            ...(carried.length
+              ? [
+                  {
+                    type: 'text',
+                    text: [
+                      '【以下附带本对话中已成功生成的图片，供你直接查看】',
+                      'The following image(s) were already generated successfully in this chat and are attached for you to inspect.',
+                      'Acknowledge them as existing generations — do not say generation failed or search the web for replacements.',
+                    ].join(' '),
+                  },
+                ]
+              : []),
+            ...(visibleText ? [{ type: 'text', text: visibleText }] : []),
+            ...carried.map((img) => toVisionPart(img)).filter(Boolean),
+            ...images.map((img) => toVisionPart(img)).filter(Boolean),
+          ];
+          normalizedMessages.push({ role, timestamp, content: parts });
+        } else if (carried.length > 0) {
           const parts = [
             {
               type: 'text',
@@ -632,7 +674,7 @@ export async function POST(req: NextRequest) {
                     model: requestedModel,
                     temperature,
                     stream: true,
-                    messages: workingMessages,
+                    messages: sanitizeChatMessages(workingMessages),
                     tools: toolDefs,
                     tool_choice: 'auto',
                     ...(thinking ? { enable_thinking: true } : {}),
@@ -797,7 +839,7 @@ export async function POST(req: NextRequest) {
             model: requestedModel,
             temperature,
             stream: true,
-            messages: finalMessages,
+            messages: sanitizeChatMessages(finalMessages),
             ...(thinking ? { enable_thinking: true } : {}),
           } as any);
 

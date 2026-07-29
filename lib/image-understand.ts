@@ -375,8 +375,8 @@ function collectImageSlots(content: any[]): Array<{ partIndex: number; url: stri
 
 /**
  * Replace image_url parts with plain-text descriptions from GLM-4.6V.
- * Only the latest user turn is sent to vision; older image_url parts are stripped
- * (their content should already live in persisted transcription or prior replies).
+ * Every user turn that still has pixels but no persisted transcription is sent
+ * to vision once. Older transcribed images are stripped from the request.
  *
  * Returns `didUnderstand` so the chat route can drop the image_understand tool
  * for this request and avoid injecting the same text again via a tool call.
@@ -386,7 +386,7 @@ export async function rewriteMessagesWithImageDescriptions(
   gateway: { apiKey: string; baseURL: string },
   opts?: {
     send?: (payload: Record<string, unknown>) => void;
-    /** Last user text in thread — used when a turn is image-only. */
+    /** Last user text in thread — used only when the latest turn is image-only. */
     userAsk?: string;
   },
 ): Promise<{ messages: any[]; didUnderstand: boolean }> {
@@ -412,8 +412,10 @@ export async function rewriteMessagesWithImageDescriptions(
       continue;
     }
 
+    const ownTurnText = textPartsFromMessageContent(msg.content);
     const turnPrompt =
-      textPartsFromMessageContent(msg.content) || String(opts?.userAsk || '').trim();
+      ownTurnText ||
+      (mi === lastUserIdx ? String(opts?.userAsk || '').trim() : '');
 
     if (hasPersistedImageTranscription(turnPrompt)) {
       out.push(stripImageUrlParts(msg));
@@ -426,8 +428,16 @@ export async function rewriteMessagesWithImageDescriptions(
       continue;
     }
 
-    // Prior turns: never re-call 4.6V — drop binary images, keep text.
-    if (mi !== lastUserIdx || msg.role !== 'user') {
+    // Prior turns: never re-call vision — drop binary images, keep text.
+    // (Persisted transcription or the prior assistant reply already carries context.
+    // Re-understanding every historical upload on follow-ups causes timeouts / “interrupted”.)
+    if (mi !== lastUserIdx) {
+      out.push(stripImageUrlParts(msg));
+      continue;
+    }
+
+    // Assistant image parts are not valid chat-completion history.
+    if (msg.role !== 'user') {
       out.push(stripImageUrlParts(msg));
       continue;
     }
@@ -442,6 +452,8 @@ export async function rewriteMessagesWithImageDescriptions(
         name: 'image_understand',
         query,
         provider: 'zhipu-vision',
+        targetTimestamp:
+          typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
       },
     });
 
@@ -458,6 +470,8 @@ export async function rewriteMessagesWithImageDescriptions(
         name: 'image_understand',
         query,
         provider: 'zhipu-vision',
+        targetTimestamp:
+          typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
         results: batch.ok
           ? imageSlots.map((slot, i) => ({
               title: slot.label,

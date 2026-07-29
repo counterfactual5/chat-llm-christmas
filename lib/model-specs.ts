@@ -49,6 +49,8 @@ const VISION_IDS = new Set([
   'glm-4.6v',
   /** StepFun Step 3.7 Flash — native multimodal (image/video). */
   'step-3.7-flash',
+  /** Google Gemma 4 — native multimodal (text + image; 31B dense on this gateway). */
+  'gemma-4-31b-free',
 ]);
 
 const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = {
@@ -112,6 +114,9 @@ function looksVisionByName(id: string): boolean {
   if (/^kimi-k(3|2\.(5|6|7))$/.test(normalized)) return true;
   if (/^glm-4\.6v/.test(normalized)) return true;
   if (/^step-3\.7/.test(normalized)) return true;
+  // Gemma 4 family is multimodal (image); Gemma 3 4B+ also supports vision.
+  if (/^gemma-4/.test(normalized)) return true;
+  if (/^gemma-3-(4|12|27)/.test(normalized)) return true;
   return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter/i.test(normalized);
 }
 

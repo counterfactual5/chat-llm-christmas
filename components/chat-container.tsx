@@ -547,26 +547,47 @@ function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): b
   return messages.some((m) => (m.images?.length || 0) > 0);
 }
 
-function toApiMessages(messages: Message[]) {
+function toApiMessages(
+  messages: Message[],
+  opts?: { vision?: boolean },
+) {
+  const vision = Boolean(opts?.vision);
   let lastUserIdx = -1;
   for (let i = 0; i < messages.length; i++) {
     if (messages[i].role === 'user') lastUserIdx = i;
   }
+
   return messages.map((m, i) => {
-    const dropUserImages =
-      m.role === 'user' &&
-      (hasPersistedImageTranscription(m.content || '') || i !== lastUserIdx);
+    let content = m.content;
+    let images =
+      m.images?.map((img) => ({
+        url: img.url,
+        fileId: img.fileId,
+        prompt: img.prompt,
+        name: img.name,
+      })) || [];
+
+    if (m.role === 'user') {
+      const transcribed = hasPersistedImageTranscription(content || '');
+      if (vision) {
+        if (transcribed) {
+          // Prefer pixels for native vision; avoid paying for the text injection twice.
+          content = stripPersistedImageTranscription(content || '');
+          if (!content.trim() && images.length > 0) content = '(image)';
+        }
+      } else {
+        // Text path: only the latest turn may need Image Understand.
+        // Older uploads are either already transcribed or reflected in prior replies.
+        if (transcribed || i !== lastUserIdx) {
+          images = [];
+        }
+      }
+    }
+
     return {
       role: m.role,
-      content: m.content,
-      images: dropUserImages
-        ? []
-        : m.images?.map((img) => ({
-            url: img.url,
-            fileId: img.fileId,
-            prompt: img.prompt,
-            name: img.name,
-          })) || [],
+      content,
+      images,
       timestamp: m.timestamp as number | undefined,
     };
   });
@@ -1819,6 +1840,7 @@ export default function ChatContainer() {
       provider?: string;
       results?: Array<{ title: string; url: string; snippet: string }>;
       error?: string;
+      targetTimestamp?: number;
     },
   ) => {
     setSessions((prev) =>
@@ -1896,12 +1918,17 @@ export default function ChatContainer() {
             const { body, imageCount } = injectionBodyFromToolResults(run.results || []);
             if (body) {
               const aIdx = mergedMsgs.findIndex((m) => m.id === assistantId);
-              if (aIdx > 0 && mergedMsgs[aIdx - 1]?.role === 'user') {
-                const userMsg = mergedMsgs[aIdx - 1];
+              const targetIdx = run.targetTimestamp != null
+                ? mergedMsgs.findIndex(
+                    (m) => m.role === 'user' && m.timestamp === run.targetTimestamp,
+                  )
+                : aIdx - 1;
+              if (targetIdx >= 0 && mergedMsgs[targetIdx]?.role === 'user') {
+                const userMsg = mergedMsgs[targetIdx];
                 if (!hasPersistedImageTranscription(userMsg.content || '') &&
                     (userMsg.images?.length || 0) > 0) {
                   mergedMsgs = mergedMsgs.map((m, i) =>
-                    i === aIdx - 1
+                    i === targetIdx
                       ? {
                           ...userMsg,
                           content: buildPersistedUserMessageContent(
@@ -2166,6 +2193,10 @@ export default function ChatContainer() {
               provider: parsed.tool.provider,
               results: Array.isArray(parsed.tool.results) ? parsed.tool.results : undefined,
               error: parsed.tool.error,
+              targetTimestamp:
+                typeof parsed.tool.targetTimestamp === 'number'
+                  ? parsed.tool.targetTimestamp
+                  : undefined,
             });
           }
           if (parsed.content) {
@@ -3075,7 +3106,7 @@ export default function ChatContainer() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: selectedModel,
-          messages: toApiMessages(older),
+          messages: toApiMessages(older, { vision: selectedSpec.vision }),
         }),
       });
       const data = await res.json();
@@ -3421,7 +3452,7 @@ export default function ChatContainer() {
     try {
       await streamChatResponse(
         sessionId,
-        toApiMessages(newMessages),
+        toApiMessages(newMessages, { vision: selectedSpec.vision }),
         assistantMessage.id,
         controller.signal,
         '',
@@ -3521,7 +3552,9 @@ export default function ChatContainer() {
         }),
       );
       apiMessages = [
-        ...toApiMessages(sessionMessages.filter((m) => m.id !== last.id)),
+        ...toApiMessages(sessionMessages.filter((m) => m.id !== last.id), {
+          vision: selectedSpec.vision,
+        }),
         {
           role: 'user',
           content: [
@@ -3544,7 +3577,7 @@ export default function ChatContainer() {
       initialContent = '';
     } else {
       apiMessages = [
-        ...toApiMessages(sessionMessages),
+        ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
         {
           role: 'user',
           content: buildContinuationPrompt(last.content),
@@ -3639,7 +3672,7 @@ export default function ChatContainer() {
     try {
       await streamChatResponse(
         sessionId,
-        toApiMessages(prior),
+        toApiMessages(prior, { vision: selectedSpec.vision }),
         assistantMessage.id,
         controller.signal,
       );

@@ -5219,38 +5219,30 @@ export default function ChatContainer() {
                                         // bottom-0 keeps the flyout above the viewport edge (Google is last in MCP list).
                                         className="absolute left-full bottom-0 z-20 pl-1.5"
                                       >
-                                        <div className="w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
+                                        <div className="w-40 rounded-lg border border-stone-200 bg-white/95 p-1 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
                                           {[
                                             {
                                               id: 'gmail' as const,
                                               label: t('enableGmailMcp'),
-                                              hint: t('enableGmailMcpHint'),
                                               on: gmailMcpOn,
                                             },
                                             {
                                               id: 'calendar' as const,
                                               label: t('enableCalendarMcp'),
-                                              hint: t('enableCalendarMcpHint'),
                                               on: calendarMcpOn,
                                             },
                                             {
                                               id: 'drive' as const,
                                               label: t('enableDriveMcp'),
-                                              hint: t('enableDriveMcpHint'),
                                               on: driveMcpOn,
                                             },
                                           ].map((row) => (
                                             <div
                                               key={row.id}
-                                              className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+                                              className="flex items-center gap-2 rounded-md px-2 py-1.5"
                                             >
-                                              <div className="min-w-0 flex-1">
-                                                <div className="text-sm text-stone-800 dark:text-stone-100">
-                                                  {row.label}
-                                                </div>
-                                                <div className="truncate text-[10px] text-stone-400">
-                                                  {row.hint}
-                                                </div>
+                                              <div className="min-w-0 flex-1 truncate text-xs text-stone-800 dark:text-stone-100">
+                                                {row.label}
                                               </div>
                                               <Switch
                                                 size="sm"

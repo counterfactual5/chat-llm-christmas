@@ -1689,6 +1689,37 @@ export default function ChatContainer() {
   const canResumeIncomplete = !isActiveLoading && truncationInfo.truncated;
   // Timeout / upstream failures leave an Error: bubble — offer Retry for that turn.
   const canRetryFailed = !isActiveLoading && isAssistantError(lastMessage);
+
+  // After refresh / remount, incomplete assistants can linger without an active
+  // request. Stamp them interrupted so Process/Thinking stops spinning and Continue appears.
+  useEffect(() => {
+    if (!chatsHydrated) return;
+    setSessions((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (loadingBySession[s.id]) return s;
+        let sessionChanged = false;
+        const messages = s.messages.map((m) => {
+          if (m.role !== 'assistant' || !m.incomplete) return m;
+          const toolsNeedClose = (m.toolRuns || []).some((r) => r.status === 'start');
+          const needsReason = !m.truncationReason;
+          if (!toolsNeedClose && !needsReason) return m;
+          sessionChanged = true;
+          changed = true;
+          return {
+            ...m,
+            truncationReason: m.truncationReason || 'Reply was interrupted',
+            toolRuns: (m.toolRuns || []).map((r) =>
+              r.status === 'start' ? { ...r, status: 'done' as const } : r,
+            ),
+          };
+        });
+        return sessionChanged ? { ...s, messages } : s;
+      });
+      return changed ? next : prev;
+    });
+  }, [chatsHydrated, loadingBySession]);
+
   // Empty drafts stay in state for the composer, but do not appear in the sidebar
   // until the first message is sent.
   const sidebarSessions = useMemo(
@@ -5477,15 +5508,18 @@ export default function ChatContainer() {
                             : renderToolStep(step);
 
                         const renderProcessPanel = (seg: Extract<TimelineSegment, { type: 'process' }>) => {
+                          // Hard gate: never spin unless this session is actually
+                          // streaming. Incomplete alone (e.g. after refresh) is not live.
+                          const segLive = Boolean(seg.live && isActiveLoading);
                           // `live` only applies to the last step — earlier ones already finished.
                           const lastIdx = seg.steps.length - 1;
                           const rendered = seg.steps
-                            .map((step, i) => renderProcessStep(step, seg.live && i === lastIdx))
+                            .map((step, i) => renderProcessStep(step, segLive && i === lastIdx))
                             .filter(Boolean);
 
                           // Nothing yet but the turn is in flight: a bare "Thinking…" line.
                           if (rendered.length === 0) {
-                            if (!seg.live) return null;
+                            if (!segLive) return null;
                             return (
                               <div
                                 key={seg.id}
@@ -5533,7 +5567,7 @@ export default function ChatContainer() {
                                     open ? 'rotate-0' : '-rotate-90',
                                   )}
                                 />
-                                {seg.live ? (
+                                {segLive ? (
                                   <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
                                 ) : null}
                                 <span>{t('process')}</span>

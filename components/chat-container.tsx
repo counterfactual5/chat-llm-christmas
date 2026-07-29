@@ -1017,18 +1017,33 @@ export default function ChatContainer() {
                       (session.mcpIds && session.mcpIds.length > 0) ||
                       (session.skillIds && session.skillIds.length > 0),
                   )
-                  .map((session) => ({
+                      .map((session) => ({
                     ...session,
                     messages: session.messages.map((m) => {
-                      if (
-                        m.role !== 'assistant' ||
-                        (!contentHasThinkMarkup(m.content) && !contentHasToolMarkup(m.content))
-                      ) {
-                        return m;
+                      let next = m;
+                      // Page refresh aborts in-flight streams. An incomplete flag
+                      // without an active request would leave Process spinning forever.
+                      if (m.role === 'assistant' && m.incomplete) {
+                        next = {
+                          ...next,
+                          incomplete: true,
+                          truncationReason:
+                            m.truncationReason || 'Reply was interrupted',
+                          toolRuns: (m.toolRuns || []).map((r) =>
+                            r.status === 'start' ? { ...r, status: 'done' as const } : r,
+                          ),
+                        };
                       }
-                      const parts = displayAssistantParts(m);
+                      if (
+                        next.role !== 'assistant' ||
+                        (!contentHasThinkMarkup(next.content) &&
+                          !contentHasToolMarkup(next.content))
+                      ) {
+                        return next;
+                      }
+                      const parts = displayAssistantParts(next);
                       return {
-                        ...m,
+                        ...next,
                         content: parts.content,
                         reasoning: parts.reasoning || undefined,
                       };
@@ -1648,7 +1663,18 @@ export default function ChatContainer() {
       return { truncated: false, reason: '' };
     }
     // Failed requests need Retry, not Continue-from-partial.
-    if (!lastMessage.content?.trim() || isAssistantError(lastMessage)) {
+    if (isAssistantError(lastMessage)) {
+      return { truncated: false, reason: '' };
+    }
+    // Refresh / navigate away mid-stream often leaves an empty incomplete bubble
+    // (Process was spinning, no answer token yet). Offer Continue to re-run.
+    if (lastMessage.incomplete && !String(lastMessage.content || '').trim()) {
+      return {
+        truncated: true,
+        reason: lastMessage.truncationReason || 'Reply was interrupted',
+      };
+    }
+    if (!lastMessage.content?.trim()) {
       return { truncated: false, reason: '' };
     }
     return analyzeTruncation(
@@ -3637,15 +3663,20 @@ export default function ChatContainer() {
     const sessionId = activeSessionIdRef.current;
     const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
     const last = sessionMessages[sessionMessages.length - 1];
-    if (isSessionLoading(sessionId) || !last || last.role !== 'assistant' || !last.content.trim()) return;
+    if (isSessionLoading(sessionId) || !last || last.role !== 'assistant') return;
+
+    const emptyInterrupted = last.incomplete && !last.content.trim();
     // Refuse to continue a reply that looks complete — matches the visible gate.
-    const verdict = analyzeTruncation(
-      last.content,
-      last.finishReason,
-      last.incomplete,
-      last.truncationReason,
-    );
-    if (!verdict.truncated) return;
+    if (!emptyInterrupted) {
+      if (!last.content.trim()) return;
+      const verdict = analyzeTruncation(
+        last.content,
+        last.finishReason,
+        last.incomplete,
+        last.truncationReason,
+      );
+      if (!verdict.truncated) return;
+    }
 
     stickToBottomRef.current = true;
     scrollToBottom(true);
@@ -3655,6 +3686,79 @@ export default function ChatContainer() {
     abortControllersRef.current.set(sessionId, controller);
 
     const lastUser = [...sessionMessages].reverse().find((m) => m.role === 'user');
+    // Refresh mid-Process left an empty bubble: re-answer the last user ask.
+    if (emptyInterrupted && lastUser) {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            messages: s.messages.map((m) =>
+              m.id === last.id
+                ? {
+                    ...m,
+                    content: '',
+                    reasoning: undefined,
+                    activity: undefined,
+                    toolRuns: undefined,
+                    incomplete: true,
+                    truncationReason: undefined,
+                    finishReason: undefined,
+                  }
+                : m,
+            ),
+          };
+        }),
+      );
+      try {
+        await streamChatResponse(
+          sessionId,
+          toApiMessages(
+            sessionMessages.filter((m) => m.id !== last.id),
+            { vision: selectedSpec.vision },
+          ),
+          last.id,
+          controller.signal,
+          '',
+          '',
+          sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
+        );
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          setSessions((prev) =>
+            prev.map((s) => {
+              if (s.id !== sessionId) return s;
+              const msgs = s.messages.map((m) => {
+                if (m.id !== last.id) return m;
+                if (m.content.trim() || m.reasoning?.trim()) {
+                  return {
+                    ...m,
+                    incomplete: true,
+                    truncationReason: error.message || 'Request failed',
+                  };
+                }
+                return {
+                  ...m,
+                  content: `Error: ${error.message || 'Request failed'}`,
+                  incomplete: false,
+                  truncationReason: undefined,
+                };
+              });
+              return { ...s, messages: msgs, updatedAt: Date.now() };
+            }),
+          );
+        } else {
+          markAssistantIncomplete(sessionId, last.id, true, {
+            truncationReason: 'Reply was interrupted',
+          });
+        }
+      } finally {
+        endLoadingIfController(sessionId, controller);
+      }
+      return;
+    }
+
     const polluted =
       Boolean(lastUser) &&
       assistantMismatchesUserTopic(lastUser!.content, last.content);
@@ -4830,8 +4934,13 @@ export default function ChatContainer() {
                         type ProcessStep = Exclude<ActivityStep, { kind: 'content' }>;
 
                         const hasContentSteps = activitySteps.some((s) => s.kind === 'content');
+                        // Spinner only while THIS turn is actively streaming. After a
+                        // refresh, incomplete stays true but loading is false — without
+                        // this gate Process would spin forever.
+                        const messageIsStreaming =
+                          isActiveLoading && message.id === lastMessage?.id;
                         const awaitingFirstContent = Boolean(
-                          message.incomplete && !visibleContent,
+                          message.incomplete && !visibleContent && messageIsStreaming,
                         );
 
                         /** Group consecutive reasoning/tool steps into Process panels, split by content. */
@@ -4887,12 +4996,14 @@ export default function ChatContainer() {
                           }
                           // Trailing Process (e.g. still thinking / tools after last answer chunk).
                           flushProcess(
-                            Boolean(message.incomplete && buf.length > 0) ||
-                              Boolean(message.incomplete && !visibleContent),
+                            Boolean(
+                              messageIsStreaming &&
+                                (buf.length > 0 || !visibleContent),
+                            ),
                           );
                           // Live empty Process while waiting before any activity.
                           if (
-                            message.incomplete &&
+                            messageIsStreaming &&
                             !visibleContent &&
                             segs.length === 0
                           ) {

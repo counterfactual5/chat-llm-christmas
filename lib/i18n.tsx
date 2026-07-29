@@ -126,6 +126,9 @@ const dict = {
     retry: 'Retry',
     continue: 'Continue',
     stop: 'Stop',
+    compacted: 'Compacted summary',
+    compactedTooltip:
+      'Earlier messages were summarized to fit this model\u2019s context window. The model only sees the summary below, not the original turns.',
     send: 'Send',
     clear: 'Clear',
     queued: 'queued',
@@ -325,6 +328,8 @@ const dict = {
     stop: '停止',
     send: '发送',
     clear: '清空',
+    compacted: '已压缩为摘要',
+    compactedTooltip: '较早期的消息已被压缩成摘要，以适应该模型的上下文窗口。模型只能看到下方摘要，看不到原文。',
     queued: '排队中',
     queuePaused: '已暂停',
     resumeQueue: '继续队列',

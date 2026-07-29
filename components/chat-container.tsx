@@ -4549,6 +4549,15 @@ export default function ChatContainer() {
                           </div>
                         ) : (
                       <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3">
+                        {message.compacted && (
+                          <div
+                            className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                            title={t('compactedTooltip')}
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            {t('compacted')}
+                          </div>
+                        )}
                         {message.images && message.images.length > 0 && (
                           <div className="flex flex-wrap gap-2">
                             {message.images.map((img, idx) => (

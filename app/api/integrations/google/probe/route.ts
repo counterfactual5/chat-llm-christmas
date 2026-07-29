@@ -1,31 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  getGoogleAccessToken,
-  GOOGLE_MCP_SERVERS,
-  resolveOwnerId,
-} from '@/lib/integrations';
-import { callMcpTool, listMcpTools } from '@/lib/mcp/http-client';
+import { getGoogleAccessToken, resolveOwnerId } from '@/lib/integrations';
+import { probeGoogleApis } from '@/lib/integrations/google-rest';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
 
-type ProbeResult = {
-  service: 'gmail' | 'calendar' | 'drive';
-  ok: boolean;
-  toolCount?: number;
-  checkTool?: string;
-  error?: string;
-};
-
-const CHECKS = {
-  gmail: { tool: 'list_labels', args: {} },
-  calendar: { tool: 'list_calendars', args: {} },
-  drive: { tool: 'list_recent_files', args: { pageSize: 1 } },
-} as const;
-
-function errorMessage(err: unknown): string {
-  return (err instanceof Error ? err.message : String(err || 'Unknown error')).slice(0, 300);
-}
+const GCP_ENABLE_HINT =
+  'In the GCP project that owns GOOGLE_OAUTH_CLIENT_ID, enable: gmail.googleapis.com, calendar-json.googleapis.com, drive.googleapis.com. Then reconnect Google in chat settings if needed.';
 
 export async function GET(req: NextRequest) {
   const ownerId = await resolveOwnerId(req);
@@ -38,42 +19,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Google OAuth token unavailable.' }, { status: 401 });
   }
 
-  const results: ProbeResult[] = [];
-  for (const service of Object.keys(CHECKS) as Array<keyof typeof CHECKS>) {
-    const opts = {
-      serverUrl: GOOGLE_MCP_SERVERS[service].url,
-      accessToken: token,
-      userAgent: 'ChristmasChat-GoogleMCP-Probe/1.0',
-    };
-    try {
-      const tools = await listMcpTools(opts);
-      const check = CHECKS[service];
-      if (!tools.some((tool) => tool.name === check.tool)) {
-        results.push({
-          service,
-          ok: false,
-          toolCount: tools.length,
-          error: `Expected tool ${check.tool} is missing.`,
-        });
-        continue;
-      }
-      const outcome = await callMcpTool(opts, check.tool, { ...check.args });
-      results.push({
-        service,
-        ok: !outcome.isError,
-        toolCount: tools.length,
-        checkTool: check.tool,
-        error: outcome.isError ? outcome.content.slice(0, 300) : undefined,
-      });
-    } catch (err: unknown) {
-      results.push({ service, ok: false, error: errorMessage(err) });
-    }
-  }
+  const results = await probeGoogleApis(token);
+  const usable = results.some((result) => result.ok);
+  const forbidden = results.some((result) =>
+    /permission|access not configured|has not been used|disabled|API has not been/i.test(
+      result.error || '',
+    ),
+  );
 
   return NextResponse.json({
     connected: true,
-    usable: results.some((result) => result.ok),
+    mode: 'rest',
+    usable,
     allUsable: results.every((result) => result.ok),
     results,
+    ...(forbidden && !usable ? { hint: GCP_ENABLE_HINT } : {}),
   });
 }

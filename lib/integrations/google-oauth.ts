@@ -1,18 +1,13 @@
 import type { GoogleConnection } from '@/lib/integrations/types';
 
 /**
- * Google Workspace official hosted MCP servers (Streamable HTTP).
- * See: https://developers.google.com/workspace/mcp  + gmailmcp/calendarmcp/drivemcp
- *
- * Endpoints discovered via the community `google-official-mcp-oauth` adapter
- * (redwheeler3). They speak Streamable HTTP MCP and accept a Google OAuth
- * Bearer token, exactly like the GitHub MCP pattern already in this app.
+ * Google Workspace OAuth for Gmail + Calendar + Drive REST APIs.
+ * Official Workspace MCP servers require Developer Preview enrollment;
+ * this app uses the stable REST surfaces with the same OAuth scopes.
  */
-export const GOOGLE_MCP_SERVERS = {
+export const GOOGLE_API_SCOPES = {
   gmail: {
     name: 'Gmail',
-    url: 'https://gmailmcp.googleapis.com/mcp/v1',
-    /** Read + compose + send + labels (modify). Remove `gmail.send` for drafts-only. */
     scopes: [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.compose',
@@ -22,17 +17,18 @@ export const GOOGLE_MCP_SERVERS = {
   },
   calendar: {
     name: 'Calendar',
-    url: 'https://calendarmcp.googleapis.com/mcp/v1',
     scopes: ['https://www.googleapis.com/auth/calendar'],
   },
   drive: {
     name: 'Drive',
-    url: 'https://drivemcp.googleapis.com/mcp/v1',
     scopes: ['https://www.googleapis.com/auth/drive'],
   },
 } as const;
 
-export type GoogleService = keyof typeof GOOGLE_MCP_SERVERS;
+/** @deprecated Use GOOGLE_API_SCOPES — kept so older imports keep compiling. */
+export const GOOGLE_MCP_SERVERS = GOOGLE_API_SCOPES;
+
+export type GoogleService = keyof typeof GOOGLE_API_SCOPES;
 
 /**
  * Whether the server has Google OAuth credentials. Google uses ONE OAuth app
@@ -56,7 +52,7 @@ export function googleOAuthRedirectUri(reqUrl: string): string {
 export function googleOAuthScopes(): string {
   const fromEnv = process.env.GOOGLE_OAUTH_SCOPES?.trim();
   if (fromEnv) return fromEnv;
-  return Object.values(GOOGLE_MCP_SERVERS)
+  return Object.values(GOOGLE_API_SCOPES)
     .flatMap((s) => s.scopes)
     .join(' ');
 }

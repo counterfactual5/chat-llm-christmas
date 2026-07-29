@@ -3,7 +3,7 @@ import { selectTools } from '@/lib/tools/registry';
 import { createWebSearchTool } from '@/lib/tools/web-search-tool';
 import { createNotionMcpTools } from '@/lib/tools/notion-tools';
 import { createGitHubMcpTools } from '@/lib/tools/github-tools';
-import { createGoogleMcpTools } from '@/lib/tools/google-tools';
+import { createGoogleTools } from '@/lib/tools/google-tools';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
@@ -47,10 +47,10 @@ export async function resolveEnabledToolsAsync(
   }
   if (flags.integrations.includes('google') && opts?.googleAccessToken) {
     try {
-      const googleTools = await createGoogleMcpTools(opts.googleAccessToken);
+      const googleTools = await createGoogleTools(opts.googleAccessToken);
       tools = [...tools, ...googleTools];
     } catch (err) {
-      console.warn('Google MCP listTools failed:', err);
+      console.warn('Google tools failed to load:', err);
     }
   }
   return tools;
@@ -76,4 +76,4 @@ export {
 
 export { createNotionMcpTools } from '@/lib/tools/notion-tools';
 export { createGitHubMcpTools } from '@/lib/tools/github-tools';
-export { createGoogleMcpTools } from '@/lib/tools/google-tools';
+export { createGoogleTools, createGoogleMcpTools } from '@/lib/tools/google-tools';

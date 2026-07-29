@@ -56,9 +56,11 @@ export {
   refreshGoogleToken,
   fetchGoogleEmail,
   googleConnectionFromToken,
+  GOOGLE_API_SCOPES,
   GOOGLE_MCP_SERVERS,
   googleOAuthScopes,
 } from '@/lib/integrations/google-oauth';
+export { probeGoogleApis } from '@/lib/integrations/google-rest';
 export type {
   IntegrationProvider,
   IntegrationVault,

@@ -26,7 +26,7 @@ export type NotionConnection = {
   connectedAt: number;
 };
 
-/** Google OAuth token for Workspace MCP (Gmail + Calendar + Drive). */
+/** Google OAuth token for Workspace APIs (Gmail + Calendar + Drive). */
 export type GoogleConnection = {
   accessToken: string;
   refreshToken?: string;

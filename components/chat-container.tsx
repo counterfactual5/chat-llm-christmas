@@ -703,10 +703,8 @@ export default function ChatContainer() {
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
   const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
-  const [referenceNotesExpanded, setReferenceNotesExpanded] = useState(false);
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [referenceText, setReferenceText] = useState('');
   /** When the user explicitly clears web sources, suppress auto-restore from history. */
   const [webSourcesCleared, setWebSourcesCleared] = useState(false);
   const [attachments, setAttachments] = useState<IngestedAttachment[]>([]);
@@ -1975,12 +1973,7 @@ export default function ChatContainer() {
   ) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
     const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
-    const combinedReference = [
-      String(referenceText || '').trim(),
-      formatWebSourcesForReference(sessionSources),
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const combinedReference = formatWebSourcesForReference(sessionSources);
 
     const notionConnected = Boolean(notionStatusRef.current?.connected);
     const githubConnected = Boolean(githubStatusRef.current?.connected);
@@ -2513,14 +2506,7 @@ export default function ChatContainer() {
       (sum, s) => sum + estimateTokensFromText(`${s.title}\n${s.content}`) + 8,
       0,
     );
-    const reference = estimateTokensFromText(
-      [
-        referenceText,
-        formatWebSourcesForReference(webSources),
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
-    );
+    const reference = estimateTokensFromText(formatWebSourcesForReference(webSources));
     const files = estimateTokensFromText(
       attachments
         .filter((a) => a.text)
@@ -2544,7 +2530,7 @@ export default function ChatContainer() {
       conversation,
       total: system + skillTokens + reference + files + imageTokens + conversation,
     };
-  }, [messages, systemPrompt, referenceText, webSources, attachments, activeSkills]);
+  }, [messages, systemPrompt, webSources, attachments, activeSkills]);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -3363,14 +3349,9 @@ export default function ChatContainer() {
       // fullContent already embeds pending text files — do not also add files.
       // Reference must follow the truncated thread, not the pre-edit sidebar snapshot.
       const threadReference = estimateTokensFromText(
-        [
-          String(referenceText || '').trim(),
-          formatWebSourcesForReference(
-            sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
-          ),
-        ]
-          .filter(Boolean)
-          .join('\n\n'),
+        formatWebSourcesForReference(
+          sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
+        ),
       );
       const historyText = history.reduce(
         (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
@@ -6301,7 +6282,7 @@ export default function ChatContainer() {
                       </AnimatePresence>
                     </div>
 
-                    {/* Reference Material — user notes + web search sources */}
+                    {/* Reference Material — upload anchors + tool/web sources */}
                     <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
                       <button
                         type="button"
@@ -6316,14 +6297,10 @@ export default function ChatContainer() {
                               {userUploadReferences.length + webSources.length}
                             </span>
                           )}
-                          {referenceText.trim() ? (
-                            <span className="rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                              {t('referenceNotesBadge')}
-                            </span>
-                          ) : null}
+
                         </span>
                         <div className="flex items-center gap-1">
-                          {(referenceText.trim() || webSources.length > 0) && (
+                          {webSources.length > 0 && (
                             <span
                               role="button"
                               tabIndex={0}
@@ -6486,44 +6463,7 @@ export default function ChatContainer() {
                                   </ul>
                                 </div>
                               )}
-                              {referenceNotesExpanded ? (
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                                      {t('referenceNotesLabel')}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setReferenceNotesExpanded(false)}
-                                      className="text-[10px] font-medium text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
-                                    >
-                                      {t('collapseReferenceNotes')}
-                                    </button>
-                                  </div>
-                                  <Textarea
-                                    value={referenceText}
-                                    onChange={(e) => setReferenceText(e.target.value)}
-                                    placeholder={t('referencePlaceholder')}
-                                    className="min-h-24 border-stone-200 bg-stone-50 text-xs font-mono dark:border-stone-800 dark:bg-stone-900/50"
-                                  />
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setReferenceNotesExpanded(true)}
-                                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-stone-200 px-2 py-2 text-[11px] font-medium text-stone-500 transition-colors hover:border-stone-300 hover:bg-stone-50 hover:text-stone-700 dark:border-stone-700 dark:hover:border-stone-600 dark:hover:bg-stone-800/50 dark:hover:text-stone-300"
-                                >
-                                  <Plus className="h-3 w-3 shrink-0 opacity-70" />
-                                  {referenceText.trim()
-                                    ? t('editReferenceNotes')
-                                    : t('addReferenceNotes')}
-                                </button>
-                              )}
-                              {!referenceNotesExpanded && referenceText.trim() ? (
-                                <p className="line-clamp-2 px-0.5 text-[11px] leading-4 text-stone-400">
-                                  {referenceText.trim()}
-                                </p>
-                              ) : null}
+
                             </div>
                           </motion.div>
                         )}

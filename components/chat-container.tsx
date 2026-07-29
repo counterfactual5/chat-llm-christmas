@@ -662,7 +662,6 @@ export default function ChatContainer() {
   const [input, setInput] = useState('');
   /** Per-session streaming flags — multiple chats can run in parallel. */
   const [loadingBySession, setLoadingBySession] = useState<Record<string, boolean>>({});
-  const [waitingBySession, setWaitingBySession] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -800,7 +799,6 @@ export default function ChatContainer() {
 
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
-  const isWaitingForFirstToken = Boolean(waitingBySession[activeSessionId]);
   const activeQueue = useMemo(
     () => messageQueue.filter((task) => task.sessionId === activeSessionId),
     [messageQueue, activeSessionId],
@@ -1998,15 +1996,6 @@ export default function ChatContainer() {
     );
   };
 
-  const clearWaiting = (sessionId: string) => {
-    setWaitingBySession((prev) => {
-      if (!prev[sessionId]) return prev;
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
-  };
-
   const streamChatResponse = async (
     sessionId: string,
     apiMessages: ReturnType<typeof toApiMessages>,
@@ -2104,7 +2093,6 @@ export default function ChatContainer() {
     const emitContent = (chunk: string) => {
       const cleaned = toolStripper.push(chunk);
       if (!cleaned) return;
-      clearWaiting(sessionId);
       streamed += cleaned;
       appendToAssistant(sessionId, assistantId, cleaned);
       if (sessionId === activeSessionIdRef.current) scrollToBottom();
@@ -2113,7 +2101,6 @@ export default function ChatContainer() {
     const applyThinkSplit = (raw: string) => {
       const split = thinkParser.push(raw);
       if (split.reasoning) {
-        clearWaiting(sessionId);
         appendToAssistantReasoning(sessionId, assistantId, split.reasoning);
       }
       if (split.content) emitContent(split.content);
@@ -2233,11 +2220,9 @@ export default function ChatContainer() {
             serverTruncationReason = parsed.truncation_reason;
           }
           if (parsed.reasoning) {
-            clearWaiting(sessionId);
             appendToAssistantReasoning(sessionId, assistantId, parsed.reasoning);
           }
           if (parsed.tool) {
-            clearWaiting(sessionId);
             upsertAssistantToolRun(sessionId, assistantId, {
               name: String(parsed.tool.name || 'web_search'),
               status: parsed.tool.status === 'done' ? 'done' : 'start',
@@ -2985,7 +2970,6 @@ export default function ChatContainer() {
       delete next[sessionId];
       return next;
     });
-    clearWaiting(sessionId);
     abortControllersRef.current.delete(sessionId);
   };
 
@@ -3206,7 +3190,6 @@ export default function ChatContainer() {
     setIsSkillPickerOpen(false);
     if (sessionId === activeSessionId) setInput('');
     if (!opts?.alreadyLoading) beginLoading(sessionId);
-    clearWaiting(sessionId);
 
     const sessionMessages =
       opts?.baseMessages ??
@@ -3486,8 +3469,6 @@ export default function ChatContainer() {
       }
     }
 
-    setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
-
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -3513,7 +3494,6 @@ export default function ChatContainer() {
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        clearWaiting(sessionId);
         // Keep any partial reply so the user can Continue; only use Error: when empty.
         setSessions((prev) =>
           prev.map((s) => {
@@ -3565,7 +3545,6 @@ export default function ChatContainer() {
     stickToBottomRef.current = true;
     scrollToBottom(true);
     beginLoading(sessionId);
-    setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
 
     const controller = new AbortController();
     abortControllersRef.current.set(sessionId, controller);
@@ -3708,7 +3687,6 @@ export default function ChatContainer() {
     stickToBottomRef.current = true;
     scrollToBottom(true);
     beginLoading(sessionId);
-    setWaitingBySession((prev) => ({ ...prev, [sessionId]: true }));
 
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
@@ -3730,7 +3708,6 @@ export default function ChatContainer() {
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        clearWaiting(sessionId);
         updateSession(sessionId, [
           ...prior,
           {
@@ -5278,41 +5255,6 @@ export default function ChatContainer() {
                       })()}
                     </div>
                   ),
-                )}
-
-                {/* First-token waiting dots: hide once any progress is visible
-                    (reasoning, tools like Image Understand, or content). */}
-                {isWaitingForFirstToken &&
-                  !(
-                    lastMessage?.role === 'assistant' &&
-                    (Boolean(lastMessage.reasoning) ||
-                      Boolean(String(lastMessage.content || '').trim()) ||
-                      (lastMessage.toolRuns?.length || 0) > 0 ||
-                      (lastMessage.activity?.length || 0) > 0)
-                  ) && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="w-full pr-8 sm:pr-16 flex items-center gap-2 text-stone-400 dark:text-stone-500"
-                  >
-                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-white dark:bg-stone-900 border border-stone-100 dark:border-stone-800/50 shadow-sm w-fit">
-                      <motion.div
-                        animate={{ opacity: [0.4, 1, 0.4] }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                        className="w-1.5 h-1.5 rounded-full bg-orange-500"
-                      />
-                      <motion.div
-                        animate={{ opacity: [0.4, 1, 0.4] }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.2 }}
-                        className="w-1.5 h-1.5 rounded-full bg-orange-500"
-                      />
-                      <motion.div
-                        animate={{ opacity: [0.4, 1, 0.4] }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut", delay: 0.4 }}
-                        className="w-1.5 h-1.5 rounded-full bg-orange-500"
-                      />
-                    </div>
-                  </motion.div>
                 )}
               </div>
             )}

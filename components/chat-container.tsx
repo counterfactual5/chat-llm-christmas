@@ -2151,6 +2151,37 @@ export default function ChatContainer() {
           appendToAssistant(sessionId, assistantId, cleaned);
         }
       }
+
+      // Safety net: some gateways put the whole answer in reasoning with empty
+      // content. Promote it to the bubble body so the UI is not "Thought only".
+      if (!streamed.trim()) {
+        const live = sessionsRef.current
+          .find((s) => s.id === sessionId)
+          ?.messages.find((m) => m.id === assistantId);
+        const orphan = String(live?.reasoning || '').trim();
+        if (orphan) {
+          streamed = orphan;
+          setSessions((prev) =>
+            prev.map((s) => {
+              if (s.id !== sessionId) return s;
+              return {
+                ...s,
+                updatedAt: Date.now(),
+                messages: s.messages.map((m) => {
+                  if (m.id !== assistantId) return m;
+                  return {
+                    ...m,
+                    content: orphan,
+                    reasoning: undefined,
+                    activity: (m.activity || []).filter((a) => a.kind !== 'reasoning'),
+                  };
+                }),
+              };
+            }),
+          );
+        }
+      }
+
       // Connection dropped / function killed mid-stream: no [DONE] arrived.
       // Prefer Continue over silently treating the partial reply as finished.
       if (unexpectedEnd && !finishReason && serverTruncated == null) {

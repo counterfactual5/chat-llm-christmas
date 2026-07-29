@@ -69,6 +69,46 @@ function wantsThinking(model: string) {
   );
 }
 
+/**
+ * Split a chat-completions delta into visible answer vs chain-of-thought.
+ * Some gateways (notably GLM-4.7) put the whole reply in reasoning_* even when
+ * we did not request thinking — treat those as content in that case.
+ */
+function splitCompletionDelta(
+  delta: any,
+  opts: { reasoningAsContent: boolean },
+): { content: string; reasoning: string } {
+  let content = '';
+  let reasoning = '';
+
+  const rawContent = delta?.content;
+  if (typeof rawContent === 'string') {
+    content += rawContent;
+  } else if (Array.isArray(rawContent)) {
+    for (const part of rawContent) {
+      const type = String(part?.type || '');
+      const text = String(
+        part?.text || part?.content || part?.thinking || part?.reasoning || '',
+      );
+      if (!text) continue;
+      if (type === 'thinking' || type === 'reasoning') reasoning += text;
+      else content += text;
+    }
+  }
+
+  reasoning +=
+    String(delta?.reasoning_content || '') +
+    String(delta?.reasoning || '') +
+    String(delta?.thinking || '') +
+    String(delta?.thinking_content || '');
+
+  if (opts.reasoningAsContent && reasoning) {
+    content += reasoning;
+    reasoning = '';
+  }
+  return { content, reasoning };
+}
+
 /** Heuristic: user clearly wants a live lookup (used for cursor-* proactive search). */
 function looksLikeSearchRequest(text: string): boolean {
   const t = String(text || '').trim();
@@ -732,31 +772,16 @@ export async function POST(req: NextRequest) {
                   }
                 }
 
-                // --- content ---
-                let contentChunk = '';
-                if (typeof delta.content === 'string') {
-                  contentChunk = delta.content;
-                } else if (Array.isArray(delta.content)) {
-                  for (const part of delta.content) {
-                    const type = String(part?.type || '');
-                    if (type === 'thinking' || type === 'reasoning') {
-                      streamedReasoning += part.thinking || part.reasoning || part.text || '';
-                      send({ reasoning: part.thinking || part.reasoning || part.text || '' });
-                    } else {
-                      contentChunk += part.text || part.content || '';
-                    }
-                  }
-                }
-
-                // --- reasoning ---
-                const reasoningChunk =
-                  (delta.reasoning_content || '') +
-                  (delta.reasoning || '') +
-                  (delta.thinking || '') +
-                  (delta.thinking_content || '');
-                if (reasoningChunk) {
-                  streamedReasoning += reasoningChunk;
-                  send({ reasoning: reasoningChunk });
+                // --- content / reasoning ---
+                // When thinking was not requested, fold reasoning_* into content
+                // (GLM-4.7 often dumps the full answer there otherwise).
+                const split = splitCompletionDelta(delta, {
+                  reasoningAsContent: !thinking,
+                });
+                let contentChunk = split.content;
+                if (split.reasoning) {
+                  streamedReasoning += split.reasoning;
+                  send({ reasoning: split.reasoning });
                 }
 
                 // Stream content to the client only when no tool_calls are being built.
@@ -879,28 +904,9 @@ export async function POST(req: NextRequest) {
             const finish_reason = choice?.finish_reason || null;
             if (finish_reason) lastFinishReason = finish_reason;
 
-            let content = '';
-            let reasoning = '';
-
-            if (typeof delta.content === 'string') {
-              content = delta.content;
-            } else if (Array.isArray(delta.content)) {
-              for (const part of delta.content) {
-                const type = String(part?.type || '');
-                if (type === 'thinking' || type === 'reasoning') {
-                  reasoning += part.thinking || part.reasoning || part.text || '';
-                } else if (type === 'text' || !type) {
-                  content += part.text || part.content || '';
-                }
-              }
-            }
-
-            reasoning +=
-              delta.reasoning_content ||
-              delta.reasoning ||
-              delta.thinking ||
-              delta.thinking_content ||
-              '';
+            let { content, reasoning } = splitCompletionDelta(delta, {
+              reasoningAsContent: !thinking,
+            });
 
             if (content) content = stampStripper.push(content);
             if (finish_reason) {
@@ -934,7 +940,8 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Some gateways (e.g. GLM) stream the whole answer in reasoning fields only.
+          // Thinking mode: if the model never emitted content, surface the
+          // reasoning buffer as the visible answer once (avoid empty bubbles).
           if (!sawContent && reasoningOnlyBuf.trim()) {
             sawText = true;
             send({ content: reasoningOnlyBuf });

@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ImageOff, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/file-ingest';
 
-export function attachmentImageSrc(a: Pick<IngestedAttachment, 'previewUrl' | 'dataUrl'>): string | undefined {
+export function attachmentImageSrc(
+  a: Pick<IngestedAttachment, 'previewUrl' | 'dataUrl' | 'fileId'>,
+): string | undefined {
+  if (a.fileId) {
+    return `/api/files/${encodeURIComponent(a.fileId)}`;
+  }
   return a.previewUrl || a.dataUrl;
 }
 
@@ -31,14 +36,25 @@ export function AttachmentImageThumb({
   className,
   variant = 'composer',
 }: AttachmentImageThumbProps) {
-  const src = attachmentImageSrc(a);
-  const [loadError, setLoadError] = useState(false);
+  const primarySrc = useMemo(() => attachmentImageSrc(a), [a]);
+  const [fallbackSrc, setFallbackSrc] = useState<string | null>(null);
+  const [previewBroken, setPreviewBroken] = useState(false);
+
+  const src = fallbackSrc || primarySrc;
 
   if (!src) return null;
 
   const uploading = Boolean(a.uploading);
-  const failed = Boolean(a.uploadError) || loadError;
-  const canPreview = !uploading && !failed;
+  const uploadFailed = Boolean(a.uploadError);
+  const canPreview = !uploading && !uploadFailed && !previewBroken && Boolean(src);
+
+  const handleImgError = () => {
+    if (a.dataUrl && src !== a.dataUrl) {
+      setFallbackSrc(a.dataUrl);
+      return;
+    }
+    setPreviewBroken(true);
+  };
 
   return (
     <div className={cn('group/thumb relative shrink-0', className)}>
@@ -46,7 +62,11 @@ export function AttachmentImageThumb({
         type="button"
         disabled={!canPreview}
         onClick={() => canPreview && onPreview?.(src)}
-        title={a.name}
+        title={
+          uploadFailed
+            ? 'Upload to server failed — remove and try again, or paste again'
+            : a.name
+        }
         className={cn(
           'relative block overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60',
           variant === 'composer' && 'h-[4.5rem] w-[4.5rem] sm:h-20 sm:w-20',
@@ -54,24 +74,37 @@ export function AttachmentImageThumb({
           !canPreview && 'cursor-default',
         )}
       >
-        <img
-          src={src}
-          alt={a.name}
-          className={cn(
-            variant === 'composer'
-              ? 'h-full w-full object-cover'
-              : 'max-h-32 max-w-[min(100%,14rem)] object-contain',
-            'transition-[filter,opacity] duration-200',
-            uploading && 'grayscale opacity-50',
-            failed && !uploading && 'grayscale opacity-70',
-          )}
-          onError={() => setLoadError(true)}
-        />
-        {failed && (
-          <div
-            className="pointer-events-none absolute inset-0 rounded-lg bg-red-500/20 ring-2 ring-red-500/70"
-            aria-hidden
+        {!previewBroken ? (
+          <img
+            key={src}
+            src={src}
+            alt={a.name}
+            className={cn(
+              variant === 'composer'
+                ? 'h-full w-full object-cover'
+                : 'max-h-32 max-w-[min(100%,14rem)] object-contain',
+              'transition-[filter,opacity] duration-200',
+              uploading && 'grayscale opacity-50',
+              uploadFailed && !uploading && 'grayscale opacity-60',
+            )}
+            onError={handleImgError}
           />
+        ) : (
+          <div
+            className={cn(
+              'flex items-center justify-center bg-stone-200 dark:bg-stone-800',
+              variant === 'composer' ? 'h-full w-full' : 'min-h-20 min-w-20',
+            )}
+          >
+            <ImageOff className="h-6 w-6 text-stone-400" />
+          </div>
+        )}
+        {uploadFailed && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-red-500/30 ring-2 ring-red-500/80">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white shadow-md">
+              <X className="h-5 w-5" strokeWidth={2.5} aria-hidden />
+            </span>
+          </div>
         )}
         {uploading && (
           <div className="absolute inset-0 flex items-center justify-center bg-stone-300/40 dark:bg-stone-700/50">

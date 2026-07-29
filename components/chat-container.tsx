@@ -550,13 +550,16 @@ function messageImagesToIngested(images: Message['images']): IngestedAttachment[
   return (images || []).map((img) => {
     const url = img.url;
     const isData = url.startsWith('data:');
+    const apiPreview = img.fileId
+      ? `/api/files/${encodeURIComponent(img.fileId)}`
+      : url;
     return {
       id: crypto.randomUUID(),
       name: img.name || 'image.png',
       type: 'image/png',
       size: 0,
       dataUrl: isData ? url : undefined,
-      previewUrl: url,
+      previewUrl: isData ? url : apiPreview,
       fileId: img.fileId,
     };
   });
@@ -2224,22 +2227,23 @@ export default function ChatContainer() {
         });
         const data = await res.json();
         if (res.ok && data?.id) {
+          const fileId = String(data.id);
           patch(a.id, (x) => ({
             ...x,
             uploading: false,
             uploadError: false,
-            fileId: String(data.id),
-            previewUrl: x.previewUrl || String(data.url || ''),
+            fileId,
+            previewUrl: `/api/files/${encodeURIComponent(fileId)}`,
           }));
           continue;
         }
         if (isAccountBound) {
-          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: !x.dataUrl }));
           continue;
         }
       } catch {
         if (isAccountBound) {
-          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: !x.dataUrl }));
           continue;
         }
       }
@@ -3224,7 +3228,6 @@ export default function ChatContainer() {
       setAttachError('Remove or re-add images that failed to upload');
       return false;
     }
-
     if (sessionId === activeSessionId) {
       stickToBottomRef.current = true;
       scrollToBottom(true);

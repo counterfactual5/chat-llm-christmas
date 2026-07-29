@@ -2566,6 +2566,19 @@ export default function ChatContainer() {
     setActiveMcpIds((prev) => prev.filter((id) => id !== 'zhipu-vision'));
   }, [selectedSpec.vision, zhipuVisionOn]);
 
+  // Conversation already has images + switch (or land) on a text-only model:
+  // turn Image Understand on immediately so the chat stays usable. Guests still
+  // must pick a Vision model (no MCP billing account).
+  useEffect(() => {
+    if (!isAccountBound) return;
+    if (selectedSpec.vision) return;
+    if (!hasImages) return;
+    if (zhipuVisionOn) return;
+    setActiveMcpIds((prev) =>
+      prev.includes('zhipu-vision') ? prev : [...prev, 'zhipu-vision'],
+    );
+  }, [isAccountBound, selectedSpec.vision, hasImages, zhipuVisionOn]);
+
   // Token estimate aligned with what the server actually sends.
   const contextBreakdown = useMemo(() => {
     const systemText = (systemPrompt.trim() || DEFAULT_SYSTEM_PROMPT);

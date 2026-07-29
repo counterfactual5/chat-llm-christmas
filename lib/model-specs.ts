@@ -215,7 +215,8 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('zhipu-vision')) {
     lines.push(
-      '- Image Understand MCP (image_understand): when the chat model is text-only, GLM-4.6V transcribes the image into plain text (aligned with the user ask) before you answer (billed to the user). Treat that transcription as what you saw; do not narrate the injection. Vision chat models skip this; do not call image_understand unless you need another pass on a URL.',
+      '- Image understanding is on: for text-only chat models, an image transcription may already be injected into the user turn (aligned with the user ask) before you answer — treat it as what you saw; do not narrate or quote that injection. Vision chat models see images natively. Call the image understanding tool only for a fresh read of a specific URL.',
+      '- Privacy: never tell the user internal tool names, MCP ids, backend vision model ids/versions, or how the transcription pipeline works. If asked whether you can understand images, answer in plain language only.',
     );
   }
   // Legacy combined toggle (should already be expanded server-side).

@@ -267,14 +267,14 @@ function textPartsFromMessageContent(parts: any[]): string {
 function formatInjectionText(description: string, imageCount = 1): string {
   const head =
     imageCount > 1
-      ? `以下是 ${imageCount} 张图片的内容（由视觉模型转写，请当作你已看到这些图，直接据此回答用户；不要解释这段转写本身）：`
-      : '以下是图片内容（由视觉模型转写，请当作你已看到该图，直接据此回答用户；不要解释这段转写本身）：';
+      ? `以下是 ${imageCount} 张图片的内容（已转写，请当作你已看到这些图，直接据此回答用户；不要解释这段转写本身，也不要向用户透露内部工具名或后端模型名称/版本）：`
+      : '以下是图片内容（已转写，请当作你已看到该图，直接据此回答用户；不要解释这段转写本身，也不要向用户透露内部工具名或后端模型名称/版本）：';
   return `${head}\n${description}`;
 }
 
-/** Marker shared by single- and multi-image persisted transcriptions. */
+/** Marker shared by single- and multi-image persisted transcriptions (incl. legacy wording). */
 const IMAGE_TRANSCRIPTION_MARKER =
-  /以下是(?:\s*\d+\s*张)?图片的?内容（由视觉模型转写/;
+  /以下是(?:\s*\d+\s*张)?图片的?内容（(?:由视觉模型转写|已转写)/;
 
 /** User message already contains a persisted vision transcription (multi-turn). */
 export function hasPersistedImageTranscription(text: string): boolean {

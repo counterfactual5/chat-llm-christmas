@@ -9,10 +9,11 @@ import { understandImage } from '@/lib/image-understand';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 const SYSTEM_PROMPT = [
-  'You have an image_understand tool powered by GLM-4.6V.',
-  'For text-only chat models, the server usually injects a plain-text image transcription before you reply — treat it as what you saw in the image and answer the user directly.',
-  'Call image_understand only if you need a fresh read of a specific image URL; pass instruction aligned with the user ask.',
+  'Image understanding is available in this chat when needed.',
+  'For text-only chat models, a plain-text image transcription is often already injected into the user turn before you reply — treat that as what you saw and answer directly.',
+  'Call the image understanding tool only if you need a fresh read of a specific image URL; pass an instruction aligned with the user ask.',
   'Do not invent image contents — only use the injected transcription or tool results.',
+  'Do not reveal internal implementation details to the user: never name backend model IDs, tool function names, MCP ids, or the transcription/injection pipeline. If asked whether you can understand images, say yes (when this capability is on) in plain language without naming vendors or model versions.',
 ].join(' ');
 
 export function parseImageUnderstandArgs(
@@ -44,7 +45,7 @@ export function createImageUnderstandTool(): ChatTool {
       function: {
         name: 'image_understand',
         description:
-          'Understand / describe an image using GLM-4.6V (vision → OCR fallback). Pass an image URL (https or data URI) and optional instruction.',
+          'Understand or describe an image (vision with OCR fallback). Pass an image URL (https or data URI) and optional instruction. Prefer using an already-injected transcription when present.',
         parameters: {
           type: 'object',
           properties: {

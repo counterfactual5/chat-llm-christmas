@@ -583,6 +583,8 @@ export default function ChatContainer() {
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [referenceText, setReferenceText] = useState('');
+  /** When the user explicitly clears web sources, suppress auto-restore from history. */
+  const [webSourcesCleared, setWebSourcesCleared] = useState(false);
   const [attachments, setAttachments] = useState<IngestedAttachment[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [attachError, setAttachError] = useState('');
@@ -1090,6 +1092,8 @@ export default function ChatContainer() {
 
   useEffect(() => {
     if (!activeSessionId) return;
+    // User explicitly cleared web sources — don't auto-restore from history.
+    if (webSourcesCleared) return;
     const collected = collectWebSourcesFromMessages(messages);
     const stored = activeSession?.webSources || [];
     const collectedKey = collected.map((c) => c.url).join('\n');
@@ -1107,7 +1111,7 @@ export default function ChatContainer() {
         setReferenceExpanded(true);
       });
     }
-  }, [activeSessionId, messages, activeSession?.webSources]);
+  }, [activeSessionId, messages, activeSession?.webSources, webSourcesCleared]);
   const activeSkills = useMemo(
     () =>
       activeSkillIds
@@ -1696,6 +1700,7 @@ export default function ChatContainer() {
         if (run.status === 'done') {
           nextSession.webSources = collectWebSourcesFromMessages(msgs);
           if ((nextSession.webSources?.length || 0) > 0) {
+            setWebSourcesCleared(false);
             queueMicrotask(() => {
               setIsContextPanelOpen(true);
               setReferenceExpanded(true);
@@ -3754,6 +3759,7 @@ export default function ChatContainer() {
                     <div
                       onClick={() => {
                         setActiveSessionId(session.id);
+                        setWebSourcesCleared(false);
                         setQuotedSelections([]);
                         setSessionMenuOpenId(null);
                       }}
@@ -4445,9 +4451,70 @@ export default function ChatContainer() {
                                   return (
                                     <div
                                       key={step.id}
-                                      className="whitespace-pre-wrap text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                                      className="chat-markdown text-[12px] leading-5 text-stone-500 dark:text-stone-400"
                                     >
-                                      {step.text}
+                                      <ReactMarkdown
+                                        remarkPlugins={[remarkMath, remarkGfm]}
+                                        rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                                        components={{
+                                          p({ children }) {
+                                            return (
+                                              <p className="whitespace-pre-wrap m-0 leading-5">
+                                                {children}
+                                              </p>
+                                            );
+                                          },
+                                          code({ className, children, ...props }) {
+                                            const match = /language-(\w+)/.exec(className || '');
+                                            const value = String(children).replace(/\n$/, '');
+                                            if (match) {
+                                              return <CodeBlock language={match[1]} value={value} />;
+                                            }
+                                            return (
+                                              <code
+                                                {...props}
+                                                className="rounded bg-stone-200/60 px-1.5 py-0.5 text-[11px] font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100"
+                                              >
+                                                {children}
+                                              </code>
+                                            );
+                                          },
+                                          ul({ children }) {
+                                            return (
+                                              <ul className="my-2 pl-6 list-disc space-y-0.5">
+                                                {children}
+                                              </ul>
+                                            );
+                                          },
+                                          ol({ children }) {
+                                            return (
+                                              <ol className="my-2 pl-6 list-decimal space-y-0.5">
+                                                {children}
+                                              </ol>
+                                            );
+                                          },
+                                          li({ children }) {
+                                            return <li className="leading-6">{children}</li>;
+                                          },
+                                          blockquote({ children }) {
+                                            return (
+                                              <blockquote className="my-2 border-l-[3px] border-stone-300 pl-3 not-italic dark:border-stone-600">
+                                                {children}
+                                              </blockquote>
+                                            );
+                                          },
+                                          pre({ children }) {
+                                            return <>{children}</>;
+                                          },
+                                        }}
+                                      >
+                                        {prepareChatMarkdown(step.text, {
+                                          streaming:
+                                            isActiveLoading &&
+                                            message.id === lastMessage?.id &&
+                                            message.role === 'assistant',
+                                        })}
+                                      </ReactMarkdown>
                                     </div>
                                   );
                                 }
@@ -5708,6 +5775,7 @@ export default function ChatContainer() {
                                 e.stopPropagation();
                                 setReferenceText('');
                                 setReferenceNotesExpanded(false);
+                                setWebSourcesCleared(true);
                                 setSessions((prev) =>
                                   prev.map((s) =>
                                     s.id === activeSessionId
@@ -5721,6 +5789,7 @@ export default function ChatContainer() {
                                   e.stopPropagation();
                                   setReferenceText('');
                                   setReferenceNotesExpanded(false);
+                                  setWebSourcesCleared(true);
                                   setSessions((prev) =>
                                     prev.map((s) =>
                                       s.id === activeSessionId
@@ -5774,15 +5843,16 @@ export default function ChatContainer() {
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={() =>
+                                      onClick={() => {
+                                        setWebSourcesCleared(true);
                                         setSessions((prev) =>
                                           prev.map((s) =>
                                             s.id === activeSessionId
                                               ? { ...s, webSources: undefined }
                                               : s,
                                           ),
-                                        )
-                                      }
+                                        );
+                                      }}
                                       className="text-[10px] text-stone-400 hover:text-red-500"
                                     >
                                       {t('clearWebSources')}

@@ -29,8 +29,11 @@ import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
 import {
   buildPersistedUserMessageContent,
   hasPersistedImageTranscription,
+  imageRefsFromMessageImages,
   injectionBodyFromToolResults,
-  stripPersistedImageTranscription,
+  mergePersistedImageRefs,
+  parseImageArchiveRefs,
+  stripUserMessageArtifactsForDisplay,
 } from '@/lib/image-understand';
 import {
   AttachmentImageThumb,
@@ -567,8 +570,21 @@ function toApiMessages(
       const transcribed = hasPersistedImageTranscription(content || '');
       if (vision) {
         if (transcribed) {
-          // Prefer pixels for native vision; avoid paying for the text injection twice.
-          content = stripPersistedImageTranscription(content || '');
+          const archived = mergePersistedImageRefs(
+            imageRefsFromMessageImages(m.images),
+            parseImageArchiveRefs(content || ''),
+          );
+          if (images.length === 0 && archived.length > 0) {
+            images = archived.map((r) => ({
+              fileId: r.fileId,
+              url: r.fileId
+                ? `/api/files/${encodeURIComponent(r.fileId)}`
+                : r.url || '',
+              name: r.label,
+              prompt: undefined,
+            }));
+          }
+          content = stripUserMessageArtifactsForDisplay(content || '');
           if (!content.trim() && images.length > 0) content = '(image)';
         }
       } else if (transcribed) {
@@ -1930,6 +1946,7 @@ export default function ChatContainer() {
                             userMsg.content,
                             body,
                             imageCount || run.results?.length || 1,
+                            imageRefsFromMessageImages(userMsg.images),
                           ),
                           // Keep thumbnails in UI; API drops images once transcription is present.
                         }
@@ -3704,7 +3721,7 @@ export default function ChatContainer() {
     setEditingMessageId(message.id);
     setEditingMessageContent(
       message.content && message.content !== '(image)'
-        ? stripPersistedImageTranscription(message.content)
+        ? stripUserMessageArtifactsForDisplay(message.content)
         : '',
     );
     setEditingMessageAttachments(messageImagesToIngested(message.images));
@@ -4554,7 +4571,7 @@ export default function ChatContainer() {
                             {(() => {
                               const { quotes, body } = parseQuotedUserMessage(
                                 message.content && message.content !== '(image)'
-                                  ? stripPersistedImageTranscription(message.content)
+                                  ? stripUserMessageArtifactsForDisplay(message.content)
                                   : '',
                               );
                               return (

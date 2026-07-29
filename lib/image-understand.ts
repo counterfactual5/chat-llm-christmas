@@ -276,6 +276,123 @@ function formatInjectionText(description: string, imageCount = 1): string {
 const IMAGE_TRANSCRIPTION_MARKER =
   /以下是(?:\s*\d+\s*张)?图片的?内容（(?:由视觉模型转写|已转写)/;
 
+const IMAGE_ARCHIVE_MARKER = /【原图存档】/;
+
+export type PersistedImageRef = {
+  fileId?: string;
+  url?: string;
+  label?: string;
+};
+
+/** Stable gateway paths for originals — survives text-model transcription rounds. */
+export function formatImageArchiveBlock(refs: PersistedImageRef[]): string {
+  const lines: string[] = [];
+  for (let i = 0; i < refs.length; i++) {
+    const r = refs[i];
+    const fileId = r.fileId ? String(r.fileId).trim() : '';
+    let url = String(r.url || '').trim();
+    if (!fileId && url.startsWith('/api/files/')) {
+      const id = decodeURIComponent(url.slice('/api/files/'.length).split(/[?#]/)[0] || '');
+      if (id) lines.push(`- 图${refs.length > 1 ? i + 1 : ''} /api/files/${id}`.replace('- 图 ', '- '));
+      continue;
+    }
+    if (fileId) {
+      lines.push(
+        refs.length > 1
+          ? `- 图${i + 1} /api/files/${encodeURIComponent(fileId)}`
+          : `- /api/files/${encodeURIComponent(fileId)}`,
+      );
+      continue;
+    }
+    if (url.startsWith('data:')) {
+      lines.push(
+        refs.length > 1
+          ? `- 图${i + 1} (inline image data in session)`
+          : '- (inline image data in session)',
+      );
+      continue;
+    }
+    if (url && !url.startsWith('blob:')) {
+      lines.push(refs.length > 1 ? `- 图${i + 1} ${url}` : `- ${url}`);
+    }
+  }
+  if (!lines.length) return '';
+  return `【原图存档】\n${lines.join('\n')}`;
+}
+
+export function stripImageArchiveBlock(text: string): string {
+  const raw = String(text || '');
+  const idx = raw.search(IMAGE_ARCHIVE_MARKER);
+  if (idx < 0) return raw;
+  return raw.slice(0, idx).trimEnd();
+}
+
+export function parseImageArchiveRefs(text: string): PersistedImageRef[] {
+  const raw = String(text || '');
+  const idx = raw.search(IMAGE_ARCHIVE_MARKER);
+  if (idx < 0) return [];
+  const body = raw.slice(idx).replace(IMAGE_ARCHIVE_MARKER, '').trim();
+  const refs: PersistedImageRef[] = [];
+  for (const line of body.split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('-')) continue;
+    const rest = t.slice(1).trim();
+    const fileMatch = rest.match(/\/api\/files\/([^/\s]+)/);
+    if (fileMatch) {
+      const fileId = decodeURIComponent(fileMatch[1]);
+      refs.push({ fileId, url: `/api/files/${fileId}` });
+      continue;
+    }
+    const urlMatch = rest.match(/(https?:\/\/\S+|data:[^\s]+)/);
+    if (urlMatch) refs.push({ url: urlMatch[1] });
+  }
+  return refs;
+}
+
+export function imageRefsFromMessageImages(
+  images: Array<{ url?: string; fileId?: string; name?: string }> | undefined,
+): PersistedImageRef[] {
+  return (images || [])
+    .map((img, i) => ({
+      fileId: img.fileId ? String(img.fileId) : undefined,
+      url: img.url,
+      label: img.name || (images!.length > 1 ? `图${i + 1}` : undefined),
+    }))
+    .filter((r) => Boolean(r.fileId || (r.url && !String(r.url).startsWith('blob:'))));
+}
+
+export function mergePersistedImageRefs(
+  ...groups: PersistedImageRef[][]
+): PersistedImageRef[] {
+  const out: PersistedImageRef[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const r of group) {
+      const key = r.fileId
+        ? `f:${r.fileId}`
+        : r.url
+          ? `u:${r.url.slice(0, 120)}`
+          : '';
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+export function appendImageArchiveBlock(text: string, refs: PersistedImageRef[]): string {
+  const block = formatImageArchiveBlock(refs);
+  if (!block) return text;
+  const base = stripImageArchiveBlock(text).trimEnd();
+  return `${base}\n\n${block}`;
+}
+
+/** User-visible bubble: hide transcription + archive metadata. */
+export function stripUserMessageArtifactsForDisplay(text: string): string {
+  return stripImageArchiveBlock(stripPersistedImageTranscription(text));
+}
+
 /** User message already contains a persisted vision transcription (multi-turn). */
 export function hasPersistedImageTranscription(text: string): boolean {
   return IMAGE_TRANSCRIPTION_MARKER.test(String(text || ''));
@@ -305,21 +422,22 @@ export function stripPersistedImageTranscription(text: string): string {
   if (idx < 0) return raw;
   return raw.slice(0, idx).trimEnd();
 }
-
 export function buildPersistedUserMessageContent(
   userText: string,
   injectionDescription: string,
   imageCount: number,
+  imageRefs?: PersistedImageRef[],
 ): string {
   const t = dedupePersistedImageTranscription(String(userText || '').trim());
-  if (hasPersistedImageTranscription(t)) return t;
-  const injection = formatInjectionText(injectionDescription, imageCount);
-  if (!t || t === '(image)') return injection;
-  // Description already present without the wrapper — don't wrap twice.
-  if (injectionDescription && t.includes(injectionDescription.trim())) {
-    return t;
+  if (hasPersistedImageTranscription(t)) {
+    return appendImageArchiveBlock(t, imageRefs || parseImageArchiveRefs(t));
   }
-  return `${t}\n\n${injection}`;
+  const injection = formatInjectionText(injectionDescription, imageCount);
+  let out: string;
+  if (!t || t === '(image)') out = injection;
+  else if (injectionDescription && t.includes(injectionDescription.trim())) out = t;
+  else out = `${t}\n\n${injection}`;
+  return appendImageArchiveBlock(out, imageRefs || []);
 }
 
 export function injectionBodyFromToolResults(
@@ -428,15 +546,8 @@ export async function rewriteMessagesWithImageDescriptions(
       continue;
     }
 
-    // Prior turns: never re-call vision — drop binary images, keep text.
-    // (Persisted transcription or the prior assistant reply already carries context.
-    // Re-understanding every historical upload on follow-ups causes timeouts / “interrupted”.)
-    if (mi !== lastUserIdx) {
-      out.push(stripImageUrlParts(msg));
-      continue;
-    }
-
-    // Assistant image parts are not valid chat-completion history.
+    // Assistant image parts are not valid chat-completion history. Every user
+    // turn that still has pixels but no persisted transcription is processed once.
     if (msg.role !== 'user') {
       out.push(stripImageUrlParts(msg));
       continue;
@@ -530,7 +641,13 @@ export async function rewriteMessagesWithImageDescriptions(
       }
     }
 
-    out.push({ ...msg, content: collapseContentParts(rebuilt) });
+    const collapsed = collapseContentParts(rebuilt);
+    const archiveRefs = imageSlots.map((s) => ({ url: s.url }));
+    const withArchive =
+      typeof collapsed === 'string'
+        ? appendImageArchiveBlock(collapsed, archiveRefs)
+        : collapsed;
+    out.push({ ...msg, content: withArchive });
   }
 
   return { messages: out, didUnderstand };

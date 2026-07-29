@@ -29,7 +29,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { hasPersistedImageTranscription, rewriteMessagesWithImageDescriptions, stripPersistedImageTranscription } from '@/lib/image-understand';
+import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/image-understand';
 import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
@@ -430,12 +430,31 @@ export async function POST(req: NextRequest) {
       if (role === 'user' && hasPersistedImageTranscription(text)) {
         const carried = carryAssistantImages ? pendingAssistantImages : [];
         pendingAssistantImages = [];
+        const mergedRefs = mergePersistedImageRefs(
+          imageRefsFromMessageImages(rawImages),
+          parseImageArchiveRefs(text),
+        );
+        let resolvedUploads = images;
+        if (mergedRefs.length > 0) {
+          const fromRefs: ImageRef[] = [];
+          for (const r of mergedRefs) {
+            fromRefs.push(
+              await resolveImageRef({
+                fileId: r.fileId,
+                url: r.fileId
+                  ? `/api/files/${encodeURIComponent(r.fileId)}`
+                  : r.url,
+              }),
+            );
+          }
+          resolvedUploads = fromRefs;
+        }
+        const visibleText =
+          stripImageArchiveBlock(stripPersistedImageTranscription(text)).trim() ||
+          (resolvedUploads.length || carried.length ? '(image)' : text);
         // Vision models should still receive the original pixels even after a
         // text-model turn persisted a transcription into content.
-        if (modelIsVision && (images.length > 0 || carried.length > 0)) {
-          const visibleText =
-            stripPersistedImageTranscription(text).trim() ||
-            (images.length || carried.length ? '(image)' : text);
+        if (modelIsVision && (resolvedUploads.length > 0 || carried.length > 0)) {
           const parts = [
             ...(carried.length
               ? [
@@ -451,7 +470,7 @@ export async function POST(req: NextRequest) {
               : []),
             ...(visibleText ? [{ type: 'text', text: visibleText }] : []),
             ...carried.map((img) => toVisionPart(img)).filter(Boolean),
-            ...images.map((img) => toVisionPart(img)).filter(Boolean),
+            ...resolvedUploads.map((img) => toVisionPart(img)).filter(Boolean),
           ];
           normalizedMessages.push({ role, timestamp, content: parts });
         } else if (carried.length > 0) {

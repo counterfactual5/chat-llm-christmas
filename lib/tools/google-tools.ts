@@ -9,20 +9,28 @@ import {
   driveGetFile,
   driveReadFileText,
   driveSearchFiles,
+  gmailBatchModifyMessages,
   gmailCreateDraft,
+  gmailDeleteDraft,
   gmailGetMessage,
+  gmailGetThread,
+  gmailListDrafts,
   gmailListLabels,
+  gmailListThreads,
+  gmailModifyMessage,
   gmailSearchMessages,
   gmailSendMessage,
+  gmailTrashMessage,
+  gmailUntrashMessage,
 } from '@/lib/integrations/google-rest';
 
 const GOOGLE_SYSTEM_PROMPT = [
   "You have Google MCP (Gmail, Calendar, Drive) for the user's connected Google account.",
   'When the user asks what MCP / integrations / tools you have, list Google MCP alongside any other enabled MCP (e.g. Notion, GitHub) — same category, no special caveat.',
-  'Gmail: search/read messages, create drafts, and send email when the user clearly asks.',
+  'Gmail: search/read messages and threads; list labels; create/list/delete drafts; send email; modify labels (mark read/unread, star, archive); batch-modify many messages; trash/untrash.',
   'Calendar: list calendars/events; create, update, or delete events.',
   'Drive: search files, read text content, and create plain-text files.',
-  'For write actions (send email, create/update/delete event, create file), confirm intent from the user message before calling.',
+  'For write actions (send email, modify/trash, create/update/delete event, create file), confirm intent from the user message before calling.',
   'Do not invent message IDs, event IDs, or file IDs — only use tool results.',
   'Cite Gmail/Drive/Calendar links from tool results when answering.',
 ].join(' ');
@@ -59,11 +67,16 @@ function queryHint(name: string, args: Record<string, unknown>): string {
     'summary',
     'name',
     'messageId',
+    'threadId',
+    'draftId',
     'eventId',
     'fileId',
   ]) {
     const v = args[key];
     if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120);
+  }
+  if (Array.isArray(args.messageIds) && args.messageIds.length) {
+    return `${args.messageIds.length} messages`;
   }
   return name.replace(/_/g, ' ');
 }
@@ -79,6 +92,8 @@ function extractUiResults(
     >;
     const rows =
       (Array.isArray(data.messages) && data.messages) ||
+      (Array.isArray(data.threads) && data.threads) ||
+      (Array.isArray(data.drafts) && data.drafts) ||
       (Array.isArray(data.items) && data.items) ||
       (Array.isArray(data.files) && data.files) ||
       (Array.isArray(data.events) && data.events) ||
@@ -219,6 +234,172 @@ const TOOL_DEFS: GoogleToolDef[] = [
         cc: str(args.cc) || undefined,
         bcc: str(args.bcc) || undefined,
       });
+    },
+  },
+  {
+    name: 'gmail_modify_labels',
+    description:
+      'Add/remove Gmail labels on one message. Use system labels: UNREAD (mark unread=add / mark read=remove), STARRED, INBOX (archive=remove INBOX), IMPORTANT, SPAM, TRASH, or custom label ids from gmail_list_labels.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string' },
+        addLabelIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Label ids to add',
+        },
+        removeLabelIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Label ids to remove (e.g. ["UNREAD"] to mark read)',
+        },
+      },
+      required: ['messageId'],
+    },
+    run: async (token, args) => {
+      const messageId = str(args.messageId);
+      if (!messageId) throw new Error('messageId is required');
+      const addLabelIds = Array.isArray(args.addLabelIds)
+        ? args.addLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      const removeLabelIds = Array.isArray(args.removeLabelIds)
+        ? args.removeLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      if (!addLabelIds.length && !removeLabelIds.length) {
+        throw new Error('addLabelIds or removeLabelIds is required');
+      }
+      return gmailModifyMessage(token, { messageId, addLabelIds, removeLabelIds });
+    },
+  },
+  {
+    name: 'gmail_batch_modify',
+    description:
+      'Batch add/remove labels on many messages (e.g. mark all unread as read). Pass messageIds from gmail_search. removeLabelIds=["UNREAD"] marks read; removeLabelIds=["INBOX"] archives.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        messageIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Up to 1000 Gmail message ids',
+        },
+        addLabelIds: { type: 'array', items: { type: 'string' } },
+        removeLabelIds: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['messageIds'],
+    },
+    run: async (token, args) => {
+      const messageIds = Array.isArray(args.messageIds)
+        ? args.messageIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      if (!messageIds.length) throw new Error('messageIds is required');
+      const addLabelIds = Array.isArray(args.addLabelIds)
+        ? args.addLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      const removeLabelIds = Array.isArray(args.removeLabelIds)
+        ? args.removeLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      if (!addLabelIds.length && !removeLabelIds.length) {
+        throw new Error('addLabelIds or removeLabelIds is required');
+      }
+      return gmailBatchModifyMessages(token, { messageIds, addLabelIds, removeLabelIds });
+    },
+  },
+  {
+    name: 'gmail_trash',
+    description: 'Move a Gmail message to Trash.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { messageId: { type: 'string' } },
+      required: ['messageId'],
+    },
+    run: async (token, args) => {
+      const messageId = str(args.messageId);
+      if (!messageId) throw new Error('messageId is required');
+      return gmailTrashMessage(token, messageId);
+    },
+  },
+  {
+    name: 'gmail_untrash',
+    description: 'Restore a Gmail message from Trash.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { messageId: { type: 'string' } },
+      required: ['messageId'],
+    },
+    run: async (token, args) => {
+      const messageId = str(args.messageId);
+      if (!messageId) throw new Error('messageId is required');
+      return gmailUntrashMessage(token, messageId);
+    },
+  },
+  {
+    name: 'gmail_list_threads',
+    description:
+      'List Gmail conversation threads. Use Gmail search syntax in query (same as gmail_search).',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        maxResults: { type: 'integer', description: '1-50, default 10' },
+        pageToken: { type: 'string' },
+      },
+    },
+    run: async (token, args, fallback) =>
+      gmailListThreads(token, {
+        query: str(args.query) || fallback || undefined,
+        maxResults: num(args.maxResults, 10),
+        pageToken: str(args.pageToken) || undefined,
+      }),
+  },
+  {
+    name: 'gmail_get_thread',
+    description: 'Read a full Gmail thread (all messages) by threadId.',
+    parameters: {
+      type: 'object',
+      properties: { threadId: { type: 'string' } },
+      required: ['threadId'],
+    },
+    run: async (token, args) => {
+      const threadId = str(args.threadId);
+      if (!threadId) throw new Error('threadId is required');
+      return gmailGetThread(token, threadId);
+    },
+  },
+  {
+    name: 'gmail_list_drafts',
+    description: 'List Gmail drafts for the connected account.',
+    parameters: {
+      type: 'object',
+      properties: {
+        maxResults: { type: 'integer' },
+        pageToken: { type: 'string' },
+      },
+    },
+    run: async (token, args) =>
+      gmailListDrafts(token, {
+        maxResults: num(args.maxResults, 10),
+        pageToken: str(args.pageToken) || undefined,
+      }),
+  },
+  {
+    name: 'gmail_delete_draft',
+    description: 'Permanently delete a Gmail draft by draftId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { draftId: { type: 'string' } },
+      required: ['draftId'],
+    },
+    run: async (token, args) => {
+      const draftId = str(args.draftId);
+      if (!draftId) throw new Error('draftId is required');
+      return gmailDeleteDraft(token, draftId);
     },
   },
   {

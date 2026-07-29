@@ -174,7 +174,7 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('google')) {
     lines.push(
-      '- Google MCP: Gmail / Calendar / Drive — search/read mail, manage calendar, Drive files; send mail when the user clearly asks',
+      '- Google MCP: Gmail / Calendar / Drive — search/read mail & threads, labels, drafts, send, mark read/unread / archive / trash (incl. batch), manage calendar, Drive files',
     );
   }
   if (opts.googleRequestedButUnauthorized) {

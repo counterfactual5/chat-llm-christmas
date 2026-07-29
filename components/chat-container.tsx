@@ -4148,7 +4148,7 @@ export default function ChatContainer() {
                             );
                           const isGoogleWrite =
                             isGoogle &&
-                            /create|update|send|delete|draft|modify|upload|write/i.test(
+                            /create|update|send|delete|draft|modify|trash|batch|upload|write/i.test(
                               run.name,
                             );
                           const failed = run.status === 'done' && Boolean(run.error);

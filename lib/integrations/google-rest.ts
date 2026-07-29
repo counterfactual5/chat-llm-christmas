@@ -209,6 +209,183 @@ export async function gmailSendMessage(
   return googleSendJson(`${GMAIL_API}/users/me/messages/send`, accessToken, 'POST', { raw });
 }
 
+function asIdList(raw: unknown, max = 100): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => (typeof x === 'string' ? x.trim() : String(x || '').trim()))
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+/** Add/remove labels on a single message (read/unread, star, archive, custom labels). */
+export async function gmailModifyMessage(
+  accessToken: string,
+  opts: { messageId: string; addLabelIds?: string[]; removeLabelIds?: string[] },
+) {
+  const messageId = encodeURIComponent(opts.messageId);
+  return googleSendJson(`${GMAIL_API}/users/me/messages/${messageId}/modify`, accessToken, 'POST', {
+    addLabelIds: opts.addLabelIds || [],
+    removeLabelIds: opts.removeLabelIds || [],
+  });
+}
+
+/** Batch add/remove labels (e.g. mark many messages read). Max 1000 ids per Gmail API call. */
+export async function gmailBatchModifyMessages(
+  accessToken: string,
+  opts: { messageIds: string[]; addLabelIds?: string[]; removeLabelIds?: string[] },
+) {
+  const ids = asIdList(opts.messageIds, 1000);
+  if (!ids.length) throw new Error('messageIds is required');
+  await googleSendJson(`${GMAIL_API}/users/me/messages/batchModify`, accessToken, 'POST', {
+    ids,
+    addLabelIds: opts.addLabelIds || [],
+    removeLabelIds: opts.removeLabelIds || [],
+  });
+  return { ok: true, modified: ids.length, ids };
+}
+
+export async function gmailTrashMessage(accessToken: string, messageId: string) {
+  return googleSendJson(
+    `${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}/trash`,
+    accessToken,
+    'POST',
+  );
+}
+
+export async function gmailUntrashMessage(accessToken: string, messageId: string) {
+  return googleSendJson(
+    `${GMAIL_API}/users/me/messages/${encodeURIComponent(messageId)}/untrash`,
+    accessToken,
+    'POST',
+  );
+}
+
+export async function gmailListThreads(
+  accessToken: string,
+  opts: { query?: string; maxResults?: number; pageToken?: string },
+) {
+  const params = new URLSearchParams();
+  if (opts.query) params.set('q', opts.query);
+  params.set('maxResults', String(Math.min(Math.max(opts.maxResults || 10, 1), 50)));
+  if (opts.pageToken) params.set('pageToken', opts.pageToken);
+  const list = await googleGetJson(
+    `${GMAIL_API}/users/me/threads?${params.toString()}`,
+    accessToken,
+  );
+  const ids = Array.isArray(list.threads)
+    ? (list.threads as Array<{ id?: string }>).map((t) => t.id).filter(Boolean)
+    : [];
+  const threads = [];
+  for (const id of ids.slice(0, 15)) {
+    const meta = await googleGetJson(
+      `${GMAIL_API}/users/me/threads/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+      accessToken,
+    );
+    const messages = Array.isArray(meta.messages) ? (meta.messages as GoogleRestJson[]) : [];
+    const first = messages[0];
+    const payload = first?.payload as GoogleRestJson | undefined;
+    const headers = (payload?.headers || []) as Array<{ name?: string; value?: string }>;
+    threads.push({
+      id: meta.id,
+      historyId: meta.historyId,
+      snippet: meta.snippet,
+      messageCount: messages.length,
+      from: headerValue(headers, 'From'),
+      to: headerValue(headers, 'To'),
+      subject: headerValue(headers, 'Subject'),
+      date: headerValue(headers, 'Date'),
+      labelIds: first?.labelIds,
+    });
+  }
+  return {
+    resultSizeEstimate: list.resultSizeEstimate,
+    nextPageToken: list.nextPageToken,
+    threads,
+  };
+}
+
+export async function gmailGetThread(accessToken: string, threadId: string) {
+  const thread = await googleGetJson(
+    `${GMAIL_API}/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
+    accessToken,
+  );
+  const messages = Array.isArray(thread.messages) ? (thread.messages as GoogleRestJson[]) : [];
+  return {
+    id: thread.id,
+    historyId: thread.historyId,
+    snippet: thread.snippet,
+    messages: messages.map((msg) => {
+      const payload = msg.payload as GoogleRestJson | undefined;
+      const headers = (payload?.headers || []) as Array<{ name?: string; value?: string }>;
+      const texts: string[] = [];
+      collectTextParts(payload, texts);
+      return {
+        id: msg.id,
+        threadId: msg.threadId,
+        snippet: msg.snippet,
+        labelIds: msg.labelIds,
+        from: headerValue(headers, 'From'),
+        to: headerValue(headers, 'To'),
+        cc: headerValue(headers, 'Cc'),
+        subject: headerValue(headers, 'Subject'),
+        date: headerValue(headers, 'Date'),
+        bodyText: texts.join('\n\n').slice(0, 12_000),
+      };
+    }),
+  };
+}
+
+export async function gmailListDrafts(
+  accessToken: string,
+  opts: { maxResults?: number; pageToken?: string } = {},
+) {
+  const params = new URLSearchParams();
+  params.set('maxResults', String(Math.min(Math.max(opts.maxResults || 10, 1), 50)));
+  if (opts.pageToken) params.set('pageToken', opts.pageToken);
+  const list = await googleGetJson(
+    `${GMAIL_API}/users/me/drafts?${params.toString()}`,
+    accessToken,
+  );
+  const draftsMeta = Array.isArray(list.drafts)
+    ? (list.drafts as Array<{ id?: string; message?: { id?: string } }>)
+    : [];
+  const drafts = [];
+  for (const d of draftsMeta.slice(0, 15)) {
+    const draftId = d.id;
+    if (!draftId) continue;
+    const full = await googleGetJson(
+      `${GMAIL_API}/users/me/drafts/${encodeURIComponent(draftId)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+      accessToken,
+    );
+    const message = full.message as GoogleRestJson | undefined;
+    const payload = message?.payload as GoogleRestJson | undefined;
+    const headers = (payload?.headers || []) as Array<{ name?: string; value?: string }>;
+    drafts.push({
+      id: full.id,
+      messageId: message?.id,
+      snippet: message?.snippet,
+      from: headerValue(headers, 'From'),
+      to: headerValue(headers, 'To'),
+      subject: headerValue(headers, 'Subject'),
+      date: headerValue(headers, 'Date'),
+    });
+  }
+  return {
+    resultSizeEstimate: list.resultSizeEstimate,
+    nextPageToken: list.nextPageToken,
+    drafts,
+  };
+}
+
+export async function gmailDeleteDraft(accessToken: string, draftId: string) {
+  await googleSendJson(
+    `${GMAIL_API}/users/me/drafts/${encodeURIComponent(draftId)}`,
+    accessToken,
+    'DELETE',
+  );
+  return { ok: true, deleted: draftId };
+}
+
 // —— Calendar ——
 
 export async function calendarListCalendars(accessToken: string) {

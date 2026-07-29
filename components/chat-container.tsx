@@ -5302,8 +5302,16 @@ export default function ChatContainer() {
                   ),
                 )}
 
-                {/* Waiting dots only when nothing has streamed yet (no reasoning, no content). */}
-                {isWaitingForFirstToken && !(messages[messages.length - 1]?.reasoning) && (
+                {/* First-token waiting dots: hide once any progress is visible
+                    (reasoning, tools like Image Understand, or content). */}
+                {isWaitingForFirstToken &&
+                  !(
+                    lastMessage?.role === 'assistant' &&
+                    (Boolean(lastMessage.reasoning) ||
+                      Boolean(String(lastMessage.content || '').trim()) ||
+                      (lastMessage.toolRuns?.length || 0) > 0 ||
+                      (lastMessage.activity?.length || 0) > 0)
+                  ) && (
                   <motion.div 
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}

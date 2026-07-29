@@ -3774,6 +3774,18 @@ export default function ChatContainer() {
                           <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">Google</span>
                         </button>
+                        {isAccountBound && (
+                          <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300">
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1 truncate">{t('enableZhipuVisionMcp')}</span>
+                            <Switch
+                              size="sm"
+                              checked={zhipuVisionOn}
+                              onCheckedChange={setZhipuVisionEnabled}
+                              aria-label={t('enableZhipuVisionMcp')}
+                            />
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}

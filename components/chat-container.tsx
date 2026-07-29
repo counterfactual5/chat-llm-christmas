@@ -5113,19 +5113,17 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                                  <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-sm text-stone-800 dark:text-stone-100">
-                                      Google
+                                {!googleStatus?.connected ? (
+                                  <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                    <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-sm text-stone-800 dark:text-stone-100">
+                                        Google
+                                      </div>
+                                      <div className="truncate text-[10px] text-stone-400">
+                                        {t('googleMcpNeedsConnect')}
+                                      </div>
                                     </div>
-                                    <div className="truncate text-[10px] text-stone-400">
-                                      {googleStatus?.connected
-                                        ? t('useInThisChat')
-                                        : t('googleMcpNeedsConnect')}
-                                    </div>
-                                  </div>
-                                  {googleStatus?.connected ? null : (
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -5137,56 +5135,49 @@ export default function ChatContainer() {
                                     >
                                       {t('connectGoogle')}
                                     </button>
-                                  )}
-                                </div>
-                                {googleStatus?.connected ? (
-                                  <>
-                                    {(
-                                      [
-                                        {
-                                          id: 'gmail' as const,
-                                          label: t('enableGmailMcp'),
-                                          hint: t('enableGmailMcpHint'),
-                                          on: gmailMcpOn,
-                                        },
-                                        {
-                                          id: 'calendar' as const,
-                                          label: t('enableCalendarMcp'),
-                                          hint: t('enableCalendarMcpHint'),
-                                          on: calendarMcpOn,
-                                        },
-                                        {
-                                          id: 'drive' as const,
-                                          label: t('enableDriveMcp'),
-                                          hint: t('enableDriveMcpHint'),
-                                          on: driveMcpOn,
-                                        },
-                                      ] as const
-                                    ).map((row) => (
-                                      <div
-                                        key={row.id}
-                                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 pl-8"
-                                      >
-                                        <div className="min-w-0 flex-1">
-                                          <div className="text-sm text-stone-800 dark:text-stone-100">
-                                            {row.label}
-                                          </div>
-                                          <div className="truncate text-[10px] text-stone-400">
-                                            {row.hint}
-                                          </div>
+                                  </div>
+                                ) : (
+                                  [
+                                    {
+                                      id: 'gmail' as const,
+                                      label: t('enableGmailMcp'),
+                                      on: gmailMcpOn,
+                                    },
+                                    {
+                                      id: 'calendar' as const,
+                                      label: t('enableCalendarMcp'),
+                                      on: calendarMcpOn,
+                                    },
+                                    {
+                                      id: 'drive' as const,
+                                      label: t('enableDriveMcp'),
+                                      on: driveMcpOn,
+                                    },
+                                  ].map((row) => (
+                                    <div
+                                      key={row.id}
+                                      className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+                                    >
+                                      <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-sm text-stone-800 dark:text-stone-100">
+                                          {row.label}
                                         </div>
-                                        <Switch
-                                          size="sm"
-                                          checked={row.on}
-                                          onCheckedChange={(enabled) =>
-                                            setGoogleServiceEnabled(row.id, enabled)
-                                          }
-                                          aria-label={row.label}
-                                        />
+                                        <div className="truncate text-[10px] text-stone-400">
+                                          {t('useInThisChat')}
+                                        </div>
                                       </div>
-                                    ))}
-                                  </>
-                                ) : null}
+                                      <Switch
+                                        size="sm"
+                                        checked={row.on}
+                                        onCheckedChange={(enabled) =>
+                                          setGoogleServiceEnabled(row.id, enabled)
+                                        }
+                                        aria-label={row.label}
+                                      />
+                                    </div>
+                                  ))
+                                )}
                               </motion.div>
                               )}
                             </AnimatePresence>

@@ -314,9 +314,51 @@ export function injectionBodyFromToolResults(
   return { body, imageCount: snippets.length };
 }
 
+function collapseContentParts(parts: any[]): any {
+  const collapsed: any[] = [];
+  for (const p of parts) {
+    const last = collapsed[collapsed.length - 1];
+    if (p?.type === 'text' && last?.type === 'text') {
+      last.text = `${last.text}\n\n${p.text}`;
+    } else {
+      collapsed.push(p);
+    }
+  }
+  if (collapsed.length === 1 && collapsed[0]?.type === 'text') {
+    return collapsed[0].text;
+  }
+  return collapsed;
+}
+
+/** Drop image_url parts; keep text (and any other non-image parts). */
+function stripImageUrlParts(msg: any): any {
+  if (!Array.isArray(msg?.content)) return msg;
+  const kept = msg.content.filter((p: any) => p && p.type !== 'image_url');
+  const text = textPartsFromMessageContent(msg.content);
+  if (kept.length === 0) {
+    return { ...msg, content: text || '(image)' };
+  }
+  return { ...msg, content: collapseContentParts(kept) };
+}
+
+function collectImageSlots(content: any[]): Array<{ partIndex: number; url: string; label: string }> {
+  const imageSlots: Array<{ partIndex: number; url: string; label: string }> = [];
+  let imageIndex = 0;
+  for (let i = 0; i < content.length; i++) {
+    const part = content[i];
+    if (!part || part.type !== 'image_url') continue;
+    const url = String(part?.image_url?.url || part?.url || '').trim();
+    if (!url) continue;
+    imageIndex += 1;
+    imageSlots.push({ partIndex: i, url, label: `Image ${imageIndex}` });
+  }
+  return imageSlots;
+}
+
 /**
  * Replace image_url parts with plain-text descriptions from GLM-4.6V.
- * Images in the same message are understood in one batched vision call.
+ * Only the latest user turn is sent to vision; older image_url parts are stripped
+ * (their content should already live in persisted transcription or prior replies).
  */
 export async function rewriteMessagesWithImageDescriptions(
   messages: any[],
@@ -327,10 +369,15 @@ export async function rewriteMessagesWithImageDescriptions(
     userAsk?: string;
   },
 ): Promise<any[]> {
-  const out: any[] = [];
-  let imageIndex = 0;
+  let lastUserIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]?.role === 'user') lastUserIdx = i;
+  }
 
-  for (const msg of messages) {
+  const out: any[] = [];
+
+  for (let mi = 0; mi < messages.length; mi++) {
+    const msg = messages[mi];
     if (msg?.role === 'system' || !Array.isArray(msg?.content)) {
       out.push(msg);
       continue;
@@ -340,23 +387,19 @@ export async function rewriteMessagesWithImageDescriptions(
       textPartsFromMessageContent(msg.content) || String(opts?.userAsk || '').trim();
 
     if (hasPersistedImageTranscription(turnPrompt)) {
-      const textOnly = textPartsFromMessageContent(msg.content);
-      out.push({ ...msg, content: textOnly || turnPrompt });
+      out.push(stripImageUrlParts(msg));
       continue;
     }
 
-    const imageSlots: Array<{ partIndex: number; url: string; label: string }> = [];
-    for (let i = 0; i < msg.content.length; i++) {
-      const part = msg.content[i];
-      if (!part || part.type !== 'image_url') continue;
-      const url = String(part?.image_url?.url || part?.url || '').trim();
-      if (!url) continue;
-      imageIndex += 1;
-      imageSlots.push({ partIndex: i, url, label: `Image ${imageIndex}` });
-    }
-
+    const imageSlots = collectImageSlots(msg.content);
     if (imageSlots.length === 0) {
       out.push(msg);
+      continue;
+    }
+
+    // Prior turns: never re-call 4.6V — drop binary images, keep text.
+    if (mi !== lastUserIdx || msg.role !== 'user') {
+      out.push(stripImageUrlParts(msg));
       continue;
     }
 
@@ -414,7 +457,6 @@ export async function rewriteMessagesWithImageDescriptions(
       imageSlots.length,
     );
 
-    // Keep non-image text parts; replace image slots with one combined injection.
     const rebuilt: any[] = [];
     let injected = false;
     for (let i = 0; i < msg.content.length; i++) {
@@ -428,20 +470,7 @@ export async function rewriteMessagesWithImageDescriptions(
       rebuilt.push(msg.content[i]);
     }
 
-    const collapsed: any[] = [];
-    for (const p of rebuilt) {
-      const last = collapsed[collapsed.length - 1];
-      if (p?.type === 'text' && last?.type === 'text') {
-        last.text = `${last.text}\n\n${p.text}`;
-      } else {
-        collapsed.push(p);
-      }
-    }
-    if (collapsed.length === 1 && collapsed[0]?.type === 'text') {
-      out.push({ ...msg, content: collapsed[0].text });
-    } else {
-      out.push({ ...msg, content: collapsed });
-    }
+    out.push({ ...msg, content: collapseContentParts(rebuilt) });
   }
 
   return out;

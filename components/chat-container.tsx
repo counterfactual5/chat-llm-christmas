@@ -304,6 +304,9 @@ type WebSearchSource = {
   snippet?: string;
   provider?: string;
   query?: string;
+  /** UI-only anchor for uploads already present in a user message. */
+  messageId?: string;
+  kind?: 'image' | 'file';
 };
 
 interface ChatSession {
@@ -422,6 +425,8 @@ function collectUserUploadsFromMessages(messages: Message[]): WebSearchSource[] 
         snippet: '',
         provider: 'upload',
         query: 'upload',
+        messageId: m.id,
+        kind: 'image',
       });
     }
 
@@ -440,6 +445,8 @@ function collectUserUploadsFromMessages(messages: Message[]): WebSearchSource[] 
         snippet: text.slice(0, 400),
         provider: 'upload',
         query: 'upload',
+        messageId: m.id,
+        kind: 'file',
       });
     }
   }
@@ -541,11 +548,18 @@ function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): b
 }
 
 function toApiMessages(messages: Message[]) {
-  return messages.map((m) => ({
-    role: m.role,
-    content: m.content,
-    images:
-      m.role === 'user' && hasPersistedImageTranscription(m.content || '')
+  let lastUserIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'user') lastUserIdx = i;
+  }
+  return messages.map((m, i) => {
+    const dropUserImages =
+      m.role === 'user' &&
+      (hasPersistedImageTranscription(m.content || '') || i !== lastUserIdx);
+    return {
+      role: m.role,
+      content: m.content,
+      images: dropUserImages
         ? []
         : m.images?.map((img) => ({
             url: img.url,
@@ -553,8 +567,9 @@ function toApiMessages(messages: Message[]) {
             prompt: img.prompt,
             name: img.name,
           })) || [],
-    timestamp: m.timestamp as number | undefined,
-  }));
+      timestamp: m.timestamp as number | undefined,
+    };
+  });
 }
 
 function messageImagesToIngested(images: Message['images']): IngestedAttachment[] {
@@ -1147,6 +1162,7 @@ export default function ChatContainer() {
         snippet: a.text?.slice(0, 400) || '',
         provider: 'upload',
         query: 'upload',
+        kind: isImageAttachment(a) ? 'image' : 'file',
       });
     }
     return [...fromThread, ...pending];
@@ -1155,6 +1171,23 @@ export default function ChatContainer() {
     () => referenceSourcesHeading(webSources, t),
     [webSources, t, locale],
   );
+
+  const openUploadReference = (source: WebSearchSource) => {
+    if (source.messageId) {
+      const element = document.getElementById(`message-${source.messageId}`);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      element?.animate(
+        [
+          { backgroundColor: 'transparent' },
+          { backgroundColor: 'rgba(245, 158, 11, 0.14)' },
+          { backgroundColor: 'transparent' },
+        ],
+        { duration: 1200, easing: 'ease-out' },
+      );
+      return;
+    }
+    if (source.kind === 'image' && source.url) setImagePreviewSrc(source.url);
+  };
   const notionMcpOn =
     Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
   const githubMcpOn =
@@ -1940,10 +1973,8 @@ export default function ChatContainer() {
   ) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
     const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
-    const uploadRefs = collectUserUploadsFromMessages(session?.messages || []);
     const combinedReference = [
       String(referenceText || '').trim(),
-      formatWebSourcesForReference(uploadRefs),
       formatWebSourcesForReference(sessionSources),
     ]
       .filter(Boolean)
@@ -2484,7 +2515,6 @@ export default function ChatContainer() {
       [
         referenceText,
         formatWebSourcesForReference(webSources),
-        formatWebSourcesForReference(userUploadReferences),
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -2512,7 +2542,7 @@ export default function ChatContainer() {
       conversation,
       total: system + skillTokens + reference + files + imageTokens + conversation,
     };
-  }, [messages, systemPrompt, referenceText, webSources, userUploadReferences, attachments, activeSkills]);
+  }, [messages, systemPrompt, referenceText, webSources, attachments, activeSkills]);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -4411,7 +4441,11 @@ export default function ChatContainer() {
                       <div className="h-px flex-1 bg-amber-200/80 dark:bg-amber-900/60" />
                     </div>
                   ) : message.role === 'user' ? (
-                    <div key={message.id} className="group flex w-full justify-end">
+                    <div
+                      id={`message-${message.id}`}
+                      key={message.id}
+                      className="group flex w-full scroll-mt-8 justify-end transition-colors"
+                    >
                       <div className="max-w-[82%] sm:max-w-[72%]">
                         {editingMessageId === message.id ? (
                           <div
@@ -6356,40 +6390,36 @@ export default function ChatContainer() {
                                   </div>
                                   <ul className="space-y-1">
                                     {userUploadReferences.map((src) => {
-                                      const isImg =
-                                        Boolean(src.url) &&
-                                        !src.snippet &&
-                                        /\.(png|jpe?g|gif|webp)|\/api\/files\//i.test(src.url);
+                                      const isImg = src.kind === 'image';
                                       return (
-                                        <li
-                                          key={`${src.title}-${src.url}-${src.snippet?.slice(0, 24)}`}
-                                          className="flex items-start gap-2 text-xs"
-                                        >
-                                          {isImg && src.url ? (
-                                            <button
-                                              type="button"
-                                              onClick={() => setImagePreviewSrc(src.url)}
-                                              className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
-                                            >
-                                              <img
-                                                src={src.url}
-                                                alt=""
-                                                className="h-full w-full object-cover"
-                                              />
-                                            </button>
-                                          ) : (
-                                            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
-                                          )}
-                                          <div className="min-w-0 flex-1">
-                                            <div className="truncate font-medium text-stone-700 dark:text-stone-200">
-                                              {src.title}
-                                            </div>
-                                            {src.snippet ? (
-                                              <div className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] leading-4 text-stone-500">
-                                                {src.snippet}
-                                              </div>
-                                            ) : null}
-                                          </div>
+                                        <li key={`${src.messageId || 'pending'}-${src.title}-${src.url}`}>
+                                          <button
+                                            type="button"
+                                            onClick={() => openUploadReference(src)}
+                                            className="flex w-full items-start gap-2 rounded-md px-1.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-100 dark:hover:bg-stone-800/80"
+                                          >
+                                            {isImg && src.url ? (
+                                              <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
+                                                <img
+                                                  src={src.url}
+                                                  alt=""
+                                                  className="h-full w-full object-cover"
+                                                />
+                                              </span>
+                                            ) : (
+                                              <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
+                                            )}
+                                            <span className="min-w-0 flex-1">
+                                              <span className="block truncate font-medium text-stone-700 dark:text-stone-200">
+                                                {src.title}
+                                              </span>
+                                              {src.snippet ? (
+                                                <span className="mt-0.5 block line-clamp-3 whitespace-pre-wrap text-[11px] leading-4 text-stone-500">
+                                                  {src.snippet}
+                                                </span>
+                                              ) : null}
+                                            </span>
+                                          </button>
                                         </li>
                                       );
                                     })}

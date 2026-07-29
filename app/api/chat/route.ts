@@ -376,13 +376,17 @@ export async function POST(req: NextRequest) {
 
     const normalizedMessages: any[] = [];
     /** Generated pics can't ride on assistant turns — attach to the next user turn. */
+    // Vision models: carry assistant-generated images onto the next user turn so
+    // they can re-inspect them. Text-only models must NOT — otherwise Image
+    // Understand (or a non-vision API) would treat /image outputs as new uploads.
     let pendingAssistantImages: ImageRef[] = [];
+    const carryAssistantImages = modelIsVision;
 
     for (const m of messages as any[]) {
       const role = m.role;
       const timestamp = m.timestamp;
       if (Array.isArray(m.content)) {
-        if (pendingAssistantImages.length && role === 'user') {
+        if (carryAssistantImages && pendingAssistantImages.length && role === 'user') {
           const extra = pendingAssistantImages
             .map((img) => toVisionPart(img))
             .filter(Boolean);
@@ -392,6 +396,7 @@ export async function POST(req: NextRequest) {
             : m.content;
           normalizedMessages.push({ role, content, timestamp });
         } else {
+          if (role === 'user') pendingAssistantImages = [];
           normalizedMessages.push({ role, content: m.content, timestamp });
         }
         continue;
@@ -405,7 +410,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (role === 'user' && hasPersistedImageTranscription(text)) {
-        const carried = pendingAssistantImages;
+        const carried = carryAssistantImages ? pendingAssistantImages : [];
         pendingAssistantImages = [];
         if (carried.length > 0) {
           const parts = [
@@ -430,7 +435,9 @@ export async function POST(req: NextRequest) {
       if (role === 'assistant') {
         // OpenAI-compatible assistants reject image_url parts (vision or not).
         if (images.length > 0) {
-          pendingAssistantImages.push(...images);
+          if (carryAssistantImages) {
+            pendingAssistantImages.push(...images);
+          }
           const promptHint = images
             .map((img) => img.prompt)
             .filter((p): p is string => Boolean(p && String(p).trim()));
@@ -448,7 +455,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const carried = pendingAssistantImages;
+      const carried = carryAssistantImages ? pendingAssistantImages : [];
       pendingAssistantImages = [];
       const allImages = [...carried, ...images];
       if (allImages.length === 0) {

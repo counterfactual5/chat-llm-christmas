@@ -493,6 +493,34 @@ function toApiMessages(messages: Message[]) {
   }));
 }
 
+function messageImagesToIngested(images: Message['images']): IngestedAttachment[] {
+  return (images || []).map((img) => {
+    const url = img.url;
+    const isData = url.startsWith('data:');
+    return {
+      id: crypto.randomUUID(),
+      name: img.name || 'image.png',
+      type: 'image/png',
+      size: 0,
+      dataUrl: isData ? url : undefined,
+      previewUrl: url,
+      fileId: img.fileId,
+    };
+  });
+}
+
+function ingestedToMessageImages(items: IngestedAttachment[]): NonNullable<Message['images']> {
+  return items
+    .filter((a) => a.dataUrl || a.fileId || a.previewUrl)
+    .map((a) => ({
+      url: a.fileId
+        ? `/api/files/${encodeURIComponent(a.fileId)}`
+        : a.dataUrl || a.previewUrl!,
+      name: a.name,
+      fileId: a.fileId,
+    }));
+}
+
 type QueuedTask = {
   id: string;
   sessionId: string;
@@ -516,6 +544,7 @@ export default function ChatContainer() {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageContent, setEditingMessageContent] = useState('');
+  const [editingMessageImages, setEditingMessageImages] = useState<IngestedAttachment[]>([]);
   
   // Model & Auth State
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -624,6 +653,7 @@ export default function ChatContainer() {
   const composerImeEnterLockRef = useRef(false);
   const editImeComposingRef = useRef(false);
   const editImeEnterLockRef = useRef(false);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -2079,23 +2109,23 @@ export default function ChatContainer() {
     await fetchModels();
   };
 
-  const addIngestedFiles = async (files: FileList | File[]) => {
+  const applyIngestedFiles = async (
+    files: FileList | File[],
+    append: (placeholders: IngestedAttachment[]) => void,
+    patch: (id: string, updater: (x: IngestedAttachment) => IngestedAttachment) => void,
+  ) => {
     setAttachError('');
     const { attachments: next, errors } = await ingestFiles(files);
 
-    // Show placeholders immediately so the user sees progress while
-    // /api/files is uploading (especially for copied/pasted images).
     const placeholders: IngestedAttachment[] = next.map((a) => ({
       ...a,
       uploading: Boolean(a.dataUrl && isAccountBound),
     }));
 
     if (placeholders.length > 0) {
-      setAttachments((prev) => [...prev, ...placeholders]);
-      setAttachmentsExpanded(true);
+      append(placeholders);
     }
 
-    // Upload in sequence to keep UI updates deterministic.
     for (const a of next) {
       if (!a.dataUrl || !isAccountBound) continue;
 
@@ -2107,28 +2137,51 @@ export default function ChatContainer() {
         });
         const data = await res.json();
         if (res.ok && data?.id) {
-          setAttachments((prev) =>
-            prev.map((x) =>
-              x.id !== a.id
-                ? x
-                : {
-                    ...x,
-                    uploading: false,
-                    fileId: String(data.id),
-                    // Keep local dataUrl as fallback for subsequent turns.
-                    previewUrl: x.previewUrl || String(data.url || ''),
-                  },
-            ),
-          );
+          patch(a.id, (x) => ({
+            ...x,
+            uploading: false,
+            fileId: String(data.id),
+            previewUrl: x.previewUrl || String(data.url || ''),
+          }));
           continue;
         }
       } catch {
         // Fall through to local dataUrl.
       }
 
-      setAttachments((prev) => prev.map((x) => (x.id === a.id ? { ...x, uploading: false } : x)));
+      patch(a.id, (x) => ({ ...x, uploading: false }));
     }
     if (errors.length > 0) setAttachError(errors.join(' · '));
+  };
+
+  const addIngestedFiles = async (files: FileList | File[]) => {
+    await applyIngestedFiles(
+      files,
+      (placeholders) => {
+        setAttachments((prev) => [...prev, ...placeholders]);
+        setAttachmentsExpanded(true);
+      },
+      (id, updater) => setAttachments((prev) => prev.map((x) => (x.id === id ? updater(x) : x))),
+    );
+  };
+
+  const addEditIngestedFiles = async (files: FileList | File[]) => {
+    await applyIngestedFiles(
+      files,
+      (placeholders) => setEditingMessageImages((prev) => [...prev, ...placeholders]),
+      (id, updater) =>
+        setEditingMessageImages((prev) => prev.map((x) => (x.id === id ? updater(x) : x))),
+    );
+  };
+
+  const removeEditingMessageImage = (id: string) => {
+    setEditingMessageImages((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((a) => a.id !== id);
+    });
   };
 
   const removeAttachment = (id: string) => {
@@ -3024,7 +3077,7 @@ export default function ChatContainer() {
     baseMessagesOverride?: Message[],
     force: boolean = false,
     targetSessionId?: string,
-    opts?: { alreadyLoading?: boolean },
+    opts?: { alreadyLoading?: boolean; resendImages?: Message['images'] },
   ): Promise<boolean> => {
     const sessionId = targetSessionId || activeSessionId;
     const textToSend = overrideInput || (sessionId === activeSessionId ? input : '');
@@ -3037,16 +3090,25 @@ export default function ChatContainer() {
       });
     }
 
-    const pendingImages = sessionId === activeSessionId ? attachments.filter((a) => a.dataUrl) : [];
-    const pendingTexts = sessionId === activeSessionId ? attachments.filter((a) => a.text) : [];
+    const pendingImages = opts?.resendImages?.length
+      ? messageImagesToIngested(opts.resendImages)
+      : sessionId === activeSessionId
+        ? attachments.filter((a) => a.dataUrl || a.fileId)
+        : [];
+    const pendingTexts =
+      opts?.resendImages?.length || baseMessagesOverride
+        ? []
+        : sessionId === activeSessionId
+          ? attachments.filter((a) => a.text)
+          : [];
     if (
       (!textToSend.trim() && pendingImages.length === 0 && pendingTexts.length === 0) ||
       (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading)
     ) {
       return false;
     }
-    if (sessionId === activeSessionId && imagesBlockTextModel) {
-      setAttachError(t('imagesNeedVision'));
+    if (pendingImages.length > 0 && !selectedSpec.vision && !zhipuVisionOn) {
+      if (sessionId === activeSessionId) setAttachError(t('imagesNeedVision'));
       return false;
     }
 
@@ -3440,36 +3502,54 @@ export default function ChatContainer() {
   const editUserMessage = (message: Message) => {
     if (isActiveLoading) return;
     setEditingMessageId(message.id);
-    setEditingMessageContent(message.content);
+    setEditingMessageContent(
+      message.content && message.content !== '(image)' ? message.content : '',
+    );
+    setEditingMessageImages(messageImagesToIngested(message.images));
   };
 
   const cancelEditMessage = () => {
+    editingMessageImages.forEach((a) => {
+      if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl);
+    });
     setEditingMessageId(null);
     setEditingMessageContent('');
+    setEditingMessageImages([]);
   };
 
   const saveEditedMessage = async (messageId: string) => {
     const content = editingMessageContent.trim();
-    if (!content || isActiveLoading) return;
+    const resendImages = ingestedToMessageImages(editingMessageImages);
+    if ((!content && resendImages.length === 0) || isActiveLoading) return;
+    if (editingMessageImages.some((a) => a.uploading)) {
+      setAttachError('Wait for image upload to finish');
+      return;
+    }
+    if (resendImages.length > 0 && !selectedSpec.vision && !zhipuVisionOn) {
+      setAttachError(t('imagesNeedVision'));
+      return;
+    }
     const sessionId = activeSessionId;
     const sessionMsgs =
       sessionsRef.current.find((s) => s.id === sessionId)?.messages || messages;
     const index = sessionMsgs.findIndex((message) => message.id === messageId);
     if (index < 0) return;
     const priorMessages = sessionMsgs.slice(0, index);
+    const textToSend = content || (resendImages.length ? '(image)' : '');
+    editingMessageImages.forEach((a) => {
+      if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl);
+    });
     setEditingMessageId(null);
     setEditingMessageContent('');
-
-    // Truncate immediately so sidebar Messages / Context used shrink before resend.
-    updateSession(sessionId, [...priorMessages, { ...sessionMsgs[index], content }]);
+    setEditingMessageImages([]);
 
     if (isActiveLoading) {
       stopGenerating();
       setTimeout(() => {
-        handleSubmit(content, priorMessages, false, sessionId);
+        void handleSubmit(textToSend, priorMessages, false, sessionId, { resendImages });
       }, 50);
     } else {
-      await handleSubmit(content, priorMessages, false, sessionId);
+      await handleSubmit(textToSend, priorMessages, false, sessionId, { resendImages });
     }
   };
 
@@ -3641,6 +3721,21 @@ export default function ChatContainer() {
     if (files.length === 0) return;
     e.preventDefault();
     await addIngestedFiles(files);
+  };
+
+  const onPasteEditFiles = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file && file.type.startsWith('image/')) files.push(file);
+      }
+    }
+    if (files.length === 0) return;
+    e.preventDefault();
+    await addEditIngestedFiles(files);
   };
 
   return (
@@ -4150,11 +4245,49 @@ export default function ChatContainer() {
                     <div key={message.id} className="group flex w-full justify-end">
                       <div className="max-w-[82%] sm:max-w-[72%]">
                         {editingMessageId === message.id ? (
-                          <div className="rounded-2xl border border-stone-300 bg-white p-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 w-full">
+                          <div className="rounded-2xl border border-stone-300 bg-white p-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 w-full min-w-[min(100%,20rem)]">
+                            {editingMessageImages.length > 0 && (
+                              <div className="mb-2 flex flex-wrap gap-2">
+                                {editingMessageImages.map((a) => (
+                                  <div
+                                    key={a.id}
+                                    className="group relative rounded-lg border border-stone-200 dark:border-stone-700"
+                                  >
+                                    <img
+                                      src={a.previewUrl || a.dataUrl}
+                                      alt={a.name}
+                                      className={cn(
+                                        'max-h-32 max-w-full rounded-lg object-contain',
+                                        a.uploading && 'opacity-70',
+                                      )}
+                                    />
+                                    {a.uploading && (
+                                      <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/65 backdrop-blur dark:bg-stone-900/60">
+                                        <Loader2 className="h-5 w-5 animate-spin text-stone-500" />
+                                      </div>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeEditingMessageImage(a.id)}
+                                      className="absolute -right-1.5 -top-1.5 rounded-full border border-stone-200 bg-white p-0.5 text-stone-500 shadow-sm hover:text-red-500 dark:border-stone-600 dark:bg-stone-800"
+                                      title="Remove"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <Textarea
                               value={editingMessageContent}
                               onChange={(event) => setEditingMessageContent(event.target.value)}
                               onKeyDown={(e) => handleEditMessageKeyDown(e, message.id)}
+                              onPaste={onPasteEditFiles}
+                              placeholder={
+                                editingMessageImages.length > 0
+                                  ? 'Add a message or paste more images…'
+                                  : 'Edit message or paste images…'
+                              }
                               {...bindImeGuards(editImeComposingRef, editImeEnterLockRef)}
                               className="min-h-[40px] max-h-[400px] w-full resize-none border-0 bg-transparent p-0 text-[15px] leading-7 focus-visible:ring-0"
                               style={{ height: 'auto' }}
@@ -4165,7 +4298,29 @@ export default function ChatContainer() {
                               }}
                               autoFocus
                             />
-                            <div className="mt-2 flex justify-end gap-2">
+                            <input
+                              ref={editFileInputRef}
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files?.length) {
+                                  void addEditIngestedFiles(e.target.files);
+                                }
+                                e.target.value = '';
+                              }}
+                            />
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => editFileInputRef.current?.click()}
+                                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                              >
+                                <ImageIcon className="h-3.5 w-3.5" />
+                                Add image
+                              </button>
+                              <div className="flex gap-2">
                               <button
                                 type="button"
                                 onClick={cancelEditMessage}
@@ -4176,10 +4331,16 @@ export default function ChatContainer() {
                               <button
                                 type="button"
                                 onClick={() => saveEditedMessage(message.id)}
-                                className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900"
+                                disabled={
+                                  editingMessageImages.some((a) => a.uploading) ||
+                                  (!editingMessageContent.trim() &&
+                                    editingMessageImages.length === 0)
+                                }
+                                className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900"
                               >
                                 Save & resend
                               </button>
+                              </div>
                             </div>
                           </div>
                         ) : (

@@ -306,6 +306,8 @@ interface ChatSession {
   mcpIds?: string[];
   /** Latest web search hits for this chat — shown in Reference Material. */
   webSources?: WebSearchSource[];
+  /** User removed inherited sources; don't re-add them to Material or the next prompt. */
+  webSourcesCleared?: boolean;
 }
 
 function formatWebSourcesForReference(sources: WebSearchSource[]): string {
@@ -1538,8 +1540,10 @@ export default function ChatContainer() {
             messages: newMessages,
             title: title || s.title,
             updatedAt: Date.now(),
-            // Keep Material in sync with history (edit/resend truncates prior tool hits).
-            webSources: collectWebSourcesFromMessages(newMessages),
+            // Preserve a user's explicit source clear across normal message updates.
+            webSources: s.webSourcesCleared
+              ? undefined
+              : collectWebSourcesFromMessages(newMessages),
           };
         });
       }
@@ -1715,6 +1719,8 @@ export default function ChatContainer() {
         const nextSession = { ...s, messages: msgs, updatedAt: Date.now() };
         if (run.status === 'done') {
           nextSession.webSources = collectWebSourcesFromMessages(msgs);
+          // A completed new tool run is an explicit new source set for this chat.
+          nextSession.webSourcesCleared = false;
           if ((nextSession.webSources?.length || 0) > 0) {
             setWebSourcesCleared(false);
             queueMicrotask(() => {
@@ -1749,10 +1755,10 @@ export default function ChatContainer() {
     /** Prefer sources from the truncated thread (edit/resend), not a stale ref. */
     webSourcesOverride?: WebSearchSource[],
   ) => {
-    const sessionSources =
-      webSourcesOverride ??
-      sessionsRef.current.find((s) => s.id === sessionId)?.webSources ??
-      [];
+    const session = sessionsRef.current.find((s) => s.id === sessionId);
+    const sessionSources = session?.webSourcesCleared
+      ? []
+      : webSourcesOverride ?? session?.webSources ?? [];
     const combinedReference = [
       String(referenceText || '').trim(),
       formatWebSourcesForReference(sessionSources),
@@ -3062,7 +3068,9 @@ export default function ChatContainer() {
       const threadReference = estimateTokensFromText(
         [
           String(referenceText || '').trim(),
-          formatWebSourcesForReference(collectWebSourcesFromMessages(history)),
+          sessionsRef.current.find((s) => s.id === sessionId)?.webSourcesCleared
+            ? ''
+            : formatWebSourcesForReference(collectWebSourcesFromMessages(history)), 
         ]
           .filter(Boolean)
           .join('\n\n'),
@@ -3130,7 +3138,9 @@ export default function ChatContainer() {
 
     const controller = new AbortController();
     abortControllersRef.current.set(sessionId, controller);
-    const threadSources = collectWebSourcesFromMessages(newMessages);
+    const threadSources = sessionsRef.current.find((s) => s.id === sessionId)?.webSourcesCleared
+      ? []
+      : collectWebSourcesFromMessages(newMessages);
 
     try {
       await streamChatResponse(
@@ -3774,18 +3784,6 @@ export default function ChatContainer() {
                           <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">Google</span>
                         </button>
-                        {isAccountBound && (
-                          <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300">
-                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1 truncate">{t('enableZhipuVisionMcp')}</span>
-                            <Switch
-                              size="sm"
-                              checked={zhipuVisionOn}
-                              onCheckedChange={setZhipuVisionEnabled}
-                              aria-label={t('enableZhipuVisionMcp')}
-                            />
-                          </div>
-                        )}
                       </div>
                     </motion.div>
                   )}

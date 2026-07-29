@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  hydrateVaultCookies,
   notionMcpOAuthConfigured,
   notionPublicConnected,
   purgeLegacyNotionFromVault,
-  readVault,
+  readVaultDetailed,
   resolveOwnerId,
   writeVaultCookie,
   githubOAuthConfigured,
@@ -22,7 +23,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
-  let vault = await readVault(req, ownerId);
+  const read = await readVaultDetailed(req, ownerId);
+  let vault = read.vault;
   const purged = purgeLegacyNotionFromVault(vault);
   vault = purged.vault;
 
@@ -61,7 +63,11 @@ export async function GET(req: NextRequest) {
   ];
 
   const response = NextResponse.json({ integrations });
-  if (purged.changed) {
+  if (read.fromRemote) {
+    // Restored after a fresh login / new device — seed the cookies so the rest
+    // of this session (chat requests included) skips the remote lookup.
+    await hydrateVaultCookies(response, vault);
+  } else if (purged.changed) {
     await writeVaultCookie(response, vault);
   }
   return response;

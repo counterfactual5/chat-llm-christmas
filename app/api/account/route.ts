@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { clearVaultCookie } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 20;
@@ -60,8 +59,9 @@ export async function POST(req: NextRequest) {
     await validateKey(normalized);
 
     const response = NextResponse.json({ bound: true, username: null });
-    // Switching accounts must drop the previous owner's Notion/GitHub tokens.
-    clearVaultCookie(response);
+    // The vault stays: it is keyed by owner id (hash of the API key), so a
+    // different account can never read it, while re-binding the same key
+    // restores that account's MCP connections without a reconnect.
     clearUsernameCookie(response);
     response.cookies.set({
       name: COOKIE_NAME,
@@ -83,7 +83,9 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   const response = NextResponse.json({ bound: false });
-  clearVaultCookie(response);
+  // Signing out only unbinds the key. Integration tokens stay in the
+  // owner-scoped vault (unreadable without the key) so signing back in keeps
+  // Notion / GitHub / Google connected. Per-provider Disconnect still wipes.
   clearUsernameCookie(response);
   response.cookies.set({
     name: COOKIE_NAME,

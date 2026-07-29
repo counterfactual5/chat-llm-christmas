@@ -4,8 +4,11 @@ export {
 } from '@/lib/integrations/identity';
 export {
   readVault,
+  readVaultDetailed,
   writeVaultCookie,
+  hydrateVaultCookies,
   clearVaultCookie,
+  forgetOwnerIntegrations,
   upsertNotionConnection,
   removeNotionConnection,
   getNotionAccessToken,
@@ -60,6 +63,7 @@ export {
   GOOGLE_MCP_SERVERS,
   googleOAuthScopes,
 } from '@/lib/integrations/google-oauth';
+export { remoteVaultConfigured } from '@/lib/integrations/remote-store';
 export { probeGoogleApis } from '@/lib/integrations/google-rest';
 export {
   GOOGLE_SERVICE_IDS,

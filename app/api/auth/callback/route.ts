@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { clearVaultCookie } from '@/lib/integrations';
 import { usernameFromTokenPayload } from '@/lib/account-profile';
 
 export const runtime = 'edge';
@@ -62,7 +61,8 @@ export async function GET(req: NextRequest) {
     const home = new URL('/', req.url);
     home.searchParams.set('connected', '1');
     const result = NextResponse.redirect(home);
-    clearVaultCookie(result);
+    // Vault survives SSO sign-in: it is owner-scoped, so the same account gets
+    // its MCP connections back and other accounts still can't decrypt them.
     result.cookies.set({
       name: KEY_COOKIE,
       value: apiKey,

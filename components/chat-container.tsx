@@ -5565,7 +5565,7 @@ export default function ChatContainer() {
                                 )}
                                 {softWarn && (
                                   <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                                    Text-only · via Zhipu Vision
+                                    Text-only · via Image Understand
                                   </div>
                                 )}
                               </div>

@@ -45,12 +45,15 @@ const VISION_IDS = new Set([
   'kimi-k2.5',
   'kimi-k2.6',
   'kimi-k2.7',
+  /** Zhipu GLM vision — used by image_understand MCP and direct vision chat. */
+  'glm-4.6v',
 ]);
 
 const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = {
   'deepseek-v4-flash': { context: 1_000_000, maxOutput: 384_000 },
   'deepseek-v4-flash-200k': { context: 200_000, maxOutput: 128_000 },
   'deepseek-v4-pro': { context: 1_000_000, maxOutput: 384_000 },
+  'glm-4.6v': { context: 128_000, maxOutput: 16_384 },
   'glm-4.7': { context: 204_800, maxOutput: 131_072 },
   'glm-5': { context: 204_800, maxOutput: 131_072 },
   'glm-5.1': { context: 200_000, maxOutput: 131_072 },
@@ -105,6 +108,7 @@ function looksVisionByName(id: string): boolean {
   if (/^minimax-m3(-free)?$/.test(normalized)) return true;
   if (/^mistral-(large|medium)-latest$/.test(normalized)) return true;
   if (/^kimi-k(3|2\.(5|6|7))$/.test(normalized)) return true;
+  if (/^glm-4\.6v/.test(normalized)) return true;
   return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter/i.test(normalized);
 }
 
@@ -186,6 +190,11 @@ export function activeIntegrationsPrompt(opts: {
   if (set.has('drive')) {
     lines.push(
       '- Drive MCP: search/list folder children; get/read/export/upload; create file/folder/shortcut; shared drives; copy; rename/move; trash/delete; share/permissions; comments',
+    );
+  }
+  if (set.has('zhipu-vision')) {
+    lines.push(
+      '- Zhipu Vision MCP (image_understand): GLM-4.6V image understanding / OCR; billed to the user account. When the chat model is text-only, the server may already inject image descriptions — use those; call image_understand for a fresh analysis of a specific image URL.',
     );
   }
   // Legacy combined toggle (should already be expanded server-side).

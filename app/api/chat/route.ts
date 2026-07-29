@@ -6,6 +6,7 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   activeIntegrationsPrompt,
   conversationIsolationPrompt,
+  getModelSpec,
   isCursorStyleModel,
 } from '@/lib/model-specs';
 import type { SearchOutcome } from '@/lib/web-search';
@@ -28,6 +29,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
+import { rewriteMessagesWithImageDescriptions } from '@/lib/image-understand';
 import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
@@ -269,6 +271,10 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    // Zhipu Vision MCP: no OAuth — just needs a logged-in CPA account (user key).
+    if (requestedIntegrations.includes('zhipu-vision') && isBoundAccount && boundUserKey) {
+      authorizedIntegrations.push('zhipu-vision');
+    }
     const googleRequestedButUnauthorized =
       wantsGoogleToken(requestedIntegrations) &&
       !enabledGoogleServices(authorizedIntegrations).length;
@@ -448,6 +454,8 @@ export async function POST(req: NextRequest) {
 
 
     const userAsk = lastUserText(normalizedMessages);
+    const modelIsVision = getModelSpec(requestedModel).vision;
+    const zhipuVisionOn = authorizedIntegrations.includes('zhipu-vision');
 
     const workingMessages: any[] = [
       { role: 'system', content: systemParts.join('\n\n---\n\n') },
@@ -470,9 +478,28 @@ export async function POST(req: NextRequest) {
             ...(githubAccessToken ? { githubAccessToken } : {}),
             ...(googleAccessToken ? { googleAccessToken } : {}),
           },
+          gateway: { apiKey, baseURL },
         };
 
         try {
+          // Text-only model + images + zhipu-vision MCP: convert images → text first.
+          if (zhipuVisionOn && !modelIsVision) {
+            const hasImageParts = workingMessages.some(
+              (m) =>
+                Array.isArray(m?.content) &&
+                m.content.some((p: any) => p?.type === 'image_url'),
+            );
+            if (hasImageParts) {
+              const rewritten = await rewriteMessagesWithImageDescriptions(
+                workingMessages,
+                { apiKey, baseURL },
+                { send },
+              );
+              workingMessages.length = 0;
+              workingMessages.push(...rewritten);
+            }
+          }
+
           let usedTools = false;
           const cursorModel = isCursorStyleModel(requestedModel);
           // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.

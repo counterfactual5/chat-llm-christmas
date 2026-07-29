@@ -1023,6 +1023,8 @@ export default function ChatContainer() {
   const gmailMcpOn = googleMcpConnected && activeMcpIds.includes('gmail');
   const calendarMcpOn = googleMcpConnected && activeMcpIds.includes('calendar');
   const driveMcpOn = googleMcpConnected && activeMcpIds.includes('drive');
+  /** Zhipu Vision MCP — no OAuth, just needs a logged-in CPA account. */
+  const zhipuVisionOn = isAccountBound && activeMcpIds.includes('zhipu-vision');
 
   const accountDisplayName =
     accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
@@ -1316,6 +1318,20 @@ export default function ChatContainer() {
       return;
     }
     setActiveMcpIds((prev) => (prev.includes('github') ? prev : [...prev, 'github']));
+  };
+
+  const setZhipuVisionEnabled = (enabled: boolean) => {
+    if (!enabled) {
+      setActiveMcpIds((prev) => prev.filter((id) => id !== 'zhipu-vision'));
+      return;
+    }
+    if (!isAccountBound) {
+      openLoginModal();
+      return;
+    }
+    setActiveMcpIds((prev) =>
+      prev.includes('zhipu-vision') ? prev : [...prev, 'zhipu-vision'],
+    );
   };
 
   const setGoogleServiceEnabled = (
@@ -1753,6 +1769,8 @@ export default function ChatContainer() {
       if (id === 'notion') return notionConnected;
       if (id === 'github') return githubConnected;
       if (id === 'gmail' || id === 'calendar' || id === 'drive') return googleConnected;
+      // No OAuth — server authorizes via bound CPA key.
+      if (id === 'zhipu-vision') return true;
       return false;
     });
 
@@ -2019,6 +2037,7 @@ export default function ChatContainer() {
     setIsAccountBound(false);
     setAccountUsername(null);
     setTempKeyInput('');
+    setActiveMcpIds((prev) => prev.filter((id) => id !== 'zhipu-vision'));
     closeAuthModal();
     setNotionStatus(null);
     setGitHubStatus(null);
@@ -2087,6 +2106,9 @@ export default function ChatContainer() {
     () => sessionHasImages(messages, attachments),
     [messages, attachments],
   );
+  /** Soft-allow text models with images when Zhipu Vision MCP is on. */
+  const imagesBlockTextModel = hasImages && !selectedSpec.vision && !zhipuVisionOn;
+  const imagesPreferVision = hasImages && !selectedSpec.vision && zhipuVisionOn;
 
   // Close model menu on outside click / Escape.
   useEffect(() => {
@@ -2183,16 +2205,27 @@ export default function ChatContainer() {
     return availableModels.filter((m) => m.id.toLowerCase().includes(q));
   }, [availableModels, modelSearchQuery]);
 
-  // When images appear on a text-only model, warn — do not silently jump models.
+  // When images appear on a text-only model:
+  // - Zhipu Vision MCP off → hard block (must switch to vision)
+  // - Zhipu Vision MCP on → soft suggestion (bridge via GLM-4.6V)
   useEffect(() => {
-    if (hasImages && !selectedSpec.vision) {
-      setAttachError('This conversation has images. Pick a Vision model to continue.');
+    if (imagesBlockTextModel) {
+      setAttachError(t('imagesNeedVision'));
+      return;
+    }
+    if (imagesPreferVision) {
+      setAttachError(t('imagesPreferVision'));
       return;
     }
     setAttachError((prev) =>
-      prev === 'This conversation has images. Pick a Vision model to continue.' ? '' : prev,
+      prev === t('imagesNeedVision') ||
+      prev === t('imagesPreferVision') ||
+      prev === 'This conversation has images. Pick a Vision model to continue.' ||
+      prev === 'This conversation has images — switch to a vision-capable model.'
+        ? ''
+        : prev,
     );
-  }, [hasImages, selectedSpec.vision]);
+  }, [imagesBlockTextModel, imagesPreferVision, t, locale]);
 
   // Token estimate aligned with what the server actually sends.
   const contextBreakdown = useMemo(() => {
@@ -2957,8 +2990,8 @@ export default function ChatContainer() {
     ) {
       return false;
     }
-    if (sessionId === activeSessionId && hasImages && !selectedSpec.vision) {
-      setAttachError('This conversation has images — switch to a vision-capable model.');
+    if (sessionId === activeSessionId && imagesBlockTextModel) {
+      setAttachError(t('imagesNeedVision'));
       return false;
     }
 
@@ -4253,6 +4286,9 @@ export default function ChatContainer() {
                             );
                           const isWebRead =
                             run.name === 'web_read' || run.name === 'web-read';
+                          const isImageUnderstand =
+                            run.name === 'image_understand' ||
+                            run.provider === 'zhipu-vision';
                           const failed = run.status === 'done' && Boolean(run.error);
                           const emptyResults =
                             run.status === 'done' &&
@@ -4291,9 +4327,11 @@ export default function ChatContainer() {
                                     ? t('searchingNotion')
                                     : isGitHub
                                       ? t('searchingGitHub')
-                                      : isWebRead
-                                        ? t('readingWeb')
-                                        : t('searchingWeb')
+                                      : isImageUnderstand
+                                        ? t('understandingImage')
+                                        : isWebRead
+                                          ? t('readingWeb')
+                                          : t('searchingWeb')
                               : failed
                                 ? t('searchFailed')
                                 : isNotionWrite
@@ -4304,9 +4342,11 @@ export default function ChatContainer() {
                                       ? t('searchedNotion')
                                       : isGitHub
                                         ? t('searchedGitHub')
-                                        : isWebRead
-                                          ? t('readWeb')
-                                          : t('searchedWeb');
+                                        : isImageUnderstand
+                                          ? t('understoodImage')
+                                          : isWebRead
+                                            ? t('readWeb')
+                                            : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button
@@ -4340,6 +4380,8 @@ export default function ChatContainer() {
                                   <GitHubLogo className="h-3 w-3 shrink-0" />
                                 ) : isGoogle ? (
                                   <GoogleLogo className="h-3 w-3 shrink-0" />
+                                ) : isImageUnderstand ? (
+                                  <ImageIcon className="h-3 w-3 shrink-0 opacity-60" />
                                 ) : (
                                   <Globe className="h-3 w-3 shrink-0 opacity-60" />
                                 )}
@@ -5366,6 +5408,39 @@ export default function ChatContainer() {
                                     )}
                                   </AnimatePresence>
                                 </div>
+                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                  <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-sm text-stone-800 dark:text-stone-100">
+                                      {t('enableZhipuVisionMcp')}
+                                    </div>
+                                    <div className="truncate text-[10px] text-stone-400">
+                                      {isAccountBound
+                                        ? t('zhipuVisionMcpHint')
+                                        : t('zhipuVisionMcpNeedsLogin')}
+                                    </div>
+                                  </div>
+                                  {isAccountBound ? (
+                                    <Switch
+                                      size="sm"
+                                      checked={zhipuVisionOn}
+                                      onCheckedChange={setZhipuVisionEnabled}
+                                      aria-label={t('enableZhipuVisionMcp')}
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsSkillPickerOpen(false);
+                                        setPlusFlyout(null);
+                                        openLoginModal();
+                                      }}
+                                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                    >
+                                      {t('connectAccount')}
+                                    </button>
+                                  )}
+                                </div>
                               </motion.div>
                               )}
                             </AnimatePresence>
@@ -5456,7 +5531,8 @@ export default function ChatContainer() {
                             </div>
                           )}
                           {filteredModels.map(m => {
-                            const blocked = hasImages && !m.vision;
+                            const blocked = hasImages && !m.vision && !zhipuVisionOn;
+                            const softWarn = hasImages && !m.vision && zhipuVisionOn;
                             return (
                             <button
                               key={m.id}
@@ -5474,12 +5550,23 @@ export default function ChatContainer() {
                                   ? "bg-stone-100 text-stone-900 font-medium dark:bg-stone-800 dark:text-stone-100" 
                                   : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
                               )}
-                              title={blocked ? 'Text-only — this conversation has images' : undefined}
+                              title={
+                                blocked
+                                  ? t('imagesNeedVision')
+                                  : softWarn
+                                    ? t('imagesPreferVision')
+                                    : undefined
+                              }
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="truncate">{m.id}</div>
                                 {blocked && (
                                   <div className="text-[10px] text-stone-400">Text-only · needs vision</div>
+                                )}
+                                {softWarn && (
+                                  <div className="text-[10px] text-amber-600 dark:text-amber-400">
+                                    Text-only · via Zhipu Vision
+                                  </div>
                                 )}
                               </div>
                               <span

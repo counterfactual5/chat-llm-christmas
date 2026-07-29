@@ -31,6 +31,11 @@ export type ToolRuntimeContext = {
     githubAccessToken?: string;
     googleAccessToken?: string;
   };
+  /** CPA gateway details so tools can make their own LLM calls. */
+  gateway?: {
+    apiKey: string;
+    baseURL: string;
+  };
 };
 
 export type ToolCallInput = {

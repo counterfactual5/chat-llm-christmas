@@ -17,8 +17,8 @@ import {
 } from '@/lib/integrations/google-rest';
 
 const GOOGLE_SYSTEM_PROMPT = [
-  "You have Google Workspace tools (Gmail, Calendar, Drive) for the user's connected account via Google APIs.",
-  'When the user asks what MCP / integrations / tools you have, include Google Workspace (Gmail, Calendar, Drive) — it is enabled for this chat even though it uses REST APIs rather than Google MCP preview.',
+  "You have Google MCP (Gmail, Calendar, Drive) for the user's connected Google account.",
+  'When the user asks what MCP / integrations / tools you have, list Google MCP alongside any other enabled MCP (e.g. Notion, GitHub) — same category, no special caveat.',
   'Gmail: search/read messages, create drafts, and send email when the user clearly asks.',
   'Calendar: list calendars/events; create, update, or delete events.',
   'Drive: search files, read text content, and create plain-text files.',

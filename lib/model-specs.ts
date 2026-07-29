@@ -151,7 +151,7 @@ export const CURSOR_WEB_CHAT_PROMPT = [
   '得到工具结果后基于结果作答并附上来源链接；若工具失败，如实说明。',
 ].join('');
 
-/** Explicit inventory so models don't omit Google when asked “有哪些 MCP/工具”. */
+/** Explicit inventory so models list Notion/GitHub/Google MCP uniformly when asked. */
 export function activeIntegrationsPrompt(opts: {
   searchEnabled: boolean;
   integrations: string[];
@@ -174,7 +174,7 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('google')) {
     lines.push(
-      '- Google Workspace (Gmail / Calendar / Drive): search/read mail, manage calendar, Drive files; send mail when the user clearly asks. Exposed as chat tools (not the Google MCP preview).',
+      '- Google MCP: Gmail / Calendar / Drive — search/read mail, manage calendar, Drive files; send mail when the user clearly asks',
     );
   }
   if (opts.googleRequestedButUnauthorized) {

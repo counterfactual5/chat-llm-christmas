@@ -50,9 +50,9 @@ const dict = {
     disconnectGoogle: 'Disconnect Google',
     googleConnected: 'Google connected',
     googleNotConfigured: 'Google OAuth is unavailable on this server',
-    googleConnectCardTitle: 'Google Workspace',
+    googleConnectCardTitle: 'Google',
     googleConnectCardBody:
-      'Connect Google to use Gmail, Calendar, and Drive — search, read, compose, and send when you ask.',
+      'Connect via Google MCP to use Gmail, Calendar, and Drive — search, read, compose, and send when you ask.',
     googleMcpNeedsConnect: 'Connect Google in MCP settings first',
     enableGoogleMcp: 'Google',
     searchingGoogle: 'Searching Google…',
@@ -240,9 +240,9 @@ const dict = {
     disconnectGoogle: '断开 Google',
     googleConnected: 'Google 已连接',
     googleNotConfigured: '服务器 Google OAuth 暂不可用',
-    googleConnectCardTitle: 'Google Workspace',
+    googleConnectCardTitle: 'Google',
     googleConnectCardBody:
-      '连接 Google 后可使用 Gmail、日历与云端硬盘：搜索、阅读内容，并在你明确要求时撰写或发送邮件、管理日程。',
+      '通过 Google MCP 连接后可使用 Gmail、日历与云端硬盘：搜索、阅读内容，并在你明确要求时撰写或发送邮件、管理日程。',
     googleMcpNeedsConnect: '请先在 MCP 设置中连接 Google',
     enableGoogleMcp: 'Google',
     searchingGoogle: '正在搜索 Google…',

@@ -4796,9 +4796,16 @@ export default function ChatContainer() {
                                     </div>
                                   )}
                                   {run.status === 'done' && resultCount > 0 && (
-                                    <ul className="space-y-0.5">
+                                    <ul className={cn('space-y-2', !isImageUnderstand && 'space-y-0.5')}>
                                       {(run.results || []).slice(0, 8).map((r) => (
-                                        <li key={r.url || r.title} className={isImageUnderstand ? 'whitespace-pre-wrap break-words' : 'truncate'}>
+                                        <li
+                                          key={r.url || r.title || r.snippet?.slice(0, 40)}
+                                          className={
+                                            isImageUnderstand
+                                              ? 'break-words'
+                                              : 'truncate'
+                                          }
+                                        >
                                           {r.url && !isImageUnderstand ? (
                                             <a
                                               href={r.url}
@@ -4809,12 +4816,71 @@ export default function ChatContainer() {
                                             >
                                               {r.title || r.url}
                                             </a>
+                                          ) : isImageUnderstand ? (
+                                            <div className="chat-markdown text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                                              <ReactMarkdown
+                                                remarkPlugins={[remarkMath, remarkGfm]}
+                                                rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                                                components={{
+                                                  p({ children }) {
+                                                    return (
+                                                      <p className="m-0 whitespace-pre-wrap leading-5">
+                                                        {children}
+                                                      </p>
+                                                    );
+                                                  },
+                                                  h1({ children }) {
+                                                    return (
+                                                      <h3 className="mb-1 mt-2 text-[12px] font-semibold text-stone-600 dark:text-stone-300">
+                                                        {children}
+                                                      </h3>
+                                                    );
+                                                  },
+                                                  h2({ children }) {
+                                                    return (
+                                                      <h3 className="mb-1 mt-2 text-[12px] font-semibold text-stone-600 dark:text-stone-300">
+                                                        {children}
+                                                      </h3>
+                                                    );
+                                                  },
+                                                  h3({ children }) {
+                                                    return (
+                                                      <h3 className="mb-1 mt-2 text-[12px] font-semibold text-stone-600 dark:text-stone-300">
+                                                        {children}
+                                                      </h3>
+                                                    );
+                                                  },
+                                                  ul({ children }) {
+                                                    return (
+                                                      <ul className="my-1 list-disc space-y-0.5 pl-5">
+                                                        {children}
+                                                      </ul>
+                                                    );
+                                                  },
+                                                  ol({ children }) {
+                                                    return (
+                                                      <ol className="my-1 list-decimal space-y-0.5 pl-5">
+                                                        {children}
+                                                      </ol>
+                                                    );
+                                                  },
+                                                  li({ children }) {
+                                                    return <li className="leading-5">{children}</li>;
+                                                  },
+                                                  code({ children }) {
+                                                    return (
+                                                      <code className="rounded bg-stone-200/60 px-1 py-0.5 font-mono text-[11px] dark:bg-stone-800">
+                                                        {children}
+                                                      </code>
+                                                    );
+                                                  },
+                                                }}
+                                              >
+                                                {prepareChatMarkdown(r.snippet || r.title || '')}
+                                              </ReactMarkdown>
+                                            </div>
                                           ) : (
-                                            <span title={r.snippet || r.title}>
-                                              {isImageUnderstand
-                                                ? r.snippet || r.title
-                                                : r.title}
-                                            </span>
+                                            <span title={r.snippet || r.title}>{r.title}</span>
                                           )}
                                         </li>
                                       ))}

@@ -528,6 +528,7 @@ export default function ChatContainer() {
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
+  const [googleMcpMenuOpen, setGoogleMcpMenuOpen] = useState(true);
   const [plusFlyout, setPlusFlyout] = useState<null | 'skills' | 'mcp'>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
@@ -5130,71 +5131,103 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
-                                {!googleStatus?.connected ? (
-                                  <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                                    <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-sm text-stone-800 dark:text-stone-100">
-                                        Google
-                                      </div>
-                                      <div className="truncate text-[10px] text-stone-400">
-                                        {t('googleMcpNeedsConnect')}
-                                      </div>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsSkillPickerOpen(false);
-                                        setPlusFlyout(null);
-                                        openGoogleModal();
-                                      }}
-                                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
-                                    >
-                                      {t('connectGoogle')}
-                                    </button>
+                                <div className="rounded-lg">
+                                  <div className="flex items-center gap-2 px-2.5 py-2">
+                                    {googleStatus?.connected ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setGoogleMcpMenuOpen((v) => !v)}
+                                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                        aria-expanded={googleMcpMenuOpen}
+                                      >
+                                        <ChevronRight
+                                          className={cn(
+                                            'h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform',
+                                            googleMcpMenuOpen && 'rotate-90',
+                                          )}
+                                        />
+                                        <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
+                                            Google
+                                          </div>
+                                          <div className="truncate text-[10px] text-stone-400">
+                                            {t('useInThisChat')}
+                                          </div>
+                                        </div>
+                                      </button>
+                                    ) : (
+                                      <>
+                                        <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="text-sm font-medium text-stone-800 dark:text-stone-100">
+                                            Google
+                                          </div>
+                                          <div className="truncate text-[10px] text-stone-400">
+                                            {t('googleMcpNeedsConnect')}
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setIsSkillPickerOpen(false);
+                                            setPlusFlyout(null);
+                                            openGoogleModal();
+                                          }}
+                                          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                        >
+                                          {t('connectGoogle')}
+                                        </button>
+                                      </>
+                                    )}
                                   </div>
-                                ) : (
-                                  [
-                                    {
-                                      id: 'gmail' as const,
-                                      label: t('enableGmailMcp'),
-                                      on: gmailMcpOn,
-                                    },
-                                    {
-                                      id: 'calendar' as const,
-                                      label: t('enableCalendarMcp'),
-                                      on: calendarMcpOn,
-                                    },
-                                    {
-                                      id: 'drive' as const,
-                                      label: t('enableDriveMcp'),
-                                      on: driveMcpOn,
-                                    },
-                                  ].map((row) => (
-                                    <div
-                                      key={row.id}
-                                      className="flex items-center gap-2 rounded-lg px-2.5 py-2"
-                                    >
-                                      <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
-                                      <div className="min-w-0 flex-1">
-                                        <div className="text-sm text-stone-800 dark:text-stone-100">
-                                          {row.label}
+                                  {googleStatus?.connected && googleMcpMenuOpen && (
+                                    <div className="ml-4 space-y-0.5 border-l border-stone-200 pl-2 dark:border-stone-700">
+                                      {[
+                                        {
+                                          id: 'gmail' as const,
+                                          label: t('enableGmailMcp'),
+                                          hint: t('enableGmailMcpHint'),
+                                          on: gmailMcpOn,
+                                        },
+                                        {
+                                          id: 'calendar' as const,
+                                          label: t('enableCalendarMcp'),
+                                          hint: t('enableCalendarMcpHint'),
+                                          on: calendarMcpOn,
+                                        },
+                                        {
+                                          id: 'drive' as const,
+                                          label: t('enableDriveMcp'),
+                                          hint: t('enableDriveMcpHint'),
+                                          on: driveMcpOn,
+                                        },
+                                      ].map((row) => (
+                                        <div
+                                          key={row.id}
+                                          className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+                                        >
+                                          <div className="min-w-0 flex-1">
+                                            <div className="text-sm text-stone-800 dark:text-stone-100">
+                                              {row.label}
+                                            </div>
+                                            <div className="truncate text-[10px] text-stone-400">
+                                              {row.hint}
+                                            </div>
+                                          </div>
+                                          <Switch
+                                            size="sm"
+                                            checked={row.on}
+                                            onCheckedChange={(enabled) =>
+                                              setGoogleServiceEnabled(row.id, enabled)
+                                            }
+                                            aria-label={row.label}
+                                          />
                                         </div>
-                                        <div className="truncate text-[10px] text-stone-400">
-                                          {t('useInThisChat')}
-                                        </div>
-                                      </div>
-                                      <Switch
-                                        size="sm"
-                                        checked={row.on}
-                                        onCheckedChange={(enabled) =>
-                                          setGoogleServiceEnabled(row.id, enabled)
-                                        }
-                                        aria-label={row.label}
-                                      />
+                                      ))}
                                     </div>
-                                  ))
-                                )}
+                                  )}
+                                </div>
                               </motion.div>
                               )}
                             </AnimatePresence>

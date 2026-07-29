@@ -4032,7 +4032,20 @@ export default function ChatContainer() {
             ) : (
               <div className="space-y-8 pb-20">
                 {messages.map((message) =>
-                  message.role === 'user' ? (
+                  message.compacted ? (
+                    <div
+                      key={message.id}
+                      className="flex w-full items-center gap-3 py-1.5 text-amber-700 dark:text-amber-300"
+                      title={t('compactedTooltip')}
+                    >
+                      <div className="h-px flex-1 bg-amber-200/80 dark:bg-amber-900/60" />
+                      <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider dark:border-amber-900/60 dark:bg-amber-950/40">
+                        <Sparkles className="h-3 w-3" />
+                        {t('compacted')}
+                      </div>
+                      <div className="h-px flex-1 bg-amber-200/80 dark:bg-amber-900/60" />
+                    </div>
+                  ) : message.role === 'user' ? (
                     <div key={message.id} className="group flex w-full justify-end">
                       <div className="max-w-[82%] sm:max-w-[72%]">
                         {editingMessageId === message.id ? (
@@ -4549,15 +4562,6 @@ export default function ChatContainer() {
                           </div>
                         ) : (
                       <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3">
-                        {message.compacted && (
-                          <div
-                            className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
-                            title={t('compactedTooltip')}
-                          >
-                            <Sparkles className="h-3 w-3" />
-                            {t('compacted')}
-                          </div>
-                        )}
                         {message.images && message.images.length > 0 && (
                           <div className="flex flex-wrap gap-2">
                             {message.images.map((img, idx) => (

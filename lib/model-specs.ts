@@ -176,13 +176,13 @@ export function activeIntegrationsPrompt(opts: {
   if (set.has('google')) {
     lines.push('- Google MCP (three parts, like standard Workspace MCP):');
     lines.push(
-      '  • Gmail: search/read mail & threads, labels, drafts, send, mark read/unread / archive / trash (incl. batch)',
+      '  • Gmail: search/read mail & threads, attachments, labels, drafts, send/reply, mark read/unread / archive / trash (incl. batch)',
     );
     lines.push(
       '  • Calendar: list calendars/events, get event, free/busy, create/update/delete/move events',
     );
     lines.push(
-      '  • Drive: search/get/read/export, create file/folder, copy, rename/move, trash/delete',
+      '  • Drive: search/get/read/export, create file/folder, copy, rename/move, trash/delete, share/permissions',
     );
   }
   if (opts.googleRequestedButUnauthorized) {

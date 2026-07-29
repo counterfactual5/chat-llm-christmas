@@ -107,18 +107,45 @@ function buildMimeMessage(opts: {
   body: string;
   cc?: string;
   bcc?: string;
+  inReplyTo?: string;
+  references?: string;
 }): string {
   const lines = [
     `To: ${opts.to}`,
     ...(opts.cc ? [`Cc: ${opts.cc}`] : []),
     ...(opts.bcc ? [`Bcc: ${opts.bcc}`] : []),
     `Subject: ${opts.subject}`,
+    ...(opts.inReplyTo ? [`In-Reply-To: ${opts.inReplyTo}`] : []),
+    ...(opts.references ? [`References: ${opts.references}`] : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',
     '',
     opts.body,
   ];
   return lines.join('\r\n');
+}
+
+function collectAttachments(
+  payload: GoogleRestJson | undefined,
+  out: Array<{ attachmentId: string; filename: string; mimeType: string; size: number }>,
+): void {
+  if (!payload || typeof payload !== 'object') return;
+  const filename = String(payload.filename || '');
+  const body = payload.body as { attachmentId?: string; size?: number } | undefined;
+  if (filename && body?.attachmentId) {
+    out.push({
+      attachmentId: body.attachmentId,
+      filename,
+      mimeType: String(payload.mimeType || 'application/octet-stream'),
+      size: Number(body.size || 0),
+    });
+  }
+  const parts = payload.parts;
+  if (Array.isArray(parts)) {
+    for (const part of parts) {
+      if (part && typeof part === 'object') collectAttachments(part as GoogleRestJson, out);
+    }
+  }
 }
 
 // —— Gmail ——
@@ -177,6 +204,13 @@ export async function gmailGetMessage(accessToken: string, messageId: string) {
   const headers = (payload?.headers || []) as Array<{ name?: string; value?: string }>;
   const texts: string[] = [];
   collectTextParts(payload, texts);
+  const attachments: Array<{
+    attachmentId: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+  }> = [];
+  collectAttachments(payload, attachments);
   return {
     id: msg.id,
     threadId: msg.threadId,
@@ -187,7 +221,43 @@ export async function gmailGetMessage(accessToken: string, messageId: string) {
     cc: headerValue(headers, 'Cc'),
     subject: headerValue(headers, 'Subject'),
     date: headerValue(headers, 'Date'),
+    messageIdHeader: headerValue(headers, 'Message-ID') || headerValue(headers, 'Message-Id'),
     bodyText: texts.join('\n\n').slice(0, 20_000),
+    attachments,
+  };
+}
+
+export async function gmailGetAttachment(
+  accessToken: string,
+  opts: { messageId: string; attachmentId: string },
+) {
+  const messageId = encodeURIComponent(opts.messageId);
+  const attachmentId = encodeURIComponent(opts.attachmentId);
+  const data = await googleGetJson(
+    `${GMAIL_API}/users/me/messages/${messageId}/attachments/${attachmentId}`,
+    accessToken,
+  );
+  const raw = String(data.data || '');
+  const size = Number(data.size || 0);
+  // Prefer decoded text for text-like payloads; otherwise return truncated base64.
+  let textPreview = '';
+  try {
+    textPreview = decodeBase64Url(raw).slice(0, 20_000);
+  } catch {
+    textPreview = '';
+  }
+  const looksBinary = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(textPreview.slice(0, 200));
+  return {
+    messageId: opts.messageId,
+    attachmentId: opts.attachmentId,
+    size,
+    ...(looksBinary
+      ? {
+          encoding: 'base64url',
+          dataPreview: raw.slice(0, 4_000),
+          note: 'Binary attachment; dataPreview is truncated base64url.',
+        }
+      : { encoding: 'utf-8', text: textPreview }),
   };
 }
 
@@ -203,10 +273,81 @@ export async function gmailCreateDraft(
 
 export async function gmailSendMessage(
   accessToken: string,
-  opts: { to: string; subject: string; body: string; cc?: string; bcc?: string },
+  opts: {
+    to: string;
+    subject: string;
+    body: string;
+    cc?: string;
+    bcc?: string;
+    threadId?: string;
+    inReplyTo?: string;
+    references?: string;
+  },
 ) {
-  const raw = encodeBase64Url(buildMimeMessage(opts));
-  return googleSendJson(`${GMAIL_API}/users/me/messages/send`, accessToken, 'POST', { raw });
+  const raw = encodeBase64Url(
+    buildMimeMessage({
+      to: opts.to,
+      subject: opts.subject,
+      body: opts.body,
+      cc: opts.cc,
+      bcc: opts.bcc,
+      inReplyTo: opts.inReplyTo,
+      references: opts.references,
+    }),
+  );
+  const body: GoogleRestJson = { raw };
+  if (opts.threadId) body.threadId = opts.threadId;
+  return googleSendJson(`${GMAIL_API}/users/me/messages/send`, accessToken, 'POST', body);
+}
+
+/** Reply in-thread: loads original headers and sends with In-Reply-To / References. */
+export async function gmailReplyMessage(
+  accessToken: string,
+  opts: {
+    messageId: string;
+    body: string;
+    replyAll?: boolean;
+    to?: string;
+    cc?: string;
+    subject?: string;
+  },
+) {
+  const original = await gmailGetMessage(accessToken, opts.messageId);
+  const from = String(original.from || '');
+  const toHeader = String(original.to || '');
+  const ccHeader = String(original.cc || '');
+  const subjectRaw = String(original.subject || '');
+  const messageIdHeader = String(original.messageIdHeader || '');
+  const subject =
+    opts.subject ||
+    (/^re:\s/i.test(subjectRaw) ? subjectRaw : `Re: ${subjectRaw || '(no subject)'}`);
+
+  let to = opts.to || from;
+  // Prefer the other party: if From is us, fall back to original To.
+  if (!opts.to && from && toHeader && /me|self/i.test(from) === false) {
+    to = from;
+  }
+  let cc = opts.cc;
+  if (opts.replyAll) {
+    const parts = [toHeader, ccHeader]
+      .join(',')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // Keep unique addresses excluding the primary To we're already using.
+    const unique = Array.from(new Set(parts)).filter((addr) => addr !== to);
+    cc = unique.join(', ') || undefined;
+  }
+
+  return gmailSendMessage(accessToken, {
+    to,
+    subject,
+    body: opts.body,
+    cc,
+    threadId: String(original.threadId || '') || undefined,
+    inReplyTo: messageIdHeader || undefined,
+    references: messageIdHeader || undefined,
+  });
 }
 
 function asIdList(raw: unknown, max = 100): string[] {
@@ -763,6 +904,59 @@ export async function driveExportFile(
     webViewLink: meta.webViewLink,
     content: text.slice(0, 40_000),
   };
+}
+
+export async function driveListPermissions(accessToken: string, fileId: string) {
+  const params = new URLSearchParams({
+    fields:
+      'permissions(id,type,role,emailAddress,domain,displayName,photoLink,allowFileDiscovery)',
+    pageSize: '100',
+  });
+  return googleGetJson(
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions?${params.toString()}`,
+    accessToken,
+  );
+}
+
+export async function driveShareFile(
+  accessToken: string,
+  opts: {
+    fileId: string;
+    role: 'reader' | 'commenter' | 'writer' | 'owner';
+    type: 'user' | 'group' | 'domain' | 'anyone';
+    emailAddress?: string;
+    domain?: string;
+    sendNotificationEmail?: boolean;
+  },
+) {
+  const body: GoogleRestJson = {
+    role: opts.role,
+    type: opts.type,
+  };
+  if (opts.emailAddress) body.emailAddress = opts.emailAddress;
+  if (opts.domain) body.domain = opts.domain;
+  const params = new URLSearchParams({
+    fields: 'id,type,role,emailAddress,domain,displayName',
+    sendNotificationEmail: opts.sendNotificationEmail === false ? 'false' : 'true',
+  });
+  return googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/permissions?${params.toString()}`,
+    accessToken,
+    'POST',
+    body,
+  );
+}
+
+export async function driveRevokePermission(
+  accessToken: string,
+  opts: { fileId: string; permissionId: string },
+) {
+  await googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/permissions/${encodeURIComponent(opts.permissionId)}`,
+    accessToken,
+    'DELETE',
+  );
+  return { ok: true, fileId: opts.fileId, permissionId: opts.permissionId };
 }
 
 /** Lightweight connectivity probe used by /api/integrations/google/probe. */

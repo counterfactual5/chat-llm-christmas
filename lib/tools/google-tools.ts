@@ -14,20 +14,25 @@ import {
   driveDeleteFile,
   driveExportFile,
   driveGetFile,
+  driveListPermissions,
   driveReadFileText,
+  driveRevokePermission,
   driveSearchFiles,
+  driveShareFile,
   driveTrashFile,
   driveUntrashFile,
   driveUpdateFile,
   gmailBatchModifyMessages,
   gmailCreateDraft,
   gmailDeleteDraft,
+  gmailGetAttachment,
   gmailGetMessage,
   gmailGetThread,
   gmailListDrafts,
   gmailListLabels,
   gmailListThreads,
   gmailModifyMessage,
+  gmailReplyMessage,
   gmailSearchMessages,
   gmailSendMessage,
   gmailTrashMessage,
@@ -36,11 +41,11 @@ import {
 
 const GOOGLE_SYSTEM_PROMPT = [
   "You have Google MCP for the user's connected Google account, split into three surfaces like standard Google Workspace MCP:",
-  '1) Gmail MCP tools — search/read messages & threads; labels; drafts; send; modify/batch-modify (read/unread, star, archive); trash/untrash.',
+  '1) Gmail MCP tools — search/read messages & threads; attachments; labels; drafts; send; reply; modify/batch-modify (read/unread, star, archive); trash/untrash.',
   '2) Calendar MCP tools — list calendars/events; get event; free/busy; create/update/delete/move events.',
-  '3) Drive MCP tools — search/get/read/export; create text file or folder; copy; rename/move; trash/untrash/delete.',
+  '3) Drive MCP tools — search/get/read/export; create text file or folder; copy; rename/move; trash/untrash/delete; list/share/revoke permissions.',
   'When the user asks what MCP / integrations / tools you have, list Google as these three parts alongside Notion/GitHub if enabled.',
-  'For write actions, confirm intent from the user message before calling.',
+  'For write actions (send/reply, share, trash, delete), confirm intent from the user message before calling.',
   'Do not invent message IDs, event IDs, or file IDs — only use tool results.',
   'Cite Gmail/Drive/Calendar links from tool results when answering.',
 ].join(' ');
@@ -79,8 +84,10 @@ function queryHint(name: string, args: Record<string, unknown>): string {
     'messageId',
     'threadId',
     'draftId',
+    'attachmentId',
     'eventId',
     'fileId',
+    'permissionId',
     'parentId',
     'destinationCalendarId',
   ]) {
@@ -170,7 +177,8 @@ const TOOL_DEFS: GoogleToolDef[] = [
   },
   {
     name: 'gmail_get_message',
-    description: 'Read a Gmail message by id (full text body when available).',
+    description:
+      'Read a Gmail message by id (full text body + attachment metadata when available).',
     parameters: {
       type: 'object',
       properties: {
@@ -246,6 +254,58 @@ const TOOL_DEFS: GoogleToolDef[] = [
         cc: str(args.cc) || undefined,
         bcc: str(args.bcc) || undefined,
       });
+    },
+  },
+  {
+    name: 'gmail_reply',
+    description:
+      'Reply to a Gmail message in the same thread. Uses original Message-ID headers. Set replyAll=true to CC other recipients.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string', description: 'Original Gmail message id to reply to' },
+        body: { type: 'string', description: 'Plain-text reply body' },
+        replyAll: { type: 'boolean' },
+        to: { type: 'string', description: 'Override To (default: original From)' },
+        cc: { type: 'string' },
+        subject: { type: 'string', description: 'Override subject (default Re: …)' },
+      },
+      required: ['messageId', 'body'],
+    },
+    run: async (token, args) => {
+      const messageId = str(args.messageId);
+      const body = str(args.body);
+      if (!messageId || !body) throw new Error('messageId and body are required');
+      return gmailReplyMessage(token, {
+        messageId,
+        body,
+        replyAll: Boolean(args.replyAll),
+        to: str(args.to) || undefined,
+        cc: str(args.cc) || undefined,
+        subject: str(args.subject) || undefined,
+      });
+    },
+  },
+  {
+    name: 'gmail_get_attachment',
+    description:
+      'Download a Gmail attachment by messageId + attachmentId (from gmail_get_message.attachments). Text attachments return utf-8 text; binary returns truncated base64url preview.',
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string' },
+        attachmentId: { type: 'string' },
+      },
+      required: ['messageId', 'attachmentId'],
+    },
+    run: async (token, args) => {
+      const messageId = str(args.messageId);
+      const attachmentId = str(args.attachmentId);
+      if (!messageId || !attachmentId) {
+        throw new Error('messageId and attachmentId are required');
+      }
+      return gmailGetAttachment(token, { messageId, attachmentId });
     },
   },
   {
@@ -836,6 +896,86 @@ const TOOL_DEFS: GoogleToolDef[] = [
         fileId,
         mimeType: str(args.mimeType) || undefined,
       });
+    },
+  },
+  {
+    name: 'drive_list_permissions',
+    description: 'List sharing permissions for a Drive file.',
+    parameters: {
+      type: 'object',
+      properties: { fileId: { type: 'string' } },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveListPermissions(token, fileId);
+    },
+  },
+  {
+    name: 'drive_share',
+    description:
+      'Share a Drive file. type=user|group|domain|anyone; role=reader|commenter|writer. For user/group provide emailAddress.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        role: {
+          type: 'string',
+          description: 'reader | commenter | writer | owner',
+        },
+        type: {
+          type: 'string',
+          description: 'user | group | domain | anyone',
+        },
+        emailAddress: { type: 'string' },
+        domain: { type: 'string' },
+        sendNotificationEmail: { type: 'boolean', description: 'Default true' },
+      },
+      required: ['fileId', 'role', 'type'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      const role = str(args.role) as 'reader' | 'commenter' | 'writer' | 'owner';
+      const type = str(args.type) as 'user' | 'group' | 'domain' | 'anyone';
+      if (!fileId || !role || !type) throw new Error('fileId, role, and type are required');
+      if (!['reader', 'commenter', 'writer', 'owner'].includes(role)) {
+        throw new Error('role must be reader, commenter, writer, or owner');
+      }
+      if (!['user', 'group', 'domain', 'anyone'].includes(type)) {
+        throw new Error('type must be user, group, domain, or anyone');
+      }
+      return driveShareFile(token, {
+        fileId,
+        role,
+        type,
+        emailAddress: str(args.emailAddress) || undefined,
+        domain: str(args.domain) || undefined,
+        sendNotificationEmail:
+          args.sendNotificationEmail === undefined
+            ? undefined
+            : Boolean(args.sendNotificationEmail),
+      });
+    },
+  },
+  {
+    name: 'drive_revoke_permission',
+    description: 'Revoke a Drive sharing permission by permissionId (from drive_list_permissions).',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        permissionId: { type: 'string' },
+      },
+      required: ['fileId', 'permissionId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      const permissionId = str(args.permissionId);
+      if (!fileId || !permissionId) throw new Error('fileId and permissionId are required');
+      return driveRevokePermission(token, { fileId, permissionId });
     },
   },
 ];

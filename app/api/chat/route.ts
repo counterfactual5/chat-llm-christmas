@@ -75,6 +75,14 @@ function modelNeedsThinkingForTools(model: string) {
 }
 
 /**
+ * These models often put the full answer in reasoning_* even when the user-
+ * visible reply should be normal chat text. Fold into content for the UI.
+ */
+function modelDumpsAnswerInReasoning(model: string) {
+  return /glm-4\.7|glm-4\.6(?!v)/i.test(String(model || ''));
+}
+
+/**
  * Raw SSE chat.completions — preserves gateway-only fields like reasoning_content
  * that the OpenAI SDK types omit (runtime usually keeps them, but this is explicit).
  */
@@ -712,24 +720,17 @@ export async function POST(req: NextRequest) {
             authorizedIntegrations.length === 0 &&
             looksLikeSearchRequest(userAsk);
 
-          // Only offer model-callable tools when they are likely needed. Leaving
-          // web_search on for every glm-4.7 turn commonly yields empty streams
-          // (tool protocol + thinking interaction). Image Understand is server-side.
-          const mcpToolNames = new Set(
-            enabledTools
-              .map((t) => t.name)
-              .filter((n) => n !== 'web_search' && n !== 'web_read' && n !== 'image_understand'),
-          );
-          const toolsLikelyNeeded =
-            mcpToolNames.size > 0 ||
-            (searchEnabled && looksLikeSearchRequest(userAsk));
-          const activeToolDefs = toolsLikelyNeeded ? toolDefs : [];
+          // Always hand tools to the model (tool_choice: auto). Image Understand
+          // stays server-side and is not in toolDefs. GLM-4.7 needs thinking on
+          // when tools are present, otherwise the upstream stream is often empty.
+          const activeToolDefs = toolDefs;
           if (activeToolDefs.length > 0 && modelNeedsThinkingForTools(requestedModel)) {
             thinking = true;
           }
-          // Without an explicit thinking request, fold reasoning_* into the visible
-          // answer (glm-4.7 otherwise parks the whole reply in Thought process).
-          const reasoningAsContent = !thinking;
+          // Fold reasoning_* → content when thinking wasn't requested for UI, or
+          // when this model dumps the whole answer into reasoning anyway.
+          const reasoningAsContent =
+            !thinking || modelDumpsAnswerInReasoning(requestedModel);
 
           const injectSearchOutcome = async (outcome: SearchOutcome) => {
             const callId = `proactive_search_${Date.now()}`;

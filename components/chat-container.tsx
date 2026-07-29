@@ -4718,10 +4718,6 @@ export default function ChatContainer() {
                         type ToolStep = Extract<(typeof activitySteps)[number], { kind: 'tool' }>;
 
                         const toolCount = activitySteps.filter((s) => s.kind === 'tool').length;
-                        const anyToolSearching = activitySteps.some((s) => {
-                          if (s.kind !== 'tool') return false;
-                          return toolById.get(s.toolRunId)?.status === 'start';
-                        });
                         // Keep Process live from request start until the first visible
                         // answer token — covers the blank gap before tools and the 1–2s
                         // after Image Understand / search before streaming begins.
@@ -4731,12 +4727,9 @@ export default function ChatContainer() {
                         const processLive = awaitingFirstContent;
                         const showProcessPanel =
                           awaitingFirstContent || activitySteps.length > 0;
-                        // Keep open by default when tools ran — otherwise search UI
-                        // disappears inside a collapsed Process panel after streaming ends.
+                        // Auto-open once real steps exist; empty Process stays a header + spinner.
                         const processOpen =
-                          reasoningOpen[message.id] ?? (processLive || toolCount > 0);
-                        const showGeneratingStep =
-                          processLive && !anyToolSearching && !thinkingOnly;
+                          reasoningOpen[message.id] ?? activitySteps.length > 0;
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;
@@ -5113,16 +5106,6 @@ export default function ChatContainer() {
                                 }
                                 return renderToolStep(step);
                               })}
-                              {showGeneratingStep && (
-                                <div className="flex items-center gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
-                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                                  <span>
-                                    {activitySteps.length === 0
-                                      ? t('thinking')
-                                      : t('generatingReply')}
-                                  </span>
-                                </div>
-                              )}
                             </div>
                           )}
                         </div>

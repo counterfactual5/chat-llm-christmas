@@ -1,21 +1,29 @@
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 import {
+  calendarCreateCalendar,
   calendarCreateEvent,
+  calendarDeleteAcl,
   calendarDeleteEvent,
   calendarFreeBusy,
   calendarGetEvent,
+  calendarInsertAcl,
+  calendarListAcl,
   calendarListCalendars,
   calendarListEventInstances,
   calendarListEvents,
   calendarMoveEvent,
   calendarUpdateEvent,
   driveCopyFile,
+  driveCreateComment,
   driveCreateFolder,
   driveCreateShortcut,
   driveCreateTextFile,
+  driveDeleteComment,
   driveDeleteFile,
   driveExportFile,
   driveGetFile,
+  driveListChildren,
+  driveListComments,
   driveListPermissions,
   driveListSharedDrives,
   driveReadFileText,
@@ -26,6 +34,7 @@ import {
   driveUntrashFile,
   driveUpdateFile,
   driveUploadFile,
+  gmailBatchGetMessages,
   gmailBatchModifyMessages,
   gmailCreateDraft,
   gmailCreateLabel,
@@ -34,6 +43,7 @@ import {
   gmailForwardMessage,
   gmailGetAttachment,
   gmailGetMessage,
+  gmailGetProfile,
   gmailGetThread,
   gmailListDrafts,
   gmailListLabels,
@@ -50,22 +60,22 @@ import {
 
 const GMAIL_SYSTEM_PROMPT = [
   'You have Gmail MCP tools for the user\'s connected Google account.',
-  'Search/read messages & threads; attachments; labels (list/create/update/delete); drafts (create/list/send/delete); send; reply; forward; modify/batch-modify (read/unread, star, archive); trash/untrash.',
+  'Profile; search/read messages (incl. batch get) & threads; attachments; labels CRUD; drafts; send/reply/forward; modify/batch-modify; trash/untrash.',
   'For send/reply/forward/trash/label changes, confirm intent from the user message before calling.',
   'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
 ].join(' ');
 
 const CALENDAR_SYSTEM_PROMPT = [
   'You have Google Calendar MCP tools for the user\'s connected Google account.',
-  'List calendars/events; get event; list recurring instances; free/busy; create/update/delete/move events.',
-  'For create/update/delete/move, confirm intent from the user message before calling.',
+  'List/create calendars; list/get/create/update/delete/move events; recurring instances; free/busy; list/add/remove calendar ACL sharing.',
+  'For create/update/delete/move/ACL, confirm intent from the user message before calling.',
   'Do not invent event IDs — only use tool results. Cite Calendar links when answering.',
 ].join(' ');
 
 const DRIVE_SYSTEM_PROMPT = [
   'You have Google Drive MCP tools for the user\'s connected Google account.',
-  'Search/get/read/export/upload; create text file, folder, or shortcut; list shared drives; copy; rename/move; trash/untrash/delete; list/share/revoke permissions.',
-  'For share/trash/delete/create/upload, confirm intent from the user message before calling.',
+  'Search/get/read/export/upload; list folder children; create text/folder/shortcut; shared drives; copy; rename/move; trash/delete; permissions; comments.',
+  'For share/trash/delete/create/upload/comments, confirm intent from the user message before calling.',
   'Do not invent file IDs — only use tool results. Cite Drive links when answering.',
 ].join(' ');
 
@@ -122,6 +132,8 @@ function queryHint(name: string, args: Record<string, unknown>): string {
     'fileId',
     'permissionId',
     'parentId',
+    'commentId',
+    'ruleId',
     'destinationCalendarId',
   ]) {
     const v = args[key];
@@ -191,6 +203,12 @@ type GoogleToolDef = {
 
 const TOOL_DEFS: GoogleToolDef[] = [
   {
+    name: 'gmail_get_profile',
+    description: 'Get the connected Gmail profile (emailAddress, messagesTotal, threadsTotal, historyId).',
+    parameters: { type: 'object', properties: {} },
+    run: async (token) => gmailGetProfile(token),
+  },
+  {
     name: 'gmail_search',
     description:
       'Search the user Gmail inbox. Use Gmail search syntax in query (e.g. newer_than:7d, from:, subject:).',
@@ -224,6 +242,29 @@ const TOOL_DEFS: GoogleToolDef[] = [
       const messageId = str(args.messageId);
       if (!messageId) throw new Error('messageId is required');
       return gmailGetMessage(token, messageId);
+    },
+  },
+  {
+    name: 'gmail_batch_get',
+    description:
+      'Fetch multiple Gmail messages by id (up to 20). Prefer this over many gmail_get_message calls.',
+    parameters: {
+      type: 'object',
+      properties: {
+        messageIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Gmail message ids (max 20)',
+        },
+      },
+      required: ['messageIds'],
+    },
+    run: async (token, args) => {
+      const messageIds = Array.isArray(args.messageIds)
+        ? args.messageIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      if (!messageIds.length) throw new Error('messageIds is required');
+      return gmailBatchGetMessages(token, messageIds);
     },
   },
   {
@@ -625,6 +666,109 @@ const TOOL_DEFS: GoogleToolDef[] = [
     run: async (token) => calendarListCalendars(token),
   },
   {
+    name: 'calendar_create_calendar',
+    description: 'Create a secondary Google Calendar.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'Calendar title' },
+        description: { type: 'string' },
+        timeZone: { type: 'string' },
+      },
+      required: ['summary'],
+    },
+    run: async (token, args) => {
+      const summary = str(args.summary);
+      if (!summary) throw new Error('summary is required');
+      return calendarCreateCalendar(token, {
+        summary,
+        description: str(args.description) || undefined,
+        timeZone: str(args.timeZone) || undefined,
+      });
+    },
+  },
+  {
+    name: 'calendar_list_acl',
+    description: 'List ACL rules (who can access a calendar).',
+    parameters: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Default primary' },
+      },
+    },
+    run: async (token, args) =>
+      calendarListAcl(token, { calendarId: str(args.calendarId) || undefined }),
+  },
+  {
+    name: 'calendar_insert_acl',
+    description:
+      'Share a calendar. role: none|freeBusyReader|reader|writer|owner. For type=user provide email.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string' },
+        role: { type: 'string' },
+        type: { type: 'string', description: 'user | group | domain | default' },
+        email: { type: 'string' },
+        domain: { type: 'string' },
+      },
+      required: ['role', 'type'],
+    },
+    run: async (token, args) => {
+      const role = str(args.role) as
+        | 'none'
+        | 'freeBusyReader'
+        | 'reader'
+        | 'writer'
+        | 'owner';
+      const scopeType = str(args.type) as 'user' | 'group' | 'domain' | 'default';
+      if (!role || !scopeType) throw new Error('role and type are required');
+      if (!['none', 'freeBusyReader', 'reader', 'writer', 'owner'].includes(role)) {
+        throw new Error('role must be none, freeBusyReader, reader, writer, or owner');
+      }
+      if (!['user', 'group', 'domain', 'default'].includes(scopeType)) {
+        throw new Error('type must be user, group, domain, or default');
+      }
+      const scopeValue =
+        str(args.email) || str(args.domain) || str(args.scopeValue) || undefined;
+      if ((scopeType === 'user' || scopeType === 'group') && !scopeValue) {
+        throw new Error('email is required for type=user|group');
+      }
+      if (scopeType === 'domain' && !scopeValue) {
+        throw new Error('domain is required for type=domain');
+      }
+      return calendarInsertAcl(token, {
+        calendarId: str(args.calendarId) || undefined,
+        role,
+        scopeType,
+        scopeValue,
+      });
+    },
+  },
+  {
+    name: 'calendar_delete_acl',
+    description: 'Remove a calendar ACL rule by ruleId (from calendar_list_acl).',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string' },
+        ruleId: { type: 'string' },
+      },
+      required: ['ruleId'],
+    },
+    run: async (token, args) => {
+      const ruleId = str(args.ruleId);
+      if (!ruleId) throw new Error('ruleId is required');
+      return calendarDeleteAcl(token, {
+        calendarId: str(args.calendarId) || undefined,
+        ruleId,
+      });
+    },
+  },
+  {
     name: 'calendar_list_events',
     description:
       'List upcoming calendar events. Defaults to primary calendar from now. Use ISO timestamps for timeMin/timeMax.',
@@ -862,6 +1006,26 @@ const TOOL_DEFS: GoogleToolDef[] = [
         pageToken: str(args.pageToken) || undefined,
       });
     },
+  },
+  {
+    name: 'drive_list_children',
+    description:
+      'List files/folders directly inside a Drive folder. Defaults to My Drive root.',
+    parameters: {
+      type: 'object',
+      properties: {
+        folderId: { type: 'string', description: 'Folder id; omit for root' },
+        parentId: { type: 'string', description: 'Alias of folderId' },
+        pageSize: { type: 'integer' },
+        pageToken: { type: 'string' },
+      },
+    },
+    run: async (token, args) =>
+      driveListChildren(token, {
+        folderId: str(args.folderId) || str(args.parentId) || undefined,
+        pageSize: num(args.pageSize, 20),
+        pageToken: str(args.pageToken) || undefined,
+      }),
   },
   {
     name: 'drive_get_file',
@@ -1219,6 +1383,66 @@ const TOOL_DEFS: GoogleToolDef[] = [
         content,
         contentBase64,
       });
+    },
+  },
+  {
+    name: 'drive_list_comments',
+    description: 'List comments on a Drive file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        pageSize: { type: 'integer' },
+        pageToken: { type: 'string' },
+      },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveListComments(token, {
+        fileId,
+        pageSize: num(args.pageSize, 20),
+        pageToken: str(args.pageToken) || undefined,
+      });
+    },
+  },
+  {
+    name: 'drive_create_comment',
+    description: 'Add a comment to a Drive file.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        content: { type: 'string' },
+      },
+      required: ['fileId', 'content'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      const content = str(args.content);
+      if (!fileId || !content) throw new Error('fileId and content are required');
+      return driveCreateComment(token, { fileId, content });
+    },
+  },
+  {
+    name: 'drive_delete_comment',
+    description: 'Delete a Drive comment by commentId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        commentId: { type: 'string' },
+      },
+      required: ['fileId', 'commentId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      const commentId = str(args.commentId);
+      if (!fileId || !commentId) throw new Error('fileId and commentId are required');
+      return driveDeleteComment(token, { fileId, commentId });
     },
   },
 ];

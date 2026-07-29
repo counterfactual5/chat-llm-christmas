@@ -888,6 +888,23 @@ export default function ChatContainer() {
               setShowAuthModal(false);
               // Cookie was just set by the OAuth callback — refresh status.
               await fetchIntegrations();
+              // First-time connect: enable all three surfaces on the newest chat
+              // (index 0 after restore). Mount effect may have a stale activeSessionId.
+              setSessions((prev) => {
+                if (!prev.length) return prev;
+                const target = prev[0];
+                const ids = target.mcpIds || [];
+                if (ids.some((id) => isGoogleMcpId(id))) return prev;
+                const nextIds = [
+                  ...ids.filter((id) => id !== 'google'),
+                  'gmail',
+                  'calendar',
+                  'drive',
+                ];
+                return prev.map((s, i) =>
+                  i === 0 ? { ...s, mcpIds: nextIds, updatedAt: Date.now() } : s,
+                );
+              });
             } else {
               setAuthModalMode('login');
               setAccountError(
@@ -4165,7 +4182,7 @@ export default function ChatContainer() {
                             );
                           const isGoogleWrite =
                             isGoogle &&
-                            /create|update|send|reply|forward|delete|draft|modify|trash|batch|move|copy|share|revoke|upload|export|write/i.test(
+                            /create|update|send|reply|forward|delete|draft|modify|trash|batch|move|copy|share|revoke|upload|export|comment|acl|insert|write/i.test(
                               run.name,
                             );
                           const isWebRead =

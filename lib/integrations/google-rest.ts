@@ -150,8 +150,32 @@ function collectAttachments(
 
 // —— Gmail ——
 
+export async function gmailGetProfile(accessToken: string) {
+  return googleGetJson(`${GMAIL_API}/users/me/profile`, accessToken);
+}
+
 export async function gmailListLabels(accessToken: string) {
   return googleGetJson(`${GMAIL_API}/users/me/labels`, accessToken);
+}
+
+/** Fetch several messages by id (metadata + short body). Caps at 20. */
+export async function gmailBatchGetMessages(
+  accessToken: string,
+  messageIds: string[],
+) {
+  const ids = Array.from(
+    new Set(
+      (messageIds || [])
+        .map((x) => String(x || '').trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 20);
+  if (!ids.length) throw new Error('messageIds is required');
+  const messages = [];
+  for (const id of ids) {
+    messages.push(await gmailGetMessage(accessToken, id));
+  }
+  return { count: messages.length, messages };
 }
 
 export async function gmailSearchMessages(
@@ -798,6 +822,64 @@ export async function calendarListEventInstances(
   );
 }
 
+export async function calendarCreateCalendar(
+  accessToken: string,
+  opts: { summary: string; description?: string; timeZone?: string },
+) {
+  return googleSendJson(`${CALENDAR_API}/calendars`, accessToken, 'POST', {
+    summary: opts.summary,
+    description: opts.description,
+    timeZone: opts.timeZone || 'UTC',
+  });
+}
+
+export async function calendarListAcl(
+  accessToken: string,
+  opts: { calendarId?: string } = {},
+) {
+  const calendarId = encodeURIComponent(opts.calendarId || 'primary');
+  return googleGetJson(
+    `${CALENDAR_API}/calendars/${calendarId}/acl?maxResults=100`,
+    accessToken,
+  );
+}
+
+export async function calendarInsertAcl(
+  accessToken: string,
+  opts: {
+    calendarId?: string;
+    role: 'none' | 'freeBusyReader' | 'reader' | 'writer' | 'owner';
+    scopeType: 'default' | 'user' | 'group' | 'domain';
+    scopeValue?: string;
+  },
+) {
+  const calendarId = encodeURIComponent(opts.calendarId || 'primary');
+  const body: GoogleRestJson = {
+    role: opts.role,
+    scope: { type: opts.scopeType },
+  };
+  if (opts.scopeValue) (body.scope as GoogleRestJson).value = opts.scopeValue;
+  return googleSendJson(
+    `${CALENDAR_API}/calendars/${calendarId}/acl`,
+    accessToken,
+    'POST',
+    body,
+  );
+}
+
+export async function calendarDeleteAcl(
+  accessToken: string,
+  opts: { calendarId?: string; ruleId: string },
+) {
+  const calendarId = encodeURIComponent(opts.calendarId || 'primary');
+  await googleSendJson(
+    `${CALENDAR_API}/calendars/${calendarId}/acl/${encodeURIComponent(opts.ruleId)}`,
+    accessToken,
+    'DELETE',
+  );
+  return { ok: true, deleted: opts.ruleId };
+}
+
 // —— Drive ——
 
 export async function driveSearchFiles(
@@ -1158,6 +1240,62 @@ export async function driveUploadFile(
   );
   if (!response.ok) throw new Error(await readError(response));
   return (await response.json()) as GoogleRestJson;
+}
+
+/** List immediate children of a folder (Drive search under parent). Defaults to My Drive root. */
+export async function driveListChildren(
+  accessToken: string,
+  opts: { folderId?: string; pageSize?: number; pageToken?: string } = {},
+) {
+  const folderId = String(opts.folderId || 'root').trim() || 'root';
+  const q = `'${folderId.replace(/'/g, "\\'")}' in parents and trashed=false`;
+  return driveSearchFiles(accessToken, {
+    query: q,
+    pageSize: opts.pageSize,
+    pageToken: opts.pageToken,
+  });
+}
+
+export async function driveListComments(
+  accessToken: string,
+  opts: { fileId: string; pageSize?: number; pageToken?: string },
+) {
+  const params = new URLSearchParams({
+    pageSize: String(Math.min(Math.max(opts.pageSize || 20, 1), 100)),
+    fields:
+      'nextPageToken,comments(id,content,createdTime,modifiedTime,author,resolved,htmlContent,quotedFileContent)',
+  });
+  if (opts.pageToken) params.set('pageToken', opts.pageToken);
+  return googleGetJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/comments?${params.toString()}`,
+    accessToken,
+  );
+}
+
+export async function driveCreateComment(
+  accessToken: string,
+  opts: { fileId: string; content: string },
+) {
+  const content = String(opts.content || '').trim();
+  if (!content) throw new Error('content is required');
+  return googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/comments?fields=id,content,createdTime,author`,
+    accessToken,
+    'POST',
+    { content },
+  );
+}
+
+export async function driveDeleteComment(
+  accessToken: string,
+  opts: { fileId: string; commentId: string },
+) {
+  await googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/comments/${encodeURIComponent(opts.commentId)}`,
+    accessToken,
+    'DELETE',
+  );
+  return { ok: true, deleted: opts.commentId };
 }
 
 /** Lightweight connectivity probe used by /api/integrations/google/probe. */

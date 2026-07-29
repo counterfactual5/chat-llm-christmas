@@ -1540,9 +1540,10 @@ export default function ChatContainer() {
             messages: newMessages,
             title: title || s.title,
             updatedAt: Date.now(),
-            // Preserve a user's explicit source clear across normal message updates.
+            // After an explicit clear, sources become an allowlist populated only
+            // by subsequent tool results, never rebuilt from old history.
             webSources: s.webSourcesCleared
-              ? undefined
+              ? s.webSources
               : collectWebSourcesFromMessages(newMessages),
           };
         });
@@ -1718,11 +1719,24 @@ export default function ChatContainer() {
         });
         const nextSession = { ...s, messages: msgs, updatedAt: Date.now() };
         if (run.status === 'done') {
-          nextSession.webSources = collectWebSourcesFromMessages(msgs);
-          // A completed new tool run is an explicit new source set for this chat.
-          nextSession.webSourcesCleared = false;
+          if (s.webSourcesCleared) {
+            const sourceByUrl = new Map((s.webSources || []).map((source) => [source.url, source]));
+            for (const result of run.results || []) {
+              if (!result.url) continue;
+              sourceByUrl.set(result.url, {
+                title: result.title,
+                url: result.url,
+                snippet: result.snippet,
+                provider: run.provider,
+                query: run.query,
+              });
+            }
+            nextSession.webSources = [...sourceByUrl.values()].slice(-40);
+          } else {
+            nextSession.webSources = collectWebSourcesFromMessages(msgs);
+          }
           if ((nextSession.webSources?.length || 0) > 0) {
-            setWebSourcesCleared(false);
+            if (!s.webSourcesCleared) setWebSourcesCleared(false);
             queueMicrotask(() => {
               setIsContextPanelOpen(true);
               setReferenceExpanded(true);
@@ -1756,9 +1770,7 @@ export default function ChatContainer() {
     webSourcesOverride?: WebSearchSource[],
   ) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
-    const sessionSources = session?.webSourcesCleared
-      ? []
-      : webSourcesOverride ?? session?.webSources ?? [];
+    const sessionSources = webSourcesOverride ?? session?.webSources ?? []; 
     const combinedReference = [
       String(referenceText || '').trim(),
       formatWebSourcesForReference(sessionSources),
@@ -3068,9 +3080,9 @@ export default function ChatContainer() {
       const threadReference = estimateTokensFromText(
         [
           String(referenceText || '').trim(),
-          sessionsRef.current.find((s) => s.id === sessionId)?.webSourcesCleared
-            ? ''
-            : formatWebSourcesForReference(collectWebSourcesFromMessages(history)),
+          formatWebSourcesForReference(
+            sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
+          ),
         ]
           .filter(Boolean)
           .join('\n\n'),
@@ -3138,9 +3150,7 @@ export default function ChatContainer() {
 
     const controller = new AbortController();
     abortControllersRef.current.set(sessionId, controller);
-    const threadSources = sessionsRef.current.find((s) => s.id === sessionId)?.webSourcesCleared
-      ? []
-      : collectWebSourcesFromMessages(newMessages);
+    const threadSources = sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [];
 
     try {
       await streamChatResponse(

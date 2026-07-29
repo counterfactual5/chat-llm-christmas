@@ -2237,12 +2237,7 @@ export default function ChatContainer() {
             appendToAssistantReasoning(sessionId, assistantId, parsed.reasoning);
           }
           if (parsed.tool) {
-            // Image Understand is preprocessing — keep the waiting dots until the
-            // chat model starts streaming the actual reply.
-            const isImageUnderstand =
-              String(parsed.tool.name || '') === 'image_understand' ||
-              String(parsed.tool.provider || '') === 'zhipu-vision';
-            if (!isImageUnderstand) clearWaiting(sessionId);
+            clearWaiting(sessionId);
             upsertAssistantToolRun(sessionId, assistantId, {
               name: String(parsed.tool.name || 'web_search'),
               status: parsed.tool.status === 'done' ? 'done' : 'start',

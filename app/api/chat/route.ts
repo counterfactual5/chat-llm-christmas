@@ -161,6 +161,16 @@ function withMessageTimestamps(messages: any[]): any[] {
  * OpenAI-compatible gateways (incl. some GLM routes) reject unknown message
  * fields like `timestamp` / `images`. Keep only chat-completion schema keys.
  */
+function lastUserMessageHasImageParts(messages: any[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role !== 'user') continue;
+    if (!Array.isArray(m?.content)) return false;
+    return m.content.some((p: any) => p?.type === 'image_url');
+  }
+  return false;
+}
+
 function sanitizeChatMessages(messages: any[]): any[] {
   return messages.map((m) => {
     const role = m?.role;
@@ -586,12 +596,7 @@ export async function POST(req: NextRequest) {
           // Text-only model + images + zhipu-vision MCP: convert images → text first.
           // Vision models skip this — they receive image_url parts directly.
           if (zhipuVisionOn && !modelIsVision) {
-            const hasImageParts = workingMessages.some(
-              (m) =>
-                Array.isArray(m?.content) &&
-                m.content.some((p: any) => p?.type === 'image_url'),
-            );
-            if (hasImageParts) {
+            if (lastUserMessageHasImageParts(workingMessages)) {
               const { messages: rewritten } =
                 await rewriteMessagesWithImageDescriptions(
                   workingMessages,
@@ -790,8 +795,10 @@ export async function POST(req: NextRequest) {
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
-                // Content was already streamed to the client; just close.
-                if (streamedContent || streamedReasoning) {
+                // Only end here when the model already streamed a user-visible answer.
+                // Reasoning-only chunks (common on GLM with tools enabled) must fall
+                // through to the final completion pass — otherwise the bubble stays empty.
+                if (streamedContent.trim()) {
                   send(streamCompletionPayload(roundFinishReason || 'stop'));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   controller.close();
@@ -862,8 +869,10 @@ export async function POST(req: NextRequest) {
           } as any);
 
           let sawText = false;
+          let sawContent = false;
           let lastFinishReason: string | null = null;
           const stampStripper = createStampLeakStripper();
+          let reasoningOnlyBuf = '';
           for await (const chunk of final as any) {
             const choice = chunk?.choices?.[0];
             const delta = choice?.delta || {};
@@ -899,8 +908,14 @@ export async function POST(req: NextRequest) {
               if (rest) content = (content || '') + rest;
             }
 
-            if (content) sawText = true;
-            if (reasoning) sawText = true;
+            if (content) {
+              sawText = true;
+              sawContent = true;
+            }
+            if (reasoning) {
+              sawText = true;
+              reasoningOnlyBuf += reasoning;
+            }
             // Defer finish_reason / truncated to the completion event below so the
             // client has one authoritative end-of-turn signal.
             if (content || reasoning) {
@@ -914,8 +929,15 @@ export async function POST(req: NextRequest) {
             const rest = stampStripper.flush();
             if (rest) {
               sawText = true;
+              sawContent = true;
               send({ content: rest });
             }
+          }
+
+          // Some gateways (e.g. GLM) stream the whole answer in reasoning fields only.
+          if (!sawContent && reasoningOnlyBuf.trim()) {
+            sawText = true;
+            send({ content: reasoningOnlyBuf });
           }
 
           if (!sawText) {

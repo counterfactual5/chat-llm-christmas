@@ -27,26 +27,78 @@ function jinaApiKey(): string | undefined {
   return process.env.JINA_API_KEY?.trim() || undefined;
 }
 
+const MIN_EXTRACT_CHARS = 40;
+const BROWSER_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const BARE_FETCH_TIMEOUT_MS = 15_000;
+const PROVIDER_FETCH_TIMEOUT_MS = 25_000;
+/** Cap HTML body read so one huge page cannot OOM the Edge isolate. */
+const MAX_FETCH_BYTES = 2_500_000;
+
+function codePointToChar(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '';
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return '';
+  }
+}
+
+function isBlockedHostname(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '0.0.0.0') return true;
+  if (host === '::1' || host === '[::1]') return true;
+  if (host === 'metadata.google.internal') return true;
+
+  // IPv4 literal (including decimal / short forms normalized by URL)
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const parts = ipv4.slice(1).map((p) => Number(p));
+    if (parts.some((n) => n > 255)) return true;
+    const [a, b] = parts;
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 127) return true; // loopback
+    if (a === 0) return true;
+    if (a === 169 && b === 254) return true; // link-local / cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+    return false;
+  }
+
+  // IPv6 literals arrive without brackets from URL.hostname
+  if (host.includes(':')) {
+    if (host === '::1') return true;
+    if (host.startsWith('fc') || host.startsWith('fd')) return true; // ULA
+    if (host.startsWith('fe80')) return true; // link-local
+    // IPv4-mapped IPv6 ::ffff:x.x.x.x
+    const mapped = host.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
+    if (mapped) return isBlockedHostname(mapped[1]);
+  }
+
+  return false;
+}
+
 function normalizeUrl(raw: string): string | null {
   const s = String(raw || '').trim();
   if (!s) return null;
   try {
     const u = new URL(s);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (isBlockedHostname(u.hostname)) return null;
     return u.toString();
   } catch {
     try {
       const u = new URL(`https://${s}`);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      if (isBlockedHostname(u.hostname)) return null;
       return u.toString();
     } catch {
       return null;
     }
   }
 }
-
-const MIN_EXTRACT_CHARS = 40;
-const BROWSER_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 function truncateContent(text: string): string {
   const t = String(text || '').trim();
@@ -63,14 +115,55 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
     .replace(/&apos;/gi, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
-      const code = Number.parseInt(hex, 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
-    })
-    .replace(/&#(\d+);/g, (_, dec: string) => {
-      const code = Number.parseInt(dec, 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
-    });
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      codePointToChar(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, dec: string) =>
+      codePointToChar(Number.parseInt(dec, 10)),
+    );
+}
+
+function isTimeoutError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const name = String((err as { name?: string }).name || '');
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
+async function readResponseTextLimited(
+  res: Response,
+  maxBytes = MAX_FETCH_BYTES,
+): Promise<string> {
+  const declared = Number(res.headers.get('content-length') || '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`Response too large (${declared} bytes)`);
+  }
+  if (!res.body) return res.text();
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore
+      }
+      throw new Error(`Response too large (>${maxBytes} bytes)`);
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: false }).decode(merged);
 }
 
 function metaContent(html: string, property: string): string | undefined {
@@ -398,22 +491,64 @@ function extractJsonLdBlocks(html: string): unknown[] {
 
 function extractInlineStateJson(html: string): unknown[] {
   const blocks: unknown[] = [];
-  const patterns = [
-    /window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/i,
-    /window\.__NUXT__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/i,
-    /window\.__PRELOADED_STATE__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/i,
-    /window\.__APOLLO_STATE__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/i,
+  const markers = [
+    'window.__INITIAL_STATE__',
+    'window.__NUXT__',
+    'window.__PRELOADED_STATE__',
+    'window.__APOLLO_STATE__',
   ];
   // Note: __NEXT_DATA__ is a <script id="__NEXT_DATA__" type="application/json">
-  // whose body IS the JSON (no "window.__NEXT_DATA__ = " prefix) — handled
-  // separately via extractScriptJsonById, not this window-assignment pattern list.
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (!m?.[1]) continue;
-    const parsed = parseJsonLenient(m[1]);
-    if (parsed != null) blocks.push(parsed);
+  // whose body IS the JSON — handled via extractScriptJsonById, not here.
+  for (const marker of markers) {
+    let from = 0;
+    while (from < html.length) {
+      const idx = html.indexOf(marker, from);
+      if (idx < 0) break;
+      from = idx + marker.length;
+      const eq = html.indexOf('=', from);
+      if (eq < 0 || eq - from > 24) continue;
+      const json = extractBalancedJsonObject(html, eq + 1);
+      if (!json) continue;
+      const parsed = parseJsonLenient(json);
+      if (parsed != null) blocks.push(parsed);
+      break; // one blob per marker is enough
+    }
   }
   return blocks;
+}
+
+/** Extract a JSON object starting at/after `fromIndex`, respecting nested braces and strings. */
+function extractBalancedJsonObject(source: string, fromIndex: number): string | null {
+  const start = source.indexOf('{', fromIndex);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 function textFromJsonLd(blocks: unknown[]): { title?: string; description?: string; content: string } {
@@ -579,31 +714,55 @@ async function readZhipu(url: string): Promise<WebReadOutcome> {
   const key = zhipuApiKey();
   if (!key) throw new Error('ZHIPU_API_KEY missing');
 
-  const res = await fetch('https://open.bigmodel.cn/api/paas/v4/reader', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      url,
-      timeout: 20,
-      return_format: 'markdown',
-      retain_images: false,
-      with_links_summary: false,
-    }),
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetch('https://open.bigmodel.cn/api/paas/v4/reader', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url,
+        timeout: 20,
+        return_format: 'markdown',
+        retain_images: false,
+        with_links_summary: false,
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS),
+    });
+  } catch (err: unknown) {
+    if (isTimeoutError(err)) {
+      throw new Error(`Zhipu reader timed out after ${PROVIDER_FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
 
-  const data = (await res.json().catch(() => ({}))) as {
-    reader_result?: {
-      content?: string;
-      description?: string;
-      title?: string;
-      url?: string;
-    };
-    error?: { code?: string; message?: string };
-  };
+  const raw = await readResponseTextLimited(res, 1_500_000);
+  const data = (() => {
+    try {
+      return JSON.parse(raw) as {
+        reader_result?: {
+          content?: string;
+          description?: string;
+          title?: string;
+          url?: string;
+        };
+        error?: { code?: string; message?: string };
+      };
+    } catch {
+      return {} as {
+        reader_result?: {
+          content?: string;
+          description?: string;
+          title?: string;
+          url?: string;
+        };
+        error?: { code?: string; message?: string };
+      };
+    }
+  })();
 
   if (!res.ok) {
     throw new Error(
@@ -640,9 +799,22 @@ async function readJina(url: string): Promise<WebReadOutcome> {
     Authorization: `Bearer ${key}`,
   };
 
-  const res = await fetch(endpoint, { headers, cache: 'no-store' });
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS),
+    });
+  } catch (err: unknown) {
+    if (isTimeoutError(err)) {
+      throw new Error(`Jina reader timed out after ${PROVIDER_FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
+
   const contentType = res.headers.get('content-type') || '';
-  const raw = await res.text();
+  const raw = await readResponseTextLimited(res, 1_500_000);
 
   if (!res.ok) {
     let message = `Jina reader HTTP ${res.status}`;
@@ -680,8 +852,6 @@ async function readJina(url: string): Promise<WebReadOutcome> {
   return { provider: 'jina', url, content };
 }
 
-const BARE_FETCH_TIMEOUT_MS = 15_000;
-
 /** Last resort: plain HTTP GET + structured HTML extract (no JS rendering). */
 async function readBareFetch(url: string): Promise<WebReadOutcome> {
   let res: Response;
@@ -697,20 +867,31 @@ async function readBareFetch(url: string): Promise<WebReadOutcome> {
       signal: AbortSignal.timeout(BARE_FETCH_TIMEOUT_MS),
     });
   } catch (err: unknown) {
-    if (err instanceof Error && err.name === 'TimeoutError') {
+    if (isTimeoutError(err)) {
       throw new Error(`Fetch timed out after ${BARE_FETCH_TIMEOUT_MS}ms`);
     }
     throw err;
   }
   if (!res.ok) throw new Error(`Fetch HTTP ${res.status}`);
-  const html = await res.text();
+  // After redirects, refuse private/metadata hosts (DNS rebinding / open redirect).
+  const finalHost = (() => {
+    try {
+      return new URL(res.url || url).hostname;
+    } catch {
+      return '';
+    }
+  })();
+  if (finalHost && isBlockedHostname(finalHost)) {
+    throw new Error('Blocked private or local URL after redirect');
+  }
+  const html = await readResponseTextLimited(res);
   const extracted = extractFromHtml(html);
   if (!extracted.content || extracted.content.length < MIN_EXTRACT_CHARS) {
     throw new Error('Bare fetch extracted too little text');
   }
   return {
     provider: 'fetch',
-    url,
+    url: res.url || url,
     title: extracted.title,
     description: extracted.description,
     content: extracted.content,
@@ -745,7 +926,12 @@ const PROVIDERS: ReaderProvider[] = [
 export async function webRead(urlInput: string): Promise<WebReadOutcome> {
   const url = normalizeUrl(urlInput);
   if (!url) {
-    return { provider: 'none', url: '', content: '', error: 'Invalid or missing URL' };
+    return {
+      provider: 'none',
+      url: '',
+      content: '',
+      error: 'Invalid, missing, or blocked URL',
+    };
   }
 
   const errors: string[] = [];

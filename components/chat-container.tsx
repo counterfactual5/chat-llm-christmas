@@ -4762,7 +4762,8 @@ export default function ChatContainer() {
                                   run.provider !== 'none' &&
                                   !isNotion &&
                                   !isGitHub &&
-                                  !isGoogle && (
+                                  !isGoogle &&
+                                  !isImageUnderstand && (
                                     <span className="opacity-50">
                                       {t('searchedVia').replace(
                                         '{provider}',

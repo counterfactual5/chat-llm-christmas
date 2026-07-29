@@ -1,7 +1,13 @@
 /**
  * Multi-provider web page reader with fallback chain.
- * Order: Zhipu → Jina (if JINA_API_KEY) → bare fetch (last resort).
+ * Order: Zhipu (Coding Plan MCP → PaaS REST) → Jina → bare fetch.
  */
+
+import {
+  zhipuApiKey,
+  zhipuMcpEnabled,
+  zhipuMcpWebRead,
+} from '@/lib/zhipu-mcp';
 
 export type WebReadOutcome = {
   provider: string;
@@ -13,15 +19,6 @@ export type WebReadOutcome = {
 };
 
 const MAX_CONTENT_CHARS = 48_000;
-
-function zhipuApiKey(): string | undefined {
-  return (
-    process.env.ZHIPU_API_KEY?.trim() ||
-    process.env.ZHIPUAI_API_KEY?.trim() ||
-    process.env.BIGMODEL_API_KEY?.trim() ||
-    undefined
-  );
-}
 
 function jinaApiKey(): string | undefined {
   return process.env.JINA_API_KEY?.trim() || undefined;
@@ -714,6 +711,27 @@ async function readZhipu(url: string): Promise<WebReadOutcome> {
   const key = zhipuApiKey();
   if (!key) throw new Error('ZHIPU_API_KEY missing');
 
+  const errors: string[] = [];
+
+  if (zhipuMcpEnabled()) {
+    try {
+      const mcp = await zhipuMcpWebRead(url);
+      const content = truncateContent(mcp.content || '');
+      if (content) {
+        return {
+          provider: 'zhipu-mcp',
+          url: mcp.url || url,
+          title: mcp.title,
+          description: mcp.description,
+          content,
+        };
+      }
+      errors.push('mcp: empty');
+    } catch (err: unknown) {
+      errors.push(`mcp: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   let res: Response;
   try {
     res = await fetch('https://open.bigmodel.cn/api/paas/v4/reader', {
@@ -734,7 +752,11 @@ async function readZhipu(url: string): Promise<WebReadOutcome> {
     });
   } catch (err: unknown) {
     if (isTimeoutError(err)) {
-      throw new Error(`Zhipu reader timed out after ${PROVIDER_FETCH_TIMEOUT_MS}ms`);
+      throw new Error(
+        [...errors, `Zhipu reader timed out after ${PROVIDER_FETCH_TIMEOUT_MS}ms`]
+          .filter(Boolean)
+          .join(' | '),
+      );
     }
     throw err;
   }
@@ -766,13 +788,22 @@ async function readZhipu(url: string): Promise<WebReadOutcome> {
 
   if (!res.ok) {
     throw new Error(
-      data.error?.message || data.error?.code || `Zhipu reader HTTP ${res.status}`,
+      [
+        ...errors,
+        data.error?.message || data.error?.code || `Zhipu reader HTTP ${res.status}`,
+      ]
+        .filter(Boolean)
+        .join(' | '),
     );
   }
 
   const result = data.reader_result || {};
   const content = truncateContent(result.content || '');
-  if (!content) throw new Error('Zhipu reader returned empty content');
+  if (!content) {
+    throw new Error(
+      [...errors, 'Zhipu reader returned empty content'].filter(Boolean).join(' | '),
+    );
+  }
 
   return {
     provider: 'zhipu',

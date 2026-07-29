@@ -1,12 +1,17 @@
 /**
  * Multi-provider web search with fallback chain.
- * Order: Zhipu → Tavily → Brave → Serper → Google News RSS → DuckDuckGo → Wikipedia.
+ * Order: Zhipu (Coding Plan MCP → PaaS REST) → Tavily → Brave → Serper → …
  */
 
 import {
   freshnessForQuery,
   type Freshness,
 } from '@/lib/time-context';
+import {
+  zhipuApiKey,
+  zhipuMcpEnabled,
+  zhipuMcpWebSearch,
+} from '@/lib/zhipu-mcp';
 
 export type SearchHit = {
   title: string;
@@ -88,15 +93,6 @@ export function annotateHitFreshness(
   return { ...hit, yearHints, staleHint: staleHint || undefined };
 }
 
-function zhipuApiKey(): string | undefined {
-  return (
-    process.env.ZHIPU_API_KEY?.trim() ||
-    process.env.ZHIPUAI_API_KEY?.trim() ||
-    process.env.BIGMODEL_API_KEY?.trim() ||
-    undefined
-  );
-}
-
 function zhipuSearchEngine(): string {
   const fromEnv = process.env.ZHIPU_SEARCH_ENGINE?.trim();
   if (fromEnv) return fromEnv;
@@ -113,12 +109,35 @@ function zhipuRecency(freshness?: Freshness | null): string {
 }
 
 /**
- * 智谱开放平台 Web Search API（专给大模型用的联网搜索）。
- * docs: https://docs.bigmodel.cn/api-reference/工具-api/网络搜索
+ * Coding Plan MCP first (counts toward MCP monthly quota), then PaaS REST
+ * (bills account balance). docs:
+ * https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server
+ * https://docs.bigmodel.cn/api-reference/工具-api/网络搜索
  */
 async function searchZhipu(query: string, freshness?: Freshness | null): Promise<SearchHit[]> {
   const key = zhipuApiKey();
   if (!key) throw new Error('ZHIPU_API_KEY missing');
+
+  const errors: string[] = [];
+
+  if (zhipuMcpEnabled()) {
+    try {
+      const mcpHits = await zhipuMcpWebSearch(query);
+      const hits = mcpHits
+        .map((r) =>
+          trimHit({
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+          }),
+        )
+        .filter((h) => h.url);
+      if (hits.length) return hits.slice(0, MAX_RESULTS);
+      errors.push('mcp: empty');
+    } catch (err: unknown) {
+      errors.push(`mcp: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   // 官方建议 query ≤ 70 字符
   const searchQuery = query.slice(0, 70);
@@ -153,9 +172,12 @@ async function searchZhipu(query: string, freshness?: Freshness | null): Promise
 
   if (!res.ok) {
     throw new Error(
-      data.error?.message ||
-        data.error?.code ||
-        `Zhipu web_search HTTP ${res.status}`,
+      [
+        ...errors,
+        data.error?.message || data.error?.code || `Zhipu web_search HTTP ${res.status}`,
+      ]
+        .filter(Boolean)
+        .join(' | '),
     );
   }
 
@@ -170,7 +192,11 @@ async function searchZhipu(query: string, freshness?: Freshness | null): Promise
     )
     .filter((h) => h.url);
 
-  if (!hits.length) throw new Error('Zhipu web_search returned no results');
+  if (!hits.length) {
+    throw new Error(
+      [...errors, 'Zhipu web_search returned no results'].filter(Boolean).join(' | '),
+    );
+  }
   return hits.slice(0, MAX_RESULTS);
 }
 

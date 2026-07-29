@@ -289,6 +289,14 @@ function formatWebSourcesForReference(sources: WebSearchSource[]): string {
         ? query && query !== 'web'
           ? `Notion results for "${query}":`
           : 'Notion pages:'
+        : provider === 'google'
+          ? query && query !== 'web'
+            ? `Google results for "${query}":`
+            : 'Google results:'
+          : provider === 'github'
+            ? query && query !== 'web'
+              ? `GitHub results for "${query}":`
+              : 'GitHub results:'
         : query === 'web'
           ? 'Web search results:'
           : `Web search results for "${query}"${provider && provider !== 'none' ? ` (${provider})` : ''}:`;
@@ -331,8 +339,16 @@ function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
 
 function referenceSourcesHeading(
   sources: WebSearchSource[],
-  t: (key: 'webSearchSources' | 'notionSources' | 'referenceSources') => string,
-): { label: string; useNotionIcon: boolean; providerSuffix?: string } {
+  t: (
+    key: 'webSearchSources' | 'notionSources' | 'googleSources' | 'referenceSources',
+  ) => string,
+): {
+  label: string;
+  useNotionIcon: boolean;
+  useGoogleIcon?: boolean;
+  useGitHubIcon?: boolean;
+  providerSuffix?: string;
+} {
   if (sources.length === 0) {
     return { label: t('webSearchSources'), useNotionIcon: false };
   }
@@ -344,6 +360,12 @@ function referenceSourcesHeading(
   if (providers.length === 1 && providers[0] === 'notion') {
     return { label: t('notionSources'), useNotionIcon: true };
   }
+  if (providers.length === 1 && providers[0] === 'google') {
+    return { label: t('googleSources'), useNotionIcon: false, useGoogleIcon: true };
+  }
+  if (providers.length === 1 && providers[0] === 'github') {
+    return { label: 'GitHub', useNotionIcon: false, useGitHubIcon: true };
+  }
   if (providers.length === 1) {
     return {
       label: t('webSearchSources'),
@@ -351,7 +373,7 @@ function referenceSourcesHeading(
       providerSuffix: providers[0],
     };
   }
-  if (providers.includes('notion')) {
+  if (providers.includes('notion') || providers.includes('google') || providers.includes('github')) {
     return { label: t('referenceSources'), useNotionIcon: false };
   }
   return { label: t('webSearchSources'), useNotionIcon: false };
@@ -4110,11 +4132,23 @@ export default function ChatContainer() {
                           const isGitHub =
                             run.provider === 'github' ||
                             /^github[-_]/i.test(run.name);
+                          const isGoogle =
+                            run.provider === 'google' ||
+                            /^(gmail|calendar|drive)[-_]/i.test(run.name);
+                          const isGmail = isGoogle && /^gmail[-_]/i.test(run.name);
+                          const isCalendar =
+                            isGoogle && /^calendar[-_]/i.test(run.name);
+                          const isDrive = isGoogle && /^drive[-_]/i.test(run.name);
                           const isNotionFetch =
                             /fetch/i.test(run.name) && isNotion;
                           const isNotionWrite =
                             isNotion &&
                             /create|update|move|duplicate|append|delete|trash|comment|write/i.test(
+                              run.name,
+                            );
+                          const isGoogleWrite =
+                            isGoogle &&
+                            /create|update|send|delete|draft|modify|upload|write/i.test(
                               run.name,
                             );
                           const failed = run.status === 'done' && Boolean(run.error);
@@ -4127,27 +4161,46 @@ export default function ChatContainer() {
                           // Keep result links open by default so search isn't buried.
                           const expanded =
                             toolRunOpen[run.id] ?? (searching || resultCount > 0 || Boolean(run.error));
-                          const label = searching
-                            ? isNotionWrite
-                              ? t('writingNotion')
-                              : isNotionFetch
-                                ? t('readingNotion')
-                                : isNotion
-                                  ? t('searchingNotion')
-                                  : isGitHub
-                                    ? t('searchingGitHub')
-                                    : t('searchingWeb')
-                            : failed
+                          const googleLabel = (() => {
+                            if (isGoogleWrite) {
+                              return searching ? t('writingGoogle') : t('wroteGoogle');
+                            }
+                            if (isGmail) {
+                              return searching ? t('searchingGmail') : t('searchedGmail');
+                            }
+                            if (isCalendar) {
+                              return searching ? t('searchingCalendar') : t('searchedCalendar');
+                            }
+                            if (isDrive) {
+                              return searching ? t('searchingDrive') : t('searchedDrive');
+                            }
+                            return searching ? t('searchingGoogle') : t('searchedGoogle');
+                          })();
+                          const label = isGoogle
+                            ? failed
                               ? t('searchFailed')
-                              : isNotionWrite
-                                ? t('wroteNotion')
+                              : googleLabel
+                            : searching
+                              ? isNotionWrite
+                                ? t('writingNotion')
                                 : isNotionFetch
-                                  ? t('readNotion')
+                                  ? t('readingNotion')
                                   : isNotion
-                                    ? t('searchedNotion')
+                                    ? t('searchingNotion')
                                     : isGitHub
-                                      ? t('searchedGitHub')
-                                      : t('searchedWeb');
+                                      ? t('searchingGitHub')
+                                      : t('searchingWeb')
+                              : failed
+                                ? t('searchFailed')
+                                : isNotionWrite
+                                  ? t('wroteNotion')
+                                  : isNotionFetch
+                                    ? t('readNotion')
+                                    : isNotion
+                                      ? t('searchedNotion')
+                                      : isGitHub
+                                        ? t('searchedGitHub')
+                                        : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button
@@ -4177,6 +4230,10 @@ export default function ChatContainer() {
                                   <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
                                 ) : isNotion ? (
                                   <NotionLogo className="h-3 w-3 shrink-0" />
+                                ) : isGitHub ? (
+                                  <GitHubLogo className="h-3 w-3 shrink-0" />
+                                ) : isGoogle ? (
+                                  <GoogleLogo className="h-3 w-3 shrink-0" />
                                 ) : (
                                   <Globe className="h-3 w-3 shrink-0 opacity-60" />
                                 )}
@@ -4184,7 +4241,9 @@ export default function ChatContainer() {
                                 {run.status === 'done' &&
                                   run.provider &&
                                   run.provider !== 'none' &&
-                                  !isNotion && (
+                                  !isNotion &&
+                                  !isGitHub &&
+                                  !isGoogle && (
                                     <span className="opacity-50">
                                       {t('searchedVia').replace(
                                         '{provider}',
@@ -4192,7 +4251,7 @@ export default function ChatContainer() {
                                       )}
                                     </span>
                                   )}
-                                {run.query && isNotion && !searching && (
+                                {run.query && (isNotion || isGoogle) && !searching && (
                                   <span className="min-w-0 truncate opacity-50">
                                     ·{' '}
                                     {isNotionFetch && run.results?.[0]?.title
@@ -5536,6 +5595,10 @@ export default function ChatContainer() {
                                     <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
                                       {referenceSourcesMeta.useNotionIcon ? (
                                         <NotionLogo className="h-3 w-3 shrink-0" />
+                                      ) : referenceSourcesMeta.useGoogleIcon ? (
+                                        <GoogleLogo className="h-3 w-3 shrink-0" />
+                                      ) : referenceSourcesMeta.useGitHubIcon ? (
+                                        <GitHubLogo className="h-3 w-3 shrink-0" />
                                       ) : (
                                         <Globe className="h-3 w-3" />
                                       )}

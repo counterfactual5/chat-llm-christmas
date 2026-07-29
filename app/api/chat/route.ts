@@ -69,6 +69,60 @@ function wantsThinking(model: string) {
   );
 }
 
+/** GLM-4.7 tool-calling expects thinking; without it the stream often ends empty. */
+function modelNeedsThinkingForTools(model: string) {
+  return /glm-4\.7|glm-4\.6(?!v)|glm-5/i.test(String(model || ''));
+}
+
+/**
+ * Raw SSE chat.completions — preserves gateway-only fields like reasoning_content
+ * that the OpenAI SDK types omit (runtime usually keeps them, but this is explicit).
+ */
+async function* streamChatCompletionsRaw(opts: {
+  apiKey: string;
+  baseURL: string;
+  body: Record<string, unknown>;
+}): AsyncGenerator<any> {
+  const res = await fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({ ...opts.body, stream: true }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(
+      `Upstream chat error: ${res.status} ${errText.slice(0, 300) || res.statusText}`,
+    );
+  }
+  if (!res.body) throw new Error('Upstream chat returned an empty body');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      try {
+        yield JSON.parse(data);
+      } catch {
+        // ignore malformed SSE lines
+      }
+    }
+  }
+}
+
 /**
  * Split a chat-completions delta into visible answer vs chain-of-thought.
  * Some gateways (notably GLM-4.7) put the whole reply in reasoning_* even when
@@ -614,7 +668,7 @@ export async function POST(req: NextRequest) {
     ];
 
     const encoder = new TextEncoder();
-    const thinking = wantsThinking(requestedModel);
+    let thinking = wantsThinking(requestedModel);
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -657,6 +711,25 @@ export async function POST(req: NextRequest) {
             cursorModel &&
             authorizedIntegrations.length === 0 &&
             looksLikeSearchRequest(userAsk);
+
+          // Only offer model-callable tools when they are likely needed. Leaving
+          // web_search on for every glm-4.7 turn commonly yields empty streams
+          // (tool protocol + thinking interaction). Image Understand is server-side.
+          const mcpToolNames = new Set(
+            enabledTools
+              .map((t) => t.name)
+              .filter((n) => n !== 'web_search' && n !== 'web_read' && n !== 'image_understand'),
+          );
+          const toolsLikelyNeeded =
+            mcpToolNames.size > 0 ||
+            (searchEnabled && looksLikeSearchRequest(userAsk));
+          const activeToolDefs = toolsLikelyNeeded ? toolDefs : [];
+          if (activeToolDefs.length > 0 && modelNeedsThinkingForTools(requestedModel)) {
+            thinking = true;
+          }
+          // Without an explicit thinking request, fold reasoning_* into the visible
+          // answer (glm-4.7 otherwise parks the whole reply in Thought process).
+          const reasoningAsContent = !thinking;
 
           const injectSearchOutcome = async (outcome: SearchOutcome) => {
             const callId = `proactive_search_${Date.now()}`;
@@ -721,7 +794,7 @@ export async function POST(req: NextRequest) {
 
           // Generic tool loop — stream each round so content arrives
           // incrementally even when the model decides not to call tools.
-          if (toolDefs.length > 0 && !usedTools) {
+          if (activeToolDefs.length > 0 && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
               let streamedContent = '';
               let streamedReasoning = '';
@@ -730,21 +803,32 @@ export async function POST(req: NextRequest) {
               let roundFinishReason: string | null = null;
               const roundStampStripper = createStampLeakStripper();
 
-              let streamIter: any;
+              let streamIter: AsyncGenerator<any>;
               try {
-                streamIter = await withTimeout(
-                  openai.chat.completions.create({
+                const raw = streamChatCompletionsRaw({
+                  apiKey,
+                  baseURL,
+                  body: {
                     model: requestedModel,
                     temperature,
-                    stream: true,
                     messages: sanitizeChatMessages(workingMessages),
-                    tools: toolDefs,
+                    tools: activeToolDefs,
                     tool_choice: 'auto',
                     ...(thinking ? { enable_thinking: true } : {}),
-                  } as any),
-                  TOOLS_ROUND_TIMEOUT_MS,
-                  'tools round',
-                );
+                  },
+                });
+                streamIter = (async function* () {
+                  // Bound the whole tools round (create + stream) by timeout.
+                  const iter = raw[Symbol.asyncIterator]();
+                  const deadline = Date.now() + TOOLS_ROUND_TIMEOUT_MS;
+                  while (true) {
+                    const remaining = deadline - Date.now();
+                    if (remaining <= 0) throw new Error('tools round timed out');
+                    const next = await withTimeout(iter.next(), remaining, 'tools round');
+                    if (next.done) break;
+                    yield next.value;
+                  }
+                })();
               } catch (toolErr: any) {
                 console.warn('tools round skipped:', toolErr?.message || toolErr);
                 break;
@@ -753,7 +837,7 @@ export async function POST(req: NextRequest) {
               // Whether we've seen any tool_call delta (tells us not to stream content to client).
               let hasToolCallDeltas = false;
 
-              for await (const chunk of streamIter as any) {
+              for await (const chunk of streamIter) {
                 const choice = chunk?.choices?.[0];
                 const delta = choice?.delta || {};
                 const finishReason = choice?.finish_reason || null;
@@ -773,11 +857,7 @@ export async function POST(req: NextRequest) {
                 }
 
                 // --- content / reasoning ---
-                // When thinking was not requested, fold reasoning_* into content
-                // (GLM-4.7 often dumps the full answer there otherwise).
-                const split = splitCompletionDelta(delta, {
-                  reasoningAsContent: !thinking,
-                });
+                const split = splitCompletionDelta(delta, { reasoningAsContent });
                 let contentChunk = split.content;
                 if (split.reasoning) {
                   streamedReasoning += split.reasoning;
@@ -885,27 +965,30 @@ export async function POST(req: NextRequest) {
               ]
             : workingMessages;
 
-          const final = await openai.chat.completions.create({
-            model: requestedModel,
-            temperature,
-            stream: true,
-            messages: sanitizeChatMessages(finalMessages),
-            ...(thinking ? { enable_thinking: true } : {}),
-          } as any);
+          const finalStream = streamChatCompletionsRaw({
+            apiKey,
+            baseURL,
+            body: {
+              model: requestedModel,
+              temperature,
+              messages: sanitizeChatMessages(finalMessages),
+              ...(thinking ? { enable_thinking: true } : {}),
+            },
+          });
 
           let sawText = false;
           let sawContent = false;
           let lastFinishReason: string | null = null;
           const stampStripper = createStampLeakStripper();
           let reasoningOnlyBuf = '';
-          for await (const chunk of final as any) {
+          for await (const chunk of finalStream) {
             const choice = chunk?.choices?.[0];
             const delta = choice?.delta || {};
             const finish_reason = choice?.finish_reason || null;
             if (finish_reason) lastFinishReason = finish_reason;
 
             let { content, reasoning } = splitCompletionDelta(delta, {
-              reasoningAsContent: !thinking,
+              reasoningAsContent,
             });
 
             if (content) content = stampStripper.push(content);

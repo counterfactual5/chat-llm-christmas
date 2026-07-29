@@ -7,12 +7,6 @@ import {
   refreshNotionMcpToken,
 } from '@/lib/integrations/notion-mcp-oauth';
 import {
-  deleteRemoteVault,
-  readRemoteVault,
-  remoteVaultConfigured,
-  writeRemoteVault,
-} from '@/lib/integrations/remote-store';
-import {
   GOOGLE_INTEGRATION_COOKIE,
   INTEGRATIONS_COOKIE,
   type IntegrationVault,
@@ -26,19 +20,16 @@ type GoogleVault = {
   google: GoogleConnection;
 };
 
+/** Align with the bound API key cookie (~30 days). */
 const secureCookieOptions = {
   httpOnly: true,
   secure: true,
   sameSite: 'lax' as const,
   path: '/',
-  maxAge: 60 * 60 * 24 * 90,
+  maxAge: 60 * 60 * 24 * 30,
 };
 
-function hasAnyConnection(vault: IntegrationVault): boolean {
-  return Boolean(vault.notion || vault.github || vault.google);
-}
-
-async function readCookieVault(
+export async function readVault(
   req: NextRequest,
   ownerId: string,
 ): Promise<IntegrationVault> {
@@ -54,55 +45,6 @@ async function readCookieVault(
   const googleVault = await decryptJson<GoogleVault>(googleRaw, secret);
   if (!googleVault || googleVault.ownerId !== ownerId) return vault;
   return { ...vault, ownerId, google: googleVault.google };
-}
-
-/**
- * Vault for this owner, plus whether it came from the server-side store.
- * Cookies stay the fast path; the remote store is only consulted when this
- * browser has nothing for the owner (fresh login, new device, cleared cookies).
- */
-export async function readVaultDetailed(
-  req: NextRequest,
-  ownerId: string,
-): Promise<{ vault: IntegrationVault; fromRemote: boolean }> {
-  const cookieVault = await readCookieVault(req, ownerId);
-  if (hasAnyConnection(cookieVault) || !remoteVaultConfigured()) {
-    return { vault: cookieVault, fromRemote: false };
-  }
-  const remote = await readRemoteVault(ownerId);
-  if (!remote || !hasAnyConnection(remote)) {
-    return { vault: cookieVault, fromRemote: false };
-  }
-  return { vault: { ...remote, ownerId }, fromRemote: true };
-}
-
-export async function readVault(
-  req: NextRequest,
-  ownerId: string,
-): Promise<IntegrationVault> {
-  const { vault } = await readVaultDetailed(req, ownerId);
-  return vault;
-}
-
-/**
- * Write a vault restored from the server-side store back into cookies, so
- * subsequent requests in this browser skip the remote round trip.
- */
-export async function hydrateVaultCookies(
-  response: NextResponse,
-  vault: IntegrationVault,
-): Promise<void> {
-  await writeVaultCookie(response, vault);
-  if (vault.google) {
-    try {
-      await writeGoogleCookie(response, vault.ownerId, vault.google);
-    } catch (err: unknown) {
-      console.warn(
-        'integrations: google cookie hydrate skipped:',
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
 }
 
 export async function writeVaultCookie(
@@ -167,11 +109,7 @@ function clearGoogleCookie(response: NextResponse): void {
   });
 }
 
-/**
- * Drop this browser's copy of the vault. The server-side store is untouched:
- * signing back in with the same account restores the connections. Use
- * `forgetOwnerIntegrations` for a real, irreversible disconnect.
- */
+/** Clear this browser's vault cookies (e.g. per-provider Disconnect). */
 export function clearVaultCookie(response: NextResponse): void {
   response.cookies.set({
     name: INTEGRATIONS_COOKIE,
@@ -180,15 +118,6 @@ export function clearVaultCookie(response: NextResponse): void {
     maxAge: 0,
   });
   clearGoogleCookie(response);
-}
-
-/** Cookie + server-side removal for one owner. */
-export async function forgetOwnerIntegrations(
-  response: NextResponse,
-  ownerId: string,
-): Promise<void> {
-  clearVaultCookie(response);
-  await deleteRemoteVault(ownerId);
 }
 
 export async function upsertNotionConnection(
@@ -200,7 +129,6 @@ export async function upsertNotionConnection(
   const vault = await readVault(req, ownerId);
   const next: IntegrationVault = { ...vault, ownerId, notion };
   await writeVaultCookie(response, next);
-  await writeRemoteVault(ownerId, next);
   return next;
 }
 
@@ -213,7 +141,6 @@ export async function removeNotionConnection(
   const { notion: _removed, ...rest } = vault;
   const next: IntegrationVault = { ...rest, ownerId };
   await writeVaultCookie(response, next);
-  await writeRemoteVault(ownerId, next);
   return next;
 }
 
@@ -226,7 +153,6 @@ export async function upsertGitHubConnection(
   const vault = await readVault(req, ownerId);
   const next: IntegrationVault = { ...vault, ownerId, github };
   await writeVaultCookie(response, next);
-  await writeRemoteVault(ownerId, next);
   return next;
 }
 
@@ -239,7 +165,6 @@ export async function removeGitHubConnection(
   const { github: _removed, ...rest } = vault;
   const next: IntegrationVault = { ...rest, ownerId };
   await writeVaultCookie(response, next);
-  await writeRemoteVault(ownerId, next);
   return next;
 }
 
@@ -252,7 +177,6 @@ export async function upsertGoogleConnection(
   const vault = await readVault(req, ownerId);
   const next: IntegrationVault = { ...vault, ownerId, google };
   await writeGoogleCookie(response, ownerId, google);
-  await writeRemoteVault(ownerId, next);
   return next;
 }
 
@@ -265,7 +189,6 @@ export async function removeGoogleConnection(
   const { google: _removed, ...rest } = vault;
   const next: IntegrationVault = { ...rest, ownerId };
   clearGoogleCookie(response);
-  await writeRemoteVault(ownerId, next);
   return next;
 }
 

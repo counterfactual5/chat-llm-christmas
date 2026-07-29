@@ -27,6 +27,12 @@ import { BrandMark } from '@/components/brand-mark';
 import { NotionLogo } from '@/components/notion-logo';
 import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
 import {
+  buildPersistedUserMessageContent,
+  hasPersistedImageTranscription,
+  injectionBodyFromToolResults,
+  stripPersistedImageTranscription,
+} from '@/lib/image-understand';
+import {
   AttachmentImageThumb,
   ImagePreviewOverlay,
   isImageAttachment,
@@ -539,12 +545,14 @@ function toApiMessages(messages: Message[]) {
     role: m.role,
     content: m.content,
     images:
-      m.images?.map((img) => ({
-        url: img.url,
-        fileId: img.fileId,
-        prompt: img.prompt,
-        name: img.name,
-      })) || [],
+      m.role === 'user' && hasPersistedImageTranscription(m.content || '')
+        ? []
+        : m.images?.map((img) => ({
+            url: img.url,
+            fileId: img.fileId,
+            prompt: img.prompt,
+            name: img.name,
+          })) || [],
     timestamp: m.timestamp as number | undefined,
   }));
 }
@@ -1849,11 +1857,34 @@ export default function ChatContainer() {
           }
           return { ...m, toolRuns, activity, incomplete: true };
         });
-        const nextSession = { ...s, messages: msgs, updatedAt: Date.now() };
+        let mergedMsgs = msgs;
         if (run.status === 'done') {
           const isImageUnderstand =
             run.name === 'image_understand' || run.provider === 'zhipu-vision';
-          if (!isImageUnderstand) {
+          if (isImageUnderstand) {
+            const { body, imageCount } = injectionBodyFromToolResults(run.results || []);
+            if (body) {
+              const aIdx = mergedMsgs.findIndex((m) => m.id === assistantId);
+              if (aIdx > 0 && mergedMsgs[aIdx - 1]?.role === 'user') {
+                const userMsg = mergedMsgs[aIdx - 1];
+                if (!hasPersistedImageTranscription(userMsg.content || '')) {
+                  mergedMsgs = mergedMsgs.map((m, i) =>
+                    i === aIdx - 1
+                      ? {
+                          ...userMsg,
+                          content: buildPersistedUserMessageContent(
+                            userMsg.content,
+                            body,
+                            imageCount || run.results?.length || 1,
+                          ),
+                        }
+                      : m,
+                  );
+                }
+              }
+            }
+          } else {
+            const nextSession = { ...s, messages: mergedMsgs, updatedAt: Date.now() };
             if (s.webSourcesCleared) {
               const sourceByUrl = new Map((s.webSources || []).map((source) => [source.url, source]));
               for (const result of run.results || []) {
@@ -1868,7 +1899,7 @@ export default function ChatContainer() {
               }
               nextSession.webSources = [...sourceByUrl.values()].slice(-40);
             } else {
-              nextSession.webSources = collectWebSourcesFromMessages(msgs);
+              nextSession.webSources = collectWebSourcesFromMessages(mergedMsgs);
             }
             if ((nextSession.webSources?.length || 0) > 0) {
               if (!s.webSourcesCleared) setWebSourcesCleared(false);
@@ -1877,8 +1908,10 @@ export default function ChatContainer() {
                 setReferenceExpanded(true);
               });
             }
+            return nextSession;
           }
         }
+        const nextSession = { ...s, messages: mergedMsgs, updatedAt: Date.now() };
         return nextSession;
       }),
     );
@@ -3629,7 +3662,9 @@ export default function ChatContainer() {
     if (!message || message.role !== 'user') return;
     setEditingMessageId(message.id);
     setEditingMessageContent(
-      message.content && message.content !== '(image)' ? message.content : '',
+      message.content && message.content !== '(image)'
+        ? stripPersistedImageTranscription(message.content)
+        : '',
     );
     setEditingMessageAttachments(messageImagesToIngested(message.images));
   };
@@ -4474,7 +4509,7 @@ export default function ChatContainer() {
                             {(() => {
                               const { quotes, body } = parseQuotedUserMessage(
                                 message.content && message.content !== '(image)'
-                                  ? message.content
+                                  ? stripPersistedImageTranscription(message.content)
                                   : '',
                               );
                               return (

@@ -272,6 +272,48 @@ function formatInjectionText(description: string, imageCount = 1): string {
   return `${head}\n${description}`;
 }
 
+/** Marker shared by single- and multi-image persisted transcriptions. */
+const IMAGE_TRANSCRIPTION_MARKER =
+  /以下是(?:\s*\d+\s*张)?图片的?内容（由视觉模型转写/;
+
+/** User message already contains a persisted vision transcription (multi-turn). */
+export function hasPersistedImageTranscription(text: string): boolean {
+  return IMAGE_TRANSCRIPTION_MARKER.test(String(text || ''));
+}
+
+/**
+ * Strip persisted vision transcription from user-visible bubble text.
+ * The full string (with injection) remains in message.content for the API.
+ */
+export function stripPersistedImageTranscription(text: string): string {
+  const raw = String(text || '');
+  const idx = raw.search(IMAGE_TRANSCRIPTION_MARKER);
+  if (idx < 0) return raw;
+  return raw.slice(0, idx).trimEnd();
+}
+
+export function buildPersistedUserMessageContent(
+  userText: string,
+  injectionDescription: string,
+  imageCount: number,
+): string {
+  const injection = formatInjectionText(injectionDescription, imageCount);
+  const t = String(userText || '').trim();
+  if (!t || t === '(image)') return injection;
+  if (hasPersistedImageTranscription(t)) return t;
+  return `${t}\n\n${injection}`;
+}
+
+export function injectionBodyFromToolResults(
+  results: Array<{ snippet?: string }>,
+): { body: string; imageCount: number } {
+  const snippets = results.map((r) => String(r.snippet || '').trim()).filter(Boolean);
+  if (snippets.length === 0) return { body: '', imageCount: 0 };
+  if (snippets.length === 1) return { body: snippets[0], imageCount: 1 };
+  const body = snippets.map((s, i) => `【图${i + 1}】\n${s}`).join('\n\n');
+  return { body, imageCount: snippets.length };
+}
+
 /**
  * Replace image_url parts with plain-text descriptions from GLM-4.6V.
  * Images in the same message are understood in one batched vision call.
@@ -296,6 +338,12 @@ export async function rewriteMessagesWithImageDescriptions(
 
     const turnPrompt =
       textPartsFromMessageContent(msg.content) || String(opts?.userAsk || '').trim();
+
+    if (hasPersistedImageTranscription(turnPrompt)) {
+      const textOnly = textPartsFromMessageContent(msg.content);
+      out.push({ ...msg, content: textOnly || turnPrompt });
+      continue;
+    }
 
     const imageSlots: Array<{ partIndex: number; url: string; label: string }> = [];
     for (let i = 0; i < msg.content.length; i++) {

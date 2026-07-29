@@ -29,7 +29,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { rewriteMessagesWithImageDescriptions } from '@/lib/image-understand';
+import { hasPersistedImageTranscription, rewriteMessagesWithImageDescriptions } from '@/lib/image-understand';
 import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
@@ -402,6 +402,29 @@ export async function POST(req: NextRequest) {
       const images: ImageRef[] = [];
       for (const raw of rawImages) {
         images.push(await resolveImageRef(raw));
+      }
+
+      if (role === 'user' && hasPersistedImageTranscription(text)) {
+        const carried = pendingAssistantImages;
+        pendingAssistantImages = [];
+        if (carried.length > 0) {
+          const parts = [
+            {
+              type: 'text',
+              text: [
+                '【以下附带本对话中已成功生成的图片，供你直接查看】',
+                'The following image(s) were already generated successfully in this chat and are attached for you to inspect.',
+                'Acknowledge them as existing generations — do not say generation failed or search the web for replacements.',
+              ].join(' '),
+            },
+            { type: 'text', text },
+            ...carried.map((img) => toVisionPart(img)).filter(Boolean),
+          ];
+          normalizedMessages.push({ role, timestamp, content: parts });
+        } else {
+          normalizedMessages.push({ role, content: text, timestamp });
+        }
+        continue;
       }
 
       if (role === 'assistant') {

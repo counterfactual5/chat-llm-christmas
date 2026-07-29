@@ -6037,14 +6037,25 @@ export default function ChatContainer() {
                             </div>
                           )}
                           {filteredModels.map(m => {
-                            const blocked = hasImages && !m.vision && !zhipuVisionOn;
-                            const softWarn = hasImages && !m.vision && zhipuVisionOn;
+                            // Vision models auto-disable Image Understand. Don't trap users:
+                            // logged-in accounts can pick a text model again — we re-enable
+                            // Image Understand on select. Guests still need a Vision model.
+                            const blocked =
+                              hasImages && !m.vision && !zhipuVisionOn && !isAccountBound;
+                            const softWarn = hasImages && !m.vision && isAccountBound;
                             return (
                             <button
                               key={m.id}
                               disabled={blocked}
                               onClick={() => {
                                 if (blocked) return;
+                                if (hasImages && !m.vision && isAccountBound) {
+                                  setActiveMcpIds((prev) =>
+                                    prev.includes('zhipu-vision')
+                                      ? prev
+                                      : [...prev, 'zhipu-vision'],
+                                  );
+                                }
                                 setSelectedModel(m.id);
                                 setIsModelMenuOpen(false);
                                 setModelSearchQuery('');
@@ -6067,11 +6078,11 @@ export default function ChatContainer() {
                               <div className="min-w-0 flex-1">
                                 <div className="truncate">{m.id}</div>
                                 {blocked && (
-                                  <div className="text-[10px] text-stone-400">Text-only · needs vision</div>
+                                  <div className="text-[10px] text-stone-400">{t('textOnlyNeedsVision')}</div>
                                 )}
                                 {softWarn && (
                                   <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                                    Text-only · via Image Understand
+                                    {t('textOnlyViaImageUnderstand')}
                                   </div>
                                 )}
                               </div>
@@ -6306,8 +6317,6 @@ export default function ChatContainer() {
                               tabIndex={0}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setReferenceText('');
-                                setReferenceNotesExpanded(false);
                                 setWebSourcesCleared(true);
                                 setSessions((prev) =>
                                   prev.map((s) =>
@@ -6324,8 +6333,6 @@ export default function ChatContainer() {
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.stopPropagation();
-                                  setReferenceText('');
-                                  setReferenceNotesExpanded(false);
                                   setWebSourcesCleared(true);
                                   setSessions((prev) =>
                                     prev.map((s) =>

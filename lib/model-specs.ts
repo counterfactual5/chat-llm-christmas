@@ -146,7 +146,7 @@ export const CURSOR_WEB_CHAT_PROMPT = [
   '【硬性环境约束 — 必须遵守】',
   '你当前运行在网页聊天（Christmas Chat）中，不是 Cursor IDE，也不是本机 Agent。',
   '你没有：文件系统、工作区、终端、Shell、Grep、Read、Write，或任意本地可执行工具。',
-  '公开网页资料请用 web_search；若本轮还启用了 Notion / GitHub / Google Workspace 等集成工具，必须以 API 下发的 tools 列表为准，不要声称“只有 web_search”。',
+  '公开网页资料请用 web_search；需要某篇页面全文时用 web_read(url)。若本轮还启用了 Notion / GitHub / Google Workspace 等集成工具，必须以 API 下发的 tools 列表为准，不要声称“只有 web_search”。',
   '禁止口头假装正在搜索/扫描工作区/读取文件；禁止输出 tool_call XML / function_call 伪标记（应走 API 的 tool_calls）；禁止编造未返回的工具结果。',
   '得到工具结果后基于结果作答并附上来源链接；若工具失败，如实说明。',
 ].join('');
@@ -162,6 +162,7 @@ export function activeIntegrationsPrompt(opts: {
   ];
   if (opts.searchEnabled) {
     lines.push('- web_search: live public web lookup');
+    lines.push('- web_read: fetch full text of a specific public URL (after search or when given a link)');
   }
   const set = new Set(
     (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
@@ -173,8 +174,15 @@ export function activeIntegrationsPrompt(opts: {
     lines.push('- GitHub MCP: repos, issues, PRs, Actions for the connected GitHub account');
   }
   if (set.has('google')) {
+    lines.push('- Google MCP (three parts, like standard Workspace MCP):');
     lines.push(
-      '- Google MCP: Gmail / Calendar / Drive — search/read mail & threads, labels, drafts, send, mark read/unread / archive / trash (incl. batch), manage calendar, Drive files',
+      '  • Gmail: search/read mail & threads, labels, drafts, send, mark read/unread / archive / trash (incl. batch)',
+    );
+    lines.push(
+      '  • Calendar: list calendars/events, get event, free/busy, create/update/delete/move events',
+    );
+    lines.push(
+      '  • Drive: search/get/read/export, create file/folder, copy, rename/move, trash/delete',
     );
   }
   if (opts.googleRequestedButUnauthorized) {

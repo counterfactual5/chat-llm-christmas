@@ -500,6 +500,55 @@ export async function calendarDeleteEvent(
   return { ok: true, eventId: opts.eventId };
 }
 
+export async function calendarGetEvent(
+  accessToken: string,
+  opts: { calendarId?: string; eventId: string },
+) {
+  const calendarId = encodeURIComponent(opts.calendarId || 'primary');
+  const eventId = encodeURIComponent(opts.eventId);
+  return googleGetJson(
+    `${CALENDAR_API}/calendars/${calendarId}/events/${eventId}`,
+    accessToken,
+  );
+}
+
+/** Move an event to another calendar. */
+export async function calendarMoveEvent(
+  accessToken: string,
+  opts: { calendarId?: string; eventId: string; destinationCalendarId: string },
+) {
+  const calendarId = encodeURIComponent(opts.calendarId || 'primary');
+  const eventId = encodeURIComponent(opts.eventId);
+  const destination = encodeURIComponent(opts.destinationCalendarId);
+  return googleSendJson(
+    `${CALENDAR_API}/calendars/${calendarId}/events/${eventId}/move?destination=${destination}`,
+    accessToken,
+    'POST',
+  );
+}
+
+/** Query free/busy for one or more calendars in a time window. */
+export async function calendarFreeBusy(
+  accessToken: string,
+  opts: {
+    timeMin: string;
+    timeMax: string;
+    calendarIds?: string[];
+    timeZone?: string;
+  },
+) {
+  const ids = (opts.calendarIds && opts.calendarIds.length
+    ? opts.calendarIds
+    : ['primary']
+  ).map((id) => String(id || '').trim()).filter(Boolean);
+  return googleSendJson(`${CALENDAR_API}/freeBusy`, accessToken, 'POST', {
+    timeMin: opts.timeMin,
+    timeMax: opts.timeMax,
+    timeZone: opts.timeZone || 'UTC',
+    items: ids.map((id) => ({ id })),
+  });
+}
+
 // —— Drive ——
 
 export async function driveSearchFiles(
@@ -596,6 +645,124 @@ export async function driveCreateTextFile(
   );
   if (!response.ok) throw new Error(await readError(response));
   return (await response.json()) as GoogleRestJson;
+}
+
+export async function driveCreateFolder(
+  accessToken: string,
+  opts: { name: string; parentId?: string },
+) {
+  const metadata: GoogleRestJson = {
+    name: opts.name,
+    mimeType: 'application/vnd.google-apps.folder',
+  };
+  if (opts.parentId) metadata.parents = [opts.parentId];
+  return googleSendJson(
+    `${DRIVE_API}/files?fields=id,name,mimeType,webViewLink,parents`,
+    accessToken,
+    'POST',
+    metadata,
+  );
+}
+
+export async function driveCopyFile(
+  accessToken: string,
+  opts: { fileId: string; name?: string; parentId?: string },
+) {
+  const body: GoogleRestJson = {};
+  if (opts.name) body.name = opts.name;
+  if (opts.parentId) body.parents = [opts.parentId];
+  return googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/copy?fields=id,name,mimeType,webViewLink,parents`,
+    accessToken,
+    'POST',
+    body,
+  );
+}
+
+/** Rename and/or move a file (update parents via addParents/removeParents). */
+export async function driveUpdateFile(
+  accessToken: string,
+  opts: {
+    fileId: string;
+    name?: string;
+    description?: string;
+    addParents?: string[];
+    removeParents?: string[];
+  },
+) {
+  const params = new URLSearchParams({
+    fields: 'id,name,mimeType,webViewLink,parents,description',
+  });
+  if (opts.addParents?.length) params.set('addParents', opts.addParents.join(','));
+  if (opts.removeParents?.length) params.set('removeParents', opts.removeParents.join(','));
+  const body: GoogleRestJson = {};
+  if (opts.name !== undefined) body.name = opts.name;
+  if (opts.description !== undefined) body.description = opts.description;
+  return googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}?${params.toString()}`,
+    accessToken,
+    'PATCH',
+    body,
+  );
+}
+
+export async function driveTrashFile(accessToken: string, fileId: string) {
+  return googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,name,trashed,webViewLink`,
+    accessToken,
+    'PATCH',
+    { trashed: true },
+  );
+}
+
+export async function driveUntrashFile(accessToken: string, fileId: string) {
+  return googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,name,trashed,webViewLink`,
+    accessToken,
+    'PATCH',
+    { trashed: false },
+  );
+}
+
+export async function driveDeleteFile(accessToken: string, fileId: string) {
+  await googleSendJson(
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}`,
+    accessToken,
+    'DELETE',
+  );
+  return { ok: true, deleted: fileId };
+}
+
+/** Export a Google Docs/Sheets/Slides file to a target MIME (returns text/base64-safe text). */
+export async function driveExportFile(
+  accessToken: string,
+  opts: { fileId: string; mimeType?: string },
+) {
+  const meta = await driveGetFile(accessToken, opts.fileId);
+  const mime = String(meta.mimeType || '');
+  let exportMime = opts.mimeType;
+  if (!exportMime) {
+    if (mime === 'application/vnd.google-apps.spreadsheet') exportMime = 'text/csv';
+    else if (mime === 'application/vnd.google-apps.presentation') {
+      exportMime = 'text/plain';
+    } else {
+      exportMime = 'text/plain';
+    }
+  }
+  const response = await fetch(
+    `${DRIVE_API}/files/${encodeURIComponent(opts.fileId)}/export?mimeType=${encodeURIComponent(exportMime)}`,
+    { headers: authHeaders(accessToken), cache: 'no-store' },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  const text = await response.text();
+  return {
+    id: meta.id,
+    name: meta.name,
+    sourceMimeType: meta.mimeType,
+    exportMimeType: exportMime,
+    webViewLink: meta.webViewLink,
+    content: text.slice(0, 40_000),
+  };
 }
 
 /** Lightweight connectivity probe used by /api/integrations/google/probe. */

@@ -2,13 +2,23 @@ import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 import {
   calendarCreateEvent,
   calendarDeleteEvent,
+  calendarFreeBusy,
+  calendarGetEvent,
   calendarListCalendars,
   calendarListEvents,
+  calendarMoveEvent,
   calendarUpdateEvent,
+  driveCopyFile,
+  driveCreateFolder,
   driveCreateTextFile,
+  driveDeleteFile,
+  driveExportFile,
   driveGetFile,
   driveReadFileText,
   driveSearchFiles,
+  driveTrashFile,
+  driveUntrashFile,
+  driveUpdateFile,
   gmailBatchModifyMessages,
   gmailCreateDraft,
   gmailDeleteDraft,
@@ -25,12 +35,12 @@ import {
 } from '@/lib/integrations/google-rest';
 
 const GOOGLE_SYSTEM_PROMPT = [
-  "You have Google MCP (Gmail, Calendar, Drive) for the user's connected Google account.",
-  'When the user asks what MCP / integrations / tools you have, list Google MCP alongside any other enabled MCP (e.g. Notion, GitHub) — same category, no special caveat.',
-  'Gmail: search/read messages and threads; list labels; create/list/delete drafts; send email; modify labels (mark read/unread, star, archive); batch-modify many messages; trash/untrash.',
-  'Calendar: list calendars/events; create, update, or delete events.',
-  'Drive: search files, read text content, and create plain-text files.',
-  'For write actions (send email, modify/trash, create/update/delete event, create file), confirm intent from the user message before calling.',
+  "You have Google MCP for the user's connected Google account, split into three surfaces like standard Google Workspace MCP:",
+  '1) Gmail MCP tools — search/read messages & threads; labels; drafts; send; modify/batch-modify (read/unread, star, archive); trash/untrash.',
+  '2) Calendar MCP tools — list calendars/events; get event; free/busy; create/update/delete/move events.',
+  '3) Drive MCP tools — search/get/read/export; create text file or folder; copy; rename/move; trash/untrash/delete.',
+  'When the user asks what MCP / integrations / tools you have, list Google as these three parts alongside Notion/GitHub if enabled.',
+  'For write actions, confirm intent from the user message before calling.',
   'Do not invent message IDs, event IDs, or file IDs — only use tool results.',
   'Cite Gmail/Drive/Calendar links from tool results when answering.',
 ].join(' ');
@@ -71,6 +81,8 @@ function queryHint(name: string, args: Record<string, unknown>): string {
     'draftId',
     'eventId',
     'fileId',
+    'parentId',
+    'destinationCalendarId',
   ]) {
     const v = args[key];
     if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 120);
@@ -520,6 +532,85 @@ const TOOL_DEFS: GoogleToolDef[] = [
     },
   },
   {
+    name: 'calendar_get_event',
+    description: 'Get a single calendar event by eventId.',
+    parameters: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string' },
+        eventId: { type: 'string' },
+      },
+      required: ['eventId'],
+    },
+    run: async (token, args) => {
+      const eventId = str(args.eventId);
+      if (!eventId) throw new Error('eventId is required');
+      return calendarGetEvent(token, {
+        calendarId: str(args.calendarId) || undefined,
+        eventId,
+      });
+    },
+  },
+  {
+    name: 'calendar_move_event',
+    description: 'Move an event to another calendar (destinationCalendarId).',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string', description: 'Source calendar, default primary' },
+        eventId: { type: 'string' },
+        destinationCalendarId: { type: 'string' },
+      },
+      required: ['eventId', 'destinationCalendarId'],
+    },
+    run: async (token, args) => {
+      const eventId = str(args.eventId);
+      const destinationCalendarId = str(args.destinationCalendarId);
+      if (!eventId || !destinationCalendarId) {
+        throw new Error('eventId and destinationCalendarId are required');
+      }
+      return calendarMoveEvent(token, {
+        calendarId: str(args.calendarId) || undefined,
+        eventId,
+        destinationCalendarId,
+      });
+    },
+  },
+  {
+    name: 'calendar_freebusy',
+    description:
+      'Query free/busy for calendars between timeMin and timeMax (RFC3339). Defaults to primary calendar.',
+    parameters: {
+      type: 'object',
+      properties: {
+        timeMin: { type: 'string' },
+        timeMax: { type: 'string' },
+        calendarIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Calendar ids; default ["primary"]',
+        },
+        timeZone: { type: 'string' },
+      },
+      required: ['timeMin', 'timeMax'],
+    },
+    run: async (token, args) => {
+      const timeMin = str(args.timeMin);
+      const timeMax = str(args.timeMax);
+      if (!timeMin || !timeMax) throw new Error('timeMin and timeMax are required');
+      const calendarIds = Array.isArray(args.calendarIds)
+        ? args.calendarIds.map((x) => str(x)).filter(Boolean)
+        : undefined;
+      return calendarFreeBusy(token, {
+        timeMin,
+        timeMax,
+        calendarIds,
+        timeZone: str(args.timeZone) || undefined,
+      });
+    },
+  },
+  {
     name: 'drive_search',
     description:
       'Search Google Drive files. query uses Drive search syntax (e.g. name contains "report", mimeType=...).',
@@ -591,6 +682,159 @@ const TOOL_DEFS: GoogleToolDef[] = [
         name,
         content,
         parentId: str(args.parentId) || undefined,
+      });
+    },
+  },
+  {
+    name: 'drive_create_folder',
+    description: 'Create a folder in Google Drive.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        parentId: { type: 'string', description: 'Optional parent folder id' },
+      },
+      required: ['name'],
+    },
+    run: async (token, args) => {
+      const name = str(args.name);
+      if (!name) throw new Error('name is required');
+      return driveCreateFolder(token, {
+        name,
+        parentId: str(args.parentId) || undefined,
+      });
+    },
+  },
+  {
+    name: 'drive_copy_file',
+    description: 'Copy a Drive file. Optionally rename and/or place in another folder.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        name: { type: 'string' },
+        parentId: { type: 'string' },
+      },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveCopyFile(token, {
+        fileId,
+        name: str(args.name) || undefined,
+        parentId: str(args.parentId) || undefined,
+      });
+    },
+  },
+  {
+    name: 'drive_update_file',
+    description:
+      'Rename a Drive file and/or move it (addParents / removeParents). Use removeParents of the current parent and addParents of the destination to move.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        addParents: { type: 'array', items: { type: 'string' } },
+        removeParents: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      const addParents = Array.isArray(args.addParents)
+        ? args.addParents.map((x) => str(x)).filter(Boolean)
+        : undefined;
+      const removeParents = Array.isArray(args.removeParents)
+        ? args.removeParents.map((x) => str(x)).filter(Boolean)
+        : undefined;
+      const name = str(args.name) || undefined;
+      const description =
+        args.description === undefined ? undefined : str(args.description);
+      if (!name && description === undefined && !addParents?.length && !removeParents?.length) {
+        throw new Error('Provide name, description, addParents, and/or removeParents');
+      }
+      return driveUpdateFile(token, {
+        fileId,
+        name,
+        description,
+        addParents,
+        removeParents,
+      });
+    },
+  },
+  {
+    name: 'drive_trash',
+    description: 'Move a Drive file to trash.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { fileId: { type: 'string' } },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveTrashFile(token, fileId);
+    },
+  },
+  {
+    name: 'drive_untrash',
+    description: 'Restore a Drive file from trash.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { fileId: { type: 'string' } },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveUntrashFile(token, fileId);
+    },
+  },
+  {
+    name: 'drive_delete',
+    description: 'Permanently delete a Drive file (skips trash). Prefer drive_trash unless the user asked to permanently delete.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { fileId: { type: 'string' } },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveDeleteFile(token, fileId);
+    },
+  },
+  {
+    name: 'drive_export',
+    description:
+      'Export a Google Docs/Sheets/Slides file to another MIME (default: Docs→text/plain, Sheets→text/csv).',
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        mimeType: {
+          type: 'string',
+          description: 'Target MIME, e.g. text/plain, text/csv, application/pdf',
+        },
+      },
+      required: ['fileId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      if (!fileId) throw new Error('fileId is required');
+      return driveExportFile(token, {
+        fileId,
+        mimeType: str(args.mimeType) || undefined,
       });
     },
   },

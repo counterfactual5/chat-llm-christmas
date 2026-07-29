@@ -4148,9 +4148,11 @@ export default function ChatContainer() {
                             );
                           const isGoogleWrite =
                             isGoogle &&
-                            /create|update|send|delete|draft|modify|trash|batch|upload|write/i.test(
+                            /create|update|send|delete|draft|modify|trash|batch|move|copy|export|upload|write/i.test(
                               run.name,
                             );
+                          const isWebRead =
+                            run.name === 'web_read' || run.name === 'web-read';
                           const failed = run.status === 'done' && Boolean(run.error);
                           const emptyResults =
                             run.status === 'done' &&
@@ -4189,7 +4191,9 @@ export default function ChatContainer() {
                                     ? t('searchingNotion')
                                     : isGitHub
                                       ? t('searchingGitHub')
-                                      : t('searchingWeb')
+                                      : isWebRead
+                                        ? t('readingWeb')
+                                        : t('searchingWeb')
                               : failed
                                 ? t('searchFailed')
                                 : isNotionWrite
@@ -4200,7 +4204,9 @@ export default function ChatContainer() {
                                       ? t('searchedNotion')
                                       : isGitHub
                                         ? t('searchedGitHub')
-                                        : t('searchedWeb');
+                                        : isWebRead
+                                          ? t('readWeb')
+                                          : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button

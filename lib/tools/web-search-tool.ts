@@ -54,6 +54,7 @@ export function formatWebSearchToolContent(
 const WEB_SEARCH_SYSTEM_PROMPT = [
   'You have a web_search tool for live web lookup.',
   'Call web_search when the user asks to look something up, wants recent/current facts, news, prices, or anything that may have changed after your training data.',
+  'After web_search, if you need full article/docs text from a result URL, call web_read on that URL (do not rely on snippets alone for deep details).',
   'Do not pretend to search — if you need the web, call the tool.',
   'When building a search query for “recent/latest/this week”, include an explicit calendar anchor from the latest message timestamp (year/month or ISO date).',
   'After tool results arrive, cite title + URL. Do not invent sources.',

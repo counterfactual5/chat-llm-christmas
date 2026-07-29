@@ -1,13 +1,14 @@
 import type { ChatTool, ToolRuntimeFlags } from '@/lib/tools/registry';
 import { selectTools } from '@/lib/tools/registry';
 import { createWebSearchTool } from '@/lib/tools/web-search-tool';
+import { createWebReadTool } from '@/lib/tools/web-reader-tool';
 import { createNotionMcpTools } from '@/lib/tools/notion-tools';
 import { createGitHubMcpTools } from '@/lib/tools/github-tools';
 import { createGoogleTools } from '@/lib/tools/google-tools';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
-  return [createWebSearchTool()];
+  return [createWebSearchTool(), createWebReadTool()];
 }
 
 export function resolveEnabledTools(flags: ToolRuntimeFlags): ChatTool[] {
@@ -73,6 +74,8 @@ export {
   formatWebSearchToolContent,
   parseSearchQuery,
 } from '@/lib/tools/web-search-tool';
+
+export { createWebReadTool, runWebRead, parseReadUrl } from '@/lib/tools/web-reader-tool';
 
 export { createNotionMcpTools } from '@/lib/tools/notion-tools';
 export { createGitHubMcpTools } from '@/lib/tools/github-tools';

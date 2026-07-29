@@ -55,8 +55,12 @@ export async function POST(req: NextRequest) {
                   .map((p: any) => p.text)
                   .join('\n')
               : '';
-        const images = Array.isArray(m.images) ? m.images.length : 0;
-        const imageNote = images > 0 ? `\n[${images} image(s) attached]` : '';
+        const images = Array.isArray(m.images) ? m.images : [];
+        const imageNote = images.length
+          ? `\n[Attached image metadata only — do not invent visual details: ${images
+              .map((img: any, i: number) => img?.name || `Image ${i + 1}`)
+              .join(', ')}]`
+          : '';
         return `${role}:\n${text}${imageNote}`;
       })
       .join('\n\n---\n\n');
@@ -73,7 +77,9 @@ export async function POST(req: NextRequest) {
 - Key decisions and conclusions
 - Important facts, numbers, paths, code identifiers
 - Open questions / unfinished work
-Omit greetings, repeated drafts, and filler. Output plain text only — no preamble.`,
+- Any already-transcribed image facts present in the transcript
+
+Images marked as metadata-only were not supplied as pixels. Do not infer or invent their visual contents; preserve that limitation if it remains relevant. Omit greetings, repeated drafts, and filler. Output plain text only — no preamble.`,
         },
         {
           role: 'user',

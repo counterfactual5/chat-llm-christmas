@@ -27,6 +27,11 @@ import { BrandMark } from '@/components/brand-mark';
 import { NotionLogo } from '@/components/notion-logo';
 import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
 import {
+  AttachmentImageThumb,
+  ImagePreviewOverlay,
+  isImageAttachment,
+} from '@/components/attachment-image-thumb';
+import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
   formatContextWindow,
@@ -628,6 +633,7 @@ export default function ChatContainer() {
   const [attachments, setAttachments] = useState<IngestedAttachment[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [attachError, setAttachError] = useState('');
+  const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [compactNotice, setCompactNotice] = useState('');
   const [isCompacting, setIsCompacting] = useState(false);
 
@@ -1049,6 +1055,15 @@ export default function ChatContainer() {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
+
+  useEffect(() => {
+    if (!imagePreviewSrc) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setImagePreviewSrc(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [imagePreviewSrc]);
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const webSources = activeSession?.webSources || [];
@@ -2140,13 +2155,21 @@ export default function ChatContainer() {
           patch(a.id, (x) => ({
             ...x,
             uploading: false,
+            uploadError: false,
             fileId: String(data.id),
             previewUrl: x.previewUrl || String(data.url || ''),
           }));
           continue;
         }
+        if (isAccountBound) {
+          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          continue;
+        }
       } catch {
-        // Fall through to local dataUrl.
+        if (isAccountBound) {
+          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          continue;
+        }
       }
 
       patch(a.id, (x) => ({ ...x, uploading: false }));
@@ -3111,6 +3134,14 @@ export default function ChatContainer() {
       if (sessionId === activeSessionId) setAttachError(t('imagesNeedVision'));
       return false;
     }
+    if (sessionId === activeSessionId && attachments.some((a) => a.uploading)) {
+      setAttachError('Wait for image upload to finish');
+      return false;
+    }
+    if (sessionId === activeSessionId && attachments.some((a) => a.uploadError)) {
+      setAttachError('Remove or re-add images that failed to upload');
+      return false;
+    }
 
     if (sessionId === activeSessionId) {
       stickToBottomRef.current = true;
@@ -3499,8 +3530,13 @@ export default function ChatContainer() {
     }
   };
 
-  const editUserMessage = (message: Message) => {
+  const editUserMessage = (messageId: string) => {
     if (isActiveLoading) return;
+    const sessionId = activeSessionIdRef.current;
+    const sessionMsgs =
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+    const message = sessionMsgs.find((m) => m.id === messageId);
+    if (!message || message.role !== 'user') return;
     setEditingMessageId(message.id);
     setEditingMessageContent(
       message.content && message.content !== '(image)' ? message.content : '',
@@ -3523,6 +3559,10 @@ export default function ChatContainer() {
     if ((!content && resendImages.length === 0) || isActiveLoading) return;
     if (editingMessageImages.some((a) => a.uploading)) {
       setAttachError('Wait for image upload to finish');
+      return;
+    }
+    if (editingMessageImages.some((a) => a.uploadError)) {
+      setAttachError('Remove or re-add images that failed to upload');
       return;
     }
     if (resendImages.length > 0 && !selectedSpec.vision && !zhipuVisionOn) {
@@ -4245,36 +4285,31 @@ export default function ChatContainer() {
                     <div key={message.id} className="group flex w-full justify-end">
                       <div className="max-w-[82%] sm:max-w-[72%]">
                         {editingMessageId === message.id ? (
-                          <div className="rounded-2xl border border-stone-300 bg-white p-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 w-full min-w-[min(100%,20rem)]">
+                          <div
+                            className="rounded-2xl border border-stone-300 bg-white p-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 w-full min-w-[min(100%,20rem)]"
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const files = Array.from(e.dataTransfer.files || []).filter((f) =>
+                                f.type.startsWith('image/'),
+                              );
+                              if (files.length) void addEditIngestedFiles(files);
+                            }}
+                          >
                             {editingMessageImages.length > 0 && (
                               <div className="mb-2 flex flex-wrap gap-2">
                                 {editingMessageImages.map((a) => (
-                                  <div
+                                  <AttachmentImageThumb
                                     key={a.id}
-                                    className="group relative rounded-lg border border-stone-200 dark:border-stone-700"
-                                  >
-                                    <img
-                                      src={a.previewUrl || a.dataUrl}
-                                      alt={a.name}
-                                      className={cn(
-                                        'max-h-32 max-w-full rounded-lg object-contain',
-                                        a.uploading && 'opacity-70',
-                                      )}
-                                    />
-                                    {a.uploading && (
-                                      <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/65 backdrop-blur dark:bg-stone-900/60">
-                                        <Loader2 className="h-5 w-5 animate-spin text-stone-500" />
-                                      </div>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={() => removeEditingMessageImage(a.id)}
-                                      className="absolute -right-1.5 -top-1.5 rounded-full border border-stone-200 bg-white p-0.5 text-stone-500 shadow-sm hover:text-red-500 dark:border-stone-600 dark:bg-stone-800"
-                                      title="Remove"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </div>
+                                    attachment={a}
+                                    variant="free"
+                                    onPreview={setImagePreviewSrc}
+                                    onRemove={() => removeEditingMessageImage(a.id)}
+                                  />
                                 ))}
                               </div>
                             )}
@@ -4391,12 +4426,18 @@ export default function ChatContainer() {
                                     {message.images && message.images.length > 0 && (
                                       <div className={cn('flex flex-wrap gap-2', body && 'mb-2')}>
                                         {message.images.map((img, idx) => (
-                                          <img
+                                          <button
                                             key={idx}
-                                            src={img.url}
-                                            alt={img.name || 'attachment'}
-                                            className="max-h-48 max-w-full rounded-lg object-contain"
-                                          />
+                                            type="button"
+                                            onClick={() => setImagePreviewSrc(img.url)}
+                                            className="cursor-zoom-in overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60"
+                                          >
+                                            <img
+                                              src={img.url}
+                                              alt={img.name || 'attachment'}
+                                              className="max-h-48 max-w-full rounded-lg object-contain"
+                                            />
+                                          </button>
                                         ))}
                                       </div>
                                     )}
@@ -4409,7 +4450,7 @@ export default function ChatContainer() {
                             <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
                               <button
                                 type="button"
-                                onClick={() => editUserMessage(message)}
+                                onClick={() => editUserMessage(message.id)}
                                 className="rounded-md px-2 py-1 text-[11px] text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
                               >
                                 Edit
@@ -5116,40 +5157,31 @@ export default function ChatContainer() {
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-stone-400/20 focus-within:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-500 transition-all relative">
               {attachments.length > 0 && (
                 <div className="px-3 pt-3 pb-1 flex flex-wrap gap-2">
-                  {attachments.map((a) => (
-                    <div
-                      key={a.id}
-                      className="group flex max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900"
-                    >
-                      {a.previewUrl || a.dataUrl ? (
-                        <div className="relative">
-                          <img
-                            src={a.previewUrl || a.dataUrl}
-                            alt=""
-                            className={cn(
-                              'h-8 w-8 rounded object-cover',
-                              a.uploading ? 'opacity-70' : 'opacity-100',
-                            )}
-                          />
-                          {a.uploading && (
-                            <div className="absolute inset-0 flex items-center justify-center rounded bg-white/65 backdrop-blur dark:bg-stone-900/60">
-                              <Loader2 className="h-4 w-4 animate-spin text-stone-500 dark:text-stone-400" />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
-                      )}
-                      <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(a.id)}
-                        className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-red-500 dark:hover:bg-stone-800"
+                  {attachments.map((a) =>
+                    isImageAttachment(a) ? (
+                      <AttachmentImageThumb
+                        key={a.id}
+                        attachment={a}
+                        onPreview={setImagePreviewSrc}
+                        onRemove={() => removeAttachment(a.id)}
+                      />
+                    ) : (
+                      <div
+                        key={a.id}
+                        className="group flex max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900"
                       >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
+                        <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                        <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a.id)}
+                          className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-red-500 dark:hover:bg-stone-800"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ),
+                  )}
                 </div>
               )}
               {activeSkills.length > 0 && (
@@ -6927,6 +6959,8 @@ export default function ChatContainer() {
           </div>
         )}
       </AnimatePresence>
+
+      <ImagePreviewOverlay src={imagePreviewSrc} onClose={() => setImagePreviewSrc(null)} />
 
     </div>
   );

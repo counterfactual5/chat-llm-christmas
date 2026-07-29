@@ -11,6 +11,8 @@ export type IngestedAttachment = {
   fileId?: string;
   /** Client-side upload state when account-bound upload is in progress. */
   uploading?: boolean;
+  /** Gateway upload failed (network / server); local preview may still exist. */
+  uploadError?: boolean;
 };
 
 function readAsDataUrl(file: File): Promise<string> {

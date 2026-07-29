@@ -1,10 +1,9 @@
 /**
  * Multi-provider web page reader with fallback chain.
- * Order: Zhipu (Coding Plan MCP → PaaS REST) → Jina → bare fetch.
+ * Order: Zhipu Coding Plan MCP → Jina → bare fetch.
  */
 
 import {
-  zhipuApiKey,
   zhipuMcpEnabled,
   zhipuMcpWebRead,
 } from '@/lib/zhipu-mcp';
@@ -708,108 +707,17 @@ function extractFromHtml(html: string): ExtractedPage {
 }
 
 async function readZhipu(url: string): Promise<WebReadOutcome> {
-  const key = zhipuApiKey();
-  if (!key) throw new Error('ZHIPU_API_KEY missing');
-
-  const errors: string[] = [];
-
-  if (zhipuMcpEnabled()) {
-    try {
-      const mcp = await zhipuMcpWebRead(url);
-      const content = truncateContent(mcp.content || '');
-      if (content) {
-        return {
-          provider: 'zhipu-mcp',
-          url: mcp.url || url,
-          title: mcp.title,
-          description: mcp.description,
-          content,
-        };
-      }
-      errors.push('mcp: empty');
-    } catch (err: unknown) {
-      errors.push(`mcp: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  let res: Response;
-  try {
-    res = await fetch('https://open.bigmodel.cn/api/paas/v4/reader', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url,
-        timeout: 20,
-        return_format: 'markdown',
-        retain_images: false,
-        with_links_summary: false,
-      }),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS),
-    });
-  } catch (err: unknown) {
-    if (isTimeoutError(err)) {
-      throw new Error(
-        [...errors, `Zhipu reader timed out after ${PROVIDER_FETCH_TIMEOUT_MS}ms`]
-          .filter(Boolean)
-          .join(' | '),
-      );
-    }
-    throw err;
-  }
-
-  const raw = await readResponseTextLimited(res, 1_500_000);
-  const data = (() => {
-    try {
-      return JSON.parse(raw) as {
-        reader_result?: {
-          content?: string;
-          description?: string;
-          title?: string;
-          url?: string;
-        };
-        error?: { code?: string; message?: string };
-      };
-    } catch {
-      return {} as {
-        reader_result?: {
-          content?: string;
-          description?: string;
-          title?: string;
-          url?: string;
-        };
-        error?: { code?: string; message?: string };
-      };
-    }
-  })();
-
-  if (!res.ok) {
-    throw new Error(
-      [
-        ...errors,
-        data.error?.message || data.error?.code || `Zhipu reader HTTP ${res.status}`,
-      ]
-        .filter(Boolean)
-        .join(' | '),
-    );
-  }
-
-  const result = data.reader_result || {};
-  const content = truncateContent(result.content || '');
-  if (!content) {
-    throw new Error(
-      [...errors, 'Zhipu reader returned empty content'].filter(Boolean).join(' | '),
-    );
-  }
-
+  if (!zhipuMcpEnabled()) throw new Error('Zhipu MCP disabled');
+  // Coding Plan MCP only — PaaS `/reader` bills balance and is unused here.
+  // docs: https://docs.bigmodel.cn/cn/coding-plan/mcp/reader-mcp-server
+  const mcp = await zhipuMcpWebRead(url);
+  const content = truncateContent(mcp.content || '');
+  if (!content) throw new Error('Zhipu MCP webReader returned empty content');
   return {
-    provider: 'zhipu',
-    url: result.url || url,
-    title: result.title || undefined,
-    description: result.description || undefined,
+    provider: 'zhipu-mcp',
+    url: mcp.url || url,
+    title: mcp.title,
+    description: mcp.description,
     content,
   };
 }
@@ -938,7 +846,7 @@ type ReaderProvider = {
 const PROVIDERS: ReaderProvider[] = [
   {
     name: 'zhipu',
-    available: () => Boolean(zhipuApiKey()),
+    available: () => zhipuMcpEnabled(),
     read: readZhipu,
   },
   {

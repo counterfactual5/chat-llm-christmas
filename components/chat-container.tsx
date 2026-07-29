@@ -4722,13 +4722,21 @@ export default function ChatContainer() {
                           if (s.kind !== 'tool') return false;
                           return toolById.get(s.toolRunId)?.status === 'start';
                         });
-                        const processLive =
-                          Boolean(message.incomplete && !visibleContent) &&
-                          (Boolean(visibleReasoning) || anyToolSearching || toolCount > 0);
+                        // Keep Process live from request start until the first visible
+                        // answer token — covers the blank gap before tools and the 1–2s
+                        // after Image Understand / search before streaming begins.
+                        const awaitingFirstContent = Boolean(
+                          message.incomplete && !visibleContent,
+                        );
+                        const processLive = awaitingFirstContent;
+                        const showProcessPanel =
+                          awaitingFirstContent || activitySteps.length > 0;
                         // Keep open by default when tools ran — otherwise search UI
                         // disappears inside a collapsed Process panel after streaming ends.
                         const processOpen =
                           reasoningOpen[message.id] ?? (processLive || toolCount > 0);
+                        const showGeneratingStep =
+                          processLive && !anyToolSearching && !thinkingOnly;
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;
@@ -4993,7 +5001,7 @@ export default function ChatContainer() {
 
                         return (
                           <>
-                      {activitySteps.length > 0 && (
+                      {showProcessPanel && (
                         <div
                           className={cn(
                             'overflow-hidden',
@@ -5020,6 +5028,9 @@ export default function ChatContainer() {
                                 processOpen ? 'rotate-0' : '-rotate-90',
                               )}
                             />
+                            {processLive ? (
+                              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+                            ) : null}
                             <span>{t('process')}</span>
                             {toolCount > 0 && (
                               <span className="opacity-50">· {toolCount}</span>
@@ -5102,14 +5113,21 @@ export default function ChatContainer() {
                                 }
                                 return renderToolStep(step);
                               })}
+                              {showGeneratingStep && (
+                                <div className="flex items-center gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                                  <span>
+                                    {activitySteps.length === 0
+                                      ? t('thinking')
+                                      : t('generatingReply')}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
                       )}
-                                            {(visibleContent ||
-                        message.images?.length ||
-                        message.toolRuns?.length ||
-                        (!visibleReasoning && message.incomplete)) && (
+                                            {(visibleContent || message.images?.length) && (
                         isAssistantError(message) ? (
                           <div className="rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-3 dark:border-red-900/50 dark:bg-red-950/30">
                             <p className="text-sm font-medium text-red-700 dark:text-red-300">

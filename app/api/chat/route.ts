@@ -4,6 +4,7 @@ import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
 import {
   CURSOR_WEB_CHAT_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
+  activeIntegrationsPrompt,
   conversationIsolationPrompt,
   isCursorStyleModel,
 } from '@/lib/model-specs';
@@ -261,6 +262,8 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    const googleRequestedButUnauthorized =
+      requestedIntegrations.includes('google') && !authorizedIntegrations.includes('google');
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
     const enabledTools = await resolveEnabledToolsAsync(
@@ -282,6 +285,13 @@ export async function POST(req: NextRequest) {
     if (threadId) {
       systemParts.push(conversationIsolationPrompt(threadId));
     }
+    systemParts.push(
+      activeIntegrationsPrompt({
+        searchEnabled,
+        integrations: authorizedIntegrations,
+        googleRequestedButUnauthorized,
+      }),
+    );
     if (toolsGuidance) {
       systemParts.push(toolsGuidance);
     }
@@ -731,6 +741,10 @@ export async function POST(req: NextRequest) {
       'X-Vercel-AI-Data-Stream': 'v1',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      'X-Enabled-Integrations': authorizedIntegrations.join(',') || 'none',
+      ...(googleRequestedButUnauthorized
+        ? { 'X-Google-Auth': 'requested-but-unauthorized' }
+        : {}),
     };
 
     if (notionVaultUpdate && notionOwnerId) {

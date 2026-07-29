@@ -146,10 +146,47 @@ export const CURSOR_WEB_CHAT_PROMPT = [
   '【硬性环境约束 — 必须遵守】',
   '你当前运行在网页聊天（Christmas Chat）中，不是 Cursor IDE，也不是本机 Agent。',
   '你没有：文件系统、工作区、终端、Shell、Grep、Read、Write，或任意本地可执行工具。',
-  '你唯一可用的联网能力是 web_search 工具。需要查资料、搜新闻、核实时效信息时，必须调用 web_search，禁止口头假装“正在搜索/扫描工作区/读取文件”。',
-  '禁止输出 tool_call XML / function_call 伪标记（应走 API 的 tool_calls）；禁止编造未返回的搜索结果。',
-  '得到 web_search 结果后，基于结果作答并附上来源链接；若搜索失败，如实说明。',
+  '公开网页资料请用 web_search；若本轮还启用了 Notion / GitHub / Google Workspace 等集成工具，必须以 API 下发的 tools 列表为准，不要声称“只有 web_search”。',
+  '禁止口头假装正在搜索/扫描工作区/读取文件；禁止输出 tool_call XML / function_call 伪标记（应走 API 的 tool_calls）；禁止编造未返回的工具结果。',
+  '得到工具结果后基于结果作答并附上来源链接；若工具失败，如实说明。',
 ].join('');
+
+/** Explicit inventory so models don't omit Google when asked “有哪些 MCP/工具”. */
+export function activeIntegrationsPrompt(opts: {
+  searchEnabled: boolean;
+  integrations: string[];
+  googleRequestedButUnauthorized?: boolean;
+}): string {
+  const lines: string[] = [
+    'Active capabilities for THIS chat (list these accurately if the user asks what tools/MCP/integrations you have):',
+  ];
+  if (opts.searchEnabled) {
+    lines.push('- web_search: live public web lookup');
+  }
+  const set = new Set(
+    (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
+  );
+  if (set.has('notion')) {
+    lines.push('- Notion MCP: search/read/edit the user Notion workspace');
+  }
+  if (set.has('github')) {
+    lines.push('- GitHub MCP: repos, issues, PRs, Actions for the connected GitHub account');
+  }
+  if (set.has('google')) {
+    lines.push(
+      '- Google Workspace (Gmail / Calendar / Drive): search/read mail, manage calendar, Drive files; send mail when the user clearly asks. Exposed as chat tools (not the Google MCP preview).',
+    );
+  }
+  if (opts.googleRequestedButUnauthorized) {
+    lines.push(
+      '- Google was toggled on in the UI, but no usable OAuth access token is available this request. Tell the user to reconnect Google in MCP settings, then retry.',
+    );
+  }
+  if (lines.length === 1) {
+    lines.push('- No third-party integrations are authorized for this request.');
+  }
+  return lines.join('\n');
+}
 
 /** Pin each browser chat thread so agent-style models don't bleed tasks across sessions. */
 export function conversationIsolationPrompt(conversationId: string): string {

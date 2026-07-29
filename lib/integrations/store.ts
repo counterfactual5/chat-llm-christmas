@@ -231,7 +231,11 @@ export async function getGoogleAccessToken(
     });
     const updated = googleConnectionFromToken(token, google.email, google);
     return { token: updated.accessToken, updatedGoogle: updated };
-  } catch {
+  } catch (err: unknown) {
+    console.warn(
+      'Google access token refresh failed:',
+      err instanceof Error ? err.message : err,
+    );
     return { token: null };
   }
 }

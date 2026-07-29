@@ -4882,13 +4882,6 @@ export default function ChatContainer() {
                                       : run.query}
                                   </span>
                                 )}
-                                {searching && (
-                                  <span className="ml-1 flex items-center gap-0.5">
-                                    <span className="h-1 w-1 animate-pulse rounded-full bg-stone-400" />
-                                    <span className="h-1 w-1 animate-pulse rounded-full bg-stone-400 [animation-delay:150ms]" />
-                                    <span className="h-1 w-1 animate-pulse rounded-full bg-stone-400 [animation-delay:300ms]" />
-                                  </span>
-                                )}
                               </button>
                               {expanded && (
                                 <div className="space-y-1 pb-1 pl-5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
@@ -5030,13 +5023,6 @@ export default function ChatContainer() {
                             <span>{t('process')}</span>
                             {toolCount > 0 && (
                               <span className="opacity-50">· {toolCount}</span>
-                            )}
-                            {processLive && (
-                              <span className="ml-1 flex items-center gap-0.5">
-                                <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500" />
-                                <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:150ms]" />
-                                <span className="h-1 w-1 animate-pulse rounded-full bg-orange-500 [animation-delay:300ms]" />
-                              </span>
                             )}
                           </button>
                           {processOpen && (

@@ -350,8 +350,11 @@ function formatWebSourcesForReference(sources: WebSearchSource[]): string {
       [
         header,
         ...list.map((s) => {
-          const title = s.title || s.url;
+          const title = s.title || s.url || 'Upload';
           const snip = s.snippet?.trim() ? `\n   ${s.snippet.trim()}` : '';
+          // Uploaded images are already sent as multimodal parts (or processed by
+          // Image Understand). Never duplicate data:/blob:/file URLs as prompt text.
+          if (s.provider === 'upload') return `${n++}. ${title}${snip}`;
           return `${n++}. [${title}](${s.url})${snip}`;
         }),
       ].join('\n'),

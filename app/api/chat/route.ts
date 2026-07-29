@@ -499,7 +499,7 @@ export async function POST(req: NextRequest) {
               const rewritten = await rewriteMessagesWithImageDescriptions(
                 workingMessages,
                 { apiKey, baseURL },
-                { send },
+                { send, userAsk },
               );
               workingMessages.length = 0;
               workingMessages.push(...rewritten);

@@ -1,8 +1,8 @@
 /**
  * Image understanding via GLM-4.6V through CPA gateway.
  *
- * Priority: vision understanding/description → OCR fallback.
- * Uses the same CPA endpoint + user API key so costs are billed to the user.
+ * Vision model runs with a system prompt (brief plain-text output, aligned with the
+ * user's chat message). The text-only chat model receives that text instead of pixels.
  */
 
 import OpenAI from 'openai';
@@ -10,28 +10,29 @@ import { toImageContentPart } from '@/lib/gateway-files';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';
 const UNDERSTAND_TIMEOUT_MS = 30_000;
-/** Cap description injected into the text-model prompt (chars). */
-const MAX_DESCRIPTION_CHARS = 4_000;
 
 export interface ImageUnderstandInput {
   /** Image URL (https / data URI) or gateway file id. */
   imageUrl: string;
-  /** Optional user instruction for the vision model. */
+  /**
+   * The user's chat text for this turn (or tool instruction).
+   * Drives what the vision model should focus on (OCR, objects, etc.).
+   */
+  userPrompt?: string;
+  /** @deprecated Use userPrompt */
   instruction?: string;
 }
 
 export interface ImageUnderstandResult {
   ok: boolean;
-  /** Text description / understanding of the image. */
+  /** Plain-text description for the text-only chat model. */
   text: string;
-  /** Which mode produced the result. */
   mode: 'understand' | 'ocr' | 'error';
 }
 
 function toVisionImagePart(imageUrl: string): Record<string, unknown> | null {
   const raw = String(imageUrl || '').trim();
   if (!raw) return null;
-  // Prefer gateway file-id resolution when callers pass /api/files/... or bare ids.
   const part = toImageContentPart(
     raw.startsWith('http') || raw.startsWith('data:')
       ? { url: raw }
@@ -40,21 +41,43 @@ function toVisionImagePart(imageUrl: string): Record<string, unknown> | null {
   return part;
 }
 
+export function buildImageUnderstandSystemPrompt(userPrompt: string): string {
+  const focus = userPrompt.trim();
+  const intentBlock = focus
+    ? focus
+    : '（用户未附带文字 — 请用简短语言概括图片的主要内容。）';
+
+  return [
+    '你是图像理解助手，为「无法直接看图」的文本对话模型提供纯文本说明。',
+    '只输出纯文本：不要开场白、不要 Markdown 标题、不要重复用户原话。',
+    '篇幅要短：通常几句话或很短的分点即可，只写与用户问题相关的可见信息。',
+    '根据用户意图选择重点：问文字就尽量转录可见文字；问物体/界面就列关键元素；问数据就读图表/表格中的关键数字。',
+    '',
+    '用户在对话中的消息（请按此意图看图）：',
+    intentBlock,
+  ].join('\n');
+}
+
+const OCR_RETRY_SYSTEM = [
+  '你是图像 OCR 助手。只输出图片中可见文字的纯文本转录，保持原有换行。',
+  '若无文字，用一两句话概括图片。不要 Markdown，不要解释。',
+].join('\n');
+
 async function callVision(
   client: OpenAI,
   imagePart: Record<string, unknown>,
-  text: string,
+  system: string,
 ): Promise<string> {
   const res = await withTimeout(
     client.chat.completions.create({
       model: IMAGE_UNDERSTAND_MODEL,
       messages: [
+        { role: 'system', content: system },
         {
           role: 'user',
-          content: [{ type: 'text', text }, imagePart] as any,
+          content: [{ type: 'text', text: '请根据系统说明观察这张图片。' }, imagePart] as any,
         },
       ],
-      max_tokens: 2048,
     }),
     UNDERSTAND_TIMEOUT_MS,
   );
@@ -62,7 +85,7 @@ async function callVision(
 }
 
 /**
- * Call GLM-4.6V to understand an image. Falls back to OCR-style prompt on failure.
+ * Call GLM-4.6V with system prompt + user image. Output is plain text for the chat model.
  */
 export async function understandImage(
   input: ImageUnderstandInput,
@@ -73,30 +96,24 @@ export async function understandImage(
     return { ok: false, text: 'Invalid image URL.', mode: 'error' };
   }
 
+  const userPrompt = (input.userPrompt || input.instruction || '').trim();
+
   const client = new OpenAI({
     apiKey: gateway.apiKey,
     baseURL: gateway.baseURL,
   });
 
-  const userInstruction =
-    input.instruction?.trim() ||
-    '请详细描述这张图片的内容，包括主要元素、场景、文字、数据等关键信息。';
+  const system = buildImageUnderstandSystemPrompt(userPrompt);
 
-  // Attempt 1: understanding / description
   try {
-    const text = await callVision(client, imagePart, userInstruction);
+    const text = await callVision(client, imagePart, system);
     if (text) return { ok: true, text, mode: 'understand' };
   } catch (err) {
     console.warn('image-understand: vision call failed, trying OCR fallback', err);
   }
 
-  // Attempt 2: OCR fallback — ask specifically for text extraction
   try {
-    const text = await callVision(
-      client,
-      imagePart,
-      '请提取这张图片中的所有文字内容。如果没有文字，请描述图片的主要内容。',
-    );
+    const text = await callVision(client, imagePart, OCR_RETRY_SYSTEM);
     if (text) return { ok: true, text, mode: 'ocr' };
   } catch (err) {
     console.warn('image-understand: OCR fallback also failed', err);
@@ -109,23 +126,41 @@ export async function understandImage(
   };
 }
 
+function textPartsFromMessageContent(parts: any[]): string {
+  return parts
+    .filter((p) => p && p.type === 'text')
+    .map((p) => String(p.text || '').trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function formatInjectionText(description: string): string {
+  return `[Image description]\n${description}`;
+}
+
 /**
- * Replace image_url parts in chat messages with text descriptions from GLM-4.6V.
- * Used when the selected chat model is text-only but zhipu-vision MCP is on.
+ * Replace image_url parts with plain-text descriptions from GLM-4.6V.
  */
 export async function rewriteMessagesWithImageDescriptions(
   messages: any[],
   gateway: { apiKey: string; baseURL: string },
-  opts?: { send?: (payload: Record<string, unknown>) => void },
+  opts?: {
+    send?: (payload: Record<string, unknown>) => void;
+    /** Last user text in thread — used when a turn is image-only. */
+    userAsk?: string;
+  },
 ): Promise<any[]> {
   const out: any[] = [];
   let imageIndex = 0;
 
   for (const msg of messages) {
-    if (!Array.isArray(msg?.content)) {
+    if (msg?.role === 'system' || !Array.isArray(msg?.content)) {
       out.push(msg);
       continue;
     }
+
+    const turnPrompt =
+      textPartsFromMessageContent(msg.content) || String(opts?.userAsk || '').trim();
 
     const nextParts: any[] = [];
     let changed = false;
@@ -148,43 +183,41 @@ export async function rewriteMessagesWithImageDescriptions(
         tool: {
           status: 'start',
           name: 'image_understand',
-          query: label,
+          query: turnPrompt ? turnPrompt.slice(0, 120) : label,
           provider: 'zhipu-vision',
         },
       });
 
-      const result = await understandImage({ imageUrl: url }, gateway);
-      const description = result.ok
-        ? result.text.length > MAX_DESCRIPTION_CHARS
-          ? `${result.text.slice(0, MAX_DESCRIPTION_CHARS)}\n…(truncated)`
-          : result.text
-        : result.text;
-      // Never put data:/file urls into results — UI treats them as Reference Material
-      // links and would dump megabyte base64 into the next request's context.
+      const result = await understandImage(
+        { imageUrl: url, userPrompt: turnPrompt },
+        gateway,
+      );
+      const description = result.text;
+
       opts?.send?.({
         tool: {
           status: 'done',
           name: 'image_understand',
-          query: label,
+          query: turnPrompt ? turnPrompt.slice(0, 120) : label,
           provider: 'zhipu-vision',
           results: result.ok
             ? [
                 {
-                  title: `${label} (${result.mode})`,
+                  title: label,
                   url: '',
-                  snippet: description.slice(0, 400),
+                  snippet: description,
                 },
               ]
             : [],
-          error: result.ok ? undefined : result.text,
+          error: result.ok ? undefined : description,
         },
       });
 
       nextParts.push({
         type: 'text',
         text: result.ok
-          ? `【${label} 图像理解 / ${result.mode}】\n${description}`
-          : `【${label} 图像理解失败】${description}`,
+          ? formatInjectionText(description)
+          : `[Image understanding failed] ${description}`,
       });
       changed = true;
     }
@@ -192,7 +225,6 @@ export async function rewriteMessagesWithImageDescriptions(
     if (!changed) {
       out.push(msg);
     } else {
-      // Collapse adjacent text parts for cleaner prompts.
       const collapsed: any[] = [];
       for (const p of nextParts) {
         const last = collapsed[collapsed.length - 1];
@@ -217,8 +249,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms);
     promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
     );
   });
 }

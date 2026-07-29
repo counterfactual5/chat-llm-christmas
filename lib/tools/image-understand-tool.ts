@@ -10,10 +10,9 @@ import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 const SYSTEM_PROMPT = [
   'You have an image_understand tool powered by GLM-4.6V.',
-  'When the conversation contains images that you cannot see directly (text-only model),',
-  'the server may already have injected image descriptions — use those.',
-  'Call image_understand if you need a fresh / more detailed analysis of a specific image URL.',
-  'Do not invent image contents — only use tool results or injected descriptions.',
+  'For text-only chat models, the server usually injects short [Image description] text before you reply — use that.',
+  'Call image_understand only if you need a fresh read of a specific image URL; pass instruction aligned with the user ask.',
+  'Do not invent image contents — only use injected descriptions or tool results.',
 ].join(' ');
 
 export function parseImageUnderstandArgs(
@@ -100,8 +99,9 @@ export function createImageUnderstandTool(): ChatTool {
       });
 
       try {
+        const userPrompt = instruction || ctx.userAsk || '';
         const result = await understandImage(
-          { imageUrl, instruction: instruction || undefined },
+          { imageUrl, userPrompt },
           ctx.gateway,
         );
         ctx.send({
@@ -110,14 +110,12 @@ export function createImageUnderstandTool(): ChatTool {
             name: 'image_understand',
             query,
             provider: 'zhipu-vision',
-            // No url — image understand is not a web source; putting data: URLs
-            // here would bloat Reference Material and break the SSE stream.
             results: result.ok
               ? [
                   {
                     title: `Image (${result.mode})`,
                     url: '',
-                    snippet: result.text.slice(0, 400),
+                    snippet: result.text,
                   },
                 ]
               : [],

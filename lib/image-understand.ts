@@ -282,6 +282,20 @@ export function hasPersistedImageTranscription(text: string): boolean {
 }
 
 /**
+ * Keep at most one vision-transcription block in a string (first wins).
+ * Prevents accidental double-append from racey tool events / rewrites.
+ */
+export function dedupePersistedImageTranscription(text: string): string {
+  const raw = String(text || '');
+  const first = raw.search(IMAGE_TRANSCRIPTION_MARKER);
+  if (first < 0) return raw;
+  const afterFirst = raw.slice(first + 1);
+  const secondRel = afterFirst.search(IMAGE_TRANSCRIPTION_MARKER);
+  if (secondRel < 0) return raw;
+  return raw.slice(0, first + 1 + secondRel).trimEnd();
+}
+
+/**
  * Strip persisted vision transcription from user-visible bubble text.
  * The full string (with injection) remains in message.content for the API.
  */
@@ -297,10 +311,14 @@ export function buildPersistedUserMessageContent(
   injectionDescription: string,
   imageCount: number,
 ): string {
-  const injection = formatInjectionText(injectionDescription, imageCount);
-  const t = String(userText || '').trim();
-  if (!t || t === '(image)') return injection;
+  const t = dedupePersistedImageTranscription(String(userText || '').trim());
   if (hasPersistedImageTranscription(t)) return t;
+  const injection = formatInjectionText(injectionDescription, imageCount);
+  if (!t || t === '(image)') return injection;
+  // Description already present without the wrapper — don't wrap twice.
+  if (injectionDescription && t.includes(injectionDescription.trim())) {
+    return t;
+  }
   return `${t}\n\n${injection}`;
 }
 
@@ -359,6 +377,9 @@ function collectImageSlots(content: any[]): Array<{ partIndex: number; url: stri
  * Replace image_url parts with plain-text descriptions from GLM-4.6V.
  * Only the latest user turn is sent to vision; older image_url parts are stripped
  * (their content should already live in persisted transcription or prior replies).
+ *
+ * Returns `didUnderstand` so the chat route can drop the image_understand tool
+ * for this request and avoid injecting the same text again via a tool call.
  */
 export async function rewriteMessagesWithImageDescriptions(
   messages: any[],
@@ -368,18 +389,26 @@ export async function rewriteMessagesWithImageDescriptions(
     /** Last user text in thread — used when a turn is image-only. */
     userAsk?: string;
   },
-): Promise<any[]> {
+): Promise<{ messages: any[]; didUnderstand: boolean }> {
   let lastUserIdx = -1;
   for (let i = 0; i < messages.length; i++) {
     if (messages[i]?.role === 'user') lastUserIdx = i;
   }
 
   const out: any[] = [];
+  let didUnderstand = false;
 
   for (let mi = 0; mi < messages.length; mi++) {
     const msg = messages[mi];
     if (msg?.role === 'system' || !Array.isArray(msg?.content)) {
-      out.push(msg);
+      if (typeof msg?.content === 'string') {
+        out.push({
+          ...msg,
+          content: dedupePersistedImageTranscription(msg.content),
+        });
+      } else {
+        out.push(msg);
+      }
       continue;
     }
 
@@ -421,6 +450,7 @@ export async function rewriteMessagesWithImageDescriptions(
       turnPrompt,
       gateway,
     );
+    didUnderstand = true;
 
     opts?.send?.({
       tool: {
@@ -452,10 +482,18 @@ export async function rewriteMessagesWithImageDescriptions(
           : body
         : `[Image understanding failed] ${body}`;
     });
-    const injection = formatInjectionText(
-      imageTexts.join('\n\n'),
-      imageSlots.length,
-    );
+    const joinedBodies = imageTexts.join('\n\n');
+    // Text parts already carry this body (e.g. client re-sent persisted text + images):
+    // keep text, drop images — do not wrap/inject again.
+    if (
+      hasPersistedImageTranscription(turnPrompt) ||
+      (joinedBodies && turnPrompt.includes(joinedBodies.trim()))
+    ) {
+      out.push(stripImageUrlParts(msg));
+      continue;
+    }
+
+    const injection = formatInjectionText(joinedBodies, imageSlots.length);
 
     const rebuilt: any[] = [];
     let injected = false;
@@ -467,13 +505,21 @@ export async function rewriteMessagesWithImageDescriptions(
         }
         continue;
       }
-      rebuilt.push(msg.content[i]);
+      const part = msg.content[i];
+      if (part?.type === 'text' && typeof part.text === 'string') {
+        rebuilt.push({
+          ...part,
+          text: dedupePersistedImageTranscription(part.text),
+        });
+      } else {
+        rebuilt.push(part);
+      }
     }
 
     out.push({ ...msg, content: collapseContentParts(rebuilt) });
   }
 
-  return out;
+  return { messages: out, didUnderstand };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

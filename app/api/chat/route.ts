@@ -293,7 +293,7 @@ export async function POST(req: NextRequest) {
     if (modelIsVision) {
       enabledTools = enabledTools.filter((t) => t.name !== 'image_understand');
     }
-    const toolDefs = openaiToolDefinitions(enabledTools);
+    let toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
 
     const systemParts: string[] = [];
@@ -526,13 +526,20 @@ export async function POST(req: NextRequest) {
                 m.content.some((p: any) => p?.type === 'image_url'),
             );
             if (hasImageParts) {
-              const rewritten = await rewriteMessagesWithImageDescriptions(
-                workingMessages,
-                { apiKey, baseURL },
-                { send, userAsk },
-              );
+              const { messages: rewritten, didUnderstand } =
+                await rewriteMessagesWithImageDescriptions(
+                  workingMessages,
+                  { apiKey, baseURL },
+                  { send, userAsk },
+                );
               workingMessages.length = 0;
               workingMessages.push(...rewritten);
+              // Preprocess already put the transcription in the user turn — don't let
+              // the model call image_understand again and append a duplicate tool payload.
+              if (didUnderstand) {
+                enabledTools = enabledTools.filter((t) => t.name !== 'image_understand');
+                toolDefs = openaiToolDefinitions(enabledTools);
+              }
             }
           }
 

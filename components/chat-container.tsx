@@ -1900,7 +1900,8 @@ export default function ChatContainer() {
               const aIdx = mergedMsgs.findIndex((m) => m.id === assistantId);
               if (aIdx > 0 && mergedMsgs[aIdx - 1]?.role === 'user') {
                 const userMsg = mergedMsgs[aIdx - 1];
-                if (!hasPersistedImageTranscription(userMsg.content || '')) {
+                if (!hasPersistedImageTranscription(userMsg.content || '') &&
+                    (userMsg.images?.length || 0) > 0) {
                   mergedMsgs = mergedMsgs.map((m, i) =>
                     i === aIdx - 1
                       ? {
@@ -1910,6 +1911,7 @@ export default function ChatContainer() {
                             body,
                             imageCount || run.results?.length || 1,
                           ),
+                          // Keep thumbnails in UI; API drops images once transcription is present.
                         }
                       : m,
                   );

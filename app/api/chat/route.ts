@@ -547,7 +547,26 @@ export async function POST(req: NextRequest) {
     let pendingAssistantImages: ImageRef[] = [];
     const carryAssistantImages = modelIsVision;
 
-    for (const m of messages as any[]) {
+    let lastUserMsgIdx = -1;
+    for (let i = (messages as any[]).length - 1; i >= 0; i--) {
+      if ((messages as any[])[i]?.role === 'user') {
+        lastUserMsgIdx = i;
+        break;
+      }
+    }
+    /** `/api/files/<id>` or https path for a raw image ref; '' for data URLs. */
+    const imageMarkerPath = (raw: any): string => {
+      if (typeof raw === 'string') {
+        return raw.startsWith('data:') ? '' : raw;
+      }
+      const fileId = raw?.fileId ? String(raw.fileId) : '';
+      if (fileId) return `/api/files/${encodeURIComponent(fileId)}`;
+      const url = raw?.url ? String(raw.url) : '';
+      return url && !url.startsWith('data:') ? url : '';
+    };
+
+    for (let mi = 0; mi < (messages as any[]).length; mi++) {
+      const m = (messages as any[])[mi];
       const role = m.role;
       const timestamp = m.timestamp;
       if (Array.isArray(m.content)) {
@@ -569,6 +588,36 @@ export async function POST(req: NextRequest) {
 
       const text = typeof m.content === 'string' ? m.content : '';
       const rawImages: any[] = Array.isArray(m.images) ? m.images : [];
+
+      // Text-only model + OLDER user turn with never-transcribed uploads:
+      // keep lightweight reference markers instead of pixels. The model can
+      // transcribe a specific one on demand via the image_understand tool.
+      if (
+        role === 'user' &&
+        !modelIsVision &&
+        mi !== lastUserMsgIdx &&
+        rawImages.length > 0 &&
+        !hasPersistedImageTranscription(text)
+      ) {
+        pendingAssistantImages = [];
+        const refs = rawImages.map(imageMarkerPath).filter(Boolean);
+        const marker = refs.length
+          ? [
+              '【历史图片引用（未转写）】',
+              ...refs.map((p, i) => `- 图${i + 1}: ${p}`),
+            ].join('\n')
+          : '';
+        const body = stripImageArchiveBlock(text).trim();
+        normalizedMessages.push({
+          role,
+          timestamp,
+          content: [body || (marker ? '' : '(image)'), marker]
+            .filter(Boolean)
+            .join('\n\n'),
+        });
+        continue;
+      }
+
       const images: ImageRef[] = [];
       for (const raw of rawImages) {
         images.push(await resolveImageRef(raw));

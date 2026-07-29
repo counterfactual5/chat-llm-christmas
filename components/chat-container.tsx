@@ -599,8 +599,17 @@ function toApiMessages(
         images = [];
         content = stripImageArchiveBlock(content || '');
       } else if (i !== lastUserIdx) {
-        // Older untranscribed uploads: do not re-send for Image Understand.
-        images = [];
+        // Older untranscribed uploads: keep lightweight refs only (no data:
+        // pixels). The server renders them as 【历史图片引用（未转写）】 markers so
+        // the model can transcribe a specific one on demand.
+        images = images
+          .filter((img) => img.fileId || !String(img.url || '').startsWith('data:'))
+          .map((img) => ({
+            ...img,
+            url: img.fileId
+              ? `/api/files/${encodeURIComponent(img.fileId)}`
+              : img.url,
+          }));
       }
     }
 
@@ -1936,14 +1945,50 @@ export default function ChatContainer() {
             const { body, imageCount } = injectionBodyFromToolResults(run.results || []);
             if (body) {
               const aIdx = mergedMsgs.findIndex((m) => m.id === assistantId);
-              const targetIdx = run.targetTimestamp != null
-                ? mergedMsgs.findIndex(
-                    (m) => m.role === 'user' && m.timestamp === run.targetTimestamp,
-                  )
-                : aIdx - 1;
+              // On-demand transcription of an older image (model-invoked tool):
+              // results carry /api/files/<id> urls — persist onto the message
+              // that owns that file so the image is only ever transcribed once.
+              const runFileIds = (run.results || [])
+                .map((r) => {
+                  const u = String(r?.url || '');
+                  return u.startsWith('/api/files/')
+                    ? decodeURIComponent(
+                        u.slice('/api/files/'.length).split(/[?#]/)[0] || '',
+                      )
+                    : '';
+                })
+                .filter(Boolean);
+              let matchedByFileId = false;
+              let targetIdx = -1;
+              if (run.targetTimestamp != null) {
+                targetIdx = mergedMsgs.findIndex(
+                  (m) => m.role === 'user' && m.timestamp === run.targetTimestamp,
+                );
+              } else if (runFileIds.length > 0) {
+                targetIdx = mergedMsgs.findIndex(
+                  (m) =>
+                    m.role === 'user' &&
+                    (m.images || []).some(
+                      (img) =>
+                        (img.fileId && runFileIds.includes(img.fileId)) ||
+                        runFileIds.some((id) =>
+                          String(img.url || '').includes(id),
+                        ),
+                    ),
+                );
+                matchedByFileId = targetIdx >= 0;
+              }
+              if (targetIdx < 0) targetIdx = aIdx - 1;
               if (targetIdx >= 0 && mergedMsgs[targetIdx]?.role === 'user') {
                 const userMsg = mergedMsgs[targetIdx];
-                if (!hasPersistedImageTranscription(userMsg.content || '') &&
+                // A single on-demand call covers one image; only persist when it
+                // covers ALL images of that message, otherwise a partial
+                // transcription would hide the remaining ones from text models.
+                const coversAllImages =
+                  !matchedByFileId ||
+                  (userMsg.images?.length || 0) <= (run.results?.length || 0);
+                if (coversAllImages &&
+                    !hasPersistedImageTranscription(userMsg.content || '') &&
                     (userMsg.images?.length || 0) > 0) {
                   mergedMsgs = mergedMsgs.map((m, i) =>
                     i === targetIdx

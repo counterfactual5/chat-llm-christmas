@@ -989,6 +989,17 @@ export async function POST(req: NextRequest) {
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
+                // Malformed / aborted tool_calls (e.g. deltas without a function name —
+                // common on weaker free models). Content was buffered and NOT streamed
+                // to the client because hasToolCallDeltas gated it. Do not early-return
+                // with a blank bubble: park any narration in reasoning and fall through
+                // to the final completion pass without tools.
+                if (hasToolCallDeltas) {
+                  if (streamedContent.trim()) {
+                    send({ reasoning: stripMessageStamp(String(streamedContent)) });
+                  }
+                  break;
+                }
                 // Only end here when the model already streamed a user-visible answer.
                 // Reasoning-only chunks (common on GLM with tools enabled) must fall
                 // through to the final completion pass — otherwise the bubble stays empty.
@@ -1133,10 +1144,10 @@ export async function POST(req: NextRequest) {
             foldReasoning: reasoningAsContent,
           });
 
-          // GLM text models sometimes return a totally empty stream on the first
-          // pass (especially right after Image Understand). Retry once without
-          // thinking — fold any reasoning_* into content.
-          if (!finalResult.sawText && modelDumpsAnswerInReasoning(requestedModel)) {
+          // Some models return a totally empty stream on the first pass (seen on
+          // GLM after Image Understand; also weaker free models with tools). Retry
+          // once without thinking and fold any reasoning_* into content.
+          if (!finalResult.sawText) {
             console.warn('empty final completion; retrying without thinking', requestedModel);
             finalResult = await runFinalCompletion({
               enableThinking: false,

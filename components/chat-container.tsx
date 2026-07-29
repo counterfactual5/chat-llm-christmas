@@ -2214,6 +2214,36 @@ export default function ChatContainer() {
         }
       }
 
+      // Truly empty reply (no content, no reasoning): never leave a blank bubble.
+      // Treat as a failed request so the user sees Retry instead of empty space.
+      if (!streamed.trim()) {
+        const fallback =
+          'Error: The model returned an empty reply. Please try again, or switch to another model.';
+        streamed = fallback;
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            return {
+              ...s,
+              updatedAt: Date.now(),
+              messages: s.messages.map((m) => {
+                if (m.id !== assistantId) return m;
+                return {
+                  ...m,
+                  content: fallback,
+                  incomplete: false,
+                  truncationReason: undefined,
+                };
+              }),
+            };
+          }),
+        );
+        markAssistantIncomplete(sessionId, assistantId, false, {
+          finishReason: finishReason || 'error',
+        });
+        return;
+      }
+
       // Connection dropped / function killed mid-stream: no [DONE] arrived.
       // Prefer Continue over silently treating the partial reply as finished.
       if (unexpectedEnd && !finishReason && serverTruncated == null) {

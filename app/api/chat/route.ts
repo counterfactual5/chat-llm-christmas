@@ -64,9 +64,12 @@ function jsonError(message: string, status: number = 500) {
 }
 
 function wantsThinking(model: string) {
+  const id = String(model || '');
+  // deepseek-v4-flash rejects enable_thinking on the gateway (400 Unsupported).
+  if (/deepseek-v4.*flash/i.test(id)) return false;
   return (
-    /(^|[-_])(r1|reason|thinking|qwq)([-_]|$)/i.test(model) ||
-    /deepseek-v4|glm-5|kimi-k2\.|minimax-m3/i.test(model)
+    /(^|[-_])(r1|reason|thinking|qwq)([-_]|$)/i.test(id) ||
+    /deepseek-v4|glm-5|kimi-k2\.|minimax-m3/i.test(id)
   );
 }
 
@@ -86,26 +89,51 @@ function modelDumpsAnswerInReasoning(model: string) {
 /**
  * Raw SSE chat.completions — preserves gateway-only fields like reasoning_content
  * that the OpenAI SDK types omit (runtime usually keeps them, but this is explicit).
+ * If the gateway rejects enable_thinking, retry once without it.
  */
 async function* streamChatCompletionsRaw(opts: {
   apiKey: string;
   baseURL: string;
   body: Record<string, unknown>;
 }): AsyncGenerator<any> {
-  const res = await fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify({ ...opts.body, stream: true }),
-  });
+  const post = async (body: Record<string, unknown>) =>
+    fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ ...body, stream: true }),
+    });
+
+  let body: Record<string, unknown> = { ...opts.body };
+  let res = await post(body);
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(
-      `Upstream chat error: ${res.status} ${errText.slice(0, 300) || res.statusText}`,
-    );
+    const unsupportedThinking =
+      Boolean(body.enable_thinking) &&
+      res.status === 400 &&
+      /enable_thinking/i.test(errText);
+    if (unsupportedThinking) {
+      const { enable_thinking: _drop, ...rest } = body;
+      body = rest;
+      console.warn(
+        'upstream rejected enable_thinking; retrying without it',
+        body.model,
+      );
+      res = await post(body);
+    }
+    if (!res.ok) {
+      const retryText = unsupportedThinking
+        ? await res.text().catch(() => errText)
+        : errText;
+      throw new Error(
+        `Upstream chat error: ${res.status} ${
+          (retryText || res.statusText).slice(0, 300)
+        }`,
+      );
+    }
   }
   if (!res.body) throw new Error('Upstream chat returned an empty body');
 

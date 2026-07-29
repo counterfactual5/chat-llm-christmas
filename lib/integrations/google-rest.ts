@@ -527,6 +527,90 @@ export async function gmailDeleteDraft(accessToken: string, draftId: string) {
   return { ok: true, deleted: draftId };
 }
 
+export async function gmailSendDraft(accessToken: string, draftId: string) {
+  return googleSendJson(`${GMAIL_API}/users/me/drafts/send`, accessToken, 'POST', {
+    id: draftId,
+  });
+}
+
+export async function gmailCreateLabel(
+  accessToken: string,
+  opts: { name: string; messageListVisibility?: string; labelListVisibility?: string },
+) {
+  return googleSendJson(`${GMAIL_API}/users/me/labels`, accessToken, 'POST', {
+    name: opts.name,
+    messageListVisibility: opts.messageListVisibility || 'show',
+    labelListVisibility: opts.labelListVisibility || 'labelShow',
+  });
+}
+
+export async function gmailUpdateLabel(
+  accessToken: string,
+  opts: {
+    labelId: string;
+    name?: string;
+    messageListVisibility?: string;
+    labelListVisibility?: string;
+  },
+) {
+  const body: GoogleRestJson = {};
+  if (opts.name !== undefined) body.name = opts.name;
+  if (opts.messageListVisibility !== undefined) {
+    body.messageListVisibility = opts.messageListVisibility;
+  }
+  if (opts.labelListVisibility !== undefined) {
+    body.labelListVisibility = opts.labelListVisibility;
+  }
+  return googleSendJson(
+    `${GMAIL_API}/users/me/labels/${encodeURIComponent(opts.labelId)}`,
+    accessToken,
+    'PATCH',
+    body,
+  );
+}
+
+export async function gmailDeleteLabel(accessToken: string, labelId: string) {
+  await googleSendJson(
+    `${GMAIL_API}/users/me/labels/${encodeURIComponent(labelId)}`,
+    accessToken,
+    'DELETE',
+  );
+  return { ok: true, deleted: labelId };
+}
+
+/** Forward a message to a new recipient (plain-text body with original quoted). */
+export async function gmailForwardMessage(
+  accessToken: string,
+  opts: { messageId: string; to: string; body?: string; cc?: string; bcc?: string },
+) {
+  const original = await gmailGetMessage(accessToken, opts.messageId);
+  const subjectRaw = String(original.subject || '');
+  const subject = /^fwd:\s/i.test(subjectRaw)
+    ? subjectRaw
+    : `Fwd: ${subjectRaw || '(no subject)'}`;
+  const preface = String(opts.body || '').trim();
+  const quoted = [
+    preface,
+    preface ? '' : null,
+    '---------- Forwarded message ---------',
+    `From: ${original.from || ''}`,
+    `Date: ${original.date || ''}`,
+    `Subject: ${original.subject || ''}`,
+    `To: ${original.to || ''}`,
+    '',
+    String(original.bodyText || original.snippet || ''),
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
+  return gmailSendMessage(accessToken, {
+    to: opts.to,
+    subject,
+    body: quoted.slice(0, 50_000),
+    cc: opts.cc,
+    bcc: opts.bcc,
+  });
+}
+
 // —— Calendar ——
 
 export async function calendarListCalendars(accessToken: string) {
@@ -688,6 +772,30 @@ export async function calendarFreeBusy(
     timeZone: opts.timeZone || 'UTC',
     items: ids.map((id) => ({ id })),
   });
+}
+
+/** Expand instances of a recurring event. */
+export async function calendarListEventInstances(
+  accessToken: string,
+  opts: {
+    calendarId?: string;
+    eventId: string;
+    timeMin?: string;
+    timeMax?: string;
+    maxResults?: number;
+  },
+) {
+  const calendarId = encodeURIComponent(opts.calendarId || 'primary');
+  const eventId = encodeURIComponent(opts.eventId);
+  const params = new URLSearchParams({
+    maxResults: String(Math.min(Math.max(opts.maxResults || 20, 1), 50)),
+  });
+  if (opts.timeMin) params.set('timeMin', opts.timeMin);
+  if (opts.timeMax) params.set('timeMax', opts.timeMax);
+  return googleGetJson(
+    `${CALENDAR_API}/calendars/${calendarId}/events/${eventId}/instances?${params.toString()}`,
+    accessToken,
+  );
 }
 
 // —— Drive ——
@@ -957,6 +1065,99 @@ export async function driveRevokePermission(
     'DELETE',
   );
   return { ok: true, fileId: opts.fileId, permissionId: opts.permissionId };
+}
+
+export async function driveCreateShortcut(
+  accessToken: string,
+  opts: { targetId: string; name?: string; parentId?: string },
+) {
+  const metadata: GoogleRestJson = {
+    mimeType: 'application/vnd.google-apps.shortcut',
+    shortcutDetails: { targetId: opts.targetId },
+  };
+  if (opts.name) metadata.name = opts.name;
+  if (opts.parentId) metadata.parents = [opts.parentId];
+  return googleSendJson(
+    `${DRIVE_API}/files?fields=id,name,mimeType,webViewLink,shortcutDetails,parents`,
+    accessToken,
+    'POST',
+    metadata,
+  );
+}
+
+export async function driveListSharedDrives(
+  accessToken: string,
+  opts: { pageSize?: number; pageToken?: string } = {},
+) {
+  const params = new URLSearchParams({
+    pageSize: String(Math.min(Math.max(opts.pageSize || 20, 1), 50)),
+    fields: 'nextPageToken,drives(id,name,createdTime)',
+  });
+  if (opts.pageToken) params.set('pageToken', opts.pageToken);
+  return googleGetJson(`${DRIVE_API}/drives?${params.toString()}`, accessToken);
+}
+
+/** Upload a file from utf-8 text or base64 payload. */
+export async function driveUploadFile(
+  accessToken: string,
+  opts: {
+    name: string;
+    mimeType?: string;
+    parentId?: string;
+    content?: string;
+    contentBase64?: string;
+  },
+) {
+  const mimeType = opts.mimeType || 'application/octet-stream';
+  const metadata: GoogleRestJson = { name: opts.name, mimeType };
+  if (opts.parentId) metadata.parents = [opts.parentId];
+
+  let binary: Uint8Array;
+  if (opts.contentBase64) {
+    const padded = opts.contentBase64.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = padded.length % 4 === 0 ? '' : '='.repeat(4 - (padded.length % 4));
+    const raw = atob(padded + pad);
+    binary = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  } else {
+    binary = new TextEncoder().encode(opts.content || '');
+  }
+  // Cap upload size in chat context (~1.5MB decoded).
+  if (binary.byteLength > 1_500_000) {
+    throw new Error('Upload too large for chat tool (max ~1.5MB). Use Drive UI for bigger files.');
+  }
+
+  const boundary = `christmas_${Date.now().toString(36)}`;
+  const metaPart = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    'Content-Transfer-Encoding: binary',
+    '',
+  ].join('\r\n');
+  const endPart = `\r\n--${boundary}--\r\n`;
+  const metaBytes = new TextEncoder().encode(metaPart);
+  const endBytes = new TextEncoder().encode(endPart);
+  const body = new Uint8Array(metaBytes.length + binary.length + endBytes.length);
+  body.set(metaBytes, 0);
+  body.set(binary, metaBytes.length);
+  body.set(endBytes, metaBytes.length + binary.length);
+
+  const response = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,size',
+    {
+      method: 'POST',
+      headers: authHeaders(accessToken, {
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      }),
+      body,
+      cache: 'no-store',
+    },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as GoogleRestJson;
 }
 
 /** Lightweight connectivity probe used by /api/integrations/google/probe. */

@@ -5,16 +5,19 @@ import {
   calendarFreeBusy,
   calendarGetEvent,
   calendarListCalendars,
+  calendarListEventInstances,
   calendarListEvents,
   calendarMoveEvent,
   calendarUpdateEvent,
   driveCopyFile,
   driveCreateFolder,
+  driveCreateShortcut,
   driveCreateTextFile,
   driveDeleteFile,
   driveExportFile,
   driveGetFile,
   driveListPermissions,
+  driveListSharedDrives,
   driveReadFileText,
   driveRevokePermission,
   driveSearchFiles,
@@ -22,9 +25,13 @@ import {
   driveTrashFile,
   driveUntrashFile,
   driveUpdateFile,
+  driveUploadFile,
   gmailBatchModifyMessages,
   gmailCreateDraft,
+  gmailCreateLabel,
   gmailDeleteDraft,
+  gmailDeleteLabel,
+  gmailForwardMessage,
   gmailGetAttachment,
   gmailGetMessage,
   gmailGetThread,
@@ -34,29 +41,31 @@ import {
   gmailModifyMessage,
   gmailReplyMessage,
   gmailSearchMessages,
+  gmailSendDraft,
   gmailSendMessage,
   gmailTrashMessage,
   gmailUntrashMessage,
+  gmailUpdateLabel,
 } from '@/lib/integrations/google-rest';
 
 const GMAIL_SYSTEM_PROMPT = [
   'You have Gmail MCP tools for the user\'s connected Google account.',
-  'Search/read messages & threads; attachments; labels; drafts; send; reply; modify/batch-modify (read/unread, star, archive); trash/untrash.',
-  'For send/reply/trash/label changes, confirm intent from the user message before calling.',
+  'Search/read messages & threads; attachments; labels (list/create/update/delete); drafts (create/list/send/delete); send; reply; forward; modify/batch-modify (read/unread, star, archive); trash/untrash.',
+  'For send/reply/forward/trash/label changes, confirm intent from the user message before calling.',
   'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
 ].join(' ');
 
 const CALENDAR_SYSTEM_PROMPT = [
   'You have Google Calendar MCP tools for the user\'s connected Google account.',
-  'List calendars/events; get event; free/busy; create/update/delete/move events.',
+  'List calendars/events; get event; list recurring instances; free/busy; create/update/delete/move events.',
   'For create/update/delete/move, confirm intent from the user message before calling.',
   'Do not invent event IDs — only use tool results. Cite Calendar links when answering.',
 ].join(' ');
 
 const DRIVE_SYSTEM_PROMPT = [
   'You have Google Drive MCP tools for the user\'s connected Google account.',
-  'Search/get/read/export; create text file or folder; copy; rename/move; trash/untrash/delete; list/share/revoke permissions.',
-  'For share/trash/delete/create, confirm intent from the user message before calling.',
+  'Search/get/read/export/upload; create text file, folder, or shortcut; list shared drives; copy; rename/move; trash/untrash/delete; list/share/revoke permissions.',
+  'For share/trash/delete/create/upload, confirm intent from the user message before calling.',
   'Do not invent file IDs — only use tool results. Cite Drive links when answering.',
 ].join(' ');
 
@@ -107,6 +116,8 @@ function queryHint(name: string, args: Record<string, unknown>): string {
     'threadId',
     'draftId',
     'attachmentId',
+    'labelId',
+    'targetId',
     'eventId',
     'fileId',
     'permissionId',
@@ -135,6 +146,7 @@ function extractUiResults(
       (Array.isArray(data.messages) && data.messages) ||
       (Array.isArray(data.threads) && data.threads) ||
       (Array.isArray(data.drafts) && data.drafts) ||
+      (Array.isArray(data.drives) && data.drives) ||
       (Array.isArray(data.items) && data.items) ||
       (Array.isArray(data.files) && data.files) ||
       (Array.isArray(data.events) && data.events) ||
@@ -219,6 +231,72 @@ const TOOL_DEFS: GoogleToolDef[] = [
     description: 'List Gmail labels for the connected account.',
     parameters: { type: 'object', properties: {} },
     run: async (token) => gmailListLabels(token),
+  },
+  {
+    name: 'gmail_create_label',
+    description: 'Create a custom Gmail label.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        messageListVisibility: { type: 'string', description: 'show | hide' },
+        labelListVisibility: {
+          type: 'string',
+          description: 'labelShow | labelShowIfUnread | labelHide',
+        },
+      },
+      required: ['name'],
+    },
+    run: async (token, args) => {
+      const name = str(args.name);
+      if (!name) throw new Error('name is required');
+      return gmailCreateLabel(token, {
+        name,
+        messageListVisibility: str(args.messageListVisibility) || undefined,
+        labelListVisibility: str(args.labelListVisibility) || undefined,
+      });
+    },
+  },
+  {
+    name: 'gmail_update_label',
+    description: 'Rename or change visibility of a custom Gmail label.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        labelId: { type: 'string' },
+        name: { type: 'string' },
+        messageListVisibility: { type: 'string' },
+        labelListVisibility: { type: 'string' },
+      },
+      required: ['labelId'],
+    },
+    run: async (token, args) => {
+      const labelId = str(args.labelId);
+      if (!labelId) throw new Error('labelId is required');
+      return gmailUpdateLabel(token, {
+        labelId,
+        name: str(args.name) || undefined,
+        messageListVisibility: str(args.messageListVisibility) || undefined,
+        labelListVisibility: str(args.labelListVisibility) || undefined,
+      });
+    },
+  },
+  {
+    name: 'gmail_delete_label',
+    description: 'Delete a custom Gmail label by labelId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { labelId: { type: 'string' } },
+      required: ['labelId'],
+    },
+    run: async (token, args) => {
+      const labelId = str(args.labelId);
+      if (!labelId) throw new Error('labelId is required');
+      return gmailDeleteLabel(token, labelId);
+    },
   },
   {
     name: 'gmail_create_draft',
@@ -306,6 +384,35 @@ const TOOL_DEFS: GoogleToolDef[] = [
         to: str(args.to) || undefined,
         cc: str(args.cc) || undefined,
         subject: str(args.subject) || undefined,
+      });
+    },
+  },
+  {
+    name: 'gmail_forward',
+    description:
+      'Forward a Gmail message to a new recipient (quotes original plain-text body).',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string' },
+        to: { type: 'string' },
+        body: { type: 'string', description: 'Optional note above the forwarded content' },
+        cc: { type: 'string' },
+        bcc: { type: 'string' },
+      },
+      required: ['messageId', 'to'],
+    },
+    run: async (token, args) => {
+      const messageId = str(args.messageId);
+      const to = str(args.to);
+      if (!messageId || !to) throw new Error('messageId and to are required');
+      return gmailForwardMessage(token, {
+        messageId,
+        to,
+        body: str(args.body) || undefined,
+        cc: str(args.cc) || undefined,
+        bcc: str(args.bcc) || undefined,
       });
     },
   },
@@ -494,6 +601,21 @@ const TOOL_DEFS: GoogleToolDef[] = [
       const draftId = str(args.draftId);
       if (!draftId) throw new Error('draftId is required');
       return gmailDeleteDraft(token, draftId);
+    },
+  },
+  {
+    name: 'gmail_send_draft',
+    description: 'Send an existing Gmail draft by draftId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: { draftId: { type: 'string' } },
+      required: ['draftId'],
+    },
+    run: async (token, args) => {
+      const draftId = str(args.draftId);
+      if (!draftId) throw new Error('draftId is required');
+      return gmailSendDraft(token, draftId);
     },
   },
   {
@@ -689,6 +811,33 @@ const TOOL_DEFS: GoogleToolDef[] = [
         timeMax,
         calendarIds,
         timeZone: str(args.timeZone) || undefined,
+      });
+    },
+  },
+  {
+    name: 'calendar_list_instances',
+    description:
+      'List instances of a recurring calendar event by eventId (optionally bounded by timeMin/timeMax).',
+    parameters: {
+      type: 'object',
+      properties: {
+        calendarId: { type: 'string' },
+        eventId: { type: 'string' },
+        timeMin: { type: 'string' },
+        timeMax: { type: 'string' },
+        maxResults: { type: 'integer' },
+      },
+      required: ['eventId'],
+    },
+    run: async (token, args) => {
+      const eventId = str(args.eventId);
+      if (!eventId) throw new Error('eventId is required');
+      return calendarListEventInstances(token, {
+        calendarId: str(args.calendarId) || undefined,
+        eventId,
+        timeMin: str(args.timeMin) || undefined,
+        timeMax: str(args.timeMax) || undefined,
+        maxResults: num(args.maxResults, 20),
       });
     },
   },
@@ -998,6 +1147,78 @@ const TOOL_DEFS: GoogleToolDef[] = [
       const permissionId = str(args.permissionId);
       if (!fileId || !permissionId) throw new Error('fileId and permissionId are required');
       return driveRevokePermission(token, { fileId, permissionId });
+    },
+  },
+  {
+    name: 'drive_create_shortcut',
+    description: 'Create a Drive shortcut pointing at targetId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        targetId: { type: 'string', description: 'Target file/folder id' },
+        name: { type: 'string' },
+        parentId: { type: 'string' },
+      },
+      required: ['targetId'],
+    },
+    run: async (token, args) => {
+      const targetId = str(args.targetId);
+      if (!targetId) throw new Error('targetId is required');
+      return driveCreateShortcut(token, {
+        targetId,
+        name: str(args.name) || undefined,
+        parentId: str(args.parentId) || undefined,
+      });
+    },
+  },
+  {
+    name: 'drive_list_shared_drives',
+    description: 'List Shared drives (Team Drives) available to the connected account.',
+    parameters: {
+      type: 'object',
+      properties: {
+        pageSize: { type: 'integer' },
+        pageToken: { type: 'string' },
+      },
+    },
+    run: async (token, args) =>
+      driveListSharedDrives(token, {
+        pageSize: num(args.pageSize, 20),
+        pageToken: str(args.pageToken) || undefined,
+      }),
+  },
+  {
+    name: 'drive_upload_file',
+    description:
+      'Upload a file to Drive. Prefer content for utf-8 text; use contentBase64 for binary (max ~1.5MB).',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        mimeType: { type: 'string' },
+        parentId: { type: 'string' },
+        content: { type: 'string', description: 'UTF-8 text body' },
+        contentBase64: { type: 'string', description: 'Base64 / base64url binary body' },
+      },
+      required: ['name'],
+    },
+    run: async (token, args) => {
+      const name = str(args.name);
+      if (!name) throw new Error('name is required');
+      const content = args.content === undefined ? undefined : String(args.content);
+      const contentBase64 = str(args.contentBase64) || undefined;
+      if (content === undefined && !contentBase64) {
+        throw new Error('content or contentBase64 is required');
+      }
+      return driveUploadFile(token, {
+        name,
+        mimeType: str(args.mimeType) || undefined,
+        parentId: str(args.parentId) || undefined,
+        content,
+        contentBase64,
+      });
     },
   },
 ];

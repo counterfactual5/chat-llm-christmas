@@ -4165,7 +4165,7 @@ export default function ChatContainer() {
                             );
                           const isGoogleWrite =
                             isGoogle &&
-                            /create|update|send|reply|delete|draft|modify|trash|batch|move|copy|share|revoke|export|upload|write/i.test(
+                            /create|update|send|reply|forward|delete|draft|modify|trash|batch|move|copy|share|revoke|upload|export|write/i.test(
                               run.name,
                             );
                           const isWebRead =

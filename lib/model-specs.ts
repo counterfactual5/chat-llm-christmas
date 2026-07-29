@@ -175,17 +175,17 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('gmail')) {
     lines.push(
-      '- Gmail MCP: search/read mail & threads, attachments, labels, drafts, send/reply, mark read/unread / archive / trash (incl. batch)',
+      '- Gmail MCP: search/read mail & threads, attachments, labels CRUD, drafts (incl. send draft), send/reply/forward, mark read/unread / archive / trash (incl. batch)',
     );
   }
   if (set.has('calendar')) {
     lines.push(
-      '- Calendar MCP: list calendars/events, get event, free/busy, create/update/delete/move events',
+      '- Calendar MCP: list calendars/events, get event, recurring instances, free/busy, create/update/delete/move events',
     );
   }
   if (set.has('drive')) {
     lines.push(
-      '- Drive MCP: search/get/read/export, create file/folder, copy, rename/move, trash/delete, share/permissions',
+      '- Drive MCP: search/get/read/export/upload, create file/folder/shortcut, shared drives, copy, rename/move, trash/delete, share/permissions',
     );
   }
   // Legacy combined toggle (should already be expanded server-side).

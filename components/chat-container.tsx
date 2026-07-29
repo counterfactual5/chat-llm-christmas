@@ -1662,16 +1662,18 @@ export default function ChatContainer() {
       } else {
         next = prev.map((s) => {
           if (s.id !== sessionId) return s;
+          const collectedSources = collectWebSourcesFromMessages(newMessages);
+          const retainedUrls = new Set(collectedSources.map((source) => source.url));
           return {
             ...s,
             messages: newMessages,
             title: title || s.title,
             updatedAt: Date.now(),
-            // After an explicit clear, sources become an allowlist populated only
-            // by subsequent tool results, never rebuilt from old history.
+            // After an explicit clear, sources are an allowlist. On rollback/edit,
+            // keep only allowlisted sources that still exist in the retained thread.
             webSources: s.webSourcesCleared
-              ? s.webSources
-              : collectWebSourcesFromMessages(newMessages),
+              ? (s.webSources || []).filter((source) => retainedUrls.has(source.url))
+              : collectedSources,
           };
         });
       }

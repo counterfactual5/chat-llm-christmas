@@ -28,6 +28,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
+import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
   getGitHubAccessToken,
@@ -527,7 +528,7 @@ export async function POST(req: NextRequest) {
                   `查询：${outcome.query || userAsk}`,
                   `原因：${detail}`,
                 ].join('\n'),
-                finish_reason: 'stop',
+                ...streamCompletionPayload('stop'),
               });
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
@@ -599,7 +600,7 @@ export async function POST(req: NextRequest) {
                 // Plain answer without tools — finish (avoid a second stream that can hang).
                 if (content) send({ content: stripMessageStamp(String(content)) });
                 if (content || reasoning) {
-                  send({ finish_reason: choice?.finish_reason || 'stop' });
+                  send(streamCompletionPayload(choice?.finish_reason || 'stop'));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   controller.close();
                   return;
@@ -665,11 +666,13 @@ export async function POST(req: NextRequest) {
           } as any);
 
           let sawText = false;
+          let lastFinishReason: string | null = null;
           const stampStripper = createStampLeakStripper();
           for await (const chunk of final as any) {
             const choice = chunk?.choices?.[0];
             const delta = choice?.delta || {};
             const finish_reason = choice?.finish_reason || null;
+            if (finish_reason) lastFinishReason = finish_reason;
 
             let content = '';
             let reasoning = '';
@@ -702,11 +705,12 @@ export async function POST(req: NextRequest) {
 
             if (content) sawText = true;
             if (reasoning) sawText = true;
-            if (content || reasoning || finish_reason) {
+            // Defer finish_reason / truncated to the completion event below so the
+            // client has one authoritative end-of-turn signal.
+            if (content || reasoning) {
               send({
                 content: content || undefined,
                 reasoning: reasoning || undefined,
-                finish_reason,
               });
             }
           }
@@ -722,8 +726,10 @@ export async function POST(req: NextRequest) {
             send({
               content:
                 'Error: The model returned an empty reply. Please try again, or switch to another model.',
-              finish_reason: 'error',
+              ...streamCompletionPayload('error'),
             });
+          } else {
+            send(streamCompletionPayload(lastFinishReason || 'stop'));
           }
 
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
@@ -732,7 +738,7 @@ export async function POST(req: NextRequest) {
           try {
             send({
               content: `\n\nError: ${err?.message || 'Upstream model request failed.'}`,
-              finish_reason: 'error',
+              ...streamCompletionPayload('error'),
             });
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             controller.close();

@@ -51,6 +51,11 @@ import {
   isGoogleMcpId,
   normalizeGoogleIntegrations,
 } from '@/lib/integrations/google-services';
+import {
+  NATURAL_FINISH_REASONS,
+  SOFT_TRUNCATION_REASONS,
+  truncationFromFinishReason,
+} from '@/lib/truncation';
 
 const KATEX_OPTIONS = {
   throwOnError: false,
@@ -58,43 +63,77 @@ const KATEX_OPTIONS = {
   errorColor: 'var(--chat-math-error, #a8a29e)',
 } as const;
 
-/** Natural terminators reported by upstream providers.
- *  Note: tool_calls / function_call are NOT natural here — this chat has no
- *  tool runtime, so those finishes mean the model stopped mid-task. */
-const NATURAL_STOPS = new Set(['stop', 'end_turn']);
+type TruncationHints = {
+  /** Server sent truncated=true/false on the completion event. */
+  serverTruncated?: boolean | null;
+  serverReason?: string;
+};
 
 /**
- * Decide whether a reply was cut off. Prefer the provider's finish_reason;
- * fall back to structural signals and the incomplete flag set by Stop / refresh.
- * Missing finish_reason alone is NOT treated as truncation — many providers
- * omit it on a clean stop, and old saved messages never had one.
+ * Decide whether a reply was cut off.
+ * Prefer: stored hard reason → server truncated flag → finish_reason →
+ * structural (code/math/think) → incomplete flag.
+ * Do NOT guess from “工具/工作区” body text — that false-triggers Continue.
  */
 function analyzeTruncation(
   content: string,
   finishReason?: string | null,
   incomplete?: boolean,
   storedReason?: string,
+  hints?: TruncationHints,
 ): { truncated: boolean; reason: string } {
   const text = (content || '').trimEnd();
   if (!text) return { truncated: false, reason: '' };
 
-  if (storedReason) {
+  // Sticky only for hard reasons. Soft legacy reasons are revalidated below.
+  if (storedReason && !SOFT_TRUNCATION_REASONS.has(storedReason)) {
     return { truncated: true, reason: storedReason };
   }
 
-  if (finishReason === 'length' || finishReason === 'max_tokens') {
-    return { truncated: true, reason: 'Hit the output token limit' };
+  // Authoritative server completion event.
+  if (hints?.serverTruncated === true) {
+    return {
+      truncated: true,
+      reason: hints.serverReason || truncationFromFinishReason(finishReason).reason || 'Reply was interrupted',
+    };
   }
-  if (finishReason === 'content_filter') {
-    return { truncated: true, reason: 'Blocked by content filter' };
-  }
-  // Cursor / agent models often stop with tool_calls even though we never
-  // advertise tools. Treat that as an interrupted reply so Continue stays available.
-  if (finishReason === 'tool_calls' || finishReason === 'function_call') {
-    return { truncated: true, reason: 'Model tried to use a tool (unsupported here)' };
+  if (hints?.serverTruncated === false) {
+    // Still honor strong structural cuts (model said stop but left an open fence).
+    const structural = structuralTruncation(text, finishReason);
+    if (structural.truncated) return structural;
+    return { truncated: false, reason: '' };
   }
 
-  // Strong structural signals — reply is unfinished regardless of finish_reason.
+  const fromFinish = truncationFromFinishReason(finishReason);
+  if (fromFinish.truncated) {
+    // After a successful tool round, a clean answer with stop/end_turn is handled
+    // above. tool_calls on the final stream still means unfinished.
+    return fromFinish;
+  }
+
+  const structural = structuralTruncation(text, finishReason);
+  if (structural.truncated) return structural;
+
+  // User hit Stop / page refreshed mid-stream / connection dropped.
+  // Do not honor incomplete when it was only paired with a soft legacy reason
+  // (e.g. false “Stopped while trying to use tools” on a finished answer).
+  if (incomplete) {
+    if (storedReason && SOFT_TRUNCATION_REASONS.has(storedReason)) {
+      return { truncated: false, reason: '' };
+    }
+    if (finishReason && NATURAL_FINISH_REASONS.has(finishReason)) {
+      return { truncated: false, reason: '' };
+    }
+    return { truncated: true, reason: 'Reply was interrupted' };
+  }
+
+  return { truncated: false, reason: '' };
+}
+
+function structuralTruncation(
+  text: string,
+  finishReason?: string | null,
+): { truncated: boolean; reason: string } {
   if ((text.match(/```/g) || []).length % 2 === 1) {
     return { truncated: true, reason: 'Unclosed code block' };
   }
@@ -102,17 +141,19 @@ function analyzeTruncation(
   // (“同一个 $$ 块”). Only Continue when the tail still looks like cut-off math,
   // or the provider did not report a clean natural stop.
   if (hasUnclosedDisplayMath(text)) {
-    const naturalStop = !finishReason || NATURAL_STOPS.has(finishReason);
+    const naturalStop = !finishReason || NATURAL_FINISH_REASONS.has(finishReason);
     const endsLikeSentence = /[.!?。！？…]\s*$/.test(text);
     if (looksLikeTruncatedMath(text) || !naturalStop || !endsLikeSentence) {
       return { truncated: true, reason: 'Unclosed math block' };
     }
   }
-  // Prefer analyzing the visible answer (think tags stripped); unclosed think
-  // means the model never finished its private reasoning block.
   {
     const { content: visible, reasoning } = extractThinkBlocks(text);
-    if (contentHasThinkMarkup(text) && /<think\b|<thinking\b/i.test(text) && !/<\/(?:think|thinking)>/i.test(text)) {
+    if (
+      contentHasThinkMarkup(text) &&
+      /<think\b|<thinking\b/i.test(text) &&
+      !/<\/(?:think|thinking)>/i.test(text)
+    ) {
       return { truncated: true, reason: 'Unclosed thinking block' };
     }
     // Long thinking then only a short bridge sentence — usually cut before the real answer.
@@ -120,50 +161,20 @@ function analyzeTruncation(
       return { truncated: true, reason: 'Stopped before finishing the answer' };
     }
   }
-
-  if (finishReason && !NATURAL_STOPS.has(finishReason)) {
-    return { truncated: true, reason: `Stopped early (${finishReason})` };
-  }
-
-  // User hit Stop / page refreshed mid-stream / connection dropped.
-  if (incomplete) {
-    return { truncated: true, reason: 'Reply was interrupted' };
-  }
-
-  // Recover replies that only narrated fake tool use and never answered
-  // (common with cursor-auto when Continue previously treated tool_calls as done).
-  if (
-    looksLikeToolNarration(text) &&
-    !looksLikeToolCapabilityReply(text) &&
-    !/[.!?。！？…]\s*$/.test(text)
-  ) {
-    return { truncated: true, reason: 'Stopped while trying to use tools' };
-  }
-
   return { truncated: false, reason: '' };
 }
 
-/** User asked what tools exist; model listed web_search / web_read and limits — not stuck narration. */
-function looksLikeToolCapabilityReply(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  const listsBuiltinTools =
-    /\bweb_search\b/i.test(t) &&
-    (/\bweb_read\b/i.test(t) || /网页读取|read.*url/i.test(t));
-  const explainsLimits =
-    /不能|无法|没有.*(?:本地|shell|工作区)|not available|cannot read local|do not (?:read|scan)|can't read local/i.test(
-      t,
-    );
-  return listsBuiltinTools && explainsLimits;
-}
-
-/** Heuristic: partial reply is stuck narrating IDE/agent tool use. */
+/** Heuristic: partial reply is stuck narrating IDE/agent tool use (Continue prompt only). */
 function looksLikeToolNarration(text: string): boolean {
   // Negated limits (“不能扫描工作区”) are capability disclaimers, not agent narration.
-  if (/不能[^。\n]{0,40}(?:工作区|workspace|shell)|无法[^。\n]{0,40}(?:工作区|workspace)|do not (?:read|scan)|cannot read local/i.test(text)) {
+  if (
+    /不能[^。\n]{0,40}(?:工作区|workspace|shell)|无法[^。\n]{0,40}(?:工作区|workspace)|do not (?:read|scan)|cannot read local/i.test(
+      text,
+    )
+  ) {
     return false;
   }
-  return /工作区|workspace|正在扫描|改用\s*shell|同步\s*I\/O|tool_call|function_call|正在读取|扫描工作区|定位同步|Read\s+\S+|Shell\s+扫描|异步重构|排查工作区/i.test(
+  return /正在扫描|改用\s*shell|同步\s*I\/O|tool_call|function_call|正在读取|扫描工作区|定位同步|Read\s+\S+|Shell\s+扫描|异步重构|排查工作区/i.test(
     text,
   );
 }
@@ -1766,6 +1777,8 @@ export default function ChatContainer() {
     const decoder = new TextDecoder();
     let buffer = '';
     let finishReason: string | null = null;
+    let serverTruncated: boolean | null = null;
+    let serverTruncationReason: string | undefined;
     let seamPending = Boolean(seamPrefix);
     let sawDone = false;
     const thinkParser = createThinkStreamParser();
@@ -1854,7 +1867,7 @@ export default function ChatContainer() {
       }
       // Connection dropped / function killed mid-stream: no [DONE] arrived.
       // Prefer Continue over silently treating the partial reply as finished.
-      if (unexpectedEnd && !finishReason) {
+      if (unexpectedEnd && !finishReason && serverTruncated == null) {
         markAssistantIncomplete(sessionId, assistantId, true, {
           finishReason,
           truncationReason: 'Stream ended unexpectedly',
@@ -1865,6 +1878,11 @@ export default function ChatContainer() {
         streamed,
         finishReason,
         unexpectedEnd || thinkParser.inThink,
+        undefined,
+        {
+          serverTruncated,
+          serverReason: serverTruncationReason,
+        },
       );
       markAssistantIncomplete(sessionId, assistantId, verdict.truncated, {
         finishReason,
@@ -1891,6 +1909,12 @@ export default function ChatContainer() {
         try {
           const parsed = JSON.parse(data);
           if (parsed.finish_reason) finishReason = parsed.finish_reason;
+          if (typeof parsed.truncated === 'boolean') {
+            serverTruncated = parsed.truncated;
+          }
+          if (typeof parsed.truncation_reason === 'string' && parsed.truncation_reason) {
+            serverTruncationReason = parsed.truncation_reason;
+          }
           if (parsed.reasoning) {
             clearWaiting(sessionId);
             appendToAssistantReasoning(sessionId, assistantId, parsed.reasoning);

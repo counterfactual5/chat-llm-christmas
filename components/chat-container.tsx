@@ -4727,9 +4727,9 @@ export default function ChatContainer() {
                         const processLive = awaitingFirstContent;
                         const showProcessPanel =
                           awaitingFirstContent || activitySteps.length > 0;
-                        // Auto-open once real steps exist; empty Process stays a header + spinner.
-                        const processOpen =
-                          reasoningOpen[message.id] ?? activitySteps.length > 0;
+                        // Default expanded; user can collapse. Keep Process visible from
+                        // request start until the first answer token.
+                        const processOpen = reasoningOpen[message.id] ?? true;
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;

@@ -1097,7 +1097,7 @@ export default function ChatContainer() {
   useEffect(() => {
     if (!activeSessionId) return;
     // User explicitly cleared web sources — don't auto-restore from history.
-    if (webSourcesCleared) return;
+    if (webSourcesCleared || activeSession?.webSourcesCleared) return;
     const collected = collectWebSourcesFromMessages(messages);
     const stored = activeSession?.webSources || [];
     const collectedKey = collected.map((c) => c.url).join('\n');
@@ -3070,7 +3070,7 @@ export default function ChatContainer() {
           String(referenceText || '').trim(),
           sessionsRef.current.find((s) => s.id === sessionId)?.webSourcesCleared
             ? ''
-            : formatWebSourcesForReference(collectWebSourcesFromMessages(history)), 
+            : formatWebSourcesForReference(collectWebSourcesFromMessages(history)),
         ]
           .filter(Boolean)
           .join('\n\n'),
@@ -5889,7 +5889,11 @@ export default function ChatContainer() {
                                 setSessions((prev) =>
                                   prev.map((s) =>
                                     s.id === activeSessionId
-                                      ? { ...s, webSources: undefined }
+                                      ? {
+                                          ...s,
+                                          webSources: undefined,
+                                          webSourcesCleared: true,
+                                        }
                                       : s,
                                   ),
                                 );
@@ -5903,7 +5907,11 @@ export default function ChatContainer() {
                                   setSessions((prev) =>
                                     prev.map((s) =>
                                       s.id === activeSessionId
-                                        ? { ...s, webSources: undefined }
+                                        ? {
+                                            ...s,
+                                            webSources: undefined,
+                                            webSourcesCleared: true,
+                                          }
                                         : s,
                                     ),
                                   );
@@ -5958,7 +5966,11 @@ export default function ChatContainer() {
                                         setSessions((prev) =>
                                           prev.map((s) =>
                                             s.id === activeSessionId
-                                              ? { ...s, webSources: undefined }
+                                              ? {
+                                                  ...s,
+                                                  webSources: undefined,
+                                                  webSourcesCleared: true,
+                                                }
                                               : s,
                                           ),
                                         );

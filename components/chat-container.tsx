@@ -5215,8 +5215,9 @@ export default function ChatContainer() {
                                           setPlusFlyout('mcp');
                                           setGoogleMcpMenuOpen(true);
                                         }}
-                                        // pl-1.5 bridges the 6px gap so hover doesn't flicker closed
-                                        className="absolute left-full top-0 z-20 pl-1.5"
+                                        // pl-1.5 bridges the 6px gap so hover doesn't flicker closed.
+                                        // bottom-0 keeps the flyout above the viewport edge (Google is last in MCP list).
+                                        className="absolute left-full bottom-0 z-20 pl-1.5"
                                       >
                                         <div className="w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
                                           {[

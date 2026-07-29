@@ -483,12 +483,17 @@ export async function POST(req: NextRequest) {
                 'Acknowledge them as existing generations — do not say generation failed or search the web for replacements.',
               ].join(' '),
             },
-            { type: 'text', text },
+            { type: 'text', text: stripImageArchiveBlock(text) },
             ...carried.map((img) => toVisionPart(img)).filter(Boolean),
           ];
           normalizedMessages.push({ role, timestamp, content: parts });
         } else {
-          normalizedMessages.push({ role, content: text, timestamp });
+          // Text models: keep transcription, drop the archive metadata block.
+          normalizedMessages.push({
+            role,
+            content: stripImageArchiveBlock(text),
+            timestamp,
+          });
         }
         continue;
       }

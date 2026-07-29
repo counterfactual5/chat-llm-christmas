@@ -284,36 +284,44 @@ export type PersistedImageRef = {
   label?: string;
 };
 
+function normalizeArchiveFileId(raw: string): string {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.startsWith('/api/files/')) {
+    return decodeURIComponent(s.slice('/api/files/'.length).split(/[?#]/)[0] || '');
+  }
+  // Gateway image_url often stores the bare Files API id (not a URL).
+  if (
+    !s.startsWith('http') &&
+    !s.startsWith('data:') &&
+    !s.startsWith('blob:') &&
+    !s.includes('://') &&
+    !s.includes(' ')
+  ) {
+    return s;
+  }
+  return '';
+}
+
 /** Stable gateway paths for originals — survives text-model transcription rounds. */
 export function formatImageArchiveBlock(refs: PersistedImageRef[]): string {
   const lines: string[] = [];
   for (let i = 0; i < refs.length; i++) {
     const r = refs[i];
-    const fileId = r.fileId ? String(r.fileId).trim() : '';
-    let url = String(r.url || '').trim();
-    if (!fileId && url.startsWith('/api/files/')) {
-      const id = decodeURIComponent(url.slice('/api/files/'.length).split(/[?#]/)[0] || '');
-      if (id) lines.push(`- 图${refs.length > 1 ? i + 1 : ''} /api/files/${id}`.replace('- 图 ', '- '));
-      continue;
-    }
+    const fromExplicit = r.fileId ? String(r.fileId).trim() : '';
+    const url = String(r.url || '').trim();
+    const fileId = fromExplicit || normalizeArchiveFileId(url);
+    const prefix = refs.length > 1 ? `- 图${i + 1} ` : '- ';
     if (fileId) {
-      lines.push(
-        refs.length > 1
-          ? `- 图${i + 1} /api/files/${encodeURIComponent(fileId)}`
-          : `- /api/files/${encodeURIComponent(fileId)}`,
-      );
+      lines.push(`${prefix}/api/files/${encodeURIComponent(fileId)}`);
       continue;
     }
     if (url.startsWith('data:')) {
-      lines.push(
-        refs.length > 1
-          ? `- 图${i + 1} (inline image data in session)`
-          : '- (inline image data in session)',
-      );
+      lines.push(`${prefix}(inline image data in session)`);
       continue;
     }
-    if (url && !url.startsWith('blob:')) {
-      lines.push(refs.length > 1 ? `- 图${i + 1} ${url}` : `- ${url}`);
+    if (url.startsWith('http')) {
+      lines.push(`${prefix}${url}`);
     }
   }
   if (!lines.length) return '';
@@ -336,14 +344,20 @@ export function parseImageArchiveRefs(text: string): PersistedImageRef[] {
   for (const line of body.split('\n')) {
     const t = line.trim();
     if (!t.startsWith('-')) continue;
-    const rest = t.slice(1).trim();
-    const fileMatch = rest.match(/\/api\/files\/([^/\s]+)/);
+    const cleaned = t.slice(1).trim().replace(/^图\s*\d+\s+/, '').trim();
+    if (!cleaned || cleaned.startsWith('(')) continue;
+    const fileMatch = cleaned.match(/\/api\/files\/([^/\s]+)/);
     if (fileMatch) {
       const fileId = decodeURIComponent(fileMatch[1]);
       refs.push({ fileId, url: `/api/files/${fileId}` });
       continue;
     }
-    const urlMatch = rest.match(/(https?:\/\/\S+|data:[^\s]+)/);
+    const bareId = normalizeArchiveFileId(cleaned);
+    if (bareId) {
+      refs.push({ fileId: bareId, url: `/api/files/${bareId}` });
+      continue;
+    }
+    const urlMatch = cleaned.match(/(https?:\/\/\S+|data:[^\s]+)/);
     if (urlMatch) refs.push({ url: urlMatch[1] });
   }
   return refs;
@@ -546,9 +560,9 @@ export async function rewriteMessagesWithImageDescriptions(
       continue;
     }
 
-    // Assistant image parts are not valid chat-completion history. Every user
-    // turn that still has pixels but no persisted transcription is processed once.
-    if (msg.role !== 'user') {
+    // Never put image_url on assistant turns. Older user turns: keep text only —
+    // re-running 4.6V on every historical upload causes timeouts / “interrupted”.
+    if (msg.role !== 'user' || mi !== lastUserIdx) {
       out.push(stripImageUrlParts(msg));
       continue;
     }
@@ -642,7 +656,10 @@ export async function rewriteMessagesWithImageDescriptions(
     }
 
     const collapsed = collapseContentParts(rebuilt);
-    const archiveRefs = imageSlots.map((s) => ({ url: s.url }));
+    const archiveRefs = imageSlots.map((s) => {
+      const fileId = normalizeArchiveFileId(s.url);
+      return fileId ? { fileId, url: `/api/files/${fileId}` } : { url: s.url };
+    });
     const withArchive =
       typeof collapsed === 'string'
         ? appendImageArchiveBlock(collapsed, archiveRefs)

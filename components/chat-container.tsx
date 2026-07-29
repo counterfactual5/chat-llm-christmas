@@ -33,6 +33,7 @@ import {
   injectionBodyFromToolResults,
   mergePersistedImageRefs,
   parseImageArchiveRefs,
+  stripImageArchiveBlock,
   stripUserMessageArtifactsForDisplay,
 } from '@/lib/image-understand';
 import {
@@ -555,8 +556,12 @@ function toApiMessages(
   opts?: { vision?: boolean },
 ) {
   const vision = Boolean(opts?.vision);
+  let lastUserIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === 'user') lastUserIdx = i;
+  }
 
-  return messages.map((m) => {
+  return messages.map((m, i) => {
     let content = m.content;
     let images =
       m.images?.map((img) => ({
@@ -569,28 +574,32 @@ function toApiMessages(
     if (m.role === 'user') {
       const transcribed = hasPersistedImageTranscription(content || '');
       if (vision) {
+        const archived = mergePersistedImageRefs(
+          imageRefsFromMessageImages(m.images),
+          parseImageArchiveRefs(content || ''),
+        );
+        if (archived.length > 0) {
+          images = archived.map((r) => ({
+            fileId: r.fileId,
+            url: r.fileId
+              ? `/api/files/${encodeURIComponent(r.fileId)}`
+              : r.url || '',
+            name: r.label,
+            prompt: undefined,
+          }));
+        }
         if (transcribed) {
-          const archived = mergePersistedImageRefs(
-            imageRefsFromMessageImages(m.images),
-            parseImageArchiveRefs(content || ''),
-          );
-          if (images.length === 0 && archived.length > 0) {
-            images = archived.map((r) => ({
-              fileId: r.fileId,
-              url: r.fileId
-                ? `/api/files/${encodeURIComponent(r.fileId)}`
-                : r.url || '',
-              name: r.label,
-              prompt: undefined,
-            }));
-          }
+          // Prefer pixels; drop injection + archive metadata from the prompt.
           content = stripUserMessageArtifactsForDisplay(content || '');
           if (!content.trim() && images.length > 0) content = '(image)';
         }
       } else if (transcribed) {
-        // Text path: pixels are redundant only after this exact turn has a
-        // persisted transcription. Older untranscribed uploads must remain so
-        // switching from native Vision to Image Understand does not lose them.
+        // Text path: keep transcription, omit pixels + archive block (archive is
+        // only for local recovery / later vision switches).
+        images = [];
+        content = stripImageArchiveBlock(content || '');
+      } else if (i !== lastUserIdx) {
+        // Older untranscribed uploads: do not re-send for Image Understand.
         images = [];
       }
     }

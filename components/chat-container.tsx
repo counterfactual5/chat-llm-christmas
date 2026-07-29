@@ -1690,8 +1690,8 @@ export default function ChatContainer() {
   // Timeout / upstream failures leave an Error: bubble — offer Retry for that turn.
   const canRetryFailed = !isActiveLoading && isAssistantError(lastMessage);
 
-  // After refresh / remount, incomplete assistants can linger without an active
-  // request. Stamp them interrupted so Process/Thinking stops spinning and Continue appears.
+  // After refresh / remount / lost tool-done events, orphan tool runs can stay at
+  // status:"start" and spin forever. Close them whenever the session is idle.
   useEffect(() => {
     if (!chatsHydrated) return;
     setSessions((prev) => {
@@ -1700,17 +1700,25 @@ export default function ChatContainer() {
         if (loadingBySession[s.id]) return s;
         let sessionChanged = false;
         const messages = s.messages.map((m) => {
-          if (m.role !== 'assistant' || !m.incomplete) return m;
+          if (m.role !== 'assistant') return m;
           const toolsNeedClose = (m.toolRuns || []).some((r) => r.status === 'start');
-          const needsReason = !m.truncationReason;
-          if (!toolsNeedClose && !needsReason) return m;
+          const needsInterruptStamp = m.incomplete && !m.truncationReason;
+          if (!toolsNeedClose && !needsInterruptStamp) return m;
           sessionChanged = true;
           changed = true;
           return {
             ...m,
-            truncationReason: m.truncationReason || 'Reply was interrupted',
+            truncationReason: needsInterruptStamp
+              ? m.truncationReason || 'Reply was interrupted'
+              : m.truncationReason,
             toolRuns: (m.toolRuns || []).map((r) =>
-              r.status === 'start' ? { ...r, status: 'done' as const } : r,
+              r.status === 'start'
+                ? {
+                    ...r,
+                    status: 'done' as const,
+                    error: r.error || 'Interrupted before results arrived',
+                  }
+                : r,
             ),
           };
         });
@@ -1963,8 +1971,20 @@ export default function ChatContainer() {
           let activity = [...(m.activity || [])];
           if (run.status === 'start') {
             const toolRunId = crypto.randomUUID();
+            // A new start for the same tool while a previous one is still pending
+            // usually means the earlier done was lost — close the orphan so it
+            // doesn't spin forever under the new call.
+            const closedOrphans = existing.map((r) =>
+              r.name === run.name && r.status === 'start'
+                ? {
+                    ...r,
+                    status: 'done' as const,
+                    error: r.error || 'Superseded by a later call',
+                  }
+                : r,
+            );
             toolRuns = [
-              ...existing,
+              ...closedOrphans,
               {
                 id: toolRunId,
                 name: run.name,
@@ -5086,11 +5106,16 @@ export default function ChatContainer() {
                             run.status === 'done' &&
                             !run.error &&
                             (!run.results || run.results.length === 0);
-                          const searching = run.status === 'start';
+                          // Only spin while this session is actually streaming —
+                          // orphan status:"start" after refresh must not look live.
+                          const searching =
+                            run.status === 'start' &&
+                            isActiveLoading &&
+                            message.id === lastMessage?.id;
                           const resultCount = run.results?.length || 0;
-                          // Keep result links open by default so search isn't buried.
-                          const expanded =
-                            toolRunOpen[run.id] ?? (searching || resultCount > 0 || Boolean(run.error));
+                          // Expand only while in flight; auto-collapse when done
+                          // so Process doesn't bury the answer. Explicit toggles win.
+                          const expanded = toolRunOpen[run.id] ?? searching;
                           const googleLabel = (() => {
                             if (isGoogleWrite) {
                               return searching ? t('writingGoogle') : t('wroteGoogle');
@@ -5108,7 +5133,7 @@ export default function ChatContainer() {
                           })();
                           const label = isGoogle
                             ? failed
-                              ? t('searchFailed')
+                              ? t('toolFailed')
                               : googleLabel
                             : searching
                               ? isNotionWrite
@@ -5125,7 +5150,7 @@ export default function ChatContainer() {
                                           ? t('readingWeb')
                                           : t('searchingWeb')
                               : failed
-                                ? t('searchFailed')
+                                ? t('toolFailed')
                                 : isNotionWrite
                                   ? t('wroteNotion')
                                   : isNotionFetch
@@ -5146,10 +5171,7 @@ export default function ChatContainer() {
                                 onClick={() =>
                                   setToolRunOpen((prev) => ({
                                     ...prev,
-                                    [run.id]: !(
-                                      prev[run.id] ??
-                                      (searching || resultCount > 0 || Boolean(run.error))
-                                    ),
+                                    [run.id]: !(prev[run.id] ?? searching),
                                   }))
                                 }
                                 className={cn(
@@ -5537,7 +5559,7 @@ export default function ChatContainer() {
                             return <div key={seg.id}>{rendered}</div>;
                           }
 
-                          const open = reasoningOpen[seg.id] ?? true;
+                          const open = reasoningOpen[seg.id] ?? segLive;
                           const segToolCount = seg.steps.filter((s) => s.kind === 'tool').length;
                           return (
                             <div

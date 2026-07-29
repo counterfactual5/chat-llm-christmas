@@ -592,7 +592,7 @@ export async function POST(req: NextRequest) {
                 m.content.some((p: any) => p?.type === 'image_url'),
             );
             if (hasImageParts) {
-              const { messages: rewritten, didUnderstand } =
+              const { messages: rewritten } =
                 await rewriteMessagesWithImageDescriptions(
                   workingMessages,
                   { apiKey, baseURL },
@@ -600,12 +600,6 @@ export async function POST(req: NextRequest) {
                 );
               workingMessages.length = 0;
               workingMessages.push(...rewritten);
-              // Preprocess already put the transcription in the user turn — don't let
-              // the model call image_understand again and append a duplicate tool payload.
-              if (didUnderstand) {
-                enabledTools = enabledTools.filter((t) => t.name !== 'image_understand');
-                toolDefs = openaiToolDefinitions(enabledTools);
-              }
             }
           }
 

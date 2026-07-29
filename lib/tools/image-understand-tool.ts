@@ -1,20 +1,14 @@
 /**
  * Image understanding ChatTool — powered by GLM-4.6V via CPA.
  *
- * Enabled when the user toggles `zhipu-vision` in the MCP panel.
- * Costs are billed to the user's CPA balance (same apiKey as chat).
+ * The zhipu-vision MCP toggle enables *server-side* preprocess
+ * (`rewriteMessagesWithImageDescriptions`), not a model-callable tool.
+ * Exposing this as an OpenAI function caused follow-up questions like
+ * “能识别图片吗” to re-invoke vision for no reason.
  */
 
 import { understandImage } from '@/lib/image-understand';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
-
-const SYSTEM_PROMPT = [
-  'Image understanding is available in this chat when needed.',
-  'For text-only chat models, a plain-text image transcription is often already injected into the user turn before you reply — treat that as what you saw and answer directly.',
-  'Call the image understanding tool only if you need a fresh read of a specific image URL; pass an instruction aligned with the user ask.',
-  'Do not invent image contents — only use the injected transcription or tool results.',
-  'Do not reveal internal implementation details to the user: never name backend model IDs, tool function names, MCP ids, or the transcription/injection pipeline. If asked whether you can understand images, say yes (when this capability is on) in plain language without naming vendors or model versions.',
-].join(' ');
 
 export function parseImageUnderstandArgs(
   rawArgs: string,
@@ -63,8 +57,11 @@ export function createImageUnderstandTool(): ChatTool {
         },
       },
     },
-    systemPrompt: SYSTEM_PROMPT,
-    enabled: (flags) => flags.integrations.includes('zhipu-vision'),
+    // Never expose as a model-callable tool. Uploads are transcribed server-side
+    // when zhipu-vision is on; leaving this enabled makes follow-ups like
+    // “能识别图片吗” re-invoke GLM-4.6V for no reason.
+    systemPrompt: '',
+    enabled: () => false,
     async execute({ rawArguments, fallbackQuery }, ctx) {
       const { imageUrl, instruction } = parseImageUnderstandArgs(
         rawArguments,

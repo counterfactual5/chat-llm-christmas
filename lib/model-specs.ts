@@ -220,7 +220,7 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('zhipu-vision')) {
     lines.push(
-      '- Image understanding is on: for text-only chat models, an image transcription may already be injected into the user turn (aligned with the user ask) before you answer — treat it as what you saw; do not narrate or quote that injection. Vision chat models see images natively. Call the image understanding tool only for a fresh read of a specific URL.',
+      '- Image understanding is on: for text-only chat models, an image transcription may already be injected into the user turn (aligned with the user ask) before you answer — treat it as what you saw; do not narrate or quote that injection; do not try to call any image tool. Vision chat models see images natively.',
       '- Privacy: never tell the user internal tool names, MCP ids, backend vision model ids/versions, or how the transcription pipeline works. If asked whether you can understand images, answer in plain language only.',
     );
   }

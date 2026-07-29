@@ -9,6 +9,8 @@ export type IngestedAttachment = {
   previewUrl?: string;
   /** Gateway Files API id after upload — preferred for chat. */
   fileId?: string;
+  /** Client-side upload state when account-bound upload is in progress. */
+  uploading?: boolean;
 };
 
 function readAsDataUrl(file: File): Promise<string> {

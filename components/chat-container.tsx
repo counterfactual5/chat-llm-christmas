@@ -2082,35 +2082,51 @@ export default function ChatContainer() {
   const addIngestedFiles = async (files: FileList | File[]) => {
     setAttachError('');
     const { attachments: next, errors } = await ingestFiles(files);
-    const enriched: IngestedAttachment[] = [];
-    for (const a of next) {
-      if (a.dataUrl && isAccountBound) {
-        try {
-          const res = await fetch('/api/files', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
-          });
-          const data = await res.json();
-          if (res.ok && data?.id) {
-            enriched.push({
-              ...a,
-              fileId: String(data.id),
-              // Keep a short local preview; chat uses fileId.
-              dataUrl: a.dataUrl,
-              previewUrl: a.previewUrl || String(data.url || ''),
-            });
-            continue;
-          }
-        } catch {
-          // Fall through to local dataUrl.
-        }
-      }
-      enriched.push(a);
-    }
-    if (enriched.length > 0) {
-      setAttachments((prev) => [...prev, ...enriched]);
+
+    // Show placeholders immediately so the user sees progress while
+    // /api/files is uploading (especially for copied/pasted images).
+    const placeholders: IngestedAttachment[] = next.map((a) => ({
+      ...a,
+      uploading: Boolean(a.dataUrl && isAccountBound),
+    }));
+
+    if (placeholders.length > 0) {
+      setAttachments((prev) => [...prev, ...placeholders]);
       setAttachmentsExpanded(true);
+    }
+
+    // Upload in sequence to keep UI updates deterministic.
+    for (const a of next) {
+      if (!a.dataUrl || !isAccountBound) continue;
+
+      try {
+        const res = await fetch('/api/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
+        });
+        const data = await res.json();
+        if (res.ok && data?.id) {
+          setAttachments((prev) =>
+            prev.map((x) =>
+              x.id !== a.id
+                ? x
+                : {
+                    ...x,
+                    uploading: false,
+                    fileId: String(data.id),
+                    // Keep local dataUrl as fallback for subsequent turns.
+                    previewUrl: x.previewUrl || String(data.url || ''),
+                  },
+            ),
+          );
+          continue;
+        }
+      } catch {
+        // Fall through to local dataUrl.
+      }
+
+      setAttachments((prev) => prev.map((x) => (x.id === a.id ? { ...x, uploading: false } : x)));
     }
     if (errors.length > 0) setAttachError(errors.join(' · '));
   };
@@ -2257,6 +2273,14 @@ export default function ChatContainer() {
         : prev,
     );
   }, [imagesBlockTextModel, imagesPreferVision, t, locale]);
+
+  // When the selected chat model is already Vision-capable, Image Understand
+  // would be redundant (and may cause double work). Auto-disable the MCP.
+  useEffect(() => {
+    if (!selectedSpec.vision) return;
+    if (!zhipuVisionOn) return;
+    setActiveMcpIds((prev) => prev.filter((id) => id !== 'zhipu-vision'));
+  }, [selectedSpec.vision, zhipuVisionOn]);
 
   // Token estimate aligned with what the server actually sends.
   const contextBreakdown = useMemo(() => {
@@ -4899,35 +4923,6 @@ export default function ChatContainer() {
               </div>
             )}
 
-            {attachments.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {attachments.map((a) => (
-                  <div
-                    key={a.id}
-                    className="group flex max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900"
-                  >
-                    {a.previewUrl || a.dataUrl ? (
-                      <img
-                        src={a.previewUrl || a.dataUrl}
-                        alt=""
-                        className="h-8 w-8 rounded object-cover"
-                      />
-                    ) : (
-                      <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
-                    )}
-                    <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(a.id)}
-                      className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-red-500 dark:hover:bg-stone-800"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* Continue — only when the last reply was clearly interrupted.
                 Sits above the composer so it reads as "finish that reply".
                 Failed requests use the Retry on the error card instead. */}
@@ -4958,6 +4953,44 @@ export default function ChatContainer() {
             </AnimatePresence>
 
             <div className="flex flex-col rounded-2xl border border-stone-300 bg-white shadow-sm focus-within:ring-2 focus-within:ring-stone-400/20 focus-within:border-stone-400 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-stone-500 transition-all relative">
+              {attachments.length > 0 && (
+                <div className="px-3 pt-3 pb-1 flex flex-wrap gap-2">
+                  {attachments.map((a) => (
+                    <div
+                      key={a.id}
+                      className="group flex max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900"
+                    >
+                      {a.previewUrl || a.dataUrl ? (
+                        <div className="relative">
+                          <img
+                            src={a.previewUrl || a.dataUrl}
+                            alt=""
+                            className={cn(
+                              'h-8 w-8 rounded object-cover',
+                              a.uploading ? 'opacity-70' : 'opacity-100',
+                            )}
+                          />
+                          {a.uploading && (
+                            <div className="absolute inset-0 flex items-center justify-center rounded bg-white/65 backdrop-blur dark:bg-stone-900/60">
+                              <Loader2 className="h-4 w-4 animate-spin text-stone-500 dark:text-stone-400" />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                      )}
+                      <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(a.id)}
+                        className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-red-500 dark:hover:bg-stone-800"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {activeSkills.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 px-3 pt-3">
                   {activeSkills.map((skill) => (
@@ -5470,6 +5503,7 @@ export default function ChatContainer() {
                                     <Switch
                                       size="sm"
                                       checked={zhipuVisionOn}
+                                      disabled={selectedSpec.vision}
                                       onCheckedChange={setZhipuVisionEnabled}
                                       aria-label={t('enableZhipuVisionMcp')}
                                     />
@@ -5477,10 +5511,12 @@ export default function ChatContainer() {
                                     <button
                                       type="button"
                                       onClick={() => {
+                                        if (selectedSpec.vision) return;
                                         setIsSkillPickerOpen(false);
                                         setPlusFlyout(null);
                                         openLoginModal();
                                       }}
+                                      disabled={selectedSpec.vision}
                                       className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                                     >
                                       {t('connectAccount')}

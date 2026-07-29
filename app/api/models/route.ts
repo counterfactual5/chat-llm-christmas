@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
-import { getModelSpec, isImageGenerationModel } from '@/lib/model-specs';
+import { getModelSpec, isChatPickerModel } from '@/lib/model-specs';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
       all = await buildCatalog(list);
     }
 
-    const chatModels = all.filter((m) => !isImageGenerationModel(m.id));
+    const chatModels = all.filter((m) => isChatPickerModel(m.id));
     const visible = showAll ? chatModels : chatModels.filter((m) => m.tier === 'free');
 
     return new Response(

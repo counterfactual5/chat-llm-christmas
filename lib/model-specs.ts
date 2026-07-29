@@ -130,6 +130,24 @@ export function isImageGenerationModel(modelId: string): boolean {
   );
 }
 
+/**
+ * Embedding / vector models — not chat completions; hide from the model picker.
+ */
+export function isEmbeddingModel(modelId: string): boolean {
+  const id = String(modelId || '').toLowerCase();
+  if (!id) return false;
+  return (
+    /(^|[-_.\/])embed(ding)?(s)?([-_.\/]|$)/i.test(id) ||
+    id.includes('text-embedding') ||
+    id.includes('embedding-')
+  );
+}
+
+/** Models that belong in the conversation picker (chat / vision). */
+export function isChatPickerModel(modelId: string): boolean {
+  return !isImageGenerationModel(modelId) && !isEmbeddingModel(modelId);
+}
+
 export function getModelSpec(modelId: string): ModelSpec {
   const id = String(modelId || '');
   const base = SPECS[id];

@@ -86,7 +86,9 @@ function modelNeedsThinkingForTools(model: string) {
 
 /**
  * These models often put the full answer in reasoning_* even when the user-
- * visible reply should be normal chat text. Fold into content for the UI.
+ * visible reply should be normal chat text. The server still sends reasoning
+ * and content separately; the **client** promotes orphan reasoning → content
+ * at settle time if the stream produced no visible content.
  */
 function modelDumpsAnswerInReasoning(model: string) {
   return /glm-4\.7|glm-4\.6(?!v)/i.test(String(model || ''));
@@ -815,10 +817,10 @@ export async function POST(req: NextRequest) {
           if (activeToolDefs.length > 0 && modelNeedsThinkingForTools(requestedModel)) {
             thinking = true;
           }
-          // Keep reasoning_* in the Process timeline. Only fold into visible content
-          // for models that dump the *answer* into reasoning (GLM-4.7 family).
-          // Folding whenever !thinking hid DeepSeek / similar CoT inside the bubble.
-          const reasoningAsContent = modelDumpsAnswerInReasoning(requestedModel);
+          // Never fold reasoning into content server-side. The client always
+          // receives them as separate SSE fields and shows reasoning in Process.
+          // If only reasoning arrives (no content), the client promotes it at settle.
+          const reasoningAsContent = false;
 
           const injectSearchOutcome = async (outcome: SearchOutcome) => {
             const callId = `proactive_search_${Date.now()}`;
@@ -1131,27 +1133,28 @@ export async function POST(req: NextRequest) {
                 send({ content: rest });
               }
             }
+            // If reasoning arrived but no content, do NOT fold server-side.
+            // The client promotes orphan reasoning → content at settle time,
+            // preserving the proper Process / answer split.
             if (!sawContent && reasoningOnlyBuf.trim()) {
               sawText = true;
-              sawContent = true;
-              send({ content: reasoningOnlyBuf });
             }
             return { sawText, sawContent, lastFinishReason };
           };
 
           let finalResult = await runFinalCompletion({
             enableThinking: thinking,
-            foldReasoning: reasoningAsContent,
+            foldReasoning: false,
           });
 
           // Some models return a totally empty stream on the first pass (seen on
           // GLM after Image Understand; also weaker free models with tools). Retry
-          // once without thinking and fold any reasoning_* into content.
+          // once without thinking — still keep reasoning separate (client promotes).
           if (!finalResult.sawText) {
             console.warn('empty final completion; retrying without thinking', requestedModel);
             finalResult = await runFinalCompletion({
               enableThinking: false,
-              foldReasoning: true,
+              foldReasoning: false,
             });
           }
 

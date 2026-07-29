@@ -54,6 +54,7 @@ export const maxDuration = 300;
 
 const MAX_TOOL_ROUNDS = 3;
 const TOOLS_ROUND_TIMEOUT_MS = 45_000;
+const FINAL_STREAM_TIMEOUT_MS = 90_000;
 
 function jsonError(message: string, status: number = 500) {
   return new Response(JSON.stringify({ error: message }), {
@@ -697,14 +698,16 @@ export async function POST(req: NextRequest) {
         try {
           // Text-only model + images + zhipu-vision MCP: convert images → text first.
           // Vision models skip this — they receive image_url parts directly.
+          let didImageUnderstand = false;
           if (zhipuVisionOn && !modelIsVision) {
             if (lastUserMessageHasImageParts(workingMessages)) {
-              const { messages: rewritten } =
+              const { messages: rewritten, didUnderstand } =
                 await rewriteMessagesWithImageDescriptions(
                   workingMessages,
                   { apiKey, baseURL },
                   { send, userAsk },
                 );
+              didImageUnderstand = didUnderstand;
               workingMessages.length = 0;
               workingMessages.push(...rewritten);
             }
@@ -720,16 +723,18 @@ export async function POST(req: NextRequest) {
             authorizedIntegrations.length === 0 &&
             looksLikeSearchRequest(userAsk);
 
-          // Always hand tools to the model (tool_choice: auto). Image Understand
-          // stays server-side and is not in toolDefs. GLM-4.7 needs thinking on
-          // when tools are present, otherwise the upstream stream is often empty.
-          const activeToolDefs = toolDefs;
+          // Normally hand all tools to the model (tool_choice: auto).
+          // Exception: this same request just ran Image Understand (server-side).
+          // Chaining glm-4.7 tools+thinking right after a long vision call commonly
+          // yields an empty/hung stream — UI shows "Image Understand" then silence.
+          // Answer from the transcription first; follow-up turns still get full tools.
+          const activeToolDefs = didImageUnderstand ? [] : toolDefs;
           if (activeToolDefs.length > 0 && modelNeedsThinkingForTools(requestedModel)) {
             thinking = true;
           }
           // Fold reasoning_* → content when thinking wasn't requested for UI, or
           // when this model dumps the whole answer into reasoning anyway.
-          const reasoningAsContent =
+          let reasoningAsContent =
             !thinking || modelDumpsAnswerInReasoning(requestedModel);
 
           const injectSearchOutcome = async (outcome: SearchOutcome) => {
@@ -966,79 +971,104 @@ export async function POST(req: NextRequest) {
               ]
             : workingMessages;
 
-          const finalStream = streamChatCompletionsRaw({
-            apiKey,
-            baseURL,
-            body: {
-              model: requestedModel,
-              temperature,
-              messages: sanitizeChatMessages(finalMessages),
-              ...(thinking ? { enable_thinking: true } : {}),
-            },
-          });
-
-          let sawText = false;
-          let sawContent = false;
-          let lastFinishReason: string | null = null;
-          const stampStripper = createStampLeakStripper();
-          let reasoningOnlyBuf = '';
-          for await (const chunk of finalStream) {
-            const choice = chunk?.choices?.[0];
-            const delta = choice?.delta || {};
-            const finish_reason = choice?.finish_reason || null;
-            if (finish_reason) lastFinishReason = finish_reason;
-
-            let { content, reasoning } = splitCompletionDelta(delta, {
-              reasoningAsContent,
+          const runFinalCompletion = async (opts: {
+            enableThinking: boolean;
+            foldReasoning: boolean;
+          }) => {
+            const finalStream = streamChatCompletionsRaw({
+              apiKey,
+              baseURL,
+              body: {
+                model: requestedModel,
+                temperature,
+                messages: sanitizeChatMessages(finalMessages),
+                ...(opts.enableThinking ? { enable_thinking: true } : {}),
+              },
             });
 
-            if (content) content = stampStripper.push(content);
-            if (finish_reason) {
-              const rest = stampStripper.flush();
-              if (rest) content = (content || '') + rest;
-            }
+            let sawText = false;
+            let sawContent = false;
+            let lastFinishReason: string | null = null;
+            const stampStripper = createStampLeakStripper();
+            let reasoningOnlyBuf = '';
+            const iter = finalStream[Symbol.asyncIterator]();
+            const deadline = Date.now() + FINAL_STREAM_TIMEOUT_MS;
+            while (true) {
+              const remaining = deadline - Date.now();
+              if (remaining <= 0) throw new Error('final completion timed out');
+              const next = await withTimeout(iter.next(), remaining, 'final completion');
+              if (next.done) break;
+              const chunk = next.value;
+              const choice = chunk?.choices?.[0];
+              const delta = choice?.delta || {};
+              const finish_reason = choice?.finish_reason || null;
+              if (finish_reason) lastFinishReason = finish_reason;
 
-            if (content) {
-              sawText = true;
-              sawContent = true;
-            }
-            if (reasoning) {
-              sawText = true;
-              reasoningOnlyBuf += reasoning;
-            }
-            // Defer finish_reason / truncated to the completion event below so the
-            // client has one authoritative end-of-turn signal.
-            if (content || reasoning) {
-              send({
-                content: content || undefined,
-                reasoning: reasoning || undefined,
+              let { content, reasoning } = splitCompletionDelta(delta, {
+                reasoningAsContent: opts.foldReasoning,
               });
+
+              if (content) content = stampStripper.push(content);
+              if (finish_reason) {
+                const rest = stampStripper.flush();
+                if (rest) content = (content || '') + rest;
+              }
+
+              if (content) {
+                sawText = true;
+                sawContent = true;
+              }
+              if (reasoning) {
+                sawText = true;
+                reasoningOnlyBuf += reasoning;
+              }
+              if (content || reasoning) {
+                send({
+                  content: content || undefined,
+                  reasoning: reasoning || undefined,
+                });
+              }
             }
-          }
-          {
-            const rest = stampStripper.flush();
-            if (rest) {
+            {
+              const rest = stampStripper.flush();
+              if (rest) {
+                sawText = true;
+                sawContent = true;
+                send({ content: rest });
+              }
+            }
+            if (!sawContent && reasoningOnlyBuf.trim()) {
               sawText = true;
               sawContent = true;
-              send({ content: rest });
+              send({ content: reasoningOnlyBuf });
             }
+            return { sawText, sawContent, lastFinishReason };
+          };
+
+          let finalResult = await runFinalCompletion({
+            enableThinking: thinking,
+            foldReasoning: reasoningAsContent,
+          });
+
+          // GLM text models sometimes return a totally empty stream on the first
+          // pass (especially right after Image Understand). Retry once without
+          // thinking — fold any reasoning_* into content.
+          if (!finalResult.sawText && modelDumpsAnswerInReasoning(requestedModel)) {
+            console.warn('empty final completion; retrying without thinking', requestedModel);
+            finalResult = await runFinalCompletion({
+              enableThinking: false,
+              foldReasoning: true,
+            });
           }
 
-          // Thinking mode: if the model never emitted content, surface the
-          // reasoning buffer as the visible answer once (avoid empty bubbles).
-          if (!sawContent && reasoningOnlyBuf.trim()) {
-            sawText = true;
-            send({ content: reasoningOnlyBuf });
-          }
-
-          if (!sawText) {
+          if (!finalResult.sawText) {
             send({
               content:
                 'Error: The model returned an empty reply. Please try again, or switch to another model.',
               ...streamCompletionPayload('error'),
             });
           } else {
-            send(streamCompletionPayload(lastFinishReason || 'stop'));
+            send(streamCompletionPayload(finalResult.lastFinishReason || 'stop'));
           }
 
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));

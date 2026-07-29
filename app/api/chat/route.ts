@@ -544,16 +544,24 @@ export async function POST(req: NextRequest) {
             if (!(await runProactiveSearch())) return;
           }
 
-          // Generic tool loop — tools come from the registry (web_search today, MCP later).
+          // Generic tool loop — stream each round so content arrives
+          // incrementally even when the model decides not to call tools.
           if (toolDefs.length > 0 && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-              let completion: any;
+              let streamedContent = '';
+              let streamedReasoning = '';
+              // Accumulate streamed tool_calls: index → {id, name, arguments}
+              const toolCallDeltas = new Map<number, { id: string; name: string; arguments: string }>();
+              let roundFinishReason: string | null = null;
+              const roundStampStripper = createStampLeakStripper();
+
+              let streamIter: any;
               try {
-                completion = await withTimeout(
+                streamIter = await withTimeout(
                   openai.chat.completions.create({
                     model: requestedModel,
                     temperature,
-                    stream: false,
+                    stream: true,
                     messages: workingMessages,
                     tools: toolDefs,
                     tool_choice: 'auto',
@@ -567,40 +575,94 @@ export async function POST(req: NextRequest) {
                 break;
               }
 
-              const choice = completion?.choices?.[0];
-              const message = choice?.message || {};
-              const toolCalls = extractToolCalls(message);
-              const content =
-                typeof message.content === 'string'
-                  ? message.content
-                  : Array.isArray(message.content)
-                    ? message.content.map((p: any) => p?.text || p?.content || '').join('')
-                    : '';
-              const reasoning =
-                message.reasoning_content ||
-                message.reasoning ||
-                message.thinking ||
-                message.thinking_content ||
-                '';
+              // Whether we've seen any tool_call delta (tells us not to stream content to client).
+              let hasToolCallDeltas = false;
 
-              if (reasoning) send({ reasoning: String(reasoning) });
+              for await (const chunk of streamIter as any) {
+                const choice = chunk?.choices?.[0];
+                const delta = choice?.delta || {};
+                const finishReason = choice?.finish_reason || null;
+                if (finishReason) roundFinishReason = finishReason;
+
+                // --- tool_calls accumulation ---
+                if (Array.isArray(delta.tool_calls)) {
+                  hasToolCallDeltas = true;
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    const existing = toolCallDeltas.get(idx) || { id: '', name: '', arguments: '' };
+                    if (tc.id) existing.id = tc.id;
+                    if (tc.function?.name) existing.name += tc.function.name;
+                    if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                    toolCallDeltas.set(idx, existing);
+                  }
+                }
+
+                // --- content ---
+                let contentChunk = '';
+                if (typeof delta.content === 'string') {
+                  contentChunk = delta.content;
+                } else if (Array.isArray(delta.content)) {
+                  for (const part of delta.content) {
+                    const type = String(part?.type || '');
+                    if (type === 'thinking' || type === 'reasoning') {
+                      streamedReasoning += part.thinking || part.reasoning || part.text || '';
+                      send({ reasoning: part.thinking || part.reasoning || part.text || '' });
+                    } else {
+                      contentChunk += part.text || part.content || '';
+                    }
+                  }
+                }
+
+                // --- reasoning ---
+                const reasoningChunk =
+                  (delta.reasoning_content || '') +
+                  (delta.reasoning || '') +
+                  (delta.thinking || '') +
+                  (delta.thinking_content || '');
+                if (reasoningChunk) {
+                  streamedReasoning += reasoningChunk;
+                  send({ reasoning: reasoningChunk });
+                }
+
+                // Stream content to the client only when no tool_calls are being built.
+                // When the model calls tools it sometimes emits a brief narration before
+                // the tool_calls array — we buffer that and send it as reasoning instead.
+                if (contentChunk) {
+                  contentChunk = roundStampStripper.push(contentChunk);
+                  streamedContent += contentChunk;
+                  if (!hasToolCallDeltas && contentChunk) {
+                    send({ content: contentChunk });
+                  }
+                }
+              }
+              // Flush stamp stripper
+              {
+                const rest = roundStampStripper.flush();
+                if (rest) {
+                  streamedContent += rest;
+                  if (!hasToolCallDeltas) send({ content: rest });
+                }
+              }
+
+              // Build toolCalls array from accumulated deltas
+              const toolCalls = [...toolCallDeltas.values()].filter((tc) => tc.name);
 
               if (!toolCalls.length) {
-                // Cursor: narrated “I'll search” with no tool_calls → force real search.
+                // Cursor: narrated "I'll search" with no tool_calls → force real search.
                 if (
                   cursorModel &&
                   searchEnabled &&
-                  content &&
-                  narratesSearchInsteadOfCalling(content)
+                  streamedContent &&
+                  narratesSearchInsteadOfCalling(streamedContent)
                 ) {
-                  send({ reasoning: String(content) });
+                  // Content was already streamed — move it to reasoning.
+                  send({ reasoning: String(streamedContent) });
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
-                // Plain answer without tools — finish (avoid a second stream that can hang).
-                if (content) send({ content: stripMessageStamp(String(content)) });
-                if (content || reasoning) {
-                  send(streamCompletionPayload(choice?.finish_reason || 'stop'));
+                // Content was already streamed to the client; just close.
+                if (streamedContent || streamedReasoning) {
+                  send(streamCompletionPayload(roundFinishReason || 'stop'));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   controller.close();
                   return;
@@ -608,12 +670,16 @@ export async function POST(req: NextRequest) {
                 break;
               }
 
-              if (content) send({ content: stripMessageStamp(String(content)) });
+              // Tool calls present — if we streamed content, send it as reasoning
+              // (the real answer will come from the final stage after tools execute).
+              if (streamedContent && hasToolCallDeltas) {
+                send({ reasoning: stripMessageStamp(String(streamedContent)) });
+              }
 
               usedTools = true;
               workingMessages.push({
                 role: 'assistant',
-                content: content || null,
+                content: streamedContent || null,
                 tool_calls: toolCalls.map((tc) => ({
                   id: tc.id,
                   type: 'function',
@@ -628,7 +694,7 @@ export async function POST(req: NextRequest) {
                     name: tc.name,
                     callId: tc.id,
                     rawArguments: tc.arguments,
-                    fallbackQuery: userAsk || content,
+                    fallbackQuery: userAsk || streamedContent,
                   },
                   toolCtx,
                 );

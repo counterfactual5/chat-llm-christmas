@@ -552,12 +552,8 @@ function toApiMessages(
   opts?: { vision?: boolean },
 ) {
   const vision = Boolean(opts?.vision);
-  let lastUserIdx = -1;
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === 'user') lastUserIdx = i;
-  }
 
-  return messages.map((m, i) => {
+  return messages.map((m) => {
     let content = m.content;
     let images =
       m.images?.map((img) => ({
@@ -575,12 +571,11 @@ function toApiMessages(
           content = stripPersistedImageTranscription(content || '');
           if (!content.trim() && images.length > 0) content = '(image)';
         }
-      } else {
-        // Text path: only the latest turn may need Image Understand.
-        // Older uploads are either already transcribed or reflected in prior replies.
-        if (transcribed || i !== lastUserIdx) {
-          images = [];
-        }
+      } else if (transcribed) {
+        // Text path: pixels are redundant only after this exact turn has a
+        // persisted transcription. Older untranscribed uploads must remain so
+        // switching from native Vision to Image Understand does not lose them.
+        images = [];
       }
     }
 

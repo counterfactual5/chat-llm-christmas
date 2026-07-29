@@ -47,6 +47,8 @@ const VISION_IDS = new Set([
   'kimi-k2.7',
   /** Zhipu GLM vision — used by image_understand MCP and direct vision chat. */
   'glm-4.6v',
+  /** StepFun Step 3.7 Flash — native multimodal (image/video). */
+  'step-3.7-flash',
 ]);
 
 const SPECS: Record<string, Omit<ModelSpec, 'vision'> & { vision?: boolean }> = {
@@ -109,6 +111,7 @@ function looksVisionByName(id: string): boolean {
   if (/^mistral-(large|medium)-latest$/.test(normalized)) return true;
   if (/^kimi-k(3|2\.(5|6|7))$/.test(normalized)) return true;
   if (/^glm-4\.6v/.test(normalized)) return true;
+  if (/^step-3\.7/.test(normalized)) return true;
   return /claude|gemini|gpt-4o|gpt-5|vision|omni|cursor-auto|openrouter/i.test(normalized);
 }
 

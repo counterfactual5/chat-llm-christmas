@@ -132,15 +132,37 @@ function analyzeTruncation(
 
   // Recover replies that only narrated fake tool use and never answered
   // (common with cursor-auto when Continue previously treated tool_calls as done).
-  if (looksLikeToolNarration(text) && !/[.!?。！？…]\s*$/.test(text)) {
+  if (
+    looksLikeToolNarration(text) &&
+    !looksLikeToolCapabilityReply(text) &&
+    !/[.!?。！？…]\s*$/.test(text)
+  ) {
     return { truncated: true, reason: 'Stopped while trying to use tools' };
   }
 
   return { truncated: false, reason: '' };
 }
 
+/** User asked what tools exist; model listed web_search / web_read and limits — not stuck narration. */
+function looksLikeToolCapabilityReply(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const listsBuiltinTools =
+    /\bweb_search\b/i.test(t) &&
+    (/\bweb_read\b/i.test(t) || /网页读取|read.*url/i.test(t));
+  const explainsLimits =
+    /不能|无法|没有.*(?:本地|shell|工作区)|not available|cannot read local|do not (?:read|scan)|can't read local/i.test(
+      t,
+    );
+  return listsBuiltinTools && explainsLimits;
+}
+
 /** Heuristic: partial reply is stuck narrating IDE/agent tool use. */
 function looksLikeToolNarration(text: string): boolean {
+  // Negated limits (“不能扫描工作区”) are capability disclaimers, not agent narration.
+  if (/不能[^。\n]{0,40}(?:工作区|workspace|shell)|无法[^。\n]{0,40}(?:工作区|workspace)|do not (?:read|scan)|cannot read local/i.test(text)) {
+    return false;
+  }
   return /工作区|workspace|正在扫描|改用\s*shell|同步\s*I\/O|tool_call|function_call|正在读取|扫描工作区|定位同步|Read\s+\S+|Shell\s+扫描|异步重构|排查工作区/i.test(
     text,
   );
@@ -5069,14 +5091,10 @@ export default function ChatContainer() {
                                   transition={{ duration: 0.1 }}
                                   onPointerEnter={() => {
                                     setPlusFlyout('mcp');
-                                    setGoogleMcpMenuOpen(false);
                                   }}
                                   className="absolute left-[calc(100%+6px)] bottom-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                                 >
-                                <div
-                                  className="flex items-center gap-2 rounded-lg px-2.5 py-2"
-                                  onPointerEnter={() => setGoogleMcpMenuOpen(false)}
-                                >
+                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                   <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                                   <div className="min-w-0 flex-1">
                                     <div className="text-sm text-stone-800 dark:text-stone-100">
@@ -5109,10 +5127,7 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
-                                <div
-                                  className="flex items-center gap-2 rounded-lg px-2.5 py-2"
-                                  onPointerEnter={() => setGoogleMcpMenuOpen(false)}
-                                >
+                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                   <GitHubLogo className="h-3.5 w-3.5 shrink-0" />
                                   <div className="min-w-0 flex-1">
                                     <div className="text-sm text-stone-800 dark:text-stone-100">
@@ -5145,81 +5160,69 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
-                                <div
-                                  className="relative"
-                                  onPointerEnter={() => {
-                                    if (googleStatus?.connected) setGoogleMcpMenuOpen(true);
-                                  }}
-                                  onPointerLeave={() => setGoogleMcpMenuOpen(false)}
-                                >
-                                  <div
-                                    className={cn(
-                                      'flex items-center gap-2 rounded-lg px-2.5 py-2',
-                                      googleStatus?.connected &&
-                                        googleMcpMenuOpen &&
-                                        'bg-stone-100 dark:bg-stone-800',
-                                    )}
-                                  >
-                                    {googleStatus?.connected ? (
+                                <div>
+                                  {googleStatus?.connected ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setGoogleMcpMenuOpen((open) => !open)}
+                                      className={cn(
+                                        'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left',
+                                        googleMcpMenuOpen && 'bg-stone-100 dark:bg-stone-800',
+                                        '[@media(hover:hover)]:hover:bg-stone-100 dark:[@media(hover:hover)]:hover:bg-stone-800',
+                                      )}
+                                      aria-expanded={googleMcpMenuOpen}
+                                    >
+                                      <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-sm text-stone-800 dark:text-stone-100">
+                                          Google
+                                        </div>
+                                        <div className="truncate text-[10px] text-stone-400">
+                                          {t('useInThisChat')}
+                                        </div>
+                                      </div>
+                                      <ChevronDown
+                                        className={cn(
+                                          'h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform',
+                                          googleMcpMenuOpen && 'rotate-180',
+                                        )}
+                                      />
+                                    </button>
+                                  ) : (
+                                    <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                      <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-sm text-stone-800 dark:text-stone-100">
+                                          Google
+                                        </div>
+                                        <div className="truncate text-[10px] text-stone-400">
+                                          {t('googleMcpNeedsConnect')}
+                                        </div>
+                                      </div>
                                       <button
                                         type="button"
-                                        onClick={() => setGoogleMcpMenuOpen(true)}
-                                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                                        aria-expanded={googleMcpMenuOpen}
+                                        onClick={() => {
+                                          setIsSkillPickerOpen(false);
+                                          setPlusFlyout(null);
+                                          openGoogleModal();
+                                        }}
+                                        className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                                       >
-                                        <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
-                                        <div className="min-w-0 flex-1">
-                                          <div className="text-sm text-stone-800 dark:text-stone-100">
-                                            Google
-                                          </div>
-                                          <div className="truncate text-[10px] text-stone-400">
-                                            {t('useInThisChat')}
-                                          </div>
-                                        </div>
-                                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                                        {t('connectGoogle')}
                                       </button>
-                                    ) : (
-                                      <>
-                                        <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
-                                        <div className="min-w-0 flex-1">
-                                          <div className="text-sm text-stone-800 dark:text-stone-100">
-                                            Google
-                                          </div>
-                                          <div className="truncate text-[10px] text-stone-400">
-                                            {t('googleMcpNeedsConnect')}
-                                          </div>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setIsSkillPickerOpen(false);
-                                            setPlusFlyout(null);
-                                            openGoogleModal();
-                                          }}
-                                          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
-                                        >
-                                          {t('connectGoogle')}
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
-                                  <AnimatePresence>
+                                    </div>
+                                  )}
+                                  <AnimatePresence initial={false}>
                                     {googleStatus?.connected && googleMcpMenuOpen && (
                                       <motion.div
-                                        key="google-mcp-submenu"
-                                        initial={{ opacity: 0, x: -4 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        exit={{ opacity: 0, x: -4 }}
-                                        transition={{ duration: 0.12 }}
-                                        onPointerEnter={() => {
-                                          setPlusFlyout('mcp');
-                                          setGoogleMcpMenuOpen(true);
-                                        }}
-                                        // pl-1.5 bridges the 6px gap so hover doesn't flicker closed.
-                                        // bottom-0 keeps the flyout above the viewport edge (Google is last in MCP list).
-                                        className="absolute left-full bottom-0 z-20 pl-1.5"
+                                        key="google-mcp-inline"
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.15 }}
+                                        className="overflow-hidden"
                                       >
-                                        <div className="w-40 rounded-lg border border-stone-200 bg-white/95 p-1 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95">
+                                        <div className="ml-5 border-l border-stone-200 py-0.5 pl-2 dark:border-stone-700">
                                           {[
                                             {
                                               id: 'gmail' as const,
@@ -5241,7 +5244,7 @@ export default function ChatContainer() {
                                               key={row.id}
                                               className="flex items-center gap-2 rounded-md px-2 py-1.5"
                                             >
-                                              <div className="min-w-0 flex-1 truncate text-xs text-stone-800 dark:text-stone-100">
+                                              <div className="min-w-0 flex-1 truncate text-xs text-stone-700 dark:text-stone-200">
                                                 {row.label}
                                               </div>
                                               <Switch

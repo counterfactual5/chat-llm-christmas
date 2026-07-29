@@ -306,7 +306,7 @@ interface ChatSession {
   mcpIds?: string[];
   /** Latest web search hits for this chat — shown in Reference Material. */
   webSources?: WebSearchSource[];
-  /** User removed inherited sources; don't re-add them to Material or the next prompt. */
+  /** User removed inherited sources; retain only sources added by later tool runs. */
   webSourcesCleared?: boolean;
 }
 
@@ -1770,7 +1770,7 @@ export default function ChatContainer() {
     webSourcesOverride?: WebSearchSource[],
   ) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
-    const sessionSources = webSourcesOverride ?? session?.webSources ?? []; 
+    const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
     const combinedReference = [
       String(referenceText || '').trim(),
       formatWebSourcesForReference(sessionSources),

@@ -360,8 +360,17 @@ function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
   for (const m of messages) {
     for (const run of m.toolRuns || []) {
       if (run.status !== 'done' || !run.results?.length) continue;
+      // Image understand injects plain text into the prompt — never a Material source.
+      if (
+        run.name === 'image_understand' ||
+        run.provider === 'zhipu-vision'
+      ) {
+        continue;
+      }
       for (const r of run.results) {
         if (!r.url || seen.has(r.url)) continue;
+        // Skip data: / relative / empty — those are not browseable sources.
+        if (/^(data:|blob:|\/)/i.test(r.url)) continue;
         seen.add(r.url);
         out.push({
           title: r.title,
@@ -1719,28 +1728,32 @@ export default function ChatContainer() {
         });
         const nextSession = { ...s, messages: msgs, updatedAt: Date.now() };
         if (run.status === 'done') {
-          if (s.webSourcesCleared) {
-            const sourceByUrl = new Map((s.webSources || []).map((source) => [source.url, source]));
-            for (const result of run.results || []) {
-              if (!result.url) continue;
-              sourceByUrl.set(result.url, {
-                title: result.title,
-                url: result.url,
-                snippet: result.snippet,
-                provider: run.provider,
-                query: run.query,
+          const isImageUnderstand =
+            run.name === 'image_understand' || run.provider === 'zhipu-vision';
+          if (!isImageUnderstand) {
+            if (s.webSourcesCleared) {
+              const sourceByUrl = new Map((s.webSources || []).map((source) => [source.url, source]));
+              for (const result of run.results || []) {
+                if (!result.url || /^(data:|blob:|\/)/i.test(result.url)) continue;
+                sourceByUrl.set(result.url, {
+                  title: result.title,
+                  url: result.url,
+                  snippet: result.snippet,
+                  provider: run.provider,
+                  query: run.query,
+                });
+              }
+              nextSession.webSources = [...sourceByUrl.values()].slice(-40);
+            } else {
+              nextSession.webSources = collectWebSourcesFromMessages(msgs);
+            }
+            if ((nextSession.webSources?.length || 0) > 0) {
+              if (!s.webSourcesCleared) setWebSourcesCleared(false);
+              queueMicrotask(() => {
+                setIsContextPanelOpen(true);
+                setReferenceExpanded(true);
               });
             }
-            nextSession.webSources = [...sourceByUrl.values()].slice(-40);
-          } else {
-            nextSession.webSources = collectWebSourcesFromMessages(msgs);
-          }
-          if ((nextSession.webSources?.length || 0) > 0) {
-            if (!s.webSourcesCleared) setWebSourcesCleared(false);
-            queueMicrotask(() => {
-              setIsContextPanelOpen(true);
-              setReferenceExpanded(true);
-            });
           }
         }
         return nextSession;
@@ -4457,8 +4470,8 @@ export default function ChatContainer() {
                                   {run.status === 'done' && resultCount > 0 && (
                                     <ul className="space-y-0.5">
                                       {(run.results || []).slice(0, 8).map((r) => (
-                                        <li key={r.url || r.title} className="truncate">
-                                          {r.url ? (
+                                        <li key={r.url || r.title} className={isImageUnderstand ? 'whitespace-pre-wrap break-words' : 'truncate'}>
+                                          {r.url && !isImageUnderstand ? (
                                             <a
                                               href={r.url}
                                               target="_blank"
@@ -4470,7 +4483,9 @@ export default function ChatContainer() {
                                             </a>
                                           ) : (
                                             <span title={r.snippet || r.title}>
-                                              {r.title}
+                                              {isImageUnderstand
+                                                ? r.snippet || r.title
+                                                : r.title}
                                             </span>
                                           )}
                                         </li>

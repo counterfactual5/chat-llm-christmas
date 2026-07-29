@@ -194,7 +194,7 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('zhipu-vision')) {
     lines.push(
-      '- Zhipu Vision MCP (image_understand): GLM-4.6V image understanding / OCR; billed to the user account. When the chat model is text-only, the server may already inject image descriptions — use those; call image_understand for a fresh analysis of a specific image URL.',
+      '- Image Understand MCP (image_understand): when the chat model is text-only, images are converted to short text descriptions via GLM-4.6V before answering (billed to the user). When the chat model is already vision-capable, this MCP is idle — the model sees images directly; do not call image_understand.',
     );
   }
   // Legacy combined toggle (should already be expanded server-side).

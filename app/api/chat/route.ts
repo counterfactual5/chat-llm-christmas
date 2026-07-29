@@ -280,13 +280,19 @@ export async function POST(req: NextRequest) {
       !enabledGoogleServices(authorizedIntegrations).length;
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
-    const enabledTools = await resolveEnabledToolsAsync(
+    let enabledTools = await resolveEnabledToolsAsync(
       {
         searchEnabled,
         integrations: authorizedIntegrations,
       },
       { notionAccessToken, githubAccessToken, googleAccessToken },
     );
+    // Vision chat models already see images natively — skip image_understand
+    // to avoid double billing / conflicting tool calls.
+    const modelIsVision = getModelSpec(requestedModel).vision;
+    if (modelIsVision) {
+      enabledTools = enabledTools.filter((t) => t.name !== 'image_understand');
+    }
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
 
@@ -454,7 +460,6 @@ export async function POST(req: NextRequest) {
 
 
     const userAsk = lastUserText(normalizedMessages);
-    const modelIsVision = getModelSpec(requestedModel).vision;
     const zhipuVisionOn = authorizedIntegrations.includes('zhipu-vision');
 
     const workingMessages: any[] = [
@@ -483,6 +488,7 @@ export async function POST(req: NextRequest) {
 
         try {
           // Text-only model + images + zhipu-vision MCP: convert images → text first.
+          // Vision models skip this — they receive image_url parts directly.
           if (zhipuVisionOn && !modelIsVision) {
             const hasImageParts = workingMessages.some(
               (m) =>

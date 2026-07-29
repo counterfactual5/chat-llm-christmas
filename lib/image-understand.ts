@@ -10,6 +10,8 @@ import { toImageContentPart } from '@/lib/gateway-files';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';
 const UNDERSTAND_TIMEOUT_MS = 30_000;
+/** Cap description injected into the text-model prompt (chars). */
+const MAX_DESCRIPTION_CHARS = 4_000;
 
 export interface ImageUnderstandInput {
   /** Image URL (https / data URI) or gateway file id. */
@@ -152,6 +154,13 @@ export async function rewriteMessagesWithImageDescriptions(
       });
 
       const result = await understandImage({ imageUrl: url }, gateway);
+      const description = result.ok
+        ? result.text.length > MAX_DESCRIPTION_CHARS
+          ? `${result.text.slice(0, MAX_DESCRIPTION_CHARS)}\n…(truncated)`
+          : result.text
+        : result.text;
+      // Never put data:/file urls into results — UI treats them as Reference Material
+      // links and would dump megabyte base64 into the next request's context.
       opts?.send?.({
         tool: {
           status: 'done',
@@ -159,7 +168,13 @@ export async function rewriteMessagesWithImageDescriptions(
           query: label,
           provider: 'zhipu-vision',
           results: result.ok
-            ? [{ title: `${label} (${result.mode})`, url, snippet: result.text.slice(0, 240) }]
+            ? [
+                {
+                  title: `${label} (${result.mode})`,
+                  url: '',
+                  snippet: description.slice(0, 400),
+                },
+              ]
             : [],
           error: result.ok ? undefined : result.text,
         },
@@ -168,8 +183,8 @@ export async function rewriteMessagesWithImageDescriptions(
       nextParts.push({
         type: 'text',
         text: result.ok
-          ? `【${label} 图像理解 / ${result.mode}】\n${result.text}`
-          : `【${label} 图像理解失败】${result.text}`,
+          ? `【${label} 图像理解 / ${result.mode}】\n${description}`
+          : `【${label} 图像理解失败】${description}`,
       });
       changed = true;
     }

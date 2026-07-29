@@ -110,8 +110,16 @@ export function createImageUnderstandTool(): ChatTool {
             name: 'image_understand',
             query,
             provider: 'zhipu-vision',
+            // No url — image understand is not a web source; putting data: URLs
+            // here would bloat Reference Material and break the SSE stream.
             results: result.ok
-              ? [{ title: `Image (${result.mode})`, url: imageUrl, snippet: result.text.slice(0, 240) }]
+              ? [
+                  {
+                    title: `Image (${result.mode})`,
+                    url: '',
+                    snippet: result.text.slice(0, 400),
+                  },
+                ]
               : [],
             error: result.ok ? undefined : result.text,
           },

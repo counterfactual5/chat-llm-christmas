@@ -47,6 +47,10 @@ import {
   prepareChatMarkdown,
 } from '@/lib/markdown-math';
 import { useLocale } from '@/lib/i18n';
+import {
+  isGoogleMcpId,
+  normalizeGoogleIntegrations,
+} from '@/lib/integrations/google-services';
 
 const KATEX_OPTIONS = {
   throwOnError: false,
@@ -628,12 +632,12 @@ export default function ChatContainer() {
   const scrubGoogleMcpFromSessions = () => {
     setSessions((prev) =>
       prev.map((s) => {
-        const next = (s.mcpIds || []).filter((id) => id !== 'google');
+        const next = (s.mcpIds || []).filter((id) => !isGoogleMcpId(id));
         if (next.length === (s.mcpIds || []).length) return s;
         return { ...s, mcpIds: next, updatedAt: Date.now() };
       }),
     );
-    setActiveMcpIds((prev) => prev.filter((id) => id !== 'google'));
+    setActiveMcpIds((prev) => prev.filter((id) => !isGoogleMcpId(id)));
   };
 
   const refreshAccountStatus = async () => {
@@ -962,8 +966,10 @@ export default function ChatContainer() {
     Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
   const githubMcpOn =
     Boolean(githubStatus?.connected) && activeMcpIds.includes('github');
-  const googleMcpOn =
-    Boolean(googleStatus?.connected) && activeMcpIds.includes('google');
+  const googleMcpConnected = Boolean(googleStatus?.connected);
+  const gmailMcpOn = googleMcpConnected && activeMcpIds.includes('gmail');
+  const calendarMcpOn = googleMcpConnected && activeMcpIds.includes('calendar');
+  const driveMcpOn = googleMcpConnected && activeMcpIds.includes('drive');
 
   const accountDisplayName =
     accountUsername || (isAccountBound ? t('accountConnected') : t('connectAccount'));
@@ -1006,13 +1012,30 @@ export default function ChatContainer() {
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {
-        if (!(s.mcpIds || []).includes('google')) return s;
+        if (!(s.mcpIds || []).some((id) => isGoogleMcpId(id))) return s;
         changed = true;
-        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => id !== 'google') };
+        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => !isGoogleMcpId(id)) };
       });
       return changed ? next : prev;
     });
   }, [googleStatus]);
+
+  // Migrate legacy per-chat `google` toggle → gmail + calendar + drive.
+  useEffect(() => {
+    setSessions((prev) => {
+      let changed = false;
+      const next = prev.map((s) => {
+        if (!(s.mcpIds || []).includes('google')) return s;
+        changed = true;
+        return {
+          ...s,
+          mcpIds: normalizeGoogleIntegrations(s.mcpIds || []),
+          updatedAt: Date.now(),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -1240,28 +1263,22 @@ export default function ChatContainer() {
     setActiveMcpIds((prev) => (prev.includes('github') ? prev : [...prev, 'github']));
   };
 
-  const toggleGoogleMcp = () => {
-    if (googleMcpOn) {
-      setActiveMcpIds((prev) => prev.filter((id) => id !== 'google'));
-      return;
-    }
-    if (!isAccountBound || !googleStatus?.connected) {
-      openGoogleModal();
-      return;
-    }
-    setActiveMcpIds((prev) => (prev.includes('google') ? prev : [...prev, 'google']));
-  };
-
-  const setGoogleMcpEnabled = (enabled: boolean) => {
+  const setGoogleServiceEnabled = (
+    service: 'gmail' | 'calendar' | 'drive',
+    enabled: boolean,
+  ) => {
     if (!enabled) {
-      setActiveMcpIds((prev) => prev.filter((id) => id !== 'google'));
+      setActiveMcpIds((prev) => prev.filter((id) => id !== service && id !== 'google'));
       return;
     }
     if (!isAccountBound || !googleStatus?.connected) {
       openGoogleModal();
       return;
     }
-    setActiveMcpIds((prev) => (prev.includes('google') ? prev : [...prev, 'google']));
+    setActiveMcpIds((prev) => {
+      const withoutLegacy = prev.filter((id) => id !== 'google');
+      return withoutLegacy.includes(service) ? withoutLegacy : [...withoutLegacy, service];
+    });
   };
 
   const toggleSkill = (skillId: string) => {
@@ -1674,12 +1691,12 @@ export default function ChatContainer() {
     const notionConnected = Boolean(notionStatusRef.current?.connected);
     const githubConnected = Boolean(githubStatusRef.current?.connected);
     const googleConnected = Boolean(googleStatusRef.current?.connected);
-    const integrations = (
-      sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || []
+    const integrations = normalizeGoogleIntegrations(
+      sessionsRef.current.find((s) => s.id === sessionId)?.mcpIds || [],
     ).filter((id) => {
       if (id === 'notion') return notionConnected;
       if (id === 'github') return githubConnected;
-      if (id === 'google') return googleConnected;
+      if (id === 'gmail' || id === 'calendar' || id === 'drive') return googleConnected;
       return false;
     });
 
@@ -5108,14 +5125,7 @@ export default function ChatContainer() {
                                         : t('googleMcpNeedsConnect')}
                                     </div>
                                   </div>
-                                  {googleStatus?.connected ? (
-                                    <Switch
-                                      size="sm"
-                                      checked={googleMcpOn}
-                                      onCheckedChange={setGoogleMcpEnabled}
-                                      aria-label={t('enableGoogleMcp')}
-                                    />
-                                  ) : (
+                                  {googleStatus?.connected ? null : (
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -5129,6 +5139,54 @@ export default function ChatContainer() {
                                     </button>
                                   )}
                                 </div>
+                                {googleStatus?.connected ? (
+                                  <>
+                                    {(
+                                      [
+                                        {
+                                          id: 'gmail' as const,
+                                          label: t('enableGmailMcp'),
+                                          hint: t('enableGmailMcpHint'),
+                                          on: gmailMcpOn,
+                                        },
+                                        {
+                                          id: 'calendar' as const,
+                                          label: t('enableCalendarMcp'),
+                                          hint: t('enableCalendarMcpHint'),
+                                          on: calendarMcpOn,
+                                        },
+                                        {
+                                          id: 'drive' as const,
+                                          label: t('enableDriveMcp'),
+                                          hint: t('enableDriveMcpHint'),
+                                          on: driveMcpOn,
+                                        },
+                                      ] as const
+                                    ).map((row) => (
+                                      <div
+                                        key={row.id}
+                                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 pl-8"
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <div className="text-sm text-stone-800 dark:text-stone-100">
+                                            {row.label}
+                                          </div>
+                                          <div className="truncate text-[10px] text-stone-400">
+                                            {row.hint}
+                                          </div>
+                                        </div>
+                                        <Switch
+                                          size="sm"
+                                          checked={row.on}
+                                          onCheckedChange={(enabled) =>
+                                            setGoogleServiceEnabled(row.id, enabled)
+                                          }
+                                          aria-label={row.label}
+                                        />
+                                      </div>
+                                    ))}
+                                  </>
+                                ) : null}
                               </motion.div>
                               )}
                             </AnimatePresence>

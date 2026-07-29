@@ -35,6 +35,9 @@ import {
   resolveOwnerId,
   upsertNotionConnection,
   upsertGoogleConnection,
+  wantsGoogleToken,
+  normalizeGoogleIntegrations,
+  enabledGoogleServices,
 } from '@/lib/integrations';
 import {
   gatewayBaseURL as filesBaseURL,
@@ -213,9 +216,11 @@ export async function POST(req: NextRequest) {
     }
 
     const openai = new OpenAI({ apiKey, baseURL });
-    const requestedIntegrations = Array.isArray(integrations)
-      ? integrations.map((x: unknown) => String(x || '').trim().toLowerCase()).filter(Boolean)
-      : [];
+    const requestedIntegrations = normalizeGoogleIntegrations(
+      Array.isArray(integrations)
+        ? integrations.map((x: unknown) => String(x || '').trim().toLowerCase()).filter(Boolean)
+        : [],
+    );
     // Intersect client toggles with vault OAuth — never trust integrations alone.
     const authorizedIntegrations: string[] = [];
     let notionAccessToken: string | undefined;
@@ -250,12 +255,13 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    if (requestedIntegrations.includes('google') && isBoundAccount) {
+    const requestedGoogleServices = enabledGoogleServices(requestedIntegrations);
+    if (requestedGoogleServices.length > 0 && isBoundAccount) {
       const ownerId = notionOwnerId ?? (await resolveOwnerId(req));
       if (ownerId) {
         const mcp = await getGoogleAccessToken(req, ownerId);
         if (mcp.token) {
-          authorizedIntegrations.push('google');
+          authorizedIntegrations.push(...requestedGoogleServices);
           googleAccessToken = mcp.token;
           googleVaultUpdate = mcp.updatedGoogle;
           googleOwnerId = ownerId;
@@ -263,7 +269,8 @@ export async function POST(req: NextRequest) {
       }
     }
     const googleRequestedButUnauthorized =
-      requestedIntegrations.includes('google') && !authorizedIntegrations.includes('google');
+      wantsGoogleToken(requestedIntegrations) &&
+      !enabledGoogleServices(authorizedIntegrations).length;
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
     const enabledTools = await resolveEnabledToolsAsync(

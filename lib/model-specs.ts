@@ -173,21 +173,28 @@ export function activeIntegrationsPrompt(opts: {
   if (set.has('github')) {
     lines.push('- GitHub MCP: repos, issues, PRs, Actions for the connected GitHub account');
   }
-  if (set.has('google')) {
-    lines.push('- Google MCP (three parts, like standard Workspace MCP):');
+  if (set.has('gmail')) {
     lines.push(
-      '  • Gmail: search/read mail & threads, attachments, labels, drafts, send/reply, mark read/unread / archive / trash (incl. batch)',
+      '- Gmail MCP: search/read mail & threads, attachments, labels, drafts, send/reply, mark read/unread / archive / trash (incl. batch)',
     );
+  }
+  if (set.has('calendar')) {
     lines.push(
-      '  • Calendar: list calendars/events, get event, free/busy, create/update/delete/move events',
+      '- Calendar MCP: list calendars/events, get event, free/busy, create/update/delete/move events',
     );
+  }
+  if (set.has('drive')) {
     lines.push(
-      '  • Drive: search/get/read/export, create file/folder, copy, rename/move, trash/delete, share/permissions',
+      '- Drive MCP: search/get/read/export, create file/folder, copy, rename/move, trash/delete, share/permissions',
     );
+  }
+  // Legacy combined toggle (should already be expanded server-side).
+  if (set.has('google') && !set.has('gmail') && !set.has('calendar') && !set.has('drive')) {
+    lines.push('- Gmail MCP / Calendar MCP / Drive MCP (Google Workspace)');
   }
   if (opts.googleRequestedButUnauthorized) {
     lines.push(
-      '- Google was toggled on in the UI, but no usable OAuth access token is available this request. Tell the user to reconnect Google in MCP settings, then retry.',
+      '- A Google surface (Gmail/Calendar/Drive) was toggled on, but no usable OAuth access token is available this request. Tell the user to reconnect Google in MCP settings, then retry.',
     );
   }
   if (lines.length === 1) {

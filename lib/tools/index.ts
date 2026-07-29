@@ -5,6 +5,7 @@ import { createWebReadTool } from '@/lib/tools/web-reader-tool';
 import { createNotionMcpTools } from '@/lib/tools/notion-tools';
 import { createGitHubMcpTools } from '@/lib/tools/github-tools';
 import { createGoogleTools } from '@/lib/tools/google-tools';
+import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google-services';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
@@ -46,9 +47,10 @@ export async function resolveEnabledToolsAsync(
       console.warn('GitHub MCP listTools failed:', err);
     }
   }
-  if (flags.integrations.includes('google') && opts?.googleAccessToken) {
+  if (wantsGoogleToken(flags.integrations) && opts?.googleAccessToken) {
     try {
-      const googleTools = await createGoogleTools(opts.googleAccessToken);
+      const services = enabledGoogleServices(flags.integrations);
+      const googleTools = await createGoogleTools(opts.googleAccessToken, services);
       tools = [...tools, ...googleTools];
     } catch (err) {
       console.warn('Google tools failed to load:', err);

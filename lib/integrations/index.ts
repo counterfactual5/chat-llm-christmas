@@ -61,6 +61,15 @@ export {
   googleOAuthScopes,
 } from '@/lib/integrations/google-oauth';
 export { probeGoogleApis } from '@/lib/integrations/google-rest';
+export {
+  GOOGLE_SERVICE_IDS,
+  wantsGoogleToken,
+  normalizeGoogleIntegrations,
+  enabledGoogleServices,
+  isGoogleMcpId,
+  isGoogleServiceId,
+  type GoogleServiceId,
+} from '@/lib/integrations/google-services';
 export type {
   IntegrationProvider,
   IntegrationVault,

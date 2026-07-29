@@ -39,16 +39,38 @@ import {
   gmailUntrashMessage,
 } from '@/lib/integrations/google-rest';
 
-const GOOGLE_SYSTEM_PROMPT = [
-  "You have Google MCP for the user's connected Google account, split into three surfaces like standard Google Workspace MCP:",
-  '1) Gmail MCP tools — search/read messages & threads; attachments; labels; drafts; send; reply; modify/batch-modify (read/unread, star, archive); trash/untrash.',
-  '2) Calendar MCP tools — list calendars/events; get event; free/busy; create/update/delete/move events.',
-  '3) Drive MCP tools — search/get/read/export; create text file or folder; copy; rename/move; trash/untrash/delete; list/share/revoke permissions.',
-  'When the user asks what MCP / integrations / tools you have, list Google as these three parts alongside Notion/GitHub if enabled.',
-  'For write actions (send/reply, share, trash, delete), confirm intent from the user message before calling.',
-  'Do not invent message IDs, event IDs, or file IDs — only use tool results.',
-  'Cite Gmail/Drive/Calendar links from tool results when answering.',
+const GMAIL_SYSTEM_PROMPT = [
+  'You have Gmail MCP tools for the user\'s connected Google account.',
+  'Search/read messages & threads; attachments; labels; drafts; send; reply; modify/batch-modify (read/unread, star, archive); trash/untrash.',
+  'For send/reply/trash/label changes, confirm intent from the user message before calling.',
+  'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
 ].join(' ');
+
+const CALENDAR_SYSTEM_PROMPT = [
+  'You have Google Calendar MCP tools for the user\'s connected Google account.',
+  'List calendars/events; get event; free/busy; create/update/delete/move events.',
+  'For create/update/delete/move, confirm intent from the user message before calling.',
+  'Do not invent event IDs — only use tool results. Cite Calendar links when answering.',
+].join(' ');
+
+const DRIVE_SYSTEM_PROMPT = [
+  'You have Google Drive MCP tools for the user\'s connected Google account.',
+  'Search/get/read/export; create text file or folder; copy; rename/move; trash/untrash/delete; list/share/revoke permissions.',
+  'For share/trash/delete/create, confirm intent from the user message before calling.',
+  'Do not invent file IDs — only use tool results. Cite Drive links when answering.',
+].join(' ');
+
+function serviceSystemPrompt(service: 'gmail' | 'calendar' | 'drive'): string {
+  if (service === 'calendar') return CALENDAR_SYSTEM_PROMPT;
+  if (service === 'drive') return DRIVE_SYSTEM_PROMPT;
+  return GMAIL_SYSTEM_PROMPT;
+}
+
+function toolService(name: string): 'gmail' | 'calendar' | 'drive' {
+  if (name.startsWith('calendar_')) return 'calendar';
+  if (name.startsWith('drive_')) return 'drive';
+  return 'gmail';
+}
 
 function googleToken(ctx: ToolRuntimeContext): string | null {
   const token = ctx.credentials?.googleAccessToken?.trim();
@@ -991,8 +1013,8 @@ function makeTool(def: GoogleToolDef): ChatTool {
         parameters: def.parameters,
       },
     },
-    systemPrompt: GOOGLE_SYSTEM_PROMPT,
-    enabled: (flags) => flags.integrations.includes('google'),
+    systemPrompt: serviceSystemPrompt(toolService(def.name)),
+    enabled: (flags) => flags.integrations.includes(toolService(def.name)),
     async execute({ rawArguments, fallbackQuery }, ctx) {
       const token = googleToken(ctx);
       if (!token) {
@@ -1054,9 +1076,23 @@ function makeTool(def: GoogleToolDef): ChatTool {
 }
 
 /** Register curated Gmail / Calendar / Drive REST tools for the chat model. */
-export async function createGoogleTools(_accessToken: string): Promise<ChatTool[]> {
+export async function createGoogleTools(
+  _accessToken: string,
+  integrations: string[] = ['gmail', 'calendar', 'drive'],
+): Promise<ChatTool[]> {
   // Token is validated per-call via runtime credentials; presence here means Google is authorized.
-  return TOOL_DEFS.map(makeTool);
+  const enabled = new Set(
+    integrations
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter((id) => id === 'gmail' || id === 'calendar' || id === 'drive'),
+  );
+  // Legacy single toggle.
+  if (integrations.map((id) => String(id || '').trim().toLowerCase()).includes('google')) {
+    enabled.add('gmail');
+    enabled.add('calendar');
+    enabled.add('drive');
+  }
+  return TOOL_DEFS.filter((def) => enabled.has(toolService(def.name))).map(makeTool);
 }
 
 /** @deprecated Prefer createGoogleTools — kept for existing imports. */

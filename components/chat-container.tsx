@@ -329,7 +329,9 @@ function formatWebSourcesForReference(sources: WebSearchSource[]): string {
   for (const [query, list] of byQuery) {
     const provider = list[0]?.provider;
     const header =
-      provider === 'notion'
+      provider === 'upload'
+        ? 'Uploaded files and images in this chat:'
+        : provider === 'notion'
         ? query && query !== 'web'
           ? `Notion results for "${query}":`
           : 'Notion pages:'
@@ -388,6 +390,52 @@ function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
     }
   }
   return out.slice(-40);
+}
+
+/** User-uploaded images and ingested text files (not model-generated pictures). */
+function collectUserUploadsFromMessages(messages: Message[]): WebSearchSource[] {
+  const seen = new Set<string>();
+  const out: WebSearchSource[] = [];
+
+  for (const m of messages) {
+    if (m.role !== 'user') continue;
+
+    for (const img of m.images || []) {
+      const url = img.fileId
+        ? `/api/files/${encodeURIComponent(img.fileId)}`
+        : String(img.url || '').trim();
+      const key = img.fileId || url;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        title: img.name || 'Image',
+        url,
+        snippet: '',
+        provider: 'upload',
+        query: 'upload',
+      });
+    }
+
+    const content = String(m.content || '');
+    const fileRe = /\[Attached File: ([^\]]+)\]\n([\s\S]*?)(?=\n\n---\n\n|\n\n\[Attached File:|$)/g;
+    let match: RegExpExecArray | null;
+    while ((match = fileRe.exec(content)) !== null) {
+      const name = match[1].trim();
+      const text = match[2].trim();
+      const key = `file:${m.id}:${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        title: name,
+        url: '',
+        snippet: text.slice(0, 400),
+        provider: 'upload',
+        query: 'upload',
+      });
+    }
+  }
+
+  return out;
 }
 
 function referenceSourcesHeading(
@@ -1068,6 +1116,27 @@ export default function ChatContainer() {
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const webSources = activeSession?.webSources || [];
+  const userUploadReferences = useMemo(() => {
+    const fromThread = collectUserUploadsFromMessages(messages);
+    const seen = new Set(fromThread.map((s) => s.url || `${s.title}:${s.snippet?.slice(0, 40)}`));
+    const pending: WebSearchSource[] = [];
+    for (const a of attachments) {
+      const url = a.fileId
+        ? `/api/files/${encodeURIComponent(a.fileId)}`
+        : a.previewUrl || a.dataUrl || '';
+      const key = url || `pending:${a.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pending.push({
+        title: a.name,
+        url: isImageAttachment(a) ? url : '',
+        snippet: a.text?.slice(0, 400) || '',
+        provider: 'upload',
+        query: 'upload',
+      });
+    }
+    return [...fromThread, ...pending];
+  }, [messages, attachments]);
   const referenceSourcesMeta = useMemo(
     () => referenceSourcesHeading(webSources, t),
     [webSources, t, locale],
@@ -1830,8 +1899,10 @@ export default function ChatContainer() {
   ) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
     const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
+    const uploadRefs = collectUserUploadsFromMessages(session?.messages || []);
     const combinedReference = [
       String(referenceText || '').trim(),
+      formatWebSourcesForReference(uploadRefs),
       formatWebSourcesForReference(sessionSources),
     ]
       .filter(Boolean)
@@ -2368,7 +2439,13 @@ export default function ChatContainer() {
       0,
     );
     const reference = estimateTokensFromText(
-      [referenceText, formatWebSourcesForReference(webSources)].filter(Boolean).join('\n\n'),
+      [
+        referenceText,
+        formatWebSourcesForReference(webSources),
+        formatWebSourcesForReference(userUploadReferences),
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     );
     const files = estimateTokensFromText(
       attachments
@@ -2393,7 +2470,7 @@ export default function ChatContainer() {
       conversation,
       total: system + skillTokens + reference + files + imageTokens + conversation,
     };
-  }, [messages, systemPrompt, referenceText, webSources, attachments, activeSkills]);
+  }, [messages, systemPrompt, referenceText, webSources, userUploadReferences, attachments, activeSkills]);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -4530,6 +4607,21 @@ export default function ChatContainer() {
                         // disappears inside a collapsed「思考过程」after streaming ends.
                         const processOpen =
                           reasoningOpen[message.id] ?? (processLive || toolCount > 0);
+                        const reasoningInActivity = activitySteps.some(
+                          (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
+                        );
+                        const onlyImageUnderstandProcess =
+                          toolCount > 0 &&
+                          !reasoningInActivity &&
+                          activitySteps
+                            .filter((s): s is ToolStep => s.kind === 'tool')
+                            .every((s) => {
+                              const run = toolById.get(s.toolRunId);
+                              return (
+                                run?.name === 'image_understand' ||
+                                run?.provider === 'zhipu-vision'
+                              );
+                            });
 
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
@@ -4763,7 +4855,11 @@ export default function ChatContainer() {
                               )}
                             />
                             <span>
-                              {processLive ? t('thinking') : t('thoughtProcess')}
+                              {processLive
+                                ? t('thinking')
+                                : onlyImageUnderstandProcess
+                                  ? t('imageUnderstandProcess')
+                                  : t('thoughtProcess')}
                             </span>
                             {toolCount > 0 && (
                               <span className="opacity-50">· {toolCount}</span>
@@ -5948,75 +6044,6 @@ export default function ChatContainer() {
 
                 <ScrollArea className="flex-1 px-4 py-4">
                   <div className="space-y-2">
-                    {/* Attachments — collapsible */}
-                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setAttachmentsExpanded((v) => !v)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
-                      >
-                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-                          <FileText className="h-3.5 w-3.5" />
-                          Attachments
-                          <span className="font-mono font-normal normal-case tracking-normal text-stone-400">
-                            ({attachments.length})
-                          </span>
-                        </span>
-                        <ChevronDown
-                          className={cn(
-                            'h-3.5 w-3.5 text-stone-400 transition-transform',
-                            attachmentsExpanded && 'rotate-180',
-                          )}
-                        />
-                      </button>
-                      <AnimatePresence initial={false}>
-                        {attachmentsExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="max-h-48 space-y-2 overflow-y-auto border-t border-stone-200/70 px-3 py-2 dark:border-stone-800">
-                              {attachments.length === 0 ? (
-                                <div className="py-2 text-xs text-stone-400">No files</div>
-                              ) : (
-                                attachments.map((a) => (
-                                  <div
-                                    key={a.id}
-                                    className="group flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 p-2 text-xs dark:border-stone-800 dark:bg-stone-900/50"
-                                  >
-                                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                                      {a.previewUrl ? (
-                                        <div className="h-8 w-8 shrink-0 overflow-hidden rounded bg-stone-200">
-                                          <img
-                                            src={a.previewUrl}
-                                            alt="preview"
-                                            className="h-full w-full object-cover"
-                                          />
-                                        </div>
-                                      ) : (
-                                        <FileText className="h-4 w-4 shrink-0 text-stone-400" />
-                                      )}
-                                      <div className="truncate text-stone-600 dark:text-stone-300">
-                                        {a.name}
-                                      </div>
-                                    </div>
-                                    <button
-                                      onClick={() => removeAttachment(a.id)}
-                                      className="p-1 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
                     {/* Generated pictures — collapsible history bars */}
                     <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
                       <button
@@ -6138,9 +6165,9 @@ export default function ChatContainer() {
                         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
                           <Quote className="h-3.5 w-3.5" />
                           {t('referenceMaterial')}
-                          {webSources.length > 0 && (
+                          {(userUploadReferences.length > 0 || webSources.length > 0) && (
                             <span className="rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                              {webSources.length}
+                              {userUploadReferences.length + webSources.length}
                             </span>
                           )}
                           {referenceText.trim() ? (
@@ -6212,6 +6239,53 @@ export default function ChatContainer() {
                             className="overflow-hidden"
                           >
                             <div className="max-h-64 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+                              {userUploadReferences.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                                    {t('uploadedReferenceFiles')}
+                                  </div>
+                                  <ul className="space-y-1">
+                                    {userUploadReferences.map((src) => {
+                                      const isImg =
+                                        Boolean(src.url) &&
+                                        !src.snippet &&
+                                        /\.(png|jpe?g|gif|webp)|\/api\/files\//i.test(src.url);
+                                      return (
+                                        <li
+                                          key={`${src.title}-${src.url}-${src.snippet?.slice(0, 24)}`}
+                                          className="flex items-start gap-2 text-xs"
+                                        >
+                                          {isImg && src.url ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => setImagePreviewSrc(src.url)}
+                                              className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
+                                            >
+                                              <img
+                                                src={src.url}
+                                                alt=""
+                                                className="h-full w-full object-cover"
+                                              />
+                                            </button>
+                                          ) : (
+                                            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
+                                          )}
+                                          <div className="min-w-0 flex-1">
+                                            <div className="truncate font-medium text-stone-700 dark:text-stone-200">
+                                              {src.title}
+                                            </div>
+                                            {src.snippet ? (
+                                              <div className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] leading-4 text-stone-500">
+                                                {src.snippet}
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                </div>
+                              )}
                               {webSources.length > 0 && (
                                 <div className="space-y-1.5">
                                   <div className="flex items-center justify-between gap-2">

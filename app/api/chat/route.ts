@@ -63,14 +63,20 @@ function jsonError(message: string, status: number = 500) {
   });
 }
 
+/**
+ * Whether to send `enable_thinking: true` proactively.
+ *
+ * Keep this narrow: llm.christmas validates the parameter per model and returns
+ * 400 Unsupported for variants that do not allow it (seen on deepseek-v4-flash).
+ * Name tokens like r1 / reason / thinking / qwq are the safe opt-in signal.
+ * Do NOT blanket whole families (deepseek-v4*, glm-5*, kimi-k2*, minimax-m3*) —
+ * streamChatCompletionsRaw also retries once without the flag if rejected.
+ *
+ * Separately, modelNeedsThinkingForTools() may still force thinking for GLM
+ * when tools are present (empty-stream workaround).
+ */
 function wantsThinking(model: string) {
-  const id = String(model || '');
-  // deepseek-v4-flash rejects enable_thinking on the gateway (400 Unsupported).
-  if (/deepseek-v4.*flash/i.test(id)) return false;
-  return (
-    /(^|[-_])(r1|reason|thinking|qwq)([-_]|$)/i.test(id) ||
-    /deepseek-v4|glm-5|kimi-k2\.|minimax-m3/i.test(id)
-  );
+  return /(^|[-_])(r1|reason|thinking|qwq)([-_]|$)/i.test(String(model || ''));
 }
 
 /** GLM-4.7 tool-calling expects thinking; without it the stream often ends empty. */

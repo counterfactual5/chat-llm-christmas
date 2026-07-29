@@ -815,10 +815,10 @@ export async function POST(req: NextRequest) {
           if (activeToolDefs.length > 0 && modelNeedsThinkingForTools(requestedModel)) {
             thinking = true;
           }
-          // Fold reasoning_* → content when thinking wasn't requested for UI, or
-          // when this model dumps the whole answer into reasoning anyway.
-          let reasoningAsContent =
-            !thinking || modelDumpsAnswerInReasoning(requestedModel);
+          // Keep reasoning_* in the Process timeline. Only fold into visible content
+          // for models that dump the *answer* into reasoning (GLM-4.7 family).
+          // Folding whenever !thinking hid DeepSeek / similar CoT inside the bubble.
+          const reasoningAsContent = modelDumpsAnswerInReasoning(requestedModel);
 
           const injectSearchOutcome = async (outcome: SearchOutcome) => {
             const callId = `proactive_search_${Date.now()}`;

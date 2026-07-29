@@ -287,12 +287,13 @@ interface Message {
     error?: string;
   }>;
   /**
-   * Chronological activity for this turn (thinking / tools interleaved as they arrived).
-   * Final answer `content` always renders after this list.
+   * Chronological activity for this turn (thinking / tools / answer chunks in
+   * arrival order). Rendered as interleaved Process segments + content.
    */
   activity?: Array<
     | { id: string; kind: 'reasoning'; text: string }
     | { id: string; kind: 'tool'; toolRunId: string }
+    | { id: string; kind: 'content'; text: string }
   >;
   /** True while streaming, or after a stop / refresh / truncated reply. */
   incomplete?: boolean;
@@ -1812,8 +1813,24 @@ export default function ChatContainer() {
         if (!s.messages.some((m) => m.id === assistantId)) return s;
         const msgs = s.messages.map((m) => {
           if (m.id !== assistantId) return m;
-          // Drop model-echoed `[2026-…]` prefixes so they never stick in history.
-          return { ...m, content: stripMessageStamp(m.content + chunk), incomplete: true };
+          const nextContent = stripMessageStamp(m.content + chunk);
+          const activity = [...(m.activity || [])];
+          const last = activity[activity.length - 1];
+          // Mirror content into the timeline so Process / answer can interleave
+          // in arrival order (think → answer → tool → answer…).
+          if (last?.kind === 'content') {
+            activity[activity.length - 1] = {
+              ...last,
+              text: last.text + chunk,
+            };
+          } else {
+            activity.push({
+              id: crypto.randomUUID(),
+              kind: 'content',
+              text: chunk,
+            });
+          }
+          return { ...m, content: nextContent, activity, incomplete: true };
         });
         return { ...s, messages: msgs, updatedAt: Date.now() };
       }),
@@ -4766,8 +4783,6 @@ export default function ChatContainer() {
                         const parts = displayAssistantParts(message);
                         const visibleContent = parts.content;
                         const visibleReasoning = parts.reasoning;
-                        const thinkingOnly =
-                          Boolean(message.incomplete && !visibleContent && visibleReasoning);
                         const toolById = new Map(
                           (message.toolRuns || []).map((run) => [run.id, run]),
                         );
@@ -4810,21 +4825,86 @@ export default function ChatContainer() {
                           }
                           return base;
                         })();
-                        type ToolStep = Extract<(typeof activitySteps)[number], { kind: 'tool' }>;
+                        type ActivityStep = (typeof activitySteps)[number];
+                        type ToolStep = Extract<ActivityStep, { kind: 'tool' }>;
+                        type ProcessStep = Exclude<ActivityStep, { kind: 'content' }>;
 
-                        const toolCount = activitySteps.filter((s) => s.kind === 'tool').length;
-                        // Keep Process live from request start until the first visible
-                        // answer token — covers the blank gap before tools and the 1–2s
-                        // after Image Understand / search before streaming begins.
+                        const hasContentSteps = activitySteps.some((s) => s.kind === 'content');
                         const awaitingFirstContent = Boolean(
                           message.incomplete && !visibleContent,
                         );
-                        const processLive = awaitingFirstContent;
-                        const showProcessPanel =
-                          awaitingFirstContent || activitySteps.length > 0;
-                        // Default expanded; user can collapse. Keep Process visible from
-                        // request start until the first answer token.
-                        const processOpen = reasoningOpen[message.id] ?? true;
+
+                        /** Group consecutive reasoning/tool steps into Process panels, split by content. */
+                        type TimelineSegment =
+                          | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean }
+                          | { type: 'content'; id: string; text: string };
+
+                        const timelineSegments: TimelineSegment[] = (() => {
+                          if (!hasContentSteps) {
+                            const processSteps = activitySteps.filter(
+                              (s): s is ProcessStep => s.kind !== 'content',
+                            );
+                            const segs: TimelineSegment[] = [];
+                            if (awaitingFirstContent || processSteps.length > 0) {
+                              segs.push({
+                                type: 'process',
+                                id: `${message.id}-process-0`,
+                                steps: processSteps,
+                                live: awaitingFirstContent,
+                              });
+                            }
+                            if (visibleContent.trim()) {
+                              segs.push({
+                                type: 'content',
+                                id: `${message.id}-content-legacy`,
+                                text: visibleContent,
+                              });
+                            }
+                            return segs;
+                          }
+                          const segs: TimelineSegment[] = [];
+                          let buf: ProcessStep[] = [];
+                          let processIdx = 0;
+                          const flushProcess = (live: boolean) => {
+                            if (!buf.length && !live) return;
+                            segs.push({
+                              type: 'process',
+                              id: `${message.id}-process-${processIdx++}`,
+                              steps: buf,
+                              live,
+                            });
+                            buf = [];
+                          };
+                          for (const step of activitySteps) {
+                            if (step.kind === 'content') {
+                              flushProcess(false);
+                              if (step.text.trim()) {
+                                segs.push({ type: 'content', id: step.id, text: step.text });
+                              }
+                            } else {
+                              buf.push(step);
+                            }
+                          }
+                          // Trailing Process (e.g. still thinking / tools after last answer chunk).
+                          flushProcess(
+                            Boolean(message.incomplete && buf.length > 0) ||
+                              Boolean(message.incomplete && !visibleContent),
+                          );
+                          // Live empty Process while waiting before any activity.
+                          if (
+                            message.incomplete &&
+                            !visibleContent &&
+                            segs.length === 0
+                          ) {
+                            segs.push({
+                              type: 'process',
+                              id: `${message.id}-process-live`,
+                              steps: [],
+                              live: true,
+                            });
+                          }
+                          return segs;
+                        })();
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;
@@ -5087,251 +5167,277 @@ export default function ChatContainer() {
                           );
                         };
 
-                        return (
-                          <>
-                      {showProcessPanel && (
-                        <div
-                          className={cn(
-                            'overflow-hidden',
-                            processOpen &&
-                              'rounded-md border border-stone-200/70 bg-stone-50/50 dark:border-stone-800/80 dark:bg-stone-900/40',
-                          )}
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setReasoningOpen((prev) => ({
-                                ...prev,
-                                [message.id]: !(prev[message.id] ?? true),
-                              }))
-                            }
-                            className={cn(
-                              'flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
-                              processOpen && 'px-2 pt-1.5',
-                            )}
-                          >
-                            <ChevronDown
-                              className={cn(
-                                'h-3 w-3 shrink-0 opacity-60 transition-transform',
-                                processOpen ? 'rotate-0' : '-rotate-90',
-                              )}
-                            />
-                            {processLive ? (
-                              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
-                            ) : null}
-                            <span>{t('process')}</span>
-                            {toolCount > 0 && (
-                              <span className="opacity-50">· {toolCount}</span>
-                            )}
-                          </button>
-                          {processOpen && (
-                            <div className="max-h-72 space-y-1.5 overflow-y-auto px-2 pb-1.5 pl-6">
-                              {activitySteps.map((step) => {
-                                if (step.kind === 'reasoning') {
-                                  if (!step.text.trim()) return null;
+                        const renderAnswerMarkdown = (text: string, streaming: boolean) => (
+                          <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkMath, remarkGfm]}
+                              rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                              components={{
+                                p({ children }: any) {
+                                  return <p className="mb-4 leading-7 last:mb-0">{children}</p>;
+                                },
+                                h1({ children }: any) {
+                                  return <h1 className="text-xl font-bold mt-6 mb-3 text-stone-900 dark:text-stone-100">{children}</h1>;
+                                },
+                                h2({ children }: any) {
+                                  return <h2 className="text-lg font-bold mt-5 mb-2.5 text-stone-900 dark:text-stone-100">{children}</h2>;
+                                },
+                                h3({ children }: any) {
+                                  return <h3 className="text-base font-bold mt-4 mb-2 text-stone-900 dark:text-stone-100">{children}</h3>;
+                                },
+                                ul({ children }: any) {
+                                  return <ul className="my-3 pl-6 list-disc space-y-1">{children}</ul>;
+                                },
+                                ol({ children }: any) {
+                                  return <ol className="my-3 pl-6 list-decimal space-y-1">{children}</ol>;
+                                },
+                                li({ children }: any) {
+                                  return <li className="leading-6">{children}</li>;
+                                },
+                                a({ href, children }: any) {
                                   return (
-                                    <div
-                                      key={step.id}
-                                      className="chat-markdown text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-orange-700 underline decoration-orange-300/80 underline-offset-2 hover:text-orange-800 dark:text-orange-300 dark:decoration-orange-700/80 dark:hover:text-orange-200"
                                     >
-                                      <ReactMarkdown
-                                        remarkPlugins={[remarkMath, remarkGfm]}
-                                        rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                                        components={{
-                                          p({ children }) {
-                                            return (
-                                              <p className="whitespace-pre-wrap m-0 leading-5">
-                                                {children}
-                                              </p>
-                                            );
-                                          },
-                                          code({ className, children, ...props }) {
-                                            const match = /language-(\w+)/.exec(className || '');
-                                            const value = String(children).replace(/\n$/, '');
-                                            if (match) {
-                                              return <CodeBlock language={match[1]} value={value} />;
-                                            }
-                                            return (
-                                              <code
-                                                {...props}
-                                                className="rounded bg-stone-200/60 px-1.5 py-0.5 text-[11px] font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100"
-                                              >
-                                                {children}
-                                              </code>
-                                            );
-                                          },
-                                          ul({ children }) {
-                                            return (
-                                              <ul className="my-2 pl-6 list-disc space-y-0.5">
-                                                {children}
-                                              </ul>
-                                            );
-                                          },
-                                          ol({ children }) {
-                                            return (
-                                              <ol className="my-2 pl-6 list-decimal space-y-0.5">
-                                                {children}
-                                              </ol>
-                                            );
-                                          },
-                                          li({ children }) {
-                                            return <li className="leading-6">{children}</li>;
-                                          },
-                                          blockquote({ children }) {
-                                            return (
-                                              <blockquote className="my-2 border-l-[3px] border-stone-300 pl-3 not-italic dark:border-stone-600">
-                                                {children}
-                                              </blockquote>
-                                            );
-                                          },
-                                          pre({ children }) {
-                                            return <>{children}</>;
-                                          },
-                                        }}
-                                      >
-                                        {prepareChatMarkdown(step.text, {
-                                          streaming:
-                                            isActiveLoading &&
-                                            message.id === lastMessage?.id &&
-                                            message.role === 'assistant',
-                                        })}
-                                      </ReactMarkdown>
+                                      {children}
+                                    </a>
+                                  );
+                                },
+                                blockquote({ children }: any) {
+                                  return (
+                                    <blockquote className="my-3 border-l-[3px] border-stone-300 pl-3 text-[13px] leading-5 text-stone-500 not-italic dark:border-stone-600 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5 [&_.katex]:text-[0.95em] [&_.katex-display]:my-2 [&_.katex-error]:text-inherit">
+                                      {children}
+                                    </blockquote>
+                                  );
+                                },
+                                table({ children }: any) {
+                                  return (
+                                    <div className="my-4 w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
+                                      <table className="w-full text-left text-sm">{children}</table>
                                     </div>
                                   );
-                                }
-                                return renderToolStep(step);
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                                            {(visibleContent || message.images?.length) && (
-                        isAssistantError(message) ? (
-                          <div className="rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-3 dark:border-red-900/50 dark:bg-red-950/30">
-                            <p className="text-sm font-medium text-red-700 dark:text-red-300">
-                              {t('requestFailed')}
-                            </p>
-                            <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-red-600/90 dark:text-red-400/90">
-                              {visibleContent.replace(/^Error:\s*/, '')}
-                            </p>
-                            {message.id === lastMessage?.id && canRetryFailed && (
+                                },
+                                thead({ children }: any) {
+                                  return <thead className="bg-stone-100 dark:bg-stone-900 text-stone-900 dark:text-stone-100 font-semibold">{children}</thead>;
+                                },
+                                tbody({ children }: any) {
+                                  return <tbody className="divide-y divide-stone-200 dark:divide-stone-800">{children}</tbody>;
+                                },
+                                tr({ children }: any) {
+                                  return <tr className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50">{children}</tr>;
+                                },
+                                th({ children }: any) {
+                                  return <th className="px-3.5 py-2.5 font-semibold">{children}</th>;
+                                },
+                                td({ children }: any) {
+                                  return <td className="px-3.5 py-2.5 align-top">{children}</td>;
+                                },
+                                code({ inline, className, children, ...props }: any) {
+                                  const match = /language-(\w+)/.exec(className || '');
+                                  const value = String(children).replace(/\n$/, '');
+                                  if (!inline && match) {
+                                    return <CodeBlock language={match[1]} value={value} />;
+                                  }
+                                  return (
+                                    <code {...props} className="rounded bg-stone-200/60 px-1.5 py-0.5 text-xs font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100">
+                                      {children}
+                                    </code>
+                                  );
+                                },
+                                pre({ children }: any) { return <>{children}</>; },
+                              }}
+                            >
+                              {prepareChatMarkdown(text, { streaming })}
+                            </ReactMarkdown>
+                          </div>
+                        );
+
+                        const renderProcessPanel = (seg: Extract<TimelineSegment, { type: 'process' }>) => {
+                          const open = reasoningOpen[seg.id] ?? true;
+                          const segToolCount = seg.steps.filter((s) => s.kind === 'tool').length;
+                          return (
+                            <div
+                              key={seg.id}
+                              className={cn(
+                                'overflow-hidden',
+                                open &&
+                                  'rounded-md border border-stone-200/70 bg-stone-50/50 dark:border-stone-800/80 dark:bg-stone-900/40',
+                              )}
+                            >
                               <button
                                 type="button"
-                                onClick={() => retryFailedReply()}
-                                className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                onClick={() =>
+                                  setReasoningOpen((prev) => ({
+                                    ...prev,
+                                    [seg.id]: !(prev[seg.id] ?? true),
+                                  }))
+                                }
+                                className={cn(
+                                  'flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
+                                  open && 'px-2 pt-1.5',
+                                )}
                               >
-                                <RefreshCw className="h-3 w-3" />
-                                {t('retry')}
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                      <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3">
-                        {message.images && message.images.length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {message.images.map((img, idx) => (
-                              <a
-                                key={idx}
-                                href={img.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="block overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
-                              >
-                                <img
-                                  src={img.url}
-                                  alt={img.name || 'generated'}
-                                  className="max-h-[420px] max-w-full object-contain"
+                                <ChevronDown
+                                  className={cn(
+                                    'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                                    open ? 'rotate-0' : '-rotate-90',
+                                  )}
                                 />
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                        {visibleContent &&
-                          !(
-                            message.images?.length &&
-                            (visibleContent === 'Generating image…' ||
-                              !isAssistantError(message))
-                          ) && (
-                        <ReactMarkdown
-                          remarkPlugins={[remarkMath, remarkGfm]}
-                          rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                          components={{
-                            p({ children }: any) {
-                              return <p className="mb-4 leading-7 last:mb-0">{children}</p>;
-                            },
-                            h1({ children }: any) {
-                              return <h1 className="text-xl font-bold mt-6 mb-3 text-stone-900 dark:text-stone-100">{children}</h1>;
-                            },
-                            h2({ children }: any) {
-                              return <h2 className="text-lg font-bold mt-5 mb-2.5 text-stone-900 dark:text-stone-100">{children}</h2>;
-                            },
-                            h3({ children }: any) {
-                              return <h3 className="text-base font-bold mt-4 mb-2 text-stone-900 dark:text-stone-100">{children}</h3>;
-                            },
-                            ul({ children }: any) {
-                              return <ul className="my-3 pl-6 list-disc space-y-1">{children}</ul>;
-                            },
-                            ol({ children }: any) {
-                              return <ol className="my-3 pl-6 list-decimal space-y-1">{children}</ol>;
-                            },
-                            li({ children }: any) {
-                              return <li className="leading-6">{children}</li>;
-                            },
-                            blockquote({ children }: any) {
-                              return (
-                                <blockquote className="my-3 border-l-[3px] border-stone-300 pl-3 text-[13px] leading-5 text-stone-500 not-italic dark:border-stone-600 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5 [&_.katex]:text-[0.95em] [&_.katex-display]:my-2 [&_.katex-error]:text-inherit">
-                                  {children}
-                                </blockquote>
-                              );
-                            },
-                            table({ children }: any) {
-                              return (
-                                <div className="my-4 w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
-                                  <table className="w-full text-left text-sm">{children}</table>
+                                {seg.live ? (
+                                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+                                ) : null}
+                                <span>{t('process')}</span>
+                                {segToolCount > 0 && (
+                                  <span className="opacity-50">· {segToolCount}</span>
+                                )}
+                              </button>
+                              {open && (
+                                <div className="max-h-72 space-y-1.5 overflow-y-auto px-2 pb-1.5 pl-6">
+                                  {seg.steps.map((step) => {
+                                    if (step.kind === 'reasoning') {
+                                      if (!step.text.trim()) return null;
+                                      return (
+                                        <div
+                                          key={step.id}
+                                          className="chat-markdown text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                                        >
+                                          <ReactMarkdown
+                                            remarkPlugins={[remarkMath, remarkGfm]}
+                                            rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+                                            components={{
+                                              p({ children }) {
+                                                return (
+                                                  <p className="whitespace-pre-wrap m-0 leading-5">
+                                                    {children}
+                                                  </p>
+                                                );
+                                              },
+                                              code({ className, children, ...props }) {
+                                                const match = /language-(\w+)/.exec(className || '');
+                                                const value = String(children).replace(/\n$/, '');
+                                                if (match) {
+                                                  return <CodeBlock language={match[1]} value={value} />;
+                                                }
+                                                return (
+                                                  <code
+                                                    {...props}
+                                                    className="rounded bg-stone-200/60 px-1.5 py-0.5 text-[11px] font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100"
+                                                  >
+                                                    {children}
+                                                  </code>
+                                                );
+                                              },
+                                              ul({ children }) {
+                                                return (
+                                                  <ul className="my-2 pl-6 list-disc space-y-0.5">
+                                                    {children}
+                                                  </ul>
+                                                );
+                                              },
+                                              ol({ children }) {
+                                                return (
+                                                  <ol className="my-2 pl-6 list-decimal space-y-0.5">
+                                                    {children}
+                                                  </ol>
+                                                );
+                                              },
+                                              li({ children }) {
+                                                return <li className="leading-6">{children}</li>;
+                                              },
+                                              blockquote({ children }) {
+                                                return (
+                                                  <blockquote className="my-2 border-l-[3px] border-stone-300 pl-3 not-italic dark:border-stone-600">
+                                                    {children}
+                                                  </blockquote>
+                                                );
+                                              },
+                                              pre({ children }) {
+                                                return <>{children}</>;
+                                              },
+                                            }}
+                                          >
+                                            {prepareChatMarkdown(step.text, {
+                                              streaming:
+                                                isActiveLoading &&
+                                                message.id === lastMessage?.id &&
+                                                message.role === 'assistant',
+                                            })}
+                                          </ReactMarkdown>
+                                        </div>
+                                      );
+                                    }
+                                    return renderToolStep(step);
+                                  })}
                                 </div>
-                              );
-                            },
-                            thead({ children }: any) {
-                              return <thead className="bg-stone-100 dark:bg-stone-900 text-stone-900 dark:text-stone-100 font-semibold">{children}</thead>;
-                            },
-                            tbody({ children }: any) {
-                              return <tbody className="divide-y divide-stone-200 dark:divide-stone-800">{children}</tbody>;
-                            },
-                            tr({ children }: any) {
-                              return <tr className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50">{children}</tr>;
-                            },
-                            th({ children }: any) {
-                              return <th className="px-3.5 py-2.5 font-semibold">{children}</th>;
-                            },
-                            td({ children }: any) {
-                              return <td className="px-3.5 py-2.5 align-top">{children}</td>;
-                            },
-                            code({ node, inline, className, children, ...props }: any) {
-                              const match = /language-(\w+)/.exec(className || '');
-                              const value = String(children).replace(/\n$/, '');
-                              if (!inline && match) {
-                                return <CodeBlock language={match[1]} value={value} />;
-                              }
-                              return (
-                                <code {...props} className="rounded bg-stone-200/60 px-1.5 py-0.5 text-xs font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100">
-                                  {children}
-                                </code>
-                              );
-                            },
-                            pre({ children }: any) { return <>{children}</>; },
-                          }}
-                        >
-                          {prepareChatMarkdown(visibleContent, {
-                            streaming:
-                              isActiveLoading &&
-                              message.id === lastMessage?.id &&
-                              message.role === 'assistant',
-                          })}
-                        </ReactMarkdown>
-                        )}
-                      </div>
-                        )
-                      )}
+                              )}
+                            </div>
+                          );
+                        };
+
+                        const answerStreaming =
+                          isActiveLoading &&
+                          message.id === lastMessage?.id &&
+                          message.role === 'assistant';
+
+                        return (
+                          <>
+                            {message.images && message.images.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {message.images.map((img, idx) => (
+                                  <a
+                                    key={idx}
+                                    href={img.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+                                  >
+                                    <img
+                                      src={img.url}
+                                      alt={img.name || 'generated'}
+                                      className="max-h-[420px] max-w-full object-contain"
+                                    />
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                            {isAssistantError(message) ? (
+                              <div className="rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-3 dark:border-red-900/50 dark:bg-red-950/30">
+                                <p className="text-sm font-medium text-red-700 dark:text-red-300">
+                                  {t('requestFailed')}
+                                </p>
+                                <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-red-600/90 dark:text-red-400/90">
+                                  {visibleContent.replace(/^Error:\s*/, '')}
+                                </p>
+                                {message.id === lastMessage?.id && canRetryFailed && (
+                                  <button
+                                    type="button"
+                                    onClick={() => retryFailedReply()}
+                                    className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                  >
+                                    <RefreshCw className="h-3 w-3" />
+                                    {t('retry')}
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              timelineSegments.map((seg) =>
+                                seg.type === 'process' ? (
+                                  renderProcessPanel(seg)
+                                ) : (
+                                  <div key={seg.id}>
+                                    {renderAnswerMarkdown(
+                                      seg.text,
+                                      answerStreaming &&
+                                        seg.id ===
+                                          [...timelineSegments].reverse().find((s) => s.type === 'content')?.id,
+                                    )}
+                                  </div>
+                                ),
+                              )
+                            )}
                           </>
                         );
                       })()}

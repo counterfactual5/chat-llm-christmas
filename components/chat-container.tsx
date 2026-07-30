@@ -736,6 +736,8 @@ export default function ChatContainer() {
     title: string;
   } | null>(null);
   const [confirmClearSourcesOpen, setConfirmClearSourcesOpen] = useState(false);
+  /** Past-day sidebar groups start collapsed; toggles remembered for this page load. */
+  const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
 
   // Skills State
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -1057,8 +1059,16 @@ export default function ChatContainer() {
                     }),
                   }));
                 if (nonEmpty.length > 0) {
-                  setSessions(nonEmpty);
-                  setActiveSessionId(nonEmpty[0].id);
+                  // Land on a blank New Chat draft (ChatGPT-style), not the
+                  // most recent thread — history stays in the sidebar.
+                  const draft: ChatSession = {
+                    id: crypto.randomUUID(),
+                    title: 'New Conversation',
+                    messages: [],
+                    updatedAt: Date.now(),
+                  };
+                  setSessions([draft, ...nonEmpty]);
+                  setActiveSessionId(draft.id);
                 } else {
                   createNewSession();
                 }
@@ -1722,11 +1732,66 @@ export default function ChatContainer() {
   }, [chatsHydrated, loadingBySession]);
 
   // Empty drafts stay in state for the composer, but do not appear in the sidebar
-  // until the first message is sent.
+  // until the first message is sent. Order by last activity so resumed chats
+  // jump back to the top of today's group.
   const sidebarSessions = useMemo(
-    () => sessions.filter((session) => session.messages.length > 0),
+    () =>
+      [...sessions]
+        .filter((session) => session.messages.length > 0)
+        .sort((a, b) => b.updatedAt - a.updatedAt),
     [sessions],
   );
+
+  /** Local calendar day key (YYYY-MM-DD) for grouping. */
+  const dayKeyOf = (ts: number) => {
+    const d = new Date(ts);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const todayKey = dayKeyOf(Date.now());
+
+  type SidebarDayGroup = { key: string; sessions: ChatSession[]; isToday: boolean };
+
+  const sidebarDayGroups = useMemo(() => {
+    const map = new Map<string, ChatSession[]>();
+    for (const session of sidebarSessions) {
+      const key = dayKeyOf(session.updatedAt);
+      const list = map.get(key);
+      if (list) list.push(session);
+      else map.set(key, [session]);
+    }
+    const groups: SidebarDayGroup[] = [...map.entries()].map(([key, list]) => ({
+      key,
+      sessions: list,
+      isToday: key === todayKey,
+    }));
+    // Keys are YYYY-MM-DD so string desc ≈ chronological desc.
+    groups.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
+    return groups;
+  }, [sidebarSessions, todayKey]);
+
+  const formatDayGroupLabel = (key: string) => {
+    if (key === todayKey) return t('today');
+    const [ys, ms, ds] = key.split('-').map(Number);
+    const date = new Date(ys, ms - 1, ds);
+    const yesterday = new Date();
+    yesterday.setHours(0, 0, 0, 0);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (
+      date.getFullYear() === yesterday.getFullYear() &&
+      date.getMonth() === yesterday.getMonth() &&
+      date.getDate() === yesterday.getDate()
+    ) {
+      return t('yesterday');
+    }
+    if (locale === 'zh') {
+      return `${date.getMonth() + 1}月${date.getDate()}日`;
+    }
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
 
   const NEAR_BOTTOM_PX = 96;
 
@@ -4507,100 +4572,143 @@ export default function ChatContainer() {
             </div>
 
             <ScrollArea className="flex-1 px-3 py-2">
-              <div className="space-y-1">
-                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                  {t('recent')}
-                </div>
-                {sidebarSessions.map(session => (
-                  <div key={session.id} className="relative group">
-                    <div
-                      onClick={() => {
-                        setActiveSessionId(session.id);
-                        setWebSourcesCleared(false);
-                        setQuotedSelections([]);
-                        setSessionMenuOpenId(null);
-                      }}
-                      className={cn(
-                        "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors",
-                        activeSessionId === session.id 
-                          ? "bg-white text-stone-900 shadow-sm border border-stone-200 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-700" 
-                          : "text-stone-600 hover:bg-stone-200/50 dark:text-stone-400 dark:hover:bg-stone-800/50"
-                      )}
-                    >
-                      <div className="flex w-full items-center gap-2 overflow-hidden pr-6">
-                        <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                        {isSessionLoading(session.id) && (
-                          <Loader2
-                            className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-500"
-                            aria-label={t('generating')}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    
-                    <button 
-                      type="button"
-                      data-session-menu-trigger={session.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSessionMenuOpenId(sessionMenuOpenId === session.id ? null : session.id);
-                      }}
-                      className={cn(
-                        "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity",
-                        sessionMenuOpenId === session.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                      )}
-                    >
-                      <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
-                    </button>
-
-                    <AnimatePresence>
-                      {sessionMenuOpenId === session.id && (
-                        <motion.div
-                          data-session-menu={session.id}
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.95 }}
-                          className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+              <div className="space-y-3">
+                {sidebarDayGroups.map((group) => {
+                  const open = group.isToday || Boolean(pastDayOpen[group.key]);
+                  const label = formatDayGroupLabel(group.key);
+                  return (
+                    <div key={group.key} className="space-y-1">
+                      {group.isToday ? (
+                        <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                          {label}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPastDayOpen((prev) => ({
+                              ...prev,
+                              [group.key]: !prev[group.key],
+                            }))
+                          }
+                          className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-200/40 hover:text-stone-600 dark:hover:bg-stone-800/40 dark:hover:text-stone-300"
                         >
-                          <div className="px-2 py-1.5 border-b border-stone-100 dark:border-stone-800/50 mb-1 flex items-center gap-2 text-xs text-stone-400">
-                            <Clock className="h-3 w-3" />
-                            {new Date(session.updatedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                          </div>
-                          
-                          <div className="px-2 py-1 text-xs text-stone-500">
-                            {session.messages.length} messages
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              exportChat(session.id, e);
-                              setSessionMenuOpenId(null);
-                            }}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 rounded-md dark:text-stone-300 dark:hover:bg-stone-800"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            {t('exportMarkdown')}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSessionMenuOpenId(null);
-                              setSessionPendingDelete({ id: session.id, title: session.title });
-                            }}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md dark:text-red-400 dark:hover:bg-red-900/20"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            {t('deleteChat')}
-                          </button>
-                        </motion.div>
+                          <ChevronDown
+                            className={cn(
+                              'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                              open ? 'rotate-0' : '-rotate-90',
+                            )}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{label}</span>
+                          <span className="opacity-50">{group.sessions.length}</span>
+                        </button>
                       )}
-                    </AnimatePresence>
-                  </div>
-                ))}
+                      {open &&
+                        group.sessions.map((session) => (
+                          <div key={session.id} className="relative group">
+                            <div
+                              onClick={() => {
+                                setActiveSessionId(session.id);
+                                setWebSourcesCleared(false);
+                                setQuotedSelections([]);
+                                setSessionMenuOpenId(null);
+                              }}
+                              className={cn(
+                                'flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
+                                activeSessionId === session.id
+                                  ? 'bg-white text-stone-900 shadow-sm border border-stone-200 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-700'
+                                  : 'text-stone-600 hover:bg-stone-200/50 dark:text-stone-400 dark:hover:bg-stone-800/50',
+                              )}
+                            >
+                              <div className="flex w-full items-center gap-2 overflow-hidden pr-6">
+                                <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                                {isSessionLoading(session.id) && (
+                                  <Loader2
+                                    className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-500"
+                                    aria-label={t('generating')}
+                                  />
+                                )}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              data-session-menu-trigger={session.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSessionMenuOpenId(
+                                  sessionMenuOpenId === session.id ? null : session.id,
+                                );
+                              }}
+                              className={cn(
+                                'absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity',
+                                sessionMenuOpenId === session.id
+                                  ? 'opacity-100'
+                                  : 'opacity-0 group-hover:opacity-100',
+                              )}
+                            >
+                              <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
+                            </button>
+
+                            <AnimatePresence>
+                              {sessionMenuOpenId === session.id && (
+                                <motion.div
+                                  data-session-menu={session.id}
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  exit={{ opacity: 0, scale: 0.95 }}
+                                  className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+                                >
+                                  <div className="px-2 py-1.5 border-b border-stone-100 dark:border-stone-800/50 mb-1 flex items-center gap-2 text-xs text-stone-400">
+                                    <Clock className="h-3 w-3" />
+                                    {new Date(session.updatedAt).toLocaleString(undefined, {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: 'numeric',
+                                      minute: '2-digit',
+                                    })}
+                                  </div>
+
+                                  <div className="px-2 py-1 text-xs text-stone-500">
+                                    {session.messages.length} messages
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      exportChat(session.id, e);
+                                      setSessionMenuOpenId(null);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 rounded-md dark:text-stone-300 dark:hover:bg-stone-800"
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                    {t('exportMarkdown')}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSessionMenuOpenId(null);
+                                      setSessionPendingDelete({
+                                        id: session.id,
+                                        title: session.title,
+                                      });
+                                    }}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md dark:text-red-400 dark:hover:bg-red-900/20"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    {t('deleteChat')}
+                                  </button>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        ))}
+                    </div>
+                  );
+                })}
               </div>
             </ScrollArea>
               

@@ -1859,11 +1859,21 @@ export default function ChatContainer() {
       delete next[msg.id];
       return next;
     });
+    // Mid-answer token gaps are often 1–2s; only treat longer stalls as a "wait"
+    // (e.g. tool round). First-token wait uses awaitingFirstContent and does not
+    // depend on this timer.
+    const hasVisibleOutput =
+      Boolean(String(msg.content || '').trim()) ||
+      (msg.activity || []).some(
+        (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
+      ) ||
+      Boolean(String(msg.reasoning || '').trim());
+    const idleMs = hasVisibleOutput ? 2800 : 500;
     const timer = window.setTimeout(() => {
       setReplyWaitByMessage((prev) =>
         prev[msg.id] ? prev : { ...prev, [msg.id]: true },
       );
-    }, 500);
+    }, idleMs);
     return () => window.clearTimeout(timer);
   }, [
     isActiveLoading,

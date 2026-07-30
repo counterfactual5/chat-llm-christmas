@@ -225,6 +225,19 @@ function narratesSearchInsteadOfCalling(text: string): boolean {
   );
 }
 
+/** Model claims a Notion write succeeded (often with a fake URL) but emitted no tool_calls. */
+function narratesNotionWriteInsteadOfCalling(text: string): boolean {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  const hasNotionUrl = /(app\.notion\.com|notion\.so|notion\.site)\//i.test(t);
+  const claimsWrite =
+    /(正在(更新|写入|创建)|已(经)?(更新|写入|创建|改好|重构)|更新页面|写入.*页面|按你的要求重构|创建了?(这个|一个)?(页面|模板))/i.test(
+      t,
+    ) ||
+    /(updated|created|wrote|writing)\s+(the\s+)?(notion\s+)?page/i.test(t);
+  return claimsWrite && (hasNotionUrl || /notion|页面|模板/i.test(t));
+}
+
 function extractToolCalls(message: any): Array<{
   id: string;
   name: string;
@@ -1021,6 +1034,28 @@ export async function POST(req: NextRequest) {
                   narratesSearchInsteadOfCalling(streamedContent)
                 ) {
                   if (!(await runProactiveSearch())) return;
+                  break;
+                }
+                // Claimed a Notion write (often with a fabricated URL) but never emitted
+                // tool_calls — push a corrective turn and keep the tools loop going.
+                if (
+                  authorizedIntegrations.includes('notion') &&
+                  streamedContent &&
+                  narratesNotionWriteInsteadOfCalling(streamedContent) &&
+                  round < MAX_TOOL_ROUNDS - 1
+                ) {
+                  workingMessages.push({
+                    role: 'assistant',
+                    content: streamedContent,
+                  });
+                  workingMessages.push({
+                    role: 'user',
+                    content: [
+                      'You claimed to create/update a Notion page in the message above, but you did not call any Notion write tool in THIS turn.',
+                      'Do one of the following now via real tool_calls: call the appropriate Notion MCP write tool with real arguments from prior tool results,',
+                      'OR clearly retract the claim and say the page was NOT updated — do not invent app.notion.com / notion.so links.',
+                    ].join(' '),
+                  });
                   break;
                 }
                 // Malformed / aborted tool_calls (e.g. deltas without a function name —

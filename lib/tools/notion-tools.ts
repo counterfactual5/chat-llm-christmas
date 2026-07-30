@@ -10,6 +10,7 @@ const NOTION_SYSTEM_PROMPT = [
   'Prefer notion-search to find pages, notion-fetch to read content (or id "self" for workspace/user identity), and create/update tools to write.',
   'Do not invent Notion page IDs, titles, URLs, or content — only use tool results.',
   'Never claim you created, updated, moved, or deleted a Notion page unless a write tool in THIS turn returned success with a real URL/id from the tool payload.',
+  'If you intend to write, you MUST emit a real Notion write tool_call — narrating "正在更新页面" / "已更新" without tools is a hard failure.',
   'If write tools are unavailable or fail, say so clearly and offer copy-pasteable markdown instead of fabricating app.notion.com / notion.so links.',
   'Ask before making large destructive edits when the user intent is ambiguous.',
   'Cite page titles and URLs from tool results when answering.',

@@ -53,7 +53,8 @@ export const runtime = 'edge';
 export const maxDuration = 300;
 
 const MAX_TOOL_ROUNDS = 3;
-const TOOLS_ROUND_TIMEOUT_MS = 45_000;
+/** Model may think for a long time before emitting tool_calls; keep this generous. */
+const TOOLS_ROUND_TIMEOUT_MS = 90_000;
 const FINAL_STREAM_TIMEOUT_MS = 90_000;
 
 function jsonError(message: string, status: number = 500) {
@@ -914,10 +915,33 @@ export async function POST(req: NextRequest) {
                   const deadline = Date.now() + TOOLS_ROUND_TIMEOUT_MS;
                   while (true) {
                     const remaining = deadline - Date.now();
-                    if (remaining <= 0) throw new Error('tools round timed out');
-                    const next = await withTimeout(iter.next(), remaining, 'tools round');
-                    if (next.done) break;
-                    yield next.value;
+                    if (remaining <= 0) {
+                      throw new Error(
+                        `tools round timed out after ${TOOLS_ROUND_TIMEOUT_MS}ms`,
+                      );
+                    }
+                    try {
+                      const next = await withTimeout(
+                        iter.next(),
+                        remaining,
+                        'tools round chunk',
+                      );
+                      if (next.done) break;
+                      yield next.value;
+                    } catch (chunkErr: unknown) {
+                      const msg =
+                        chunkErr instanceof Error
+                          ? chunkErr.message
+                          : String(chunkErr || 'failed');
+                      // withTimeout reports the *remaining* slice (e.g. 90ms), which
+                      // misleads the UI — always surface the full round budget.
+                      if (/timed out/i.test(msg)) {
+                        throw new Error(
+                          `tools round timed out after ${TOOLS_ROUND_TIMEOUT_MS}ms`,
+                        );
+                      }
+                      throw chunkErr;
+                    }
                   }
                 })();
               } catch (toolErr: any) {
@@ -928,43 +952,53 @@ export async function POST(req: NextRequest) {
               // Whether we've seen any tool_call delta (tells us not to stream content to client).
               let hasToolCallDeltas = false;
 
-              for await (const chunk of streamIter) {
-                const choice = chunk?.choices?.[0];
-                const delta = choice?.delta || {};
-                const finishReason = choice?.finish_reason || null;
-                if (finishReason) roundFinishReason = finishReason;
+              try {
+                for await (const chunk of streamIter) {
+                  const choice = chunk?.choices?.[0];
+                  const delta = choice?.delta || {};
+                  const finishReason = choice?.finish_reason || null;
+                  if (finishReason) roundFinishReason = finishReason;
 
-                // --- tool_calls accumulation ---
-                if (Array.isArray(delta.tool_calls)) {
-                  hasToolCallDeltas = true;
-                  for (const tc of delta.tool_calls) {
-                    const idx = tc.index ?? 0;
-                    const existing = toolCallDeltas.get(idx) || { id: '', name: '', arguments: '' };
-                    if (tc.id) existing.id = tc.id;
-                    if (tc.function?.name) existing.name += tc.function.name;
-                    if (tc.function?.arguments) existing.arguments += tc.function.arguments;
-                    toolCallDeltas.set(idx, existing);
+                  // --- tool_calls accumulation ---
+                  if (Array.isArray(delta.tool_calls)) {
+                    hasToolCallDeltas = true;
+                    for (const tc of delta.tool_calls) {
+                      const idx = tc.index ?? 0;
+                      const existing = toolCallDeltas.get(idx) || { id: '', name: '', arguments: '' };
+                      if (tc.id) existing.id = tc.id;
+                      if (tc.function?.name) existing.name += tc.function.name;
+                      if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                      toolCallDeltas.set(idx, existing);
+                    }
+                  }
+
+                  // --- content / reasoning ---
+                  const split = splitCompletionDelta(delta, { reasoningAsContent });
+                  let contentChunk = split.content;
+                  if (split.reasoning) {
+                    streamedReasoning += split.reasoning;
+                    send({ reasoning: split.reasoning });
+                  }
+
+                  // Stream content to the client only when no tool_calls are being built.
+                  // When the model calls tools it sometimes emits a brief narration before
+                  // the tool_calls array — we buffer that and send it as reasoning instead.
+                  if (contentChunk) {
+                    contentChunk = roundStampStripper.push(contentChunk);
+                    streamedContent += contentChunk;
+                    if (!hasToolCallDeltas && contentChunk) {
+                      send({ content: contentChunk });
+                    }
                   }
                 }
-
-                // --- content / reasoning ---
-                const split = splitCompletionDelta(delta, { reasoningAsContent });
-                let contentChunk = split.content;
-                if (split.reasoning) {
-                  streamedReasoning += split.reasoning;
-                  send({ reasoning: split.reasoning });
-                }
-
-                // Stream content to the client only when no tool_calls are being built.
-                // When the model calls tools it sometimes emits a brief narration before
-                // the tool_calls array — we buffer that and send it as reasoning instead.
-                if (contentChunk) {
-                  contentChunk = roundStampStripper.push(contentChunk);
-                  streamedContent += contentChunk;
-                  if (!hasToolCallDeltas && contentChunk) {
-                    send({ content: contentChunk });
-                  }
-                }
+              } catch (toolStreamErr: any) {
+                // Timeout / upstream abort during streaming used to escape here and
+                // surface as a hard "Request failed". Soft-fail: keep any partial
+                // tool_calls / content and fall through to the same post-stream logic.
+                console.warn(
+                  'tools round stream aborted:',
+                  toolStreamErr?.message || toolStreamErr,
+                );
               }
               // Flush stamp stripper
               {

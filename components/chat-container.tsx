@@ -553,6 +553,15 @@ function displayAssistantParts(message: Message): { content: string; reasoning: 
   };
 }
 
+/** Crumbs like "版本。" after a content/tool seam — not worth a Thought chrome. */
+function isTrivialReasoningText(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (t.length < 6) return true;
+  if (/^[\s\p{P}\p{S}]+$/u.test(t)) return true;
+  return false;
+}
+
 function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): boolean {
   if (pending.some((a) => Boolean(a.dataUrl || a.type.startsWith('image/')))) return true;
   return messages.some((m) => (m.images?.length || 0) > 0);
@@ -738,6 +747,11 @@ export default function ChatContainer() {
   const [confirmClearSourcesOpen, setConfirmClearSourcesOpen] = useState(false);
   /** Past-day sidebar groups start collapsed; toggles remembered for this page load. */
   const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
+  /**
+   * After Thought text goes idle but the first answer token has not arrived yet,
+   * show a "Generating reply…" placeholder instead of a frozen Thinking panel.
+   */
+  const [replyWaitByMessage, setReplyWaitByMessage] = useState<Record<string, boolean>>({});
 
   // Skills State
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -1822,6 +1836,78 @@ export default function ChatContainer() {
     scrollToBottom(true);
   }, [activeSessionId]);
 
+  // Thought stream often pauses before the first answer token. After a short idle,
+  // flip the live chrome from "Thinking…" to a dedicated generating placeholder.
+  useEffect(() => {
+    if (!isActiveLoading || !activeSessionId) {
+      setReplyWaitByMessage({});
+      return;
+    }
+    const session = sessionsRef.current.find((s) => s.id === activeSessionId);
+    const msg = session?.messages[session.messages.length - 1];
+    if (!msg || msg.role !== 'assistant' || !msg.incomplete) {
+      setReplyWaitByMessage({});
+      return;
+    }
+    if (String(msg.content || '').trim()) {
+      setReplyWaitByMessage((prev) => {
+        if (!prev[msg.id]) return prev;
+        const next = { ...prev };
+        delete next[msg.id];
+        return next;
+      });
+      return;
+    }
+    const toolPending = (msg.toolRuns || []).some((r) => r.status === 'start');
+    const lastAct = msg.activity?.[msg.activity.length - 1];
+    if (toolPending || lastAct?.kind === 'tool') {
+      setReplyWaitByMessage((prev) => {
+        if (!prev[msg.id]) return prev;
+        const next = { ...prev };
+        delete next[msg.id];
+        return next;
+      });
+      return;
+    }
+    const hasThought = (msg.activity || []).some(
+      (s) => s.kind === 'reasoning' && !isTrivialReasoningText(s.text),
+    ) || (!isTrivialReasoningText(msg.reasoning || '') && Boolean(msg.reasoning?.trim()));
+    if (!hasThought) {
+      setReplyWaitByMessage((prev) => {
+        if (!prev[msg.id]) return prev;
+        const next = { ...prev };
+        delete next[msg.id];
+        return next;
+      });
+      return;
+    }
+    setReplyWaitByMessage((prev) => {
+      if (!prev[msg.id]) return prev;
+      const next = { ...prev };
+      delete next[msg.id];
+      return next;
+    });
+    const timer = window.setTimeout(() => {
+      setReplyWaitByMessage((prev) =>
+        prev[msg.id] ? prev : { ...prev, [msg.id]: true },
+      );
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [
+    isActiveLoading,
+    activeSessionId,
+    // Re-arm whenever thought text grows or tools land.
+    sessions
+      .find((s) => s.id === activeSessionId)
+      ?.messages.filter((m) => m.role === 'assistant')
+      .slice(-1)
+      .map(
+        (m) =>
+          `${m.id}:${m.content?.length || 0}:${m.reasoning?.length || 0}:${(m.activity || []).length}`,
+      )
+      .join('|'),
+  ]);
+
   // --- Actions ---
   const createNewSession = () => {
     // Switch to a blank composer. The draft is kept in memory only and is
@@ -1989,6 +2075,14 @@ export default function ChatContainer() {
             activity[activity.length - 1] = {
               ...last,
               text: last.text + chunk,
+            };
+          } else if (isTrivialReasoningText(chunk)) {
+            // Seam crumbs after content/tools ("版本。") — keep on the message
+            // reasoning string but do not spawn a new Thought step.
+            return {
+              ...m,
+              reasoning: (m.reasoning || '') + chunk,
+              incomplete: true,
             };
           } else {
             activity.push({
@@ -5151,6 +5245,14 @@ export default function ChatContainer() {
                         const awaitingFirstContent = Boolean(
                           message.incomplete && !visibleContent && messageIsStreaming,
                         );
+                        const replyWait = Boolean(
+                          messageIsStreaming && replyWaitByMessage[message.id],
+                        );
+                        // Thought text arrived but answer tokens are still pending —
+                        // keep a live process chrome without freezing on "Thinking…".
+                        const awaitingReplyAfterThought = Boolean(
+                          replyWait && awaitingFirstContent,
+                        );
 
                         /** Group consecutive reasoning/tool steps into Process panels, split by content. */
                         type TimelineSegment =
@@ -5160,7 +5262,9 @@ export default function ChatContainer() {
                         const timelineSegments: TimelineSegment[] = (() => {
                           if (!hasContentSteps) {
                             const processSteps = activitySteps.filter(
-                              (s): s is ProcessStep => s.kind !== 'content',
+                              (s): s is ProcessStep =>
+                                s.kind !== 'content' &&
+                                !(s.kind === 'reasoning' && isTrivialReasoningText(s.text)),
                             );
                             const segs: TimelineSegment[] = [];
                             if (awaitingFirstContent || processSteps.length > 0) {
@@ -5168,6 +5272,8 @@ export default function ChatContainer() {
                                 type: 'process',
                                 id: `${message.id}-process-0`,
                                 steps: processSteps,
+                                // Stay live while waiting for the first answer token,
+                                // even after Thought text goes idle (replyWait).
                                 live: awaitingFirstContent,
                               });
                             }
@@ -5199,6 +5305,11 @@ export default function ChatContainer() {
                               if (step.text.trim()) {
                                 segs.push({ type: 'content', id: step.id, text: step.text });
                               }
+                            } else if (
+                              step.kind === 'reasoning' &&
+                              isTrivialReasoningText(step.text)
+                            ) {
+                              // drop crumbs
                             } else {
                               buf.push(step);
                             }
@@ -5207,7 +5318,7 @@ export default function ChatContainer() {
                           flushProcess(
                             Boolean(
                               messageIsStreaming &&
-                                (buf.length > 0 || !visibleContent),
+                                (buf.length > 0 || !visibleContent || awaitingReplyAfterThought),
                             ),
                           );
                           // Live empty Process while waiting before any activity.
@@ -5582,6 +5693,7 @@ export default function ChatContainer() {
                           live: boolean,
                         ) => {
                           const body = step.text.trim();
+                          if (isTrivialReasoningText(body) && !live) return null;
                           if (!body && !live) return null;
                           // Open while thinking so it streams in view, then auto-collapse
                           // once the answer starts. Explicit user toggles win.
@@ -5611,7 +5723,7 @@ export default function ChatContainer() {
                                 )}
                                 <span>{live ? t('thinking') : t('thought')}</span>
                               </button>
-                              {open && body && (
+                              {open && body && !isTrivialReasoningText(body) && (
                                 <div className="chat-markdown mt-0.5 max-h-72 overflow-y-auto pl-[18px] text-[12px] leading-5 text-stone-500 dark:text-stone-400">
                                   <ReactMarkdown
                                     remarkPlugins={[remarkMath, remarkGfm]}
@@ -5691,14 +5803,31 @@ export default function ChatContainer() {
                           // Hard gate: never spin unless this session is actually
                           // streaming. Incomplete alone (e.g. after refresh) is not live.
                           const segLive = Boolean(seg.live && isActiveLoading);
-                          // `live` only applies to the last step — earlier ones already finished.
+                          // Once Thought text idles waiting for the answer, freeze the
+                          // Thought chrome and show a separate generating line instead.
+                          const thoughtStreaming = segLive && !awaitingReplyAfterThought;
                           const lastIdx = seg.steps.length - 1;
                           const rendered = seg.steps
-                            .map((step, i) => renderProcessStep(step, segLive && i === lastIdx))
+                            .map((step, i) =>
+                              renderProcessStep(
+                                step,
+                                thoughtStreaming && i === lastIdx && step.kind === 'reasoning'
+                                  ? true
+                                  : segLive &&
+                                      i === lastIdx &&
+                                      step.kind === 'tool'
+                                    ? true
+                                    : false,
+                              ),
+                            )
                             .filter(Boolean);
 
+                          const showReplyPlaceholder =
+                            segLive &&
+                            (awaitingReplyAfterThought || rendered.length === 0);
+
                           // Nothing yet but the turn is in flight: a bare "Thinking…" line.
-                          if (rendered.length === 0) {
+                          if (rendered.length === 0 && !awaitingReplyAfterThought) {
                             if (!segLive) return null;
                             return (
                               <div
@@ -5711,14 +5840,28 @@ export default function ChatContainer() {
                             );
                           }
 
+                          const replyPlaceholder = showReplyPlaceholder ? (
+                            <div
+                              key={`${seg.id}-reply-wait`}
+                              className="flex items-center gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                            >
+                              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                              <span>{t('generatingReply')}</span>
+                            </div>
+                          ) : null;
+
                           // A single step is self-describing (Thinking / Searched the web …),
-                          // so the outer "Process" header would only add noise.
-                          if (rendered.length === 1) {
+                          // so the outer "Process" header would only add noise — unless we
+                          // also have the reply-wait placeholder (then group as Process).
+                          if (rendered.length === 1 && !replyPlaceholder) {
                             return <div key={seg.id}>{rendered}</div>;
+                          }
+                          if (rendered.length === 0 && replyPlaceholder) {
+                            return <div key={seg.id}>{replyPlaceholder}</div>;
                           }
 
                           const open = reasoningOpen[seg.id] ?? segLive;
-                          const segStepCount = rendered.length;
+                          const segStepCount = rendered.length + (replyPlaceholder ? 1 : 0);
                           return (
                             <div
                               key={seg.id}
@@ -5754,7 +5897,10 @@ export default function ChatContainer() {
                                 <span className="opacity-50">· {segStepCount}</span>
                               </button>
                               {open && (
-                                <div className="space-y-1.5 px-2 pb-1.5 pl-6">{rendered}</div>
+                                <div className="space-y-1.5 px-2 pb-1.5 pl-6">
+                                  {rendered}
+                                  {replyPlaceholder}
+                                </div>
                               )}
                             </div>
                           );

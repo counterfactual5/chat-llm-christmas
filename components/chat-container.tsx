@@ -8,7 +8,7 @@ import {
   Mic, Square, Download, Key, Sparkles, ChevronDown, ChevronRight, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
   Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks,
-  ShieldCheck, SlidersHorizontal
+  ShieldCheck, SlidersHorizontal, Terminal
 } from 'lucide-react';
 import { GitHubLogo } from '@/components/github-logo';
 import { GoogleLogo } from '@/components/google-logo';
@@ -738,8 +738,11 @@ export default function ChatContainer() {
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [commandsExpanded, setCommandsExpanded] = useState(false);
   const [googleMcpMenuOpen, setGoogleMcpMenuOpen] = useState(false);
-  const [plusFlyout, setPlusFlyout] = useState<null | 'skills' | 'mcp' | 'tools'>(null);
+  const [plusFlyout, setPlusFlyout] = useState<
+    null | 'commands' | 'skills' | 'mcp' | 'tools'
+  >(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
   const [skillDraftContent, setSkillDraftContent] = useState('');
@@ -4479,6 +4482,82 @@ export default function ChatContainer() {
 
               {/* Skills entry under New Chat (ChatGPT-style tools area) */}
               <div className="space-y-1 pt-1">
+                {/* Command layer — one-shot actions */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommandsExpanded((v) => !v);
+                      setSkillsExpanded(false);
+                      setMcpExpanded(false);
+                      setToolsExpanded(false);
+                    }}
+                    className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 font-medium">
+                      <Terminal className="h-4 w-4 text-stone-500" />
+                      {t('commandLayer')}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        'h-3.5 w-3.5 text-stone-400 transition-transform',
+                        commandsExpanded ? 'rotate-180' : '',
+                      )}
+                    />
+                  </button>
+
+                  <AnimatePresence initial={false}>
+                    {commandsExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden pl-2"
+                      >
+                        <div className="space-y-0.5 pb-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isAccountBound) {
+                                openLoginModal();
+                                return;
+                              }
+                              setInput('/image ');
+                              textareaRef.current?.focus();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1 truncate">{t('generateImage')}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                              /image
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isAccountBound) {
+                                openLoginModal();
+                                return;
+                              }
+                              void handleSubmit('/review', undefined, false, activeSessionId, {
+                                requestReview: true,
+                              });
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1 truncate">{t('requestReview')}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                              /review
+                            </span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
                 <div>
                   <button
                     type="button"
@@ -4489,6 +4568,8 @@ export default function ChatContainer() {
                       }
                       setSkillsExpanded((v) => !v);
                       setMcpExpanded(false);
+                      setToolsExpanded(false);
+                      setCommandsExpanded(false);
                       if (skills.length === 0) fetchSkills();
                     }}
                     className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -4597,6 +4678,8 @@ export default function ChatContainer() {
                     }
                     setMcpExpanded((v) => !v);
                     setSkillsExpanded(false);
+                    setToolsExpanded(false);
+                    setCommandsExpanded(false);
                     void fetchIntegrations();
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -4660,6 +4743,7 @@ export default function ChatContainer() {
                     setToolsExpanded((v) => !v);
                     setMcpExpanded(false);
                     setSkillsExpanded(false);
+                    setCommandsExpanded(false);
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
                 >
@@ -6376,45 +6460,24 @@ export default function ChatContainer() {
                           >
                             <button
                               type="button"
-                              onPointerEnter={() => setPlusFlyout(null)}
-                              onClick={() => {
-                                if (!isAccountBound) {
-                                  setIsSkillPickerOpen(false);
-                                  setPlusFlyout(null);
-                                  openLoginModal();
-                                  return;
-                                }
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                setInput('/image ');
-                                textareaRef.current?.focus();
+                              onPointerEnter={() => {
+                                setPlusFlyout('commands');
+                                setGoogleMcpMenuOpen(false);
                               }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                            >
-                              <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                              <span className="min-w-0 flex-1">{t('generateImage')}</span>
-                              <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                                /image
-                              </span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onPointerEnter={() => setPlusFlyout(null)}
                               onClick={() => {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                void handleSubmit('/review', undefined, false, activeSessionId, {
-                                  requestReview: true,
-                                });
+                                setPlusFlyout((v) => (v === 'commands' ? null : 'commands'));
+                                setGoogleMcpMenuOpen(false);
                               }}
-                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                              className={cn(
+                                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                plusFlyout === 'commands'
+                                  ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                  : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
+                              )}
                             >
-                              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                              <span className="min-w-0 flex-1">{t('requestReview')}</span>
-                              <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                                /review
-                              </span>
+                              <Terminal className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1">{t('commandLayer')}</span>
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                             </button>
 
                             <button
@@ -6486,6 +6549,65 @@ export default function ChatContainer() {
                             </button>
 
                             <AnimatePresence>
+                              {plusFlyout === 'commands' && (
+                                <motion.div
+                                  key="plus-commands-flyout"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.1 }}
+                                  onPointerEnter={() => {
+                                    setPlusFlyout('commands');
+                                    setGoogleMcpMenuOpen(false);
+                                  }}
+                                  className="absolute left-[calc(100%+6px)] top-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!isAccountBound) {
+                                        setIsSkillPickerOpen(false);
+                                        setPlusFlyout(null);
+                                        openLoginModal();
+                                        return;
+                                      }
+                                      setIsSkillPickerOpen(false);
+                                      setPlusFlyout(null);
+                                      setInput('/image ');
+                                      textareaRef.current?.focus();
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                                  >
+                                    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    <span className="min-w-0 flex-1">{t('generateImage')}</span>
+                                    <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                      /image
+                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsSkillPickerOpen(false);
+                                      setPlusFlyout(null);
+                                      void handleSubmit(
+                                        '/review',
+                                        undefined,
+                                        false,
+                                        activeSessionId,
+                                        { requestReview: true },
+                                      );
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                                  >
+                                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    <span className="min-w-0 flex-1">{t('requestReview')}</span>
+                                    <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                      /review
+                                    </span>
+                                  </button>
+                                </motion.div>
+                              )}
+
                               {plusFlyout === 'skills' && (
                                 <motion.div
                                   key="plus-skills-flyout"
@@ -6578,7 +6700,7 @@ export default function ChatContainer() {
                                   onPointerEnter={() => {
                                     setPlusFlyout('tools');
                                   }}
-                                  className="absolute left-[calc(100%+6px)] top-[6.5rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                                  className="absolute left-[calc(100%+6px)] top-[4.7rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                                 >
                                   <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                     <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />

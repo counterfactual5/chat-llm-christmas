@@ -1,6 +1,6 @@
 /**
  * Multi-provider web page reader with fallback chain.
- * Order: Zhipu Coding Plan MCP → Jina → bare fetch.
+ * Order: Zhipu Coding Plan MCP → Tavily Extract → Jina → bare fetch.
  */
 
 import {
@@ -18,6 +18,20 @@ export type WebReadOutcome = {
 };
 
 const MAX_CONTENT_CHARS = 48_000;
+
+function tavilyApiKey(): string | undefined {
+  return process.env.TAVILY_API_KEY?.trim() || undefined;
+}
+
+/** Keyless Extract is free but rate-limited; disable with TAVILY_EXTRACT_KEYLESS=0. */
+function tavilyKeylessEnabled(): boolean {
+  const flag = (process.env.TAVILY_EXTRACT_KEYLESS || '1').trim().toLowerCase();
+  return flag !== '0' && flag !== 'false' && flag !== 'off';
+}
+
+function tavilyExtractAvailable(): boolean {
+  return Boolean(tavilyApiKey()) || tavilyKeylessEnabled();
+}
 
 function jinaApiKey(): string | undefined {
   return process.env.JINA_API_KEY?.trim() || undefined;
@@ -723,9 +737,89 @@ async function readZhipu(url: string): Promise<WebReadOutcome> {
 }
 
 /**
+ * Tavily Extract — same free monthly credits as search (1k/mo with key),
+ * or keyless rate-limited access. docs:
+ * https://docs.tavily.com/documentation/api-reference/endpoint/extract
+ */
+async function readTavily(url: string): Promise<WebReadOutcome> {
+  const key = tavilyApiKey();
+  if (!key && !tavilyKeylessEnabled()) {
+    throw new Error('Tavily extract unavailable');
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (key) {
+    headers.Authorization = `Bearer ${key}`;
+  } else {
+    headers['X-Tavily-Access-Mode'] = 'keyless';
+  }
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.tavily.com/extract', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        urls: [url],
+        format: 'markdown',
+        extract_depth: 'basic',
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS),
+    });
+  } catch (err: unknown) {
+    if (isTimeoutError(err)) {
+      throw new Error(`Tavily extract timed out after ${PROVIDER_FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
+
+  const raw = await readResponseTextLimited(res, 1_500_000);
+  if (!res.ok) {
+    let message = `Tavily extract HTTP ${res.status}`;
+    try {
+      const err = JSON.parse(raw) as {
+        detail?: { error?: string } | string;
+        error?: string;
+        message?: string;
+      };
+      const detail =
+        typeof err.detail === 'string'
+          ? err.detail
+          : err.detail && typeof err.detail === 'object'
+            ? err.detail.error
+            : undefined;
+      message = detail || err.error || err.message || message;
+    } catch {
+      // keep default
+    }
+    throw new Error(message);
+  }
+
+  const data = JSON.parse(raw) as {
+    results?: Array<{ url?: string; title?: string; raw_content?: string }>;
+    failed_results?: Array<{ url?: string; error?: string }>;
+  };
+  const hit = (data.results || []).find((r) => String(r.raw_content || '').trim());
+  if (!hit) {
+    const fail = data.failed_results?.[0]?.error || 'no content';
+    throw new Error(`Tavily extract failed: ${fail}`);
+  }
+  const content = truncateContent(hit.raw_content || '');
+  if (!content) throw new Error('Tavily extract returned empty content');
+  return {
+    provider: key ? 'tavily' : 'tavily-keyless',
+    url: hit.url || url,
+    title: hit.title || undefined,
+    content,
+  };
+}
+
+/**
  * Jina Reader: https://r.jina.ai/{url}
- * Requires JINA_API_KEY — anonymous access is unreliable / often blocked from
- * server IPs, and authenticated usage is token-billed after the signup grant.
+ * Requires JINA_API_KEY — free signup tokens run out; kept as optional fallback.
  */
 async function readJina(url: string): Promise<WebReadOutcome> {
   const key = jinaApiKey();
@@ -848,6 +942,11 @@ const PROVIDERS: ReaderProvider[] = [
     name: 'zhipu',
     available: () => zhipuMcpEnabled(),
     read: readZhipu,
+  },
+  {
+    name: 'tavily',
+    available: () => tavilyExtractAvailable(),
+    read: readTavily,
   },
   {
     name: 'jina',

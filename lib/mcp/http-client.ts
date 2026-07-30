@@ -32,6 +32,58 @@ function parseSseDataBlocks(text: string): unknown[] {
   return blocks;
 }
 
+function sanitizeMcpErrorBody(text: string): string {
+  const raw = String(text || '').trim();
+  if (!raw) return '(empty)';
+  // Never dump HTML error pages into the chat UI.
+  if (/<!doctype|<html/i.test(raw)) {
+    const title = raw.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
+    if (/余额不足|无可用资源包|InsufficientBalance|recharge/i.test(raw)) {
+      return '余额不足或无可用资源包（请确认使用 Coding Plan 套餐 Key）';
+    }
+    return title ? `HTML error page (${title})` : 'HTML error page';
+  }
+  return raw.slice(0, 240);
+}
+
+function formatHttpError(status: number, text: string): string {
+  const body = sanitizeMcpErrorBody(text);
+  if (/余额不足|无可用资源包|InsufficientBalance|recharge/i.test(text)) {
+    return `MCP HTTP ${status}: 余额不足或无可用资源包（请确认使用 Coding Plan 套餐 Key，而不是普通平台 Key）`;
+  }
+  return `MCP HTTP ${status}: ${body}`;
+}
+
+function assertNotGatewayError(text: string): void {
+  // Zhipu / some gateways return HTTP 200 with { code, msg, success:false }.
+  let maybe: {
+    code?: number | string;
+    msg?: string;
+    message?: string;
+    success?: boolean;
+    jsonrpc?: string;
+  };
+  try {
+    maybe = JSON.parse(text) as typeof maybe;
+  } catch {
+    return;
+  }
+  if (
+    maybe &&
+    typeof maybe === 'object' &&
+    maybe.jsonrpc !== '2.0' &&
+    (maybe.success === false ||
+      (maybe.code != null && maybe.code !== 0 && maybe.code !== '0'))
+  ) {
+    throw new Error(
+      String(maybe.msg || maybe.message || `MCP gateway error ${maybe.code}`).slice(
+        0,
+        300,
+      ),
+    );
+  }
+}
+
 async function readJsonRpcResponse(response: Response): Promise<{
   body: JsonRpcSuccess | null;
   sessionId: string | null;
@@ -43,10 +95,10 @@ async function readJsonRpcResponse(response: Response): Promise<{
   const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(
-      `MCP HTTP ${response.status}: ${text.slice(0, 240) || response.statusText}`,
-    );
+    throw new Error(formatHttpError(response.status, text));
   }
+
+  assertNotGatewayError(text);
 
   if (contentType.includes('text/event-stream') || text.includes('data:')) {
     const events = parseSseDataBlocks(text);
@@ -64,7 +116,7 @@ async function readJsonRpcResponse(response: Response): Promise<{
   try {
     return { body: JSON.parse(text) as JsonRpcSuccess, sessionId };
   } catch {
-    throw new Error(`MCP returned non-JSON: ${text.slice(0, 200)}`);
+    throw new Error(`MCP returned non-JSON: ${sanitizeMcpErrorBody(text)}`);
   }
 }
 
@@ -73,6 +125,10 @@ export type McpHttpClientOptions = {
   accessToken: string;
   userAgent?: string;
   extraHeaders?: Record<string, string>;
+  /** Prefer older protocol when talking to Zhipu Coding Plan MCP. */
+  protocolVersion?: string;
+  /** Require Mcp-Session-Id after initialize (Zhipu streamable HTTP). */
+  requireSession?: boolean;
 };
 
 export class McpHttpClient {
@@ -98,7 +154,8 @@ export class McpHttpClient {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.opts.accessToken}`,
       'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
+      // Zhipu examples prefer event-stream first.
+      Accept: 'text/event-stream, application/json',
       'User-Agent': this.opts.userAgent || 'ChristmasChat-MCP/1.0',
       ...this.opts.extraHeaders,
     };
@@ -116,7 +173,12 @@ export class McpHttpClient {
         response.headers.get('mcp-session-id') ||
         response.headers.get('Mcp-Session-Id');
       if (sid) this.sessionId = sid;
-      await response.text().catch(() => '');
+      const text = await response.text().catch(() => '');
+      // 202 / 204 / empty 200 are fine for notifications; hard failures are not.
+      if (!response.ok && response.status !== 202 && response.status !== 204) {
+        throw new Error(formatHttpError(response.status, text));
+      }
+      if (text) assertNotGatewayError(text);
       return null;
     }
 
@@ -131,13 +193,37 @@ export class McpHttpClient {
 
   async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
-    await this.rpc('initialize', {
-      protocolVersion: '2025-03-26',
-      capabilities: {},
-      clientInfo: { name: 'christmas-chat', version: '1.0.0' },
-    });
-    await this.rpc('notifications/initialized', {}, { notification: true });
-    this.initialized = true;
+
+    const versions = [
+      this.opts.protocolVersion || '2024-11-05',
+      '2025-03-26',
+    ].filter((v, i, arr) => arr.indexOf(v) === i);
+
+    let lastErr: unknown;
+    for (const protocolVersion of versions) {
+      try {
+        this.sessionId = null;
+        await this.rpc('initialize', {
+          protocolVersion,
+          capabilities: {},
+          clientInfo: { name: 'christmas-chat', version: '1.0.0' },
+        });
+        if (this.opts.requireSession && !this.sessionId) {
+          throw new Error(
+            'MCP initialize succeeded but no Mcp-Session-Id (check Coding Plan Key)',
+          );
+        }
+        await this.rpc('notifications/initialized', {}, { notification: true });
+        this.initialized = true;
+        return;
+      } catch (err) {
+        lastErr = err;
+        this.sessionId = null;
+      }
+    }
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error('MCP initialize failed');
   }
 
   async listTools(): Promise<McpToolDefinition[]> {

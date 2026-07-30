@@ -48,6 +48,43 @@ function parseMaybeJson(text: string): unknown {
   }
 }
 
+function createZhipuMcpClient(serverUrl: string): McpHttpClient {
+  const key = zhipuApiKey();
+  if (!key) throw new Error('ZHIPU_API_KEY missing');
+  return new McpHttpClient({
+    serverUrl,
+    accessToken: key,
+    userAgent: 'ChristmasChat-ZhipuMCP/1.0',
+    // Working community curls use 2024-11-05 + require session.
+    protocolVersion: '2024-11-05',
+    requireSession: true,
+  });
+}
+
+/**
+ * Docs say camelCase; working clients often use snake_case.
+ * Prefer tools/list, then try known aliases.
+ */
+async function resolveToolName(
+  client: McpHttpClient,
+  preferred: string[],
+): Promise<string> {
+  try {
+    const tools = await client.listTools();
+    const names = tools.map((t) => t.name).filter(Boolean);
+    for (const want of preferred) {
+      const hit = names.find((n) => n === want);
+      if (hit) return hit;
+    }
+    const lower = preferred.map((p) => p.toLowerCase());
+    const fuzzy = names.find((n) => lower.includes(n.toLowerCase()));
+    if (fuzzy) return fuzzy;
+  } catch {
+    // listTools optional — fall through to preferred names
+  }
+  return preferred[0]!;
+}
+
 export type ZhipuMcpSearchHit = {
   title: string;
   url: string;
@@ -56,23 +93,22 @@ export type ZhipuMcpSearchHit = {
 };
 
 /**
- * Call Coding Plan `webSearchPrime`.
+ * Call Coding Plan web search MCP (`webSearchPrime` / `web_search_prime`).
  * Returns normalized hits; throws on MCP / tool errors.
  */
 export async function zhipuMcpWebSearch(query: string): Promise<ZhipuMcpSearchHit[]> {
-  const key = zhipuApiKey();
-  if (!key) throw new Error('ZHIPU_API_KEY missing');
+  const client = createZhipuMcpClient(ZHIPU_MCP_SEARCH_URL);
+  // Community curls that succeed use snake_case; docs list camelCase.
+  const toolName = await resolveToolName(client, [
+    'web_search_prime',
+    'webSearchPrime',
+  ]);
 
-  const client = new McpHttpClient({
-    serverUrl: ZHIPU_MCP_SEARCH_URL,
-    accessToken: key,
-    userAgent: 'ChristmasChat-ZhipuMCP/1.0',
-  });
-
-  const { content, isError } = await client.callTool('webSearchPrime', {
+  const { content, isError } = await client.callTool(toolName, {
     search_query: String(query || '').trim().slice(0, 70),
+    content_size: 'medium',
   });
-  if (isError) throw new Error(content.slice(0, 300) || 'webSearchPrime failed');
+  if (isError) throw new Error(content.slice(0, 300) || `${toolName} failed`);
 
   const parsed = parseMaybeJson(content);
   const rows: unknown[] = Array.isArray(parsed)
@@ -103,7 +139,7 @@ export async function zhipuMcpWebSearch(query: string): Promise<ZhipuMcpSearchHi
   if (!hits.length && typeof parsed === 'string' && parsed.trim()) {
     throw new Error(parsed.slice(0, 300));
   }
-  if (!hits.length) throw new Error('Zhipu MCP webSearchPrime returned no results');
+  if (!hits.length) throw new Error(`Zhipu MCP ${toolName} returned no results`);
   return hits;
 }
 
@@ -115,28 +151,22 @@ export type ZhipuMcpReadResult = {
 };
 
 /**
- * Call Coding Plan `webReader`.
+ * Call Coding Plan web reader MCP (`webReader` / `web_reader`).
  * Returns page markdown/text; throws on MCP / tool errors.
  */
 export async function zhipuMcpWebRead(url: string): Promise<ZhipuMcpReadResult> {
-  const key = zhipuApiKey();
-  if (!key) throw new Error('ZHIPU_API_KEY missing');
+  const client = createZhipuMcpClient(ZHIPU_MCP_READER_URL);
+  const toolName = await resolveToolName(client, ['web_reader', 'webReader']);
 
-  const client = new McpHttpClient({
-    serverUrl: ZHIPU_MCP_READER_URL,
-    accessToken: key,
-    userAgent: 'ChristmasChat-ZhipuMCP/1.0',
-  });
-
-  const { content, isError } = await client.callTool('webReader', {
+  const { content, isError } = await client.callTool(toolName, {
     url: String(url || '').trim(),
   });
-  if (isError) throw new Error(content.slice(0, 300) || 'webReader failed');
+  if (isError) throw new Error(content.slice(0, 300) || `${toolName} failed`);
 
   const parsed = parseMaybeJson(content);
   if (typeof parsed === 'string') {
     const text = parsed.trim();
-    if (!text) throw new Error('Zhipu MCP webReader returned empty content');
+    if (!text) throw new Error(`Zhipu MCP ${toolName} returned empty content`);
     return { url, content: text };
   }
 
@@ -148,7 +178,7 @@ export async function zhipuMcpWebRead(url: string): Promise<ZhipuMcpReadResult> 
   const body = String(
     nested.content || nested.text || nested.markdown || obj.content || '',
   ).trim();
-  if (!body) throw new Error('Zhipu MCP webReader returned empty content');
+  if (!body) throw new Error(`Zhipu MCP ${toolName} returned empty content`);
 
   return {
     url: String(nested.url || obj.url || url),

@@ -53,8 +53,20 @@ import {
   detectPendingToolIntent,
   buildCorrectionPrompt,
   buildPendingIntentPrompt,
-  emitReviewerStep,
+  buildExecutionRecordFromMessages,
+  buildExecutionRecordFromToolRuns,
+  runFullClaimAudit,
+  emitMidTurnReview,
+  emitReviewReport,
+  buildReviewReport,
+  buildFindingsResponsePrompt,
+  buildReviewIssuesResponsePrompt,
+  FINDINGS_RESPONSE_SYSTEM,
   REVIEWER_SYSTEM_PROMPT,
+  type ReviewFinding,
+  type ReviewIssue,
+  type ClaimAuditResult,
+  type MidTurnCorrection,
 } from '@/lib/claim-reviewer';
 import { isSkillCreatorId } from '@/lib/skill-creator';
 
@@ -62,9 +74,33 @@ export const runtime = 'edge';
 export const maxDuration = 300;
 
 const MAX_TOOL_ROUNDS = 3;
-/** Model may think for a long time before emitting tool_calls; keep this generous. */
-const TOOLS_ROUND_TIMEOUT_MS = 90_000;
-const FINAL_STREAM_TIMEOUT_MS = 90_000;
+/** Stall budget: no upstream chunk for this long → timeout. */
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+/** Hard cap for one streaming pass (under maxDuration). */
+const STREAM_MAX_TOTAL_MS = 240_000;
+/** @deprecated use STREAM_IDLE_TIMEOUT_MS — kept for error message parity in tools round */
+const TOOLS_ROUND_TIMEOUT_MS = STREAM_IDLE_TIMEOUT_MS;
+const VERIFIER_TIMEOUT_MS = 25_000;
+
+function streamWaitBudget(opts: {
+  startedAt: number;
+  lastChunkAt: number;
+  idleMs: number;
+  maxTotalMs: number;
+}): number {
+  const idleRemaining = opts.idleMs - (Date.now() - opts.lastChunkAt);
+  const totalRemaining = opts.maxTotalMs - (Date.now() - opts.startedAt);
+  return Math.min(idleRemaining, totalRemaining);
+}
+
+function streamTimeoutError(label: string, idleMs: number, maxTotalMs: number, startedAt: number, lastChunkAt: number): Error {
+  const stalledFor = Date.now() - lastChunkAt;
+  const totalFor = Date.now() - startedAt;
+  if (totalFor >= maxTotalMs) {
+    return new Error(`${label} exceeded ${Math.round(maxTotalMs / 1000)}s total budget`);
+  }
+  return new Error(`${label} stalled for ${Math.round(stalledFor / 1000)}s (no upstream chunks)`);
+}
 
 function jsonError(message: string, status: number = 500) {
   return new Response(JSON.stringify({ error: message }), {
@@ -113,6 +149,7 @@ async function* streamChatCompletionsRaw(opts: {
   apiKey: string;
   baseURL: string;
   body: Record<string, unknown>;
+  signal?: AbortSignal;
 }): AsyncGenerator<any> {
   const post = async (body: Record<string, unknown>) =>
     fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
@@ -123,6 +160,7 @@ async function* streamChatCompletionsRaw(opts: {
         Accept: 'text/event-stream',
       },
       body: JSON.stringify({ ...body, stream: true }),
+      signal: opts.signal,
     });
 
   let body: Record<string, unknown> = { ...opts.body };
@@ -159,6 +197,16 @@ async function* streamChatCompletionsRaw(opts: {
   const decoder = new TextDecoder();
   let buffer = '';
   while (true) {
+    if (opts.signal?.aborted) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* ignore */
+      }
+      const err = new Error('Aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -348,8 +396,49 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
+/** Non-streaming completion for the isolated claim verifier. */
+async function completeOnce(opts: {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature?: number;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const res = await fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      temperature: opts.temperature ?? 0,
+      stream: false,
+      messages: opts.messages,
+    }),
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(
+      `Verifier upstream error: ${res.status} ${(errText || res.statusText).slice(0, 200)}`,
+    );
+  }
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
+  };
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((p) => String(p?.text || '')).join('');
+  }
+  return '';
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const clientSignal = req.signal;
     const {
       messages,
       model = 'deepseek-v4-flash-200k',
@@ -363,6 +452,19 @@ export async function POST(req: NextRequest) {
       /** Tool layer: claim reviewer. */
       autoReview = true,
       requestReview = false,
+      /** Prior assistant turn to audit (request review). */
+      reviewContext = null as null | {
+        targetMessageId?: string;
+        assistantText?: string;
+        toolRuns?: Array<{
+          name: string;
+          status: string;
+          query?: string;
+          error?: string;
+          provider?: string;
+          results?: Array<{ url?: string; title?: string; snippet?: string }>;
+        }>;
+      },
     } = await req.json();
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
     const isBoundAccount = Boolean(boundUserKey);
@@ -809,8 +911,258 @@ export async function POST(req: NextRequest) {
         };
 
         if (requestReview) {
-          emitReviewerStep(send, { status: 'done', phase: 'requested' });
+          const auditOpts = {
+            searchEnabled,
+            integrations: authorizedIntegrations,
+            skillCreator: skillCreatorOn,
+          };
+          const priorText = String(reviewContext?.assistantText || '').trim();
+          const verifierComplete = async (
+            msgs: Array<{ role: string; content: string }>,
+          ) =>
+            withTimeout(
+              completeOnce({
+                apiKey,
+                baseURL,
+                model: requestedModel,
+                messages: msgs,
+                temperature: 0,
+                signal: clientSignal,
+              }),
+              VERIFIER_TIMEOUT_MS,
+              'claim verifier',
+            );
+
+          let findings: ReviewFinding[] = [];
+          let reviewIssues: ReviewIssue[] = [];
+          try {
+            if (priorText) {
+              const priorRecord = buildExecutionRecordFromToolRuns(
+                reviewContext?.toolRuns || [],
+              );
+              const audit = await runFullClaimAudit(
+                send,
+                priorText,
+                priorRecord,
+                auditOpts,
+                'requested',
+                verifierComplete,
+                {
+                  forceLlm: true,
+                  targetMessageId: reviewContext?.targetMessageId,
+                  emitEmpty: true,
+                  userAsk,
+                  signal: clientSignal,
+                },
+              );
+              findings = audit.findings;
+              reviewIssues = audit.issues;
+            } else {
+              emitReviewReport(
+                send,
+                buildReviewReport({
+                  assistantText: '',
+                  record: [],
+                  findings: [],
+                  phase: 'requested',
+                }),
+                reviewContext?.targetMessageId,
+              );
+            }
+
+            // Dedicated response path: address findings only (no tools / no persona bleed).
+            const reviewMessages = [
+              { role: 'system', content: FINDINGS_RESPONSE_SYSTEM },
+              {
+                role: 'user',
+                content: reviewIssues.length
+                  ? buildReviewIssuesResponsePrompt(reviewIssues, priorText)
+                  : buildFindingsResponsePrompt(findings, priorText),
+              },
+            ];
+            const reviewStream = streamChatCompletionsRaw({
+              apiKey,
+              baseURL,
+              signal: clientSignal,
+              body: {
+                model: requestedModel,
+                temperature: 0.3,
+                messages: sanitizeChatMessages(reviewMessages),
+              },
+            });
+            let sawText = false;
+            let lastFinishReason: string | null = null;
+            const stampStripper = createStampLeakStripper();
+            for await (const chunk of reviewStream) {
+              const choice = chunk?.choices?.[0];
+              const delta = choice?.delta || {};
+              const finish_reason = choice?.finish_reason || null;
+              if (finish_reason) lastFinishReason = finish_reason;
+              let { content, reasoning } = splitCompletionDelta(delta, {
+                reasoningAsContent: false,
+              });
+              if (content) content = stampStripper.push(content);
+              if (finish_reason) {
+                const rest = stampStripper.flush();
+                if (rest) content = (content || '') + rest;
+              }
+              if (content) {
+                sawText = true;
+                send({ content });
+              }
+              if (reasoning) {
+                sawText = true;
+                send({ reasoning });
+              }
+            }
+            {
+              const rest = stampStripper.flush();
+              if (rest) {
+                sawText = true;
+                send({ content: rest });
+              }
+            }
+            if (!sawText) {
+              send({
+                content: findings.length
+                  ? 'Review complete — see Findings above. Retract any unsupported claims listed there.'
+                  : 'Review complete — no unsupported tool claims found against the execution record.',
+              });
+            }
+            send(streamCompletionPayload(lastFinishReason || 'stop'));
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+            return;
+          } catch (err: any) {
+            if (err?.name === 'AbortError' || clientSignal.aborted) {
+              try {
+                send(streamCompletionPayload('stop'));
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                controller.close();
+              } catch {
+                /* already closed */
+              }
+              return;
+            }
+            send({
+              content: `\n\nError: ${err?.message || 'Claim review failed.'}`,
+              ...streamCompletionPayload('error'),
+            });
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+            return;
+          }
         }
+
+        const auditOpts = {
+          searchEnabled,
+          integrations: authorizedIntegrations,
+          skillCreator: skillCreatorOn,
+        };
+        let midTurnCorrection: MidTurnCorrection | null = null;
+        const verifierComplete = async (
+          msgs: Array<{ role: string; content: string }>,
+        ) =>
+          withTimeout(
+            completeOnce({
+              apiKey,
+              baseURL,
+              model: requestedModel,
+              messages: msgs,
+              temperature: 0,
+              signal: clientSignal,
+            }),
+            VERIFIER_TIMEOUT_MS,
+            'claim verifier',
+          );
+
+        const emptyAudit = (): ClaimAuditResult => ({
+          findings: [],
+          report: { phase: 'audit', status: 'done', checks: [] },
+          issues: [],
+        });
+
+        const postAudit = async (
+          text: string,
+          phase: 'audit' | 'requested' = 'audit',
+          meta?: { finishReason?: string | null; truncated?: boolean },
+        ): Promise<ClaimAuditResult> => {
+          if (!autoReview) return emptyAudit();
+          if (clientSignal.aborted) {
+            const err = new Error('Aborted');
+            err.name = 'AbortError';
+            throw err;
+          }
+          const record = buildExecutionRecordFromMessages(workingMessages);
+          return runFullClaimAudit(
+            send,
+            text,
+            record,
+            auditOpts,
+            phase,
+            verifierComplete,
+            {
+              forceLlm: false,
+              midTurn: midTurnCorrection,
+              userAsk,
+              finishReason: meta?.finishReason ?? null,
+              truncated: meta?.truncated,
+              signal: clientSignal,
+            },
+          );
+        };
+
+        /** After review finds issues, ask the main model to revise the answer. */
+        const streamReviewCorrection = async (
+          issues: ReviewIssue[],
+          priorText: string,
+        ) => {
+          if (!issues.length || clientSignal.aborted) return false;
+          send({ content: '\n\n---\n\n' });
+          const correctionMessages = [
+            { role: 'system', content: FINDINGS_RESPONSE_SYSTEM },
+            {
+              role: 'user',
+              content: buildReviewIssuesResponsePrompt(issues, priorText),
+            },
+          ];
+          const correctionStream = streamChatCompletionsRaw({
+            apiKey,
+            baseURL,
+            signal: clientSignal,
+            body: {
+              model: requestedModel,
+              temperature: 0.3,
+              messages: sanitizeChatMessages(correctionMessages),
+            },
+          });
+          let saw = false;
+          const stampStripper = createStampLeakStripper();
+          for await (const chunk of correctionStream) {
+            if (clientSignal.aborted) break;
+            const choice = chunk?.choices?.[0];
+            const delta = choice?.delta || {};
+            const finish_reason = choice?.finish_reason || null;
+            let { content } = splitCompletionDelta(delta, { reasoningAsContent: false });
+            if (content) content = stampStripper.push(content);
+            if (finish_reason) {
+              const rest = stampStripper.flush();
+              if (rest) content = (content || '') + rest;
+            }
+            if (content) {
+              saw = true;
+              send({ content });
+            }
+          }
+          if (!clientSignal.aborted) {
+            const rest = stampStripper.flush();
+            if (rest) {
+              saw = true;
+              send({ content: rest });
+            }
+          }
+          return saw;
+        };
 
         try {
           // Text-only model + images + zhipu-vision MCP: convert images → text first.
@@ -932,6 +1284,7 @@ export async function POST(req: NextRequest) {
                 const raw = streamChatCompletionsRaw({
                   apiKey,
                   baseURL,
+                  signal: clientSignal,
                   body: {
                     model: requestedModel,
                     temperature,
@@ -942,14 +1295,24 @@ export async function POST(req: NextRequest) {
                   },
                 });
                 streamIter = (async function* () {
-                  // Bound the whole tools round (create + stream) by timeout.
+                  // Bound each tools round by idle stall + total wall clock.
                   const iter = raw[Symbol.asyncIterator]();
-                  const deadline = Date.now() + TOOLS_ROUND_TIMEOUT_MS;
+                  const startedAt = Date.now();
+                  let lastChunkAt = startedAt;
                   while (true) {
-                    const remaining = deadline - Date.now();
+                    const remaining = streamWaitBudget({
+                      startedAt,
+                      lastChunkAt,
+                      idleMs: STREAM_IDLE_TIMEOUT_MS,
+                      maxTotalMs: STREAM_MAX_TOTAL_MS,
+                    });
                     if (remaining <= 0) {
-                      throw new Error(
-                        `tools round timed out after ${TOOLS_ROUND_TIMEOUT_MS}ms`,
+                      throw streamTimeoutError(
+                        'tools round',
+                        STREAM_IDLE_TIMEOUT_MS,
+                        STREAM_MAX_TOTAL_MS,
+                        startedAt,
+                        lastChunkAt,
                       );
                     }
                     try {
@@ -959,17 +1322,20 @@ export async function POST(req: NextRequest) {
                         'tools round chunk',
                       );
                       if (next.done) break;
+                      lastChunkAt = Date.now();
                       yield next.value;
                     } catch (chunkErr: unknown) {
                       const msg =
                         chunkErr instanceof Error
                           ? chunkErr.message
                           : String(chunkErr || 'failed');
-                      // withTimeout reports the *remaining* slice (e.g. 90ms), which
-                      // misleads the UI — always surface the full round budget.
                       if (/timed out/i.test(msg)) {
-                        throw new Error(
-                          `tools round timed out after ${TOOLS_ROUND_TIMEOUT_MS}ms`,
+                        throw streamTimeoutError(
+                          'tools round',
+                          STREAM_IDLE_TIMEOUT_MS,
+                          STREAM_MAX_TOTAL_MS,
+                          startedAt,
+                          lastChunkAt,
                         );
                       }
                       throw chunkErr;
@@ -1064,12 +1430,8 @@ export async function POST(req: NextRequest) {
                     integrations: authorizedIntegrations,
                   });
                   if (pending.length) {
-                    emitReviewerStep(send, {
-                      status: 'done',
-                      phase: 'mid',
-                      surfaces: pending,
-                      kind: 'intent',
-                    });
+                    midTurnCorrection = { surfaces: pending, kind: 'intent' };
+                    emitMidTurnReview(send, midTurnCorrection);
                     workingMessages.push({
                       role: 'assistant',
                       content: streamedContent,
@@ -1090,12 +1452,8 @@ export async function POST(req: NextRequest) {
                     skillCreator: skillCreatorOn,
                   });
                   if (faked.length) {
-                    emitReviewerStep(send, {
-                      status: 'done',
-                      phase: 'mid',
-                      surfaces: faked,
-                      kind: 'success',
-                    });
+                    midTurnCorrection = { surfaces: faked, kind: 'success' };
+                    emitMidTurnReview(send, midTurnCorrection);
                     workingMessages.push({
                       role: 'assistant',
                       content: streamedContent,
@@ -1142,22 +1500,12 @@ export async function POST(req: NextRequest) {
                   // Soft-audit here for visibility; mid-turn correction above should
                   // already have forced tool_calls when rounds remain.
                   if (autoReview) {
-                    const pendingLate = detectPendingToolIntent(streamedContent, {
-                      searchEnabled,
-                      integrations: authorizedIntegrations,
+                    const audit = await postAudit(streamedContent, 'audit', {
+                      finishReason: roundFinishReason,
+                      truncated: roundFinishReason === 'length',
                     });
-                    const fakedLate = detectFakedToolNarration(streamedContent, {
-                      searchEnabled,
-                      integrations: authorizedIntegrations,
-                      skillCreator: skillCreatorOn,
-                    });
-                    if (pendingLate.length || fakedLate.length) {
-                      emitReviewerStep(send, {
-                        status: 'done',
-                        phase: 'audit',
-                        surfaces: pendingLate.length ? pendingLate : fakedLate,
-                        kind: pendingLate.length ? 'intent' : 'success',
-                      });
+                    if (audit.issues.length) {
+                      await streamReviewCorrection(audit.issues, streamedContent);
                     }
                   }
                   send(streamCompletionPayload(roundFinishReason || 'stop'));
@@ -1243,6 +1591,7 @@ export async function POST(req: NextRequest) {
             const finalStream = streamChatCompletionsRaw({
               apiKey,
               baseURL,
+              signal: clientSignal,
               body: {
                 model: requestedModel,
                 temperature,
@@ -1258,12 +1607,43 @@ export async function POST(req: NextRequest) {
             const stampStripper = createStampLeakStripper();
             let reasoningOnlyBuf = '';
             const iter = finalStream[Symbol.asyncIterator]();
-            const deadline = Date.now() + FINAL_STREAM_TIMEOUT_MS;
+            const startedAt = Date.now();
+            let lastChunkAt = startedAt;
             while (true) {
-              const remaining = deadline - Date.now();
-              if (remaining <= 0) throw new Error('final completion timed out');
-              const next = await withTimeout(iter.next(), remaining, 'final completion');
+              const remaining = streamWaitBudget({
+                startedAt,
+                lastChunkAt,
+                idleMs: STREAM_IDLE_TIMEOUT_MS,
+                maxTotalMs: STREAM_MAX_TOTAL_MS,
+              });
+              if (remaining <= 0) {
+                throw streamTimeoutError(
+                  'final completion',
+                  STREAM_IDLE_TIMEOUT_MS,
+                  STREAM_MAX_TOTAL_MS,
+                  startedAt,
+                  lastChunkAt,
+                );
+              }
+              let next;
+              try {
+                next = await withTimeout(iter.next(), remaining, 'final completion');
+              } catch (chunkErr: unknown) {
+                const msg =
+                  chunkErr instanceof Error ? chunkErr.message : String(chunkErr || 'failed');
+                if (/timed out/i.test(msg)) {
+                  throw streamTimeoutError(
+                    'final completion',
+                    STREAM_IDLE_TIMEOUT_MS,
+                    STREAM_MAX_TOTAL_MS,
+                    startedAt,
+                    lastChunkAt,
+                  );
+                }
+                throw chunkErr;
+              }
               if (next.done) break;
+              lastChunkAt = Date.now();
               const chunk = next.value;
               const choice = chunk?.choices?.[0];
               const delta = choice?.delta || {};
@@ -1306,26 +1686,13 @@ export async function POST(req: NextRequest) {
               }
             }
             // Claim Reviewer post-audit: catch claims that slipped through to the
-            // final text without tool receipts. Surface in Process; don't auto-run
-            // another generation round.
+            // final text without tool receipts. Surface Findings; auto-correct errors.
+            let auditResult: ClaimAuditResult = emptyAudit();
             if (sawContent && autoReview) {
-              const pendingHits = detectPendingToolIntent(contentBuf, {
-                searchEnabled,
-                integrations: authorizedIntegrations,
+              auditResult = await postAudit(contentBuf, 'audit', {
+                finishReason: lastFinishReason,
+                truncated: lastFinishReason === 'length',
               });
-              const fakedHits = detectFakedToolNarration(contentBuf, {
-                searchEnabled,
-                integrations: authorizedIntegrations,
-                skillCreator: skillCreatorOn,
-              });
-              if (pendingHits.length || fakedHits.length) {
-                emitReviewerStep(send, {
-                  status: 'done',
-                  phase: requestReview && !autoReview ? 'requested' : 'audit',
-                  surfaces: pendingHits.length ? pendingHits : fakedHits,
-                  kind: pendingHits.length ? 'intent' : 'success',
-                });
-              }
             }
             // If reasoning arrived but no content, do NOT fold server-side.
             // The client promotes orphan reasoning → content at settle time,
@@ -1333,7 +1700,7 @@ export async function POST(req: NextRequest) {
             if (!sawContent && reasoningOnlyBuf.trim()) {
               sawText = true;
             }
-            return { sawText, sawContent, lastFinishReason };
+            return { sawText, sawContent, lastFinishReason, contentBuf, auditResult };
           };
 
           let finalResult = await runFinalCompletion({
@@ -1352,6 +1719,13 @@ export async function POST(req: NextRequest) {
             });
           }
 
+          if (finalResult.sawContent && finalResult.auditResult.issues.length) {
+            await streamReviewCorrection(
+              finalResult.auditResult.issues,
+              finalResult.contentBuf,
+            );
+          }
+
           if (!finalResult.sawText) {
             send({
               content:
@@ -1365,6 +1739,16 @@ export async function POST(req: NextRequest) {
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (err: any) {
+          if (err?.name === 'AbortError' || clientSignal.aborted) {
+            try {
+              send(streamCompletionPayload('stop'));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            } catch {
+              /* already closed */
+            }
+            return;
+          }
           try {
             send({
               content: `\n\nError: ${err?.message || 'Upstream model request failed.'}`,

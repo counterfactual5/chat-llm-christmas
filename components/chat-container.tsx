@@ -8,7 +8,8 @@ import {
   Mic, Square, Download, Key, Sparkles, ChevronDown, ChevronRight, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
   Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks,
-  ShieldCheck, SlidersHorizontal, Terminal
+  ShieldCheck, SlidersHorizontal, Terminal, Calculator, ShieldAlert, Wrench, RotateCcw, Link2,
+  CalendarClock, Scale, ListChecks, Bug
 } from 'lucide-react';
 import { GitHubLogo } from '@/components/github-logo';
 import { GoogleLogo } from '@/components/google-logo';
@@ -16,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
+import { mergeReviewChecks, type ReviewCheck, type ReviewCheckKind } from '@/lib/claim-reviewer';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import ReactMarkdown from 'react-markdown';
@@ -342,6 +344,29 @@ interface Message {
   finishReason?: string | null;
   /** Human-readable explanation of why the reply looks cut off. */
   truncationReason?: string;
+  /** Structured claim-vs-receipt findings from Claim Reviewer (legacy flat list). */
+  reviewFindings?: Array<{
+    id: string;
+    severity: 'error' | 'warn';
+    surface: string;
+    verdict: string;
+    claim: string;
+    evidence: string;
+  }>;
+  /** Hierarchical Review panel (mid-turn / tool receipt / citation / recalc / vulnerability). */
+  reviewReport?: {
+    phase?: string;
+    status: 'running' | 'done';
+    checks: Array<{
+      id: string;
+      kind: ReviewCheckKind;
+      status: 'running' | 'done' | 'skipped';
+      summary: string;
+      clean?: boolean;
+      items?: Array<{ severity: 'error' | 'warn'; title: string; detail: string }>;
+      body?: string;
+    }>;
+  };
 }
 
 type ExternalReferenceSourceKind =
@@ -2144,6 +2169,77 @@ export default function ChatContainer() {
     );
   };
 
+  const upsertReviewReport = (
+    sessionId: string,
+    assistantId: string,
+    report: Message['reviewReport'],
+  ) => {
+    if (!report) return;
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
+          messages: s.messages.map((m) => {
+            if (m.id !== assistantId) return m;
+            const prevChecks = m.reviewReport?.checks || [];
+            const mergedChecks = mergeReviewChecks(
+              prevChecks as ReviewCheck[],
+              report.checks as ReviewCheck[],
+            );
+            if (!mergedChecks.length) return m;
+            const merged: NonNullable<Message['reviewReport']> = {
+              ...report,
+              checks: mergedChecks,
+            };
+            const toolReceipt = merged.checks.find((c) => c.kind === 'tool_receipt');
+            const legacyFindings =
+              toolReceipt?.items?.map((item, i) => ({
+                id: `tool_receipt:${i}`,
+                severity: item.severity,
+                surface: 'tool',
+                verdict: 'no_receipt',
+                claim: item.title,
+                evidence: item.detail,
+              })) || [];
+            return {
+              ...m,
+              reviewReport: merged,
+              ...(merged.status === 'done' ? { reviewFindings: legacyFindings } : {}),
+            };
+          }),
+          updatedAt: Date.now(),
+        };
+      }),
+    );
+  };
+
+  const upsertReviewFindings = (
+    sessionId: string,
+    assistantId: string,
+    payload: {
+      findings: Message['reviewFindings'];
+      /** Allow clearing / recording a clean review. */
+      allowEmpty?: boolean;
+    },
+  ) => {
+    if (!payload.findings?.length && !payload.allowEmpty) return;
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
+          messages: s.messages.map((m) =>
+            m.id === assistantId
+              ? { ...m, reviewFindings: payload.findings || [] }
+              : m,
+          ),
+          updatedAt: Date.now(),
+        };
+      }),
+    );
+  };
+
   const upsertAssistantToolRun = (
     sessionId: string,
     assistantId: string,
@@ -2162,6 +2258,7 @@ export default function ChatContainer() {
         if (s.id !== sessionId) return s;
         const msgs = s.messages.map((m) => {
           if (m.id !== assistantId) return m;
+          if (run.provider === 'claim-reviewer') return m;
           const existing = m.toolRuns || [];
           const idx = existing.findIndex(
             (r) => r.name === run.name && r.query === run.query && r.status === 'start',
@@ -2370,6 +2467,11 @@ export default function ChatContainer() {
       return false;
     });
 
+    const sessionForReview = sessionsRef.current.find((s) => s.id === sessionId);
+    const lastAssistantForReview = requestReview
+      ? [...(sessionForReview?.messages || [])].reverse().find((m) => m.role === 'assistant')
+      : undefined;
+
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2382,7 +2484,32 @@ export default function ChatContainer() {
         conversationId: sessionId,
         integrations,
         autoReview: sessionsRef.current.find((s) => s.id === sessionId)?.autoReview ?? true,
-        ...(requestReview ? { requestReview: true } : {}),
+        ...(requestReview && lastAssistantForReview
+          ? {
+              requestReview: true,
+              reviewContext: {
+                targetMessageId: lastAssistantForReview.id,
+                assistantText: lastAssistantForReview.content,
+                toolRuns: (lastAssistantForReview.toolRuns || []).map((r) => ({
+                  name: r.name,
+                  status: r.status,
+                  query: r.query,
+                  error: r.error,
+                  provider: r.provider,
+                  results: (r.results || [])
+                    .filter((x) => x?.url)
+                    .slice(0, 20)
+                    .map((x) => ({
+                      url: x.url,
+                      title: x.title,
+                      snippet: x.snippet,
+                    })),
+                })),
+              },
+            }
+          : requestReview
+            ? { requestReview: true }
+            : {}),
       }),
       signal,
     });
@@ -2597,6 +2724,22 @@ export default function ChatContainer() {
           }
           if (parsed.reasoning) {
             appendToAssistantReasoning(sessionId, assistantId, parsed.reasoning);
+          }
+          if (parsed.reviewer_report?.checks) {
+            upsertReviewReport(
+              sessionId,
+              parsed.reviewer_report.targetMessageId || assistantId,
+              {
+                phase: parsed.reviewer_report.phase,
+                status: parsed.reviewer_report.status === 'running' ? 'running' : 'done',
+                checks: parsed.reviewer_report.checks,
+              },
+            );
+          } else if (Array.isArray(parsed.reviewer_findings?.findings)) {
+            upsertReviewFindings(sessionId, parsed.reviewer_findings.targetMessageId || assistantId, {
+              findings: parsed.reviewer_findings.findings,
+              allowEmpty: true,
+            });
           }
           if (parsed.tool) {
             upsertAssistantToolRun(sessionId, assistantId, {
@@ -3407,30 +3550,19 @@ export default function ChatContainer() {
 
     if (isSessionLoading(sessionId)) {
       if (!textToSend.trim()) return;
-      const now = Date.now();
-      const sessionQueue = messageQueue.filter((task) => task.sessionId === sessionId);
-      const lastInQueue = sessionQueue[sessionQueue.length - 1];
-      if (lastInQueue && lastInQueue.content === textToSend.trim() && now - lastInQueue.enqueueTime < 500) {
-        return;
-      }
-      setMessageQueue((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          sessionId,
-          content: textToSend.trim(),
-          // Snapshot this session's thread so a later drain cannot pick up
-          // another conversation via a stale active-session fallback.
-          baseMessages:
-            baseMessagesOverride ??
-            sessionsRef.current.find((s) => s.id === sessionId)?.messages,
-          enqueueTime: now,
-        },
-      ]);
+      // Interrupt the in-flight reply — including auto-review / correction —
+      // so a new message does not wait for the audit to finish.
+      stopGenerating({ pauseQueue: false, sessionId });
       if (fromComposer) {
         setInput('');
         setQuotedSelections([]);
       }
+      const snapshot =
+        baseMessagesOverride ??
+        sessionsRef.current.find((s) => s.id === sessionId)?.messages;
+      window.setTimeout(() => {
+        void handleSubmit(textToSend.trim(), snapshot, false, sessionId);
+      }, 50);
       return;
     }
 
@@ -5652,6 +5784,7 @@ export default function ChatContainer() {
                             run.provider === 'zhipu-vision';
                           const isClaimReviewer =
                             run.provider === 'claim-reviewer';
+                          if (isClaimReviewer) return null;
                           const failed = run.status === 'done' && Boolean(run.error);
                           const emptyResults =
                             run.status === 'done' &&
@@ -6192,6 +6325,206 @@ export default function ChatContainer() {
                             </div>
                           ) : null;
 
+                        const renderReviewPanel = () => {
+                          const report = message.reviewReport;
+                          if (!report?.checks?.length) return null;
+
+                          const panelId = `${message.id}-review`;
+                          const live =
+                            report.status === 'running' &&
+                            messageIsStreaming &&
+                            message.id === lastMessage?.id;
+                          const open = reasoningOpen[panelId] ?? true;
+                          const issueCount = report.checks.reduce(
+                            (n, c) => n + (c.items?.length || 0),
+                            0,
+                          );
+                          const allClean =
+                            report.status === 'done' &&
+                            report.checks.every(
+                              (c) => c.clean !== false && (c.items?.length || 0) === 0,
+                            );
+
+                          const checkTitle = (kind: ReviewCheckKind) => {
+                            if (kind === 'mid_turn') return t('reviewMidTurn');
+                            if (kind === 'tool_receipt') return t('reviewToolReceipt');
+                            if (kind === 'citation') return t('reviewCitation');
+                            if (kind === 'staleness') return t('reviewStaleness');
+                            if (kind === 'recalculation') return t('reviewRecalculation');
+                            if (kind === 'consistency') return t('reviewConsistency');
+                            if (kind === 'completeness') return t('reviewCompleteness');
+                            if (kind === 'code_quality') return t('reviewCodeQuality');
+                            return t('reviewVulnerability');
+                          };
+
+                          const CheckIcon = (kind: ReviewCheckKind) => {
+                            if (kind === 'mid_turn') return RotateCcw;
+                            if (kind === 'tool_receipt') return Wrench;
+                            if (kind === 'citation') return Link2;
+                            if (kind === 'staleness') return CalendarClock;
+                            if (kind === 'recalculation') return Calculator;
+                            if (kind === 'consistency') return Scale;
+                            if (kind === 'completeness') return ListChecks;
+                            if (kind === 'code_quality') return Bug;
+                            return ShieldAlert;
+                          };
+
+                          const renderCheck = (
+                            check: NonNullable<Message['reviewReport']>['checks'][number],
+                            nested = true,
+                          ) => {
+                            const checkKey = `${panelId}-${check.id}`;
+                            const hasItems = (check.items?.length || 0) > 0;
+                            const checkOpen =
+                              reasoningOpen[checkKey] ??
+                              (check.status === 'running' || hasItems || Boolean(check.body));
+                            const running = check.status === 'running';
+                            const Icon = CheckIcon(check.kind);
+                            const tone =
+                              running
+                                ? 'text-stone-500 dark:text-stone-400'
+                                : check.clean === false || hasItems
+                                  ? 'text-amber-800 dark:text-amber-200'
+                                  : 'text-emerald-800 dark:text-emerald-200/90';
+
+                            return (
+                              <div key={check.id} className="overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReasoningOpen((prev) => ({
+                                      ...prev,
+                                      [checkKey]: !(prev[checkKey] ?? checkOpen),
+                                    }))
+                                  }
+                                  className={cn(
+                                    'flex w-full items-center gap-1.5 py-0.5 pr-2 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
+                                    nested ? 'pl-4' : 'pl-0',
+                                  )}
+                                >
+                                  <ChevronDown
+                                    className={cn(
+                                      'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                                      checkOpen ? 'rotate-0' : '-rotate-90',
+                                    )}
+                                  />
+                                  {running ? (
+                                    <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                                  ) : (
+                                    <Icon className="h-3 w-3 shrink-0 opacity-70" />
+                                  )}
+                                  <span className={cn('min-w-0 flex-1 truncate', tone)}>
+                                    {checkTitle(check.kind)}
+                                    {running
+                                      ? ` · ${t('reviewCheckRunning')}`
+                                      : check.summary
+                                        ? ` · ${check.summary}`
+                                        : ''}
+                                  </span>
+                                </button>
+                                {checkOpen && (
+                                  <div
+                                    className={cn(
+                                      'space-y-1 pb-1.5 pr-2 text-[12px] leading-5 text-stone-500 dark:text-stone-400',
+                                      nested ? 'pl-9' : 'pl-5',
+                                    )}
+                                  >
+                                    {!hasItems && !check.body && !running && (
+                                      <div className="text-emerald-700 dark:text-emerald-300/90">
+                                        {check.summary || t('reviewFindingsClean')}
+                                      </div>
+                                    )}
+                                    {hasItems && (
+                                      <ul className="space-y-2">
+                                        {check.items!.map((item, idx) => (
+                                          <li
+                                            key={`${check.id}-${idx}`}
+                                            className={cn(
+                                              item.severity === 'error'
+                                                ? 'text-red-700 dark:text-red-300'
+                                                : 'text-amber-900 dark:text-amber-200',
+                                            )}
+                                          >
+                                            <div className="font-medium">{item.title}</div>
+                                            <div className="mt-0.5 text-[11px] opacity-85">
+                                              {item.detail}
+                                            </div>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                    {check.body && (
+                                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-stone-100/80 p-2 font-mono text-[11px] text-stone-600 dark:bg-stone-900/60 dark:text-stone-300">
+                                        {check.body}
+                                      </pre>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          };
+
+                          const renderedChecks = report.checks
+                            .map((check) => renderCheck(check, report.checks.length > 1))
+                            .filter(Boolean);
+
+                          if (renderedChecks.length === 1) {
+                            return (
+                              <div key={panelId} className="mt-2">
+                                {renderedChecks}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={panelId}
+                              className={cn(
+                                'mt-2 overflow-hidden',
+                                open &&
+                                  'rounded-md border border-stone-200/70 bg-stone-50/50 dark:border-stone-800/80 dark:bg-stone-900/40',
+                              )}
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setReasoningOpen((prev) => ({
+                                    ...prev,
+                                    [panelId]: !(prev[panelId] ?? true),
+                                  }))
+                                }
+                                className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-[12px] font-medium text-stone-600 hover:text-stone-800 dark:text-stone-300 dark:hover:text-stone-100"
+                              >
+                                <ChevronDown
+                                  className={cn(
+                                    'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                                    open ? 'rotate-0' : '-rotate-90',
+                                  )}
+                                />
+                                {live ? (
+                                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                                ) : (
+                                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                                )}
+                                <span>
+                                  {t('reviewPanel')}
+                                  {report.status === 'done' &&
+                                    (allClean
+                                      ? ''
+                                      : issueCount > 0
+                                        ? ` · ${t('reviewFindingsCount').replace('{count}', String(issueCount))}`
+                                        : '')}
+                                </span>
+                              </button>
+                              {open && (
+                                <div className="border-t border-stone-200/60 pb-1 dark:border-stone-800/80">
+                                  {renderedChecks}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        };
+
                         return (
                           <>
                             {message.images && message.images.length > 0 && (
@@ -6250,6 +6583,7 @@ export default function ChatContainer() {
                                     </div>
                                   ),
                                 )}
+                                {renderReviewPanel()}
                                 {streamGapSpinner}
                               </>
                             )}

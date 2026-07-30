@@ -309,16 +309,39 @@ interface Message {
   truncationReason?: string;
 }
 
+type ExternalReferenceSourceKind =
+  | 'web'
+  | 'notion'
+  | 'github'
+  | 'gmail'
+  | 'calendar'
+  | 'drive'
+  | 'google';
+
+type ReferenceSourceKind = 'upload' | ExternalReferenceSourceKind;
+
 type WebSearchSource = {
   title: string;
   url: string;
   snippet?: string;
   provider?: string;
   query?: string;
+  sourceKind?: ReferenceSourceKind;
   /** UI-only anchor for uploads already present in a user message. */
   messageId?: string;
   kind?: 'image' | 'file';
 };
+
+function referenceSourceKind(provider: string | undefined, toolName: string | undefined): ReferenceSourceKind {
+  const name = String(toolName || '').toLowerCase();
+  if (name.startsWith('gmail_') || name.startsWith('gmail-')) return 'gmail';
+  if (name.startsWith('calendar_') || name.startsWith('calendar-')) return 'calendar';
+  if (name.startsWith('drive_') || name.startsWith('drive-')) return 'drive';
+  if (provider === 'notion') return 'notion';
+  if (provider === 'github') return 'github';
+  if (provider === 'google') return 'google';
+  return 'web';
+}
 
 interface ChatSession {
   id: string;
@@ -408,6 +431,7 @@ function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
           snippet: r.snippet,
           provider: run.provider,
           query: run.query,
+          sourceKind: referenceSourceKind(run.provider, run.name),
         });
       }
     }
@@ -465,47 +489,7 @@ function collectUserUploadsFromMessages(messages: Message[]): WebSearchSource[] 
   return out;
 }
 
-function referenceSourcesHeading(
-  sources: WebSearchSource[],
-  t: (
-    key: 'webSearchSources' | 'notionSources' | 'googleSources' | 'referenceSources',
-  ) => string,
-): {
-  label: string;
-  useNotionIcon: boolean;
-  useGoogleIcon?: boolean;
-  useGitHubIcon?: boolean;
-  providerSuffix?: string;
-} {
-  if (sources.length === 0) {
-    return { label: t('webSearchSources'), useNotionIcon: false };
-  }
-  const providers = [
-    ...new Set(
-      sources.map((s) => s.provider).filter((p): p is string => Boolean(p && p !== 'none')),
-    ),
-  ];
-  if (providers.length === 1 && providers[0] === 'notion') {
-    return { label: t('notionSources'), useNotionIcon: true };
-  }
-  if (providers.length === 1 && providers[0] === 'google') {
-    return { label: t('googleSources'), useNotionIcon: false, useGoogleIcon: true };
-  }
-  if (providers.length === 1 && providers[0] === 'github') {
-    return { label: 'GitHub', useNotionIcon: false, useGitHubIcon: true };
-  }
-  if (providers.length === 1) {
-    return {
-      label: t('webSearchSources'),
-      useNotionIcon: false,
-      providerSuffix: providers[0],
-    };
-  }
-  if (providers.includes('notion') || providers.includes('google') || providers.includes('github')) {
-    return { label: t('referenceSources'), useNotionIcon: false };
-  }
-  return { label: t('webSearchSources'), useNotionIcon: false };
-}
+
 
 type SkillItem = { id: string; title: string; content: string };
 
@@ -739,8 +723,8 @@ export default function ChatContainer() {
   /** Past-day sidebar groups start collapsed; toggles remembered for this page load. */
   const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
   /**
-   * After Thought text goes idle but the first answer token has not arrived yet,
-   * show a "Generating reply…" placeholder instead of a frozen Thinking panel.
+   * After Thought / answer text goes idle but the turn is still open, show a
+   * textless spinner under the bubble (not a fake "Thinking…" label).
    */
   const [replyWaitByMessage, setReplyWaitByMessage] = useState<Record<string, boolean>>({});
 
@@ -767,6 +751,8 @@ export default function ChatContainer() {
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
   const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
+  /** Per-source groups within Reference Material; all start collapsed. */
+  const [referenceGroupsOpen, setReferenceGroupsOpen] = useState<Record<string, boolean>>({});
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   /** When the user explicitly clears web sources, suppress auto-restore from history. */
@@ -1251,10 +1237,28 @@ export default function ChatContainer() {
     }
     return [...fromThread, ...pending];
   }, [messages, attachments]);
-  const referenceSourcesMeta = useMemo(
-    () => referenceSourcesHeading(webSources, t),
-    [webSources, t, locale],
-  );
+
+  const referenceSourceGroups = useMemo(() => {
+    const order: ExternalReferenceSourceKind[] = [
+      'web',
+      'notion',
+      'github',
+      'gmail',
+      'calendar',
+      'drive',
+      'google',
+    ];
+    const grouped = new Map<ExternalReferenceSourceKind, WebSearchSource[]>();
+    for (const source of webSources) {
+      const kind = source.sourceKind === 'upload'
+        ? 'web'
+        : source.sourceKind || referenceSourceKind(source.provider, undefined);
+      grouped.set(kind, [...(grouped.get(kind) || []), source]);
+    }
+    return order
+      .map((kind) => ({ kind, sources: grouped.get(kind) || [] }))
+      .filter((group) => group.sources.length > 0);
+  }, [webSources]);
 
   const openUploadReference = (source: WebSearchSource) => {
     if (source.messageId) {
@@ -1365,10 +1369,7 @@ export default function ChatContainer() {
       ),
     );
     if (grew && collected.length > 0) {
-      queueMicrotask(() => {
-        setIsContextPanelOpen(true);
-        setReferenceExpanded(true);
-      });
+      queueMicrotask(() => setIsContextPanelOpen(true));
     }
   }, [activeSessionId, messages, activeSession?.webSources, webSourcesCleared]);
   const activeSkills = useMemo(
@@ -2240,6 +2241,7 @@ export default function ChatContainer() {
                   snippet: result.snippet,
                   provider: run.provider,
                   query: run.query,
+                  sourceKind: referenceSourceKind(run.provider, run.name),
                 });
               }
               nextSession.webSources = [...sourceByUrl.values()].slice(-40);
@@ -2248,10 +2250,7 @@ export default function ChatContainer() {
             }
             if ((nextSession.webSources?.length || 0) > 0) {
               if (!s.webSourcesCleared) setWebSourcesCleared(false);
-              queueMicrotask(() => {
-                setIsContextPanelOpen(true);
-                setReferenceExpanded(true);
-              });
+              queueMicrotask(() => setIsContextPanelOpen(true));
             }
             return nextSession;
           }
@@ -5772,22 +5771,14 @@ export default function ChatContainer() {
                             )
                             .filter(Boolean);
 
-                          // Nothing yet but the turn is in flight: keep a labeled Thinking
-                          // row until activity arrives (distinct from the post-content gap).
+                          // Nothing yet — do NOT label this as Thinking. Waiting for the
+                          // first token is not the same as chain-of-thought; the textless
+                          // gap spinner under the timeline covers that state.
                           if (rendered.length === 0) {
-                            if (!segLive || replyWait) return null;
-                            return (
-                              <div
-                                key={seg.id}
-                                className="flex items-center gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400"
-                              >
-                                <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                                <span>{t('thinking')}</span>
-                              </div>
-                            );
+                            return null;
                           }
 
-                          // A single step is self-describing (Thinking / Searched the web …),
+                          // A single step is self-describing (Thought / Searched the web …),
                           // so the outer "Process" header would only add noise.
                           if (rendered.length === 1) {
                             return <div key={seg.id}>{rendered}</div>;
@@ -5844,9 +5835,16 @@ export default function ChatContainer() {
                         const toolPendingUi = (message.toolRuns || []).some(
                           (r) => r.status === 'start',
                         );
-                        // Textless idle marker — never looks like model prose.
+                        const hasReasoningActivity = activitySteps.some(
+                          (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
+                        );
+                        // Textless wait marker: first-token gap (no thought yet) OR idle
+                        // after narration. Never pretends the model is "thinking".
                         const streamGapSpinner =
-                          replyWait && !toolPendingUi ? (
+                          messageIsStreaming &&
+                          message.incomplete &&
+                          !toolPendingUi &&
+                          (replyWait || (awaitingFirstContent && !hasReasoningActivity)) ? (
                             <div
                               className="flex items-center py-1.5"
                               aria-label={t('generatingReply')}
@@ -6971,26 +6969,6 @@ export default function ChatContainer() {
 
                         </span>
                         <div className="flex items-center gap-1">
-                          {webSources.length > 0 && (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmClearSourcesOpen(true);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setConfirmClearSourcesOpen(true);
-                                }
-                              }}
-                              className="rounded px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-400 hover:text-red-500"
-                            >
-                              {t('clear')}
-                            </span>
-                          )}
                           <ChevronDown
                             className={cn(
                               'h-3.5 w-3.5 text-stone-400 transition-transform',
@@ -7010,53 +6988,55 @@ export default function ChatContainer() {
                             <div className="max-h-64 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
                               {userUploadReferences.length > 0 && (
                                 <div className="space-y-1.5">
-                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                                    {t('uploadedReferenceFiles')}
-                                  </div>
-                                  <ul className="space-y-1">
-                                    {userUploadReferences.map((src) => {
-                                      const isImg = src.kind === 'image';
-                                      return (
-                                        <li key={`${src.messageId || 'pending'}-${src.title}-${src.url}`}>
-                                          <button
-                                            type="button"
-                                            onClick={() => openUploadReference(src)}
-                                            className="flex w-full items-start gap-2 rounded-md px-1.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-100 dark:hover:bg-stone-800/80"
-                                          >
-                                            {isImg && src.url ? (
-                                              <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
-                                                <img
-                                                  src={src.url}
-                                                  alt=""
-                                                  className="h-full w-full object-cover"
-                                                />
-                                              </span>
-                                            ) : (
-                                              <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
-                                            )}
-                                            <span className="min-w-0 flex-1">
-                                              <span className="block truncate font-medium text-stone-700 dark:text-stone-200">
-                                                {src.title}
-                                              </span>
-                                              {src.snippet ? (
-                                                <span className="mt-0.5 block line-clamp-3 whitespace-pre-wrap text-[11px] leading-4 text-stone-500">
-                                                  {src.snippet}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setReferenceGroupsOpen((prev) => ({
+                                        ...prev,
+                                        uploads: !prev.uploads,
+                                      }))
+                                    }
+                                    className="flex w-full items-center justify-between rounded-md px-1.5 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/80"
+                                  >
+                                    <span>{t('uploadedReferenceFiles')} · {userUploadReferences.length}</span>
+                                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', referenceGroupsOpen.uploads && 'rotate-180')} />
+                                  </button>
+                                  {referenceGroupsOpen.uploads && (
+                                    <ul className="space-y-1">
+                                      {userUploadReferences.map((src) => {
+                                        const isImg = src.kind === 'image';
+                                        return (
+                                          <li key={`${src.messageId || 'pending'}-${src.title}-${src.url}`}>
+                                            <button
+                                              type="button"
+                                              onClick={() => openUploadReference(src)}
+                                              className="flex w-full items-start gap-2 rounded-md px-1.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-100 dark:hover:bg-stone-800/80"
+                                            >
+                                              {isImg && src.url ? (
+                                                <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
+                                                  <img src={src.url} alt="" className="h-full w-full object-cover" />
                                                 </span>
-                                              ) : null}
-                                            </span>
-                                          </button>
-                                        </li>
-                                      );
-                                    })}
-                                  </ul>
+                                              ) : (
+                                                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
+                                              )}
+                                              <span className="min-w-0 flex-1">
+                                                <span className="block truncate font-medium text-stone-700 dark:text-stone-200">{src.title}</span>
+                                                {src.snippet ? (
+                                                  <span className="mt-0.5 block line-clamp-3 whitespace-pre-wrap text-[11px] leading-4 text-stone-500">{src.snippet}</span>
+                                                ) : null}
+                                              </span>
+                                            </button>
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                  )}
                                 </div>
                               )}
-                              {webSources.length > 0 && (
-                                <div className={cn("space-y-1.5", userUploadReferences.length > 0 && "pt-2 border-t border-stone-100 dark:border-stone-800")}>
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                                      {t('searchedSources')}
-                                    </span>
+                              {referenceSourceGroups.length > 0 && (
+                                <div className={cn('space-y-1.5', userUploadReferences.length > 0 && 'border-t border-stone-100 pt-2 dark:border-stone-800')}>
+                                  <div className="flex items-center justify-between gap-2 px-1.5">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">{t('searchedSources')}</span>
                                     <button
                                       type="button"
                                       onClick={() => setConfirmClearSourcesOpen(true)}
@@ -7065,21 +7045,62 @@ export default function ChatContainer() {
                                       {t('clearWebSources')}
                                     </button>
                                   </div>
-                                  <ul className="space-y-1">
-                                    {webSources.map((src) => (
-                                      <li key={src.url}>
-                                        <a
-                                          href={src.url}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="block truncate rounded-md px-1.5 py-1 text-xs text-stone-600 hover:bg-stone-100 hover:underline dark:text-stone-300 dark:hover:bg-stone-800/80"
-                                          title={src.snippet || src.title}
+                                  {referenceSourceGroups.map((group) => {
+                                    const labelKey: {
+                                      [K in ExternalReferenceSourceKind]:
+                                        | 'webSearchGroup'
+                                        | 'notionGroup'
+                                        | 'githubGroup'
+                                        | 'gmailGroup'
+                                        | 'calendarGroup'
+                                        | 'driveGroup'
+                                        | 'googleGroup';
+                                    } = {
+                                      web: 'webSearchGroup',
+                                      notion: 'notionGroup',
+                                      github: 'githubGroup',
+                                      gmail: 'gmailGroup',
+                                      calendar: 'calendarGroup',
+                                      drive: 'driveGroup',
+                                      google: 'googleGroup',
+                                    };
+                                    const groupLabel = labelKey[group.kind];
+                                    const isOpen = Boolean(referenceGroupsOpen[group.kind]);
+                                    return (
+                                      <div key={group.kind} className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setReferenceGroupsOpen((prev) => ({
+                                              ...prev,
+                                              [group.kind]: !prev[group.kind],
+                                            }))
+                                          }
+                                          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
                                         >
-                                          {src.title || src.url}
-                                        </a>
-                                      </li>
-                                    ))}
-                                  </ul>
+                                          <span>{t(groupLabel)} · {group.sources.length}</span>
+                                          <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', isOpen && 'rotate-180')} />
+                                        </button>
+                                        {isOpen && (
+                                          <ul className="space-y-1 px-1.5 pb-1.5">
+                                            {group.sources.map((src) => (
+                                              <li key={src.url}>
+                                                <a
+                                                  href={src.url}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="block truncate rounded-md px-1.5 py-1 text-xs text-stone-600 hover:bg-stone-100 hover:underline dark:text-stone-300 dark:hover:bg-stone-800/80"
+                                                  title={src.snippet || src.title}
+                                                >
+                                                  {src.title || src.url}
+                                                </a>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
 

@@ -6957,24 +6957,10 @@ export default function ChatContainer() {
                                 </div>
                               )}
                               {webSources.length > 0 && (
-                                <div className="space-y-1.5">
+                                <div className={cn("space-y-1.5", userUploadReferences.length > 0 && "pt-2 border-t border-stone-100 dark:border-stone-800")}>
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                                      {referenceSourcesMeta.useNotionIcon ? (
-                                        <NotionLogo className="h-3 w-3 shrink-0" />
-                                      ) : referenceSourcesMeta.useGoogleIcon ? (
-                                        <GoogleLogo className="h-3 w-3 shrink-0" />
-                                      ) : referenceSourcesMeta.useGitHubIcon ? (
-                                        <GitHubLogo className="h-3 w-3 shrink-0" />
-                                      ) : (
-                                        <Globe className="h-3 w-3" />
-                                      )}
-                                      {referenceSourcesMeta.label}
-                                      {referenceSourcesMeta.providerSuffix && (
-                                        <span className="font-medium normal-case tracking-normal opacity-70">
-                                          · {referenceSourcesMeta.providerSuffix}
-                                        </span>
-                                      )}
+                                      {t('searchedSources')}
                                     </span>
                                     <button
                                       type="button"

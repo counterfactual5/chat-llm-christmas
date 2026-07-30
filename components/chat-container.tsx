@@ -5560,7 +5560,7 @@ export default function ChatContainer() {
                           }
 
                           const open = reasoningOpen[seg.id] ?? segLive;
-                          const segToolCount = seg.steps.filter((s) => s.kind === 'tool').length;
+                          const segStepCount = rendered.length;
                           return (
                             <div
                               key={seg.id}
@@ -5593,9 +5593,7 @@ export default function ChatContainer() {
                                   <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
                                 ) : null}
                                 <span>{t('process')}</span>
-                                {segToolCount > 0 && (
-                                  <span className="opacity-50">· {segToolCount}</span>
-                                )}
+                                <span className="opacity-50">· {segStepCount}</span>
                               </button>
                               {open && (
                                 <div className="space-y-1.5 px-2 pb-1.5 pl-6">{rendered}</div>

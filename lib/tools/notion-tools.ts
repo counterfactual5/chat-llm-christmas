@@ -8,6 +8,9 @@ import {
 const NOTION_SYSTEM_PROMPT = [
   "You have Notion MCP tools for the user's connected workspace (full page access matching their Notion permissions).",
   'Prefer notion-search to find pages, notion-fetch to read content (or id "self" for workspace/user identity), and create/update tools to write.',
+  'notion-update-page REQUIRES a top-level string page_id (and usually command). Never omit page_id; never nest it under pages[], data, or parent — those shapes are invalid.',
+  'If you do not already have a page_id from a prior tool result in THIS conversation, call notion-search or notion-fetch first, then pass that id into notion-update-page.',
+  'Example: {"page_id":"<id from tool result>","command":"replace_content","new_str":"...markdown..."}.',
   'Do not invent Notion page IDs, titles, URLs, or content — only use tool results.',
   'If write tools are unavailable or fail, say so clearly and offer copy-pasteable markdown instead of fabricating app.notion.com / notion.so links.',
   'Ask before making large destructive edits when the user intent is ambiguous.',
@@ -26,6 +29,85 @@ function parseArgs(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/** Pull a page id from a Notion URL or bare UUID-ish string. */
+function extractPageIdCandidate(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (!s) return null;
+  // Notion URLs often end with a 32-hex id (with or without dashes).
+  const fromUrl = s.match(
+    /(?:notion\.(?:so|site)|notion\.com)\/(?:[^?#]*?-)?([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:[?#]|$)/,
+  );
+  if (fromUrl?.[1]) return fromUrl[1];
+  if (/^[0-9a-fA-F]{32}$/.test(s) || /^[0-9a-fA-F-]{36}$/.test(s)) return s;
+  return null;
+}
+
+/**
+ * Models often misplace page_id (id / pageId / nested under data|pages|parent).
+ * Hoist common aliases before calling MCP so a retry isn't always required.
+ */
+function normalizeNotionArgs(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...args };
+
+  const pickPageId = (): string | null => {
+    const direct =
+      extractPageIdCandidate(out.page_id) ||
+      extractPageIdCandidate(out.pageId) ||
+      extractPageIdCandidate(out.id) ||
+      extractPageIdCandidate(out.page) ||
+      extractPageIdCandidate(out.url);
+    if (direct) return direct;
+
+    const data = out.data;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const d = data as Record<string, unknown>;
+      const nested =
+        extractPageIdCandidate(d.page_id) ||
+        extractPageIdCandidate(d.pageId) ||
+        extractPageIdCandidate(d.id);
+      if (nested) return nested;
+    }
+
+    const parent = out.parent;
+    if (parent && typeof parent === 'object' && !Array.isArray(parent)) {
+      const p = parent as Record<string, unknown>;
+      // parent.page_id is for create under a parent — for update-page the target is page_id.
+      const nested = extractPageIdCandidate(p.page_id) || extractPageIdCandidate(p.pageId);
+      if (nested && /update-page|update_page/i.test(toolName)) return nested;
+    }
+
+    if (Array.isArray(out.pages) && out.pages[0] && typeof out.pages[0] === 'object') {
+      const row = out.pages[0] as Record<string, unknown>;
+      const nested =
+        extractPageIdCandidate(row.page_id) ||
+        extractPageIdCandidate(row.pageId) ||
+        extractPageIdCandidate(row.id);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  if (/update-page|update_page|move-page|duplicate|fetch/i.test(toolName)) {
+    if (!extractPageIdCandidate(out.page_id)) {
+      const hoisted = pickPageId();
+      if (hoisted) out.page_id = hoisted;
+    }
+  }
+
+  return out;
+}
+
+function missingPageIdError(toolName: string): string {
+  return [
+    `Missing required top-level page_id for ${toolName}.`,
+    'Resolve the target page with notion-search or notion-fetch (use an id from THAT tool result),',
+    'then retry with arguments like:',
+    '{"page_id":"<id>","command":"replace_content","new_str":"..."}',
+    'Do not nest page_id under pages[], data, or parent.',
+  ].join(' ');
 }
 
 function sanitizeToolName(name: string): string {
@@ -96,10 +178,45 @@ function extractUiResults(
 
 function mcpToolToChatTool(def: McpToolDefinition): ChatTool {
   const name = sanitizeToolName(def.name);
-  const parameters =
+  let parameters =
     def.inputSchema && typeof def.inputSchema === 'object'
-      ? (def.inputSchema as Record<string, unknown>)
+      ? ({ ...(def.inputSchema as Record<string, unknown>) } as Record<string, unknown>)
       : { type: 'object', properties: {} };
+
+  let description = String(def.description || `Notion MCP tool: ${name}`).slice(0, 900);
+  if (/update-page|update_page/i.test(name)) {
+    description = [
+      'Update a Notion page. REQUIRED: top-level page_id (string from a prior search/fetch result).',
+      'Also pass command (e.g. replace_content) and the fields that command needs (e.g. new_str).',
+      'Never omit page_id; never nest it under pages/data/parent.',
+      description,
+    ]
+      .join(' ')
+      .slice(0, 1024);
+    // Reinforce in the JSON schema the model sees for argument planning.
+    const props =
+      parameters.properties && typeof parameters.properties === 'object'
+        ? ({ ...(parameters.properties as Record<string, unknown>) } as Record<string, unknown>)
+        : {};
+    const pageIdProp: Record<string, unknown> =
+      props.page_id && typeof props.page_id === 'object'
+        ? { ...(props.page_id as Record<string, unknown>) }
+        : { type: 'string' };
+    pageIdProp.description = [
+      String(pageIdProp.description || '').trim(),
+      'Required top-level page UUID/id from notion-search or notion-fetch. Do not nest.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    props.page_id = pageIdProp;
+    parameters = { ...parameters, properties: props };
+    const required = Array.isArray(parameters.required)
+      ? [...(parameters.required as unknown[])]
+      : [];
+    if (!required.map(String).includes('page_id')) {
+      parameters = { ...parameters, required: ['page_id', ...required.map(String)] };
+    }
+  }
 
   return {
     name,
@@ -107,7 +224,7 @@ function mcpToolToChatTool(def: McpToolDefinition): ChatTool {
       type: 'function',
       function: {
         name,
-        description: String(def.description || `Notion MCP tool: ${name}`).slice(0, 1024),
+        description,
         parameters,
       },
     },
@@ -124,14 +241,34 @@ function mcpToolToChatTool(def: McpToolDefinition): ChatTool {
         };
       }
 
-      const args = parseArgs(rawArguments);
+      let args = normalizeNotionArgs(name, parseArgs(rawArguments));
       // Soft fallback for search-like tools when model omits query.
       if (
         /search/i.test(name) &&
         !args.query &&
         (fallbackQuery || ctx.userAsk)
       ) {
-        args.query = String(fallbackQuery || ctx.userAsk).slice(0, 200);
+        args = { ...args, query: String(fallbackQuery || ctx.userAsk).slice(0, 200) };
+      }
+
+      // Fail fast with an actionable message so the next tool round can self-correct.
+      if (
+        /update-page|update_page/i.test(name) &&
+        !extractPageIdCandidate(args.page_id)
+      ) {
+        const error = missingPageIdError(name);
+        ctx.send({
+          tool: {
+            status: 'done',
+            name,
+            query: queryHint(name, args),
+            provider: 'notion',
+            write: true,
+            results: [],
+            error: error.slice(0, 280),
+          },
+        });
+        return { content: JSON.stringify({ ok: false, error, hint: 'retry_with_page_id' }) };
       }
 
       const query = queryHint(name, args);
@@ -166,7 +303,13 @@ function mcpToolToChatTool(def: McpToolDefinition): ChatTool {
 
         return {
           content: outcome.isError
-            ? JSON.stringify({ ok: false, error: outcome.content })
+            ? JSON.stringify({
+                ok: false,
+                error: outcome.content,
+                ...( /page_id|invalid_type/i.test(outcome.content)
+                  ? { hint: 'retry_with_top_level_page_id_from_search_or_fetch' }
+                  : {}),
+              })
             : outcome.content,
         };
       } catch (err: unknown) {

@@ -1828,7 +1828,7 @@ export default function ChatContainer() {
   }, [activeSessionId]);
 
   // While the assistant turn is still open but the stream has gone idle (no new
-  // content / thought / tool), show a "Generating reply…" placeholder — including
+  // content / thought / tool), show a textless spinner under the bubble — including
   // the common gap after narration and before the next tool_call token.
   useEffect(() => {
     if (!isActiveLoading || !activeSessionId) {
@@ -5753,8 +5753,8 @@ export default function ChatContainer() {
                           // Hard gate: never spin unless this session is actually
                           // streaming. Incomplete alone (e.g. after refresh) is not live.
                           const segLive = Boolean(seg.live && isActiveLoading);
-                          // While the stream is idle (replyWait), freeze Thought chrome and
-                          // show a dedicated generating line under it / after content.
+                          // While the stream is idle (replyWait), freeze Thought chrome;
+                          // the textless gap spinner is rendered after the timeline.
                           const thoughtStreaming = segLive && !replyWait;
                           const lastIdx = seg.steps.length - 1;
                           const rendered = seg.steps
@@ -5772,13 +5772,10 @@ export default function ChatContainer() {
                             )
                             .filter(Boolean);
 
-                          const showReplyPlaceholder =
-                            segLive && (replyWait || rendered.length === 0);
-
-                          // Nothing yet but the turn is in flight: a bare "Thinking…" line
-                          // until the idle timer flips to generatingReply.
-                          if (rendered.length === 0 && !replyWait) {
-                            if (!segLive) return null;
+                          // Nothing yet but the turn is in flight: keep a labeled Thinking
+                          // row until activity arrives (distinct from the post-content gap).
+                          if (rendered.length === 0) {
+                            if (!segLive || replyWait) return null;
                             return (
                               <div
                                 key={seg.id}
@@ -5790,28 +5787,14 @@ export default function ChatContainer() {
                             );
                           }
 
-                          const replyPlaceholder = showReplyPlaceholder ? (
-                            <div
-                              key={`${seg.id}-reply-wait`}
-                              className="flex items-center gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400"
-                            >
-                              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-                              <span>{t('generatingReply')}</span>
-                            </div>
-                          ) : null;
-
                           // A single step is self-describing (Thinking / Searched the web …),
-                          // so the outer "Process" header would only add noise — unless we
-                          // also have the reply-wait placeholder (then group as Process).
-                          if (rendered.length === 1 && !replyPlaceholder) {
+                          // so the outer "Process" header would only add noise.
+                          if (rendered.length === 1) {
                             return <div key={seg.id}>{rendered}</div>;
-                          }
-                          if (rendered.length === 0 && replyPlaceholder) {
-                            return <div key={seg.id}>{replyPlaceholder}</div>;
                           }
 
                           const open = reasoningOpen[seg.id] ?? segLive;
-                          const segStepCount = rendered.length + (replyPlaceholder ? 1 : 0);
+                          const segStepCount = rendered.length;
                           return (
                             <div
                               key={seg.id}
@@ -5847,10 +5830,7 @@ export default function ChatContainer() {
                                 <span className="opacity-50">· {segStepCount}</span>
                               </button>
                               {open && (
-                                <div className="space-y-1.5 px-2 pb-1.5 pl-6">
-                                  {rendered}
-                                  {replyPlaceholder}
-                                </div>
+                                <div className="space-y-1.5 px-2 pb-1.5 pl-6">{rendered}</div>
                               )}
                             </div>
                           );
@@ -5860,6 +5840,20 @@ export default function ChatContainer() {
                           isActiveLoading &&
                           message.id === lastMessage?.id &&
                           message.role === 'assistant';
+
+                        const toolPendingUi = (message.toolRuns || []).some(
+                          (r) => r.status === 'start',
+                        );
+                        // Textless idle marker — never looks like model prose.
+                        const streamGapSpinner =
+                          replyWait && !toolPendingUi ? (
+                            <div
+                              className="flex items-center py-1.5"
+                              aria-label={t('generatingReply')}
+                            >
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-stone-400 dark:text-stone-500" />
+                            </div>
+                          ) : null;
 
                         return (
                           <>
@@ -5902,20 +5896,25 @@ export default function ChatContainer() {
                                 )}
                               </div>
                             ) : (
-                              timelineSegments.map((seg) =>
-                                seg.type === 'process' ? (
-                                  renderProcessPanel(seg)
-                                ) : (
-                                  <div key={seg.id}>
-                                    {renderAnswerMarkdown(
-                                      seg.text,
-                                      answerStreaming &&
-                                        seg.id ===
-                                          [...timelineSegments].reverse().find((s) => s.type === 'content')?.id,
-                                    )}
-                                  </div>
-                                ),
-                              )
+                              <>
+                                {timelineSegments.map((seg) =>
+                                  seg.type === 'process' ? (
+                                    renderProcessPanel(seg)
+                                  ) : (
+                                    <div key={seg.id}>
+                                      {renderAnswerMarkdown(
+                                        seg.text,
+                                        answerStreaming &&
+                                          seg.id ===
+                                            [...timelineSegments]
+                                              .reverse()
+                                              .find((s) => s.type === 'content')?.id,
+                                      )}
+                                    </div>
+                                  ),
+                                )}
+                                {streamGapSpinner}
+                              </>
                             )}
                           </>
                         );

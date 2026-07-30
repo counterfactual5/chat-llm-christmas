@@ -63,6 +63,7 @@ const GMAIL_SYSTEM_PROMPT = [
   'Profile; search/read messages (incl. batch get) & threads; attachments; labels CRUD; drafts; send/reply/forward; modify/batch-modify; trash/untrash.',
   'For send/reply/forward/trash/label changes, confirm intent from the user message before calling.',
   'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
+  'Never claim you sent/replied unless a write tool in THIS turn returned success — narrating "已发送" without tool_calls is a hard failure.',
 ].join(' ');
 
 const CALENDAR_SYSTEM_PROMPT = [
@@ -70,6 +71,7 @@ const CALENDAR_SYSTEM_PROMPT = [
   'List/create calendars; list/get/create/update/delete/move events; recurring instances; free/busy; list/add/remove calendar ACL sharing.',
   'For create/update/delete/move/ACL, confirm intent from the user message before calling.',
   'Do not invent event IDs — only use tool results. Cite Calendar links when answering.',
+  'Never claim you created/updated an event unless a write tool in THIS turn returned success — narrating success without tool_calls is a hard failure.',
 ].join(' ');
 
 const DRIVE_SYSTEM_PROMPT = [
@@ -77,6 +79,7 @@ const DRIVE_SYSTEM_PROMPT = [
   'Search/get/read/export/upload; list folder children; create text/folder/shortcut; shared drives; copy; rename/move; trash/delete; permissions; comments.',
   'For share/trash/delete/create/upload/comments, confirm intent from the user message before calling.',
   'Do not invent file IDs — only use tool results. Cite Drive links when answering.',
+  'Never claim you uploaded/created/shared a file unless a write tool in THIS turn returned success — narrating success without tool_calls is a hard failure.',
 ].join(' ');
 
 function serviceSystemPrompt(service: 'gmail' | 'calendar' | 'drive'): string {

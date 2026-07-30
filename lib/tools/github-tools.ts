@@ -11,6 +11,8 @@ const GITHUB_SYSTEM_PROMPT = [
   'Use search/list tools before mutating when the user only asked to explore.',
   'For write actions (create issue, comment, merge, etc.), confirm intent from the user message before calling.',
   'Do not invent repository names, issue numbers, or URLs — only use tool results.',
+  'Never claim you created/commented/merged unless a write tool in THIS turn returned success with a real URL/id.',
+  'If you intend to write, you MUST emit a real GitHub write tool_call — narrating success without tools is a hard failure.',
   'Cite repo/issue/PR links from tool results when answering.',
 ].join(' ');
 

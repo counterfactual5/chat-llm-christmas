@@ -225,17 +225,125 @@ function narratesSearchInsteadOfCalling(text: string): boolean {
   );
 }
 
-/** Model claims a Notion write succeeded (often with a fake URL) but emitted no tool_calls. */
-function narratesNotionWriteInsteadOfCalling(text: string): boolean {
+type FakedToolSurface =
+  | 'notion'
+  | 'github'
+  | 'gmail'
+  | 'calendar'
+  | 'drive'
+  | 'web_search'
+  | 'web_read';
+
+/**
+ * Detect when the model narrates a successful tool action (write / search / read)
+ * without emitting tool_calls. Scoped to surfaces that are actually enabled.
+ */
+function detectFakedToolNarration(
+  text: string,
+  opts: { searchEnabled: boolean; integrations: string[] },
+): FakedToolSurface[] {
   const t = String(text || '');
-  if (!t.trim()) return false;
-  const hasNotionUrl = /(app\.notion\.com|notion\.so|notion\.site)\//i.test(t);
-  const claimsWrite =
-    /(正在(更新|写入|创建)|已(经)?(更新|写入|创建|改好|重构)|更新页面|写入.*页面|按你的要求重构|创建了?(这个|一个)?(页面|模板))/i.test(
-      t,
-    ) ||
-    /(updated|created|wrote|writing)\s+(the\s+)?(notion\s+)?page/i.test(t);
-  return claimsWrite && (hasNotionUrl || /notion|页面|模板/i.test(t));
+  if (!t.trim()) return [];
+  const set = new Set(
+    (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
+  );
+  const found: FakedToolSurface[] = [];
+
+  if (set.has('notion')) {
+    const hasNotionUrl = /(app\.notion\.com|notion\.so|notion\.site)\//i.test(t);
+    const claimsWrite =
+      /(正在(更新|写入|创建)|已(经)?(更新|写入|创建|改好|重构)|更新页面|写入.*页面|按你的要求重构|创建了?(这个|一个)?(页面|模板))/i.test(
+        t,
+      ) || /(updated|created|wrote|writing)\s+(the\s+)?(notion\s+)?page/i.test(t);
+    if (claimsWrite && (hasNotionUrl || /notion|页面|模板/i.test(t))) {
+      found.push('notion');
+    }
+  }
+
+  if (set.has('github')) {
+    const hasGhUrl = /github\.com\//i.test(t);
+    const claimsWrite =
+      /(创建|提交|打开|评论).{0,12}(issue|PR|pull request|拉取请求)|已(创建|提交|评论|打开).{0,12}(issue|PR)|created (an? )?(issue|PR|pull request)|opened (an? )?(PR|pull request)|commented on/i.test(
+        t,
+      );
+    if (claimsWrite || (hasGhUrl && /(创建|提交|issue|PR|pull request)/i.test(t))) {
+      found.push('github');
+    }
+  }
+
+  if (set.has('gmail')) {
+    if (
+      /(已(经)?(发送|回复|转发)|正在发送).{0,8}(邮件|邮箱|gmail)|sent (the )?(email|mail)|replied to/i.test(
+        t,
+      ) ||
+      (/mail\.google\.com|gmail/i.test(t) && /(发送|回复|sent|reply)/i.test(t))
+    ) {
+      found.push('gmail');
+    }
+  }
+
+  if (set.has('calendar')) {
+    if (
+      /(已(经)?(创建|添加|安排)|正在(创建|添加)).{0,10}(日程|日历|会议|event)|created (a )?(calendar )?event|scheduled/i.test(
+        t,
+      ) ||
+      (/calendar\.google\.com/i.test(t) && /(创建|日程|event|scheduled)/i.test(t))
+    ) {
+      found.push('calendar');
+    }
+  }
+
+  if (set.has('drive')) {
+    if (
+      /(已(经)?(上传|创建|分享)|正在(上传|创建)).{0,10}(文件|文档|Drive|网盘)|uploaded (a )?file|created (a )?doc/i.test(
+        t,
+      ) ||
+      (/drive\.google\.com/i.test(t) && /(上传|创建|分享|upload)/i.test(t))
+    ) {
+      found.push('drive');
+    }
+  }
+
+  // Search / read: only when those tools are on, and the model invents concrete
+  // result payloads (links + “根据搜索”) rather than merely saying it will look up.
+  if (opts.searchEnabled) {
+    if (
+      /(根据(联网)?搜索|搜索(结果|显示|表明)|查到了|检索到)|according to (my |the )?(web )?search|I found the following links/i.test(
+        t,
+      ) &&
+      /https?:\/\//i.test(t)
+    ) {
+      found.push('web_search');
+    }
+    if (
+      /(我(已经|已)?读完|根据(该|此)页|页面内容显示)|I (have )?read (the )?(page|article)|according to the page/i.test(
+        t,
+      ) &&
+      /https?:\/\//i.test(t)
+    ) {
+      found.push('web_read');
+    }
+  }
+
+  return found;
+}
+
+function fakeToolCorrectionPrompt(surfaces: FakedToolSurface[]): string {
+  const labels: Record<FakedToolSurface, string> = {
+    notion: 'Notion write',
+    github: 'GitHub write',
+    gmail: 'Gmail send/reply',
+    calendar: 'Google Calendar write',
+    drive: 'Google Drive write',
+    web_search: 'web_search',
+    web_read: 'web_read',
+  };
+  const list = surfaces.map((s) => labels[s]).join(', ');
+  return [
+    `You claimed a successful tool action (${list}) in the message above, but you did not emit any tool_calls in THIS turn.`,
+    'Do one of the following now via real API tool_calls: call the appropriate tool(s) with real arguments from prior results,',
+    'OR clearly retract the claim and say the action was NOT performed — do not invent notion.so / github.com / google.com result links or fake tool payloads.',
+  ].join(' ');
 }
 
 function extractToolCalls(message: any): Array<{
@@ -1036,27 +1144,24 @@ export async function POST(req: NextRequest) {
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
-                // Claimed a Notion write (often with a fabricated URL) but never emitted
-                // tool_calls — push a corrective turn and keep the tools loop going.
-                if (
-                  authorizedIntegrations.includes('notion') &&
-                  streamedContent &&
-                  narratesNotionWriteInsteadOfCalling(streamedContent) &&
-                  round < MAX_TOOL_ROUNDS - 1
-                ) {
-                  workingMessages.push({
-                    role: 'assistant',
-                    content: streamedContent,
+                // Claimed a tool success (Notion / GitHub / Google / web) without
+                // emitting tool_calls — push a corrective turn and keep the loop going.
+                if (streamedContent && round < MAX_TOOL_ROUNDS - 1) {
+                  const faked = detectFakedToolNarration(streamedContent, {
+                    searchEnabled,
+                    integrations: authorizedIntegrations,
                   });
-                  workingMessages.push({
-                    role: 'user',
-                    content: [
-                      'You claimed to create/update a Notion page in the message above, but you did not call any Notion write tool in THIS turn.',
-                      'Do one of the following now via real tool_calls: call the appropriate Notion MCP write tool with real arguments from prior tool results,',
-                      'OR clearly retract the claim and say the page was NOT updated — do not invent app.notion.com / notion.so links.',
-                    ].join(' '),
-                  });
-                  break;
+                  if (faked.length) {
+                    workingMessages.push({
+                      role: 'assistant',
+                      content: streamedContent,
+                    });
+                    workingMessages.push({
+                      role: 'user',
+                      content: fakeToolCorrectionPrompt(faked),
+                    });
+                    break;
+                  }
                 }
                 // Malformed / aborted tool_calls (e.g. deltas without a function name —
                 // common on weaker free models). Content was already streamed as content.

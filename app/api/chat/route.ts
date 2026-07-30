@@ -1137,6 +1137,29 @@ export async function POST(req: NextRequest) {
                     lastToolRoundHadFailure = false;
                     break;
                   }
+                  // Early DONE used to skip runFinalCompletion entirely — so Auto-review
+                  // post-audit never ran on "model said stop after narration" turns.
+                  // Soft-audit here for visibility; mid-turn correction above should
+                  // already have forced tool_calls when rounds remain.
+                  if (autoReview) {
+                    const pendingLate = detectPendingToolIntent(streamedContent, {
+                      searchEnabled,
+                      integrations: authorizedIntegrations,
+                    });
+                    const fakedLate = detectFakedToolNarration(streamedContent, {
+                      searchEnabled,
+                      integrations: authorizedIntegrations,
+                      skillCreator: skillCreatorOn,
+                    });
+                    if (pendingLate.length || fakedLate.length) {
+                      emitReviewerStep(send, {
+                        status: 'done',
+                        phase: 'audit',
+                        surfaces: pendingLate.length ? pendingLate : fakedLate,
+                        kind: pendingLate.length ? 'intent' : 'success',
+                      });
+                    }
+                  }
                   send(streamCompletionPayload(roundFinishReason || 'stop'));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   controller.close();
@@ -1286,16 +1309,21 @@ export async function POST(req: NextRequest) {
             // final text without tool receipts. Surface in Process; don't auto-run
             // another generation round.
             if (sawContent && autoReview) {
-              const hits = detectFakedToolNarration(contentBuf, {
+              const pendingHits = detectPendingToolIntent(contentBuf, {
+                searchEnabled,
+                integrations: authorizedIntegrations,
+              });
+              const fakedHits = detectFakedToolNarration(contentBuf, {
                 searchEnabled,
                 integrations: authorizedIntegrations,
                 skillCreator: skillCreatorOn,
               });
-              if (hits.length) {
+              if (pendingHits.length || fakedHits.length) {
                 emitReviewerStep(send, {
                   status: 'done',
                   phase: requestReview && !autoReview ? 'requested' : 'audit',
-                  surfaces: hits,
+                  surfaces: pendingHits.length ? pendingHits : fakedHits,
+                  kind: pendingHits.length ? 'intent' : 'success',
                 });
               }
             }

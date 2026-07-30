@@ -2076,9 +2076,20 @@ export default function ChatContainer() {
               ...last,
               text: last.text + chunk,
             };
+          } else if (isTrivialReasoningText(chunk) && last?.kind === 'content') {
+            // Sentence tail misrouted as reasoning after a content/tool seam
+            // (e.g. "……手册" + reasoning "版本。") — splice back onto the answer.
+            activity[activity.length - 1] = {
+              ...last,
+              text: last.text + chunk,
+            };
+            return {
+              ...m,
+              content: stripMessageStamp(m.content + chunk),
+              activity,
+              incomplete: true,
+            };
           } else if (isTrivialReasoningText(chunk)) {
-            // Seam crumbs after content/tools ("版本。") — keep on the message
-            // reasoning string but do not spawn a new Thought step.
             return {
               ...m,
               reasoning: (m.reasoning || '') + chunk,

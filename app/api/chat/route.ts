@@ -889,11 +889,6 @@ export async function POST(req: NextRequest) {
           if (activeToolDefs.length > 0 && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
               let streamedContent = '';
-              // The slice of streamedContent the gate kept back (narration that arrived
-              // after the first tool_call delta). Only this may be replayed as reasoning:
-              // anything already sent as content would show up twice — once in the answer
-              // and once as a Thought step landing *after* it in the timeline.
-              let withheldContent = '';
               let streamedReasoning = '';
               // Accumulate streamed tool_calls: index → {id, name, arguments}
               const toolCallDeltas = new Map<number, { id: string; name: string; arguments: string }>();
@@ -954,7 +949,7 @@ export async function POST(req: NextRequest) {
                 break;
               }
 
-              // Whether we've seen any tool_call delta (tells us not to stream content to client).
+              // Whether we've seen any tool_call delta (used for post-stream routing).
               let hasToolCallDeltas = false;
 
               try {
@@ -978,6 +973,9 @@ export async function POST(req: NextRequest) {
                   }
 
                   // --- content / reasoning ---
+                  // Always stream content as content, even after tool_call deltas start.
+                  // Holding the tail back and replaying it as reasoning splits sentences
+                  // across the bubble and a stray Thought step (e.g. "……手册" + Thought"版本。").
                   const split = splitCompletionDelta(delta, { reasoningAsContent });
                   let contentChunk = split.content;
                   if (split.reasoning) {
@@ -985,15 +983,11 @@ export async function POST(req: NextRequest) {
                     send({ reasoning: split.reasoning });
                   }
 
-                  // Stream content to the client only when no tool_calls are being built.
-                  // When the model calls tools it sometimes emits a brief narration before
-                  // the tool_calls array — we buffer that and send it as reasoning instead.
                   if (contentChunk) {
                     contentChunk = roundStampStripper.push(contentChunk);
                     if (contentChunk) {
                       streamedContent += contentChunk;
-                      if (hasToolCallDeltas) withheldContent += contentChunk;
-                      else send({ content: contentChunk });
+                      send({ content: contentChunk });
                     }
                   }
                 }
@@ -1011,8 +1005,7 @@ export async function POST(req: NextRequest) {
                 const rest = roundStampStripper.flush();
                 if (rest) {
                   streamedContent += rest;
-                  if (hasToolCallDeltas) withheldContent += rest;
-                  else send({ content: rest });
+                  send({ content: rest });
                 }
               }
 
@@ -1027,23 +1020,13 @@ export async function POST(req: NextRequest) {
                   streamedContent &&
                   narratesSearchInsteadOfCalling(streamedContent)
                 ) {
-                  // The narration is already in the bubble and cannot be unsent, so
-                  // only flush whatever the gate held back.
-                  if (withheldContent.trim()) {
-                    send({ reasoning: stripMessageStamp(String(withheldContent)) });
-                  }
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
                 // Malformed / aborted tool_calls (e.g. deltas without a function name —
-                // common on weaker free models). Content was buffered and NOT streamed
-                // to the client because hasToolCallDeltas gated it. Do not early-return
-                // with a blank bubble: park any narration in reasoning and fall through
-                // to the final completion pass without tools.
+                // common on weaker free models). Content was already streamed as content.
+                // Fall through to the final completion pass without tools.
                 if (hasToolCallDeltas) {
-                  if (withheldContent.trim()) {
-                    send({ reasoning: stripMessageStamp(String(withheldContent)) });
-                  }
                   break;
                 }
                 // Only end here when the model already streamed a user-visible answer.
@@ -1058,12 +1041,8 @@ export async function POST(req: NextRequest) {
                 break;
               }
 
-              // Tool calls present — park only the narration the client never saw.
-              // Narration that already streamed stays where it landed in the timeline;
-              // the real answer still comes from the final stage after tools execute.
-              if (withheldContent.trim()) {
-                send({ reasoning: stripMessageStamp(String(withheldContent)) });
-              }
+              // Tool calls present — any narration already landed in the bubble as content.
+              // The follow-up answer still comes from the final stage after tools execute.
 
               usedTools = true;
               workingMessages.push({

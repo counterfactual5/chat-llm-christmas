@@ -6,11 +6,17 @@ import { createImageUnderstandTool } from '@/lib/tools/image-understand-tool';
 import { createNotionMcpTools } from '@/lib/tools/notion-tools';
 import { createGitHubMcpTools } from '@/lib/tools/github-tools';
 import { createGoogleTools } from '@/lib/tools/google-tools';
+import { createSaveSkillTool } from '@/lib/tools/save-skill-tool';
 import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google-services';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {
-  return [createWebSearchTool(), createWebReadTool(), createImageUnderstandTool()];
+  return [
+    createWebSearchTool(),
+    createWebReadTool(),
+    createImageUnderstandTool(),
+    createSaveSkillTool(),
+  ];
 }
 
 export function resolveEnabledTools(flags: ToolRuntimeFlags): ChatTool[] {

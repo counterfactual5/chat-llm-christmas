@@ -30,7 +30,11 @@ export type ToolRuntimeContext = {
     notionAccessToken?: string;
     githubAccessToken?: string;
     googleAccessToken?: string;
+    /** Bound main-site key for account-scoped writes (e.g. save_skill). */
+    skillsApiKey?: string;
   };
+  /** Active skills payload from the request (Skill Creator detection). */
+  requestSkills?: Array<{ id?: string; title?: string; content?: string }>;
   /** CPA gateway details so tools can make their own LLM calls. */
   gateway?: {
     apiKey: string;

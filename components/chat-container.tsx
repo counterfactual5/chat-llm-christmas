@@ -7,7 +7,8 @@ import {
   Menu, Plus, Settings2, Image as ImageIcon, 
   Mic, Square, Download, Key, Sparkles, ChevronDown, ChevronRight, LogOut, X,
   MoreHorizontal, Clock, FileText, PanelRightOpen, PanelRightClose, Quote,
-  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks
+  Play, ListOrdered, ScrollText, Search, Globe, Sun, Moon, Monitor, Blocks,
+  ShieldCheck, SlidersHorizontal
 } from 'lucide-react';
 import { GitHubLogo } from '@/components/github-logo';
 import { GoogleLogo } from '@/components/google-logo';
@@ -36,6 +37,7 @@ import {
   stripImageArchiveBlock,
   stripUserMessageArtifactsForDisplay,
 } from '@/lib/image-understand';
+import { BUILTIN_SKILLS, isSkillCreatorId } from '@/lib/skill-creator';
 import {
   AttachmentImageThumb,
   ImagePreviewOverlay,
@@ -352,6 +354,8 @@ interface ChatSession {
   skillIds?: string[];
   /** Per-chat MCP providers enabled for tool use (e.g. notion). */
   mcpIds?: string[];
+  /** Per-chat claim reviewer auto switch (default on when absent). */
+  autoReview?: boolean;
   /** Latest web search hits for this chat — shown in Reference Material. */
   webSources?: WebSearchSource[];
   /** User removed inherited sources; retain only sources added by later tool runs. */
@@ -733,13 +737,12 @@ export default function ChatContainer() {
   const [isSavingSkill, setIsSavingSkill] = useState(false);
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
+  const [toolsExpanded, setToolsExpanded] = useState(false);
   const [googleMcpMenuOpen, setGoogleMcpMenuOpen] = useState(false);
-  const [plusFlyout, setPlusFlyout] = useState<null | 'skills' | 'mcp'>(null);
+  const [plusFlyout, setPlusFlyout] = useState<null | 'skills' | 'mcp' | 'tools'>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [skillDraftTitle, setSkillDraftTitle] = useState('');
   const [skillDraftContent, setSkillDraftContent] = useState('');
-  const [skillDraftBrief, setSkillDraftBrief] = useState('');
-  const [isGeneratingSkill, setIsGeneratingSkill] = useState(false);
   const [skillModalError, setSkillModalError] = useState('');
   const [skillPendingDelete, setSkillPendingDelete] = useState<SkillItem | null>(null);
   const [isDeletingSkill, setIsDeletingSkill] = useState(false);
@@ -1214,6 +1217,13 @@ export default function ChatContainer() {
   }, [imagePreviewSrc]);
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
+  const activeAutoReview = activeSession?.autoReview ?? true;
+  const skillCreatorActive = activeSkillIds.some(isSkillCreatorId);
+  const setActiveAutoReview = (v: boolean) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === activeSessionId ? { ...s, autoReview: v } : s)),
+    );
+  };
   const webSources = activeSession?.webSources || [];
   const userUploadReferences = useMemo(() => {
     const fromThread = collectUserUploadsFromMessages(messages);
@@ -2283,6 +2293,8 @@ export default function ChatContainer() {
     seamPrefix = '',
     /** Prefer sources from the truncated thread (edit/resend), not a stale ref. */
     webSourcesOverride?: WebSearchSource[],
+    /** Command layer: one-off claim review of the latest assistant answer. */
+    requestReview?: boolean,
   ) => {
     const session = sessionsRef.current.find((s) => s.id === sessionId);
     const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
@@ -2313,6 +2325,8 @@ export default function ChatContainer() {
         skills: skillsPayloadForSession(sessionId),
         conversationId: sessionId,
         integrations,
+        autoReview: sessionsRef.current.find((s) => s.id === sessionId)?.autoReview ?? true,
+        ...(requestReview ? { requestReview: true } : {}),
       }),
       signal,
     });
@@ -2541,6 +2555,14 @@ export default function ChatContainer() {
                   ? parsed.tool.targetTimestamp
                   : undefined,
             });
+            // save_skill persisted to the account — refresh the sidebar list.
+            if (
+              parsed.tool.status === 'done' &&
+              parsed.tool.name === 'save_skill' &&
+              !parsed.tool.error
+            ) {
+              void fetchSkills();
+            }
           }
           if (parsed.content) {
             let chunk = parsed.content as string;
@@ -2998,7 +3020,6 @@ export default function ChatContainer() {
   const openNewSkillModal = () => {
     setSkillDraftTitle('');
     setSkillDraftContent('');
-    setSkillDraftBrief('');
     setSkillModalError('');
     setShowSkillModal(true);
   };
@@ -3034,31 +3055,6 @@ export default function ChatContainer() {
       return false;
     } finally {
       setIsSavingSkill(false);
-    }
-  };
-
-  const generateSkillWithAI = async () => {
-    const brief = skillDraftBrief.trim() || skillDraftTitle.trim();
-    if (!brief) {
-      setSkillModalError('先用一句话描述这个 Skill 要做什么');
-      return;
-    }
-    setIsGeneratingSkill(true);
-    setSkillModalError('');
-    try {
-      const res = await fetch('/api/skills/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief, model: selectedModel || undefined }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || '生成失败');
-      if (json.title) setSkillDraftTitle(json.title);
-      if (json.content) setSkillDraftContent(json.content);
-    } catch (e: any) {
-      setSkillModalError(e?.message || '生成失败');
-    } finally {
-      setIsGeneratingSkill(false);
     }
   };
 
@@ -3302,9 +3298,13 @@ export default function ChatContainer() {
   const skillsPayloadForSession = (sessionId: string) => {
     const ids = sessionsRef.current.find((s) => s.id === sessionId)?.skillIds || [];
     return ids
-      .map((id) => skillsRef.current.find((s) => s.id === id))
-      .filter((s): s is SkillItem => Boolean(s))
-      .map((s) => ({ title: s.title, content: s.content }));
+      .map((id) => {
+        const builtin = BUILTIN_SKILLS.find((b) => b.id === id);
+        if (builtin) return builtin;
+        return skillsRef.current.find((s) => s.id === id);
+      })
+      .filter((s): s is { id: string; title: string; content: string } => Boolean(s))
+      .map((s) => ({ id: s.id, title: s.title, content: s.content }));
   };
 
   // --- Chat Logic ---
@@ -3623,7 +3623,12 @@ export default function ChatContainer() {
     baseMessagesOverride?: Message[],
     force: boolean = false,
     targetSessionId?: string,
-    opts?: { alreadyLoading?: boolean; resendAttachments?: IngestedAttachment[] },
+    opts?: {
+      alreadyLoading?: boolean;
+      resendAttachments?: IngestedAttachment[];
+      /** Command layer: one-off claim review. */
+      requestReview?: boolean;
+    },
   ): Promise<boolean> => {
     const sessionId = targetSessionId || activeSessionId;
     const textToSend = overrideInput || (sessionId === activeSessionId ? input : '');
@@ -3675,6 +3680,10 @@ export default function ChatContainer() {
     }
 
     let fullContent = textToSend.trim();
+    if (opts?.requestReview) {
+      fullContent =
+        'Request review: verify the claims in my previous assistant answer against the actual tool results in this conversation. Retract anything that lacks a tool receipt.';
+    }
     if (pendingTexts.length > 0) {
       const contextParts = pendingTexts.map(
         (a) => `[Attached File: ${a.name}]\n${a.text!.trim()}`,
@@ -3700,7 +3709,9 @@ export default function ChatContainer() {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: fullContent || (pendingImages.length ? '(image)' : ''),
+      content: opts?.requestReview
+        ? '/review'
+        : fullContent || (pendingImages.length ? '(image)' : ''),
       timestamp: Date.now(),
       images: pendingImages.map((a) => ({
         url: a.fileId
@@ -3810,6 +3821,7 @@ export default function ChatContainer() {
         '',
         '',
         threadSources,
+        Boolean(opts?.requestReview),
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -4505,8 +4517,32 @@ export default function ChatContainer() {
                             <Plus className="h-3.5 w-3.5" />
                             {t('newSkill')}
                           </button>
-                          {skills.length === 0 ? null : (
-                            skills.map((skill) => (
+                          {BUILTIN_SKILLS.map((skill) => {
+                            const on = activeSkillIds.includes(skill.id);
+                            return (
+                              <div
+                                key={skill.id}
+                                className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSkill(skill.id)}
+                                  className={cn(
+                                    'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
+                                    on
+                                      ? 'text-stone-900 dark:text-stone-100'
+                                      : 'text-stone-600 dark:text-stone-300',
+                                  )}
+                                  title={on ? t('skillCreatorOnHint') : t('skillCreatorOffHint')}
+                                >
+                                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                  <span className="truncate">{skill.title}</span>
+                                  {on && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />}
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {skills.map((skill) => (
                               <div
                                 key={skill.id}
                                 className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
@@ -4543,8 +4579,7 @@ export default function ChatContainer() {
                                   <X className="h-3 w-3" />
                                 </button>
                               </div>
-                            ))
-                          )}
+                            ))}
                         </div>
                       </motion.div>
                     )}
@@ -4587,25 +4622,6 @@ export default function ChatContainer() {
                       className="overflow-hidden pl-2"
                     >
                       <div className="space-y-0.5 pb-1">
-                        <div
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                          title={
-                            selectedSpec.vision
-                              ? t('imageUnderstandDisabledOnVision')
-                              : t('zhipuVisionMcpHint')
-                          }
-                          aria-disabled
-                        >
-                          <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate">{t('enableZhipuVisionMcp')}</div>
-                            <div className="truncate text-[10px] opacity-80">
-                              {selectedSpec.vision
-                                ? t('imageUnderstandDisabledOnVision')
-                                : t('imageUnderstandBuiltIn')}
-                            </div>
-                          </div>
-                        </div>
                         <button
                           type="button"
                           onClick={() => openNotionModal()}
@@ -4630,6 +4646,80 @@ export default function ChatContainer() {
                           <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">Google</span>
                         </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                </div>
+
+                {/* Tool layer — persistent capabilities, not MCP. */}
+                <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setToolsExpanded((v) => !v);
+                    setMcpExpanded(false);
+                    setSkillsExpanded(false);
+                  }}
+                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <SlidersHorizontal className="h-4 w-4 text-stone-500" />
+                    {t('toolLayer')}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      'h-3.5 w-3.5 text-stone-400 transition-transform',
+                      toolsExpanded ? 'rotate-180' : '',
+                    )}
+                  />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {toolsExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="space-y-0.5 pb-1">
+                        <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                              {t('autoReview')}
+                            </div>
+                            <div className="truncate text-[10px] text-stone-400">
+                              {t('autoReviewHint')}
+                            </div>
+                          </div>
+                          <Switch
+                            size="sm"
+                            checked={activeAutoReview}
+                            onCheckedChange={setActiveAutoReview}
+                            aria-label={t('autoReview')}
+                          />
+                        </div>
+                        <div
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                          title={
+                            selectedSpec.vision
+                              ? t('imageUnderstandDisabledOnVision')
+                              : t('zhipuVisionMcpHint')
+                          }
+                          aria-disabled
+                        >
+                          <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate">{t('enableZhipuVisionMcp')}</div>
+                            <div className="truncate text-[10px] opacity-80">
+                              {selectedSpec.vision
+                                ? t('imageUnderstandDisabledOnVision')
+                                : t('imageUnderstandBuiltIn')}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </motion.div>
                   )}
@@ -6310,6 +6400,25 @@ export default function ChatContainer() {
 
                             <button
                               type="button"
+                              onPointerEnter={() => setPlusFlyout(null)}
+                              onClick={() => {
+                                setIsSkillPickerOpen(false);
+                                setPlusFlyout(null);
+                                void handleSubmit('/review', undefined, false, activeSessionId, {
+                                  requestReview: true,
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1">{t('requestReview')}</span>
+                              <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                /review
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
                               onPointerEnter={() => {
                                 setPlusFlyout('skills');
                                 setGoogleMcpMenuOpen(false);
@@ -6329,6 +6438,28 @@ export default function ChatContainer() {
                             >
                               <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                               <span className="min-w-0 flex-1">{t('skills')}</span>
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onPointerEnter={() => {
+                                setPlusFlyout('tools');
+                                setGoogleMcpMenuOpen(false);
+                              }}
+                              onClick={() => {
+                                setPlusFlyout((v) => (v === 'tools' ? null : 'tools'));
+                                setGoogleMcpMenuOpen(false);
+                              }}
+                              className={cn(
+                                'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                plusFlyout === 'tools'
+                                  ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                  : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
+                              )}
+                            >
+                              <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1">{t('toolLayer')}</span>
                               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                             </button>
 
@@ -6380,40 +6511,111 @@ export default function ChatContainer() {
                                   >
                                     {t('connectAccount')}
                                   </button>
-                                ) : skills.length === 0 ? (
-                                  <div className="px-2.5 py-2 text-xs leading-5 text-stone-400">
-                                    {t('noSkillsYet')}
-                                  </div>
                                 ) : (
-                                  skills.map((skill) => {
-                                    const on = activeSkillIds.includes(skill.id);
-                                    return (
-                                      <button
-                                        key={skill.id}
-                                        type="button"
-                                        onClick={() => toggleSkill(skill.id)}
-                                        className={cn(
-                                          'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
-                                          on
-                                            ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                            : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
-                                        )}
-                                      >
-                                        <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                        <span className="min-w-0 flex-1 truncate">
-                                          {skill.title}
-                                        </span>
-                                        {on ? (
-                                          <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                        ) : (
-                                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                                            /{skillSlashName(skill.title)}
-                                          </span>
-                                        )}
-                                      </button>
-                                    );
-                                  })
+                                  <>
+                                    {BUILTIN_SKILLS.map((skill) => {
+                                      const on = activeSkillIds.includes(skill.id);
+                                      return (
+                                        <button
+                                          key={skill.id}
+                                          type="button"
+                                          onClick={() => toggleSkill(skill.id)}
+                                          className={cn(
+                                            'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                            on
+                                              ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                              : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
+                                          )}
+                                        >
+                                          <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                                          <span className="min-w-0 flex-1 truncate">{skill.title}</span>
+                                          {on && <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />}
+                                        </button>
+                                      );
+                                    })}
+                                    {skills.length === 0 ? null : (
+                                      skills.map((skill) => {
+                                        const on = activeSkillIds.includes(skill.id);
+                                        return (
+                                          <button
+                                            key={skill.id}
+                                            type="button"
+                                            onClick={() => toggleSkill(skill.id)}
+                                            className={cn(
+                                              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
+                                              on
+                                                ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
+                                                : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
+                                            )}
+                                          >
+                                            <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                            <span className="min-w-0 flex-1 truncate">
+                                              {skill.title}
+                                            </span>
+                                            {on ? (
+                                              <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                            ) : (
+                                              <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                                /{skillSlashName(skill.title)}
+                                              </span>
+                                            )}
+                                          </button>
+                                        );
+                                      })
+                                    )}
+                                  </>
                                 )}
+                                </motion.div>
+                              )}
+
+                              {plusFlyout === 'tools' && (
+                                <motion.div
+                                  key="plus-tools-flyout"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  transition={{ duration: 0.1 }}
+                                  onPointerEnter={() => {
+                                    setPlusFlyout('tools');
+                                  }}
+                                  className="absolute left-[calc(100%+6px)] top-[6.5rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                                >
+                                  <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
+                                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-sm text-stone-800 dark:text-stone-100">
+                                        {t('autoReview')}
+                                      </div>
+                                      <div className="truncate text-[10px] text-stone-400">
+                                        {t('autoReviewHint')}
+                                      </div>
+                                    </div>
+                                    <Switch
+                                      size="sm"
+                                      checked={activeAutoReview}
+                                      onCheckedChange={setActiveAutoReview}
+                                      aria-label={t('autoReview')}
+                                    />
+                                  </div>
+                                  <div
+                                    className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                                    title={
+                                      selectedSpec.vision
+                                        ? t('imageUnderstandDisabledOnVision')
+                                        : t('zhipuVisionMcpHint')
+                                    }
+                                    aria-disabled
+                                  >
+                                    <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-sm">{t('enableZhipuVisionMcp')}</div>
+                                      <div className="truncate text-[10px] opacity-80">
+                                        {selectedSpec.vision
+                                          ? t('imageUnderstandDisabledOnVision')
+                                          : t('imageUnderstandBuiltIn')}
+                                      </div>
+                                    </div>
+                                  </div>
                                 </motion.div>
                               )}
 
@@ -6429,25 +6631,6 @@ export default function ChatContainer() {
                                   }}
                                   className="absolute left-[calc(100%+6px)] bottom-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                                 >
-                                <div
-                                  className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                                  title={
-                                    selectedSpec.vision
-                                      ? t('imageUnderstandDisabledOnVision')
-                                      : t('zhipuVisionMcpHint')
-                                  }
-                                  aria-disabled
-                                >
-                                  <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-sm">{t('enableZhipuVisionMcp')}</div>
-                                    <div className="truncate text-[10px] opacity-80">
-                                      {selectedSpec.vision
-                                        ? t('imageUnderstandDisabledOnVision')
-                                        : t('imageUnderstandBuiltIn')}
-                                    </div>
-                                  </div>
-                                </div>
                                 <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                   <NotionLogo className="h-3.5 w-3.5 shrink-0" />
                                   <div className="min-w-0 flex-1">
@@ -7491,34 +7674,6 @@ export default function ChatContainer() {
               </div>
 
               <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
-                    一句话描述（可选，给 AI 生成用）
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      value={skillDraftBrief}
-                      onChange={(e) => setSkillDraftBrief(e.target.value)}
-                      placeholder="例如：严谨的中文代码审查助手，只指出问题并给改法"
-                      className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-stone-700 dark:bg-stone-900/60"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={generateSkillWithAI}
-                      disabled={isGeneratingSkill}
-                      className="shrink-0 rounded-xl"
-                    >
-                      {isGeneratingSkill ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-stone-600 dark:text-stone-300" />
-                      ) : (
-                        <Sparkles className="h-4 w-4 text-orange-500" />
-                      )}
-                      <span className="ml-1.5">{isGeneratingSkill ? '生成中' : 'AI 生成'}</span>
-                    </Button>
-                  </div>
-                </div>
-
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
                     名称

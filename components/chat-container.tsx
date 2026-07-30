@@ -3629,8 +3629,6 @@ export default function ChatContainer() {
     opts?: {
       alreadyLoading?: boolean;
       resendAttachments?: IngestedAttachment[];
-      /** Command layer: one-off claim review. */
-      requestReview?: boolean;
     },
   ): Promise<boolean> => {
     const sessionId = targetSessionId || activeSessionId;
@@ -3683,10 +3681,6 @@ export default function ChatContainer() {
     }
 
     let fullContent = textToSend.trim();
-    if (opts?.requestReview) {
-      fullContent =
-        'Request review: verify the claims in my previous assistant answer against the actual tool results in this conversation. Retract anything that lacks a tool receipt.';
-    }
     if (pendingTexts.length > 0) {
       const contextParts = pendingTexts.map(
         (a) => `[Attached File: ${a.name}]\n${a.text!.trim()}`,
@@ -3712,9 +3706,7 @@ export default function ChatContainer() {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: opts?.requestReview
-        ? '/review'
-        : fullContent || (pendingImages.length ? '(image)' : ''),
+      content: fullContent || (pendingImages.length ? '(image)' : ''),
       timestamp: Date.now(),
       images: pendingImages.map((a) => ({
         url: a.fileId
@@ -3824,7 +3816,6 @@ export default function ChatContainer() {
         '',
         '',
         threadSources,
-        Boolean(opts?.requestReview),
       );
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -4112,6 +4103,85 @@ export default function ChatContainer() {
         );
       } else {
         markAssistantIncomplete(sessionId, last.id, true, {
+          truncationReason: 'Stopped by you',
+        });
+      }
+    } finally {
+      endLoadingIfController(sessionId, controller);
+    }
+  };
+
+  /** Request review — built-in action like Continue: audits the last assistant
+   *  reply against tool receipts, no visible user command. */
+  const requestClaimReview = async () => {
+    const sessionId = activeSessionIdRef.current;
+    if (!isAccountBound) {
+      openLoginModal();
+      return;
+    }
+    const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+    const lastAssistant = [...sessionMessages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant || isSessionLoading(sessionId)) return;
+
+    stickToBottomRef.current = true;
+    scrollToBottom(true);
+    beginLoading(sessionId);
+
+    const assistantMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      incomplete: true,
+    };
+    updateSession(sessionId, [...sessionMessages, assistantMessage]);
+
+    const apiMessages: ReturnType<typeof toApiMessages> = [
+      ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
+      {
+        role: 'user' as const,
+        content:
+          'Claim Review: audit your previous assistant answer. For each claim of a tool action, web search, or factual statement, verify it against the tool results in this conversation. Retract any claim that lacks a real tool receipt; otherwise confirm it is verified. Be brief.',
+        images: [],
+        timestamp: Date.now(),
+      },
+    ];
+
+    const controller = new AbortController();
+    abortControllersRef.current.set(sessionId, controller);
+    try {
+      await streamChatResponse(
+        sessionId,
+        apiMessages,
+        assistantMessage.id,
+        controller.signal,
+        '',
+        '',
+        undefined,
+        true,
+      );
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            return {
+              ...s,
+              messages: s.messages.map((m) =>
+                m.id === assistantMessage.id
+                  ? {
+                      ...m,
+                      content: `Error: ${error.message || 'Request failed'}`,
+                      incomplete: false,
+                    }
+                  : m,
+              ),
+              updatedAt: Date.now(),
+            };
+          }),
+        );
+      } else {
+        markAssistantIncomplete(sessionId, assistantMessage.id, true, {
           truncationReason: 'Stopped by you',
         });
       }
@@ -4540,9 +4610,7 @@ export default function ChatContainer() {
                                 openLoginModal();
                                 return;
                               }
-                              void handleSubmit('/review', undefined, false, activeSessionId, {
-                                requestReview: true,
-                              });
+                              void requestClaimReview();
                             }}
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
                           >
@@ -5505,6 +5573,8 @@ export default function ChatContainer() {
                           const isImageUnderstand =
                             run.name === 'image_understand' ||
                             run.provider === 'zhipu-vision';
+                          const isClaimReviewer =
+                            run.provider === 'claim-reviewer';
                           const failed = run.status === 'done' && Boolean(run.error);
                           const emptyResults =
                             run.status === 'done' &&
@@ -5535,7 +5605,11 @@ export default function ChatContainer() {
                             }
                             return searching ? t('searchingGoogle') : t('searchedGoogle');
                           })();
-                          const label = isGoogle
+                          const label = isClaimReviewer
+                            ? searching
+                              ? t('reviewingClaims')
+                              : t('reviewedClaims')
+                            : isGoogle
                             ? failed
                               ? t('toolFailed')
                               : googleLabel
@@ -5592,6 +5666,8 @@ export default function ChatContainer() {
                                 />
                                 {searching ? (
                                   <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+                                ) : isClaimReviewer ? (
+                                  <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
                                 ) : isNotion ? (
                                   <NotionLogo className="h-3 w-3 shrink-0" />
                                 ) : isGitHub ? (
@@ -5610,7 +5686,8 @@ export default function ChatContainer() {
                                   !isNotion &&
                                   !isGitHub &&
                                   !isGoogle &&
-                                  !isImageUnderstand && (
+                                  !isImageUnderstand &&
+                                  !isClaimReviewer && (
                                     <span className="opacity-50">
                                       {t('searchedVia').replace(
                                         '{provider}',
@@ -6589,13 +6666,7 @@ export default function ChatContainer() {
                                     onClick={() => {
                                       setIsSkillPickerOpen(false);
                                       setPlusFlyout(null);
-                                      void handleSubmit(
-                                        '/review',
-                                        undefined,
-                                        false,
-                                        activeSessionId,
-                                        { requestReview: true },
-                                      );
+                                      void requestClaimReview();
                                     }}
                                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
                                   >

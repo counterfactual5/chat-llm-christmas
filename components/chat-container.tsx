@@ -332,7 +332,7 @@ type WebSearchSource = {
   kind?: 'image' | 'file';
 };
 
-function referenceSourceKind(provider: string | undefined, toolName: string | undefined): ReferenceSourceKind {
+function referenceSourceKind(provider: string | undefined, toolName: string | undefined): ExternalReferenceSourceKind {
   const name = String(toolName || '').toLowerCase();
   if (name.startsWith('gmail_') || name.startsWith('gmail-')) return 'gmail';
   if (name.startsWith('calendar_') || name.startsWith('calendar-')) return 'calendar';
@@ -1250,9 +1250,10 @@ export default function ChatContainer() {
     ];
     const grouped = new Map<ExternalReferenceSourceKind, WebSearchSource[]>();
     for (const source of webSources) {
-      const kind = source.sourceKind === 'upload'
-        ? 'web'
-        : source.sourceKind || referenceSourceKind(source.provider, undefined);
+      const kind: ExternalReferenceSourceKind =
+        source.sourceKind && source.sourceKind !== 'upload'
+          ? source.sourceKind
+          : referenceSourceKind(source.provider, undefined);
       grouped.set(kind, [...(grouped.get(kind) || []), source]);
     }
     return order

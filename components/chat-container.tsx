@@ -189,7 +189,9 @@ function looksLikeToolNarration(text: string): boolean {
   ) {
     return false;
   }
-  return /正在扫描|改用\s*shell|同步\s*I\/O|tool_call|function_call|正在读取|扫描工作区|定位同步|Read\s+\S+|Shell\s+扫描|异步重构|排查工作区/i.test(
+  // Require IDE/workspace agent narration — bare "tool_call" matches Agent docs
+  // and Notion workflow templates, which wrongly wiped Continue mid-reply.
+  return /正在扫描(?:工作区|项目|仓库)|改用\s*shell|同步\s*I\/O|扫描工作区|定位同步|Shell\s+扫描|异步重构|排查工作区|<(?:tool_call|tool_calls|function_call)\b/i.test(
     text,
   );
 }
@@ -198,7 +200,11 @@ function looksLikeToolNarration(text: string): boolean {
 function assistantMismatchesUserTopic(userText: string, assistantText: string): boolean {
   if (!looksLikeToolNarration(assistantText)) return false;
   // Same-chat coding asks may legitimately mention workspace — don't treat as cross-bleed.
-  if (/async|python|refactor|代码|工作区|workspace|shell|文件|bug|报错|debug|重构/i.test(userText)) {
+  if (
+    /async|python|refactor|代码|工作区|workspace|shell|文件|bug|报错|debug|重构|notion|模板|template|agent/i.test(
+      userText,
+    )
+  ) {
     return false;
   }
   return true;
@@ -3882,62 +3888,39 @@ export default function ChatContainer() {
       assistantMismatchesUserTopic(lastUser!.content, last.content);
 
     // Cross-chat bleed (e.g. formula chat Continue resumes a Python agent task):
-    // drop the polluted assistant text and re-answer this thread's last user ask.
+    // steer with a corrective prompt, but never wipe the partial bubble.
     let apiMessages: ReturnType<typeof toApiMessages>;
     let initialContent = last.content;
     let seamPrefix = '';
 
     if (polluted && lastUser) {
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== sessionId) return s;
-          return {
-            ...s,
-            updatedAt: Date.now(),
-            messages: s.messages.map((m) =>
-              m.id === last.id
-                ? {
-                    ...m,
-                    content: '',
-                    reasoning: undefined,
-                    incomplete: true,
-                    truncationReason: undefined,
-                    finishReason: undefined,
-                  }
-                : m,
-            ),
-          };
-        }),
-      );
+      // Keep the partial bubble — wiping mid-reply felt like Continue "deleted"
+      // half the answer. Only steer the model with a corrective user turn.
       apiMessages = [
-        ...toApiMessages(sessionMessages.filter((m) => m.id !== last.id), {
+        ...toApiMessages(sessionMessages, {
           vision: selectedSpec.vision,
         }),
         {
-          role: 'user',
+          role: 'user' as const,
           content: [
-            lastUser.content,
-            '',
-            'Answer the question above in THIS conversation only.',
-            'Do not continue any other chat\'s tasks, workspace scans, refactors, or tool plans.',
-            'Do not mention filesystems, shell, or scanning a workspace.',
-          ].join('\n'),
-          images:
-            lastUser.images?.map((img) => ({
-              url: img.url,
-              fileId: img.fileId,
-              prompt: img.prompt,
-              name: img.name,
-            })) || [],
-          timestamp: lastUser.timestamp || Date.now(),
+            'Continue THIS conversation only from where the assistant reply stopped.',
+            'Do not restart the answer, and do not continue any other chat\'s tasks, workspace scans, refactors, or tool plans.',
+            'Do not mention filesystems, shell, or scanning a workspace unless the user asked for that.',
+            buildContinuationPrompt(last.content),
+          ].join('\n\n'),
+          images: [],
+          timestamp: Date.now(),
         },
       ];
-      initialContent = '';
+      initialContent = last.content;
+      const tail = last.content.trimEnd();
+      const lastLine = tail.split('\n').pop() ?? '';
+      seamPrefix = /^\s*\|.*\|\s*$/.test(lastLine) ? '\n' : '';
     } else {
       apiMessages = [
         ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
         {
-          role: 'user',
+          role: 'user' as const,
           content: buildContinuationPrompt(last.content),
           images: [],
           timestamp: Date.now(),

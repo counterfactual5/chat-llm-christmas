@@ -614,7 +614,7 @@ function toApiMessages(
     if (messages[i].role === 'user') lastUserIdx = i;
   }
 
-  return messages.map((m, i) => {
+  return messages.flatMap((m, i) => {
     let content = m.content;
     let images =
       m.images?.map((img) => ({
@@ -666,12 +666,77 @@ function toApiMessages(
       }
     }
 
-    return {
-      role: m.role,
-      content,
-      images,
-      timestamp: m.timestamp as number | undefined,
-    };
+    // Rebuild tool_calls + tool receipts so follow-up turns can see what really ran.
+    // claim_reviewer is UI-only and must not be replayed as an API tool.
+    if (m.role === 'assistant') {
+      const runs = (m.toolRuns || []).filter(
+        (r) => r?.name && r.name !== 'claim_reviewer' && r.status === 'done',
+      );
+      if (runs.length) {
+        const out: Array<Record<string, unknown>> = [];
+        const tool_calls = runs.map((r, idx) => ({
+          id: String(r.id || `hist_${m.id}_${idx}`),
+          type: 'function',
+          function: {
+            name: r.name,
+            arguments: JSON.stringify(
+              r.query
+                ? { query: r.query }
+                : {},
+            ),
+          },
+        }));
+        out.push({
+          role: 'assistant',
+          content: '',
+          tool_calls,
+          timestamp: m.timestamp,
+        });
+        for (let idx = 0; idx < runs.length; idx++) {
+          const r = runs[idx];
+          const payload = r.error
+            ? { ok: false, error: r.error, ...(r.query ? { query: r.query } : {}) }
+            : {
+                ok: true,
+                ...(r.query ? { query: r.query } : {}),
+                ...(r.provider ? { provider: r.provider } : {}),
+                ...(r.results?.length
+                  ? {
+                      results: r.results.slice(0, 8).map((x) => ({
+                        title: x.title,
+                        url: x.url,
+                        snippet: String(x.snippet || '').slice(0, 240),
+                      })),
+                    }
+                  : {}),
+              };
+          out.push({
+            role: 'tool',
+            tool_call_id: tool_calls[idx].id,
+            content: JSON.stringify(payload),
+            timestamp: m.timestamp,
+          });
+        }
+        if (String(content || '').trim()) {
+          out.push({
+            role: 'assistant',
+            content,
+            images: [],
+            timestamp: m.timestamp,
+          });
+        }
+        return out;
+      }
+    }
+
+    return [
+      {
+        role: m.role,
+        content,
+        images,
+        timestamp: m.timestamp as number | undefined,
+      },
+    ];
   });
 }
 

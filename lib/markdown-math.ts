@@ -175,9 +175,22 @@ export function looksLikeTruncatedMath(text: string): boolean {
   return /\\begin\{|\\frac|\\sum|\\int|\\left|\\right/.test(after);
 }
 
+/**
+ * CommonMark won't treat `**“…”**` as bold when CJK quotation marks sit flush
+ * against the markers. Move the quotes outside so emphasis still parses:
+ * `**“text”**` → `“**text**”`.
+ */
+export function fixFlankingEmphasis(content: string): string {
+  return String(content || '').replace(
+    /\*\*([“「『"'])([\s\S]*?)([”」』"'])\*\*/g,
+    '$1**$2**$3',
+  );
+}
+
 export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
   let out = normalizeMathDelimiters(String(content || ''));
   out = liftQuotedMathBlocks(out);
+  out = fixFlankingEmphasis(out);
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
   // rest of the message into one giant math/“quote-looking” block (even after

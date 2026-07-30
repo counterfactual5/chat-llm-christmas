@@ -699,6 +699,29 @@ export async function POST(req: NextRequest) {
       const m = (messages as any[])[mi];
       const role = m.role;
       const timestamp = m.timestamp;
+
+      // Replay prior-turn tool receipts so the model can see what actually ran.
+      if (role === 'tool') {
+        normalizedMessages.push({
+          role: 'tool',
+          tool_call_id: String(m.tool_call_id || ''),
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''),
+          timestamp,
+        });
+        continue;
+      }
+
+      if (role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        normalizedMessages.push({
+          role: 'assistant',
+          content:
+            typeof m.content === 'string' && m.content.length > 0 ? m.content : null,
+          tool_calls: m.tool_calls,
+          timestamp,
+        });
+        continue;
+      }
+
       if (Array.isArray(m.content)) {
         if (carryAssistantImages && pendingAssistantImages.length && role === 'user') {
           const extra = pendingAssistantImages

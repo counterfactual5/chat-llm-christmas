@@ -4456,23 +4456,24 @@ export default function ChatContainer() {
                       className="overflow-hidden pl-2"
                     >
                       <div className="space-y-0.5 pb-1">
-                        <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300">
-                          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <div
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                          title={
+                            selectedSpec.vision
+                              ? t('imageUnderstandDisabledOnVision')
+                              : t('zhipuVisionMcpHint')
+                          }
+                          aria-disabled
+                        >
+                          <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
                           <div className="min-w-0 flex-1">
                             <div className="truncate">{t('enableZhipuVisionMcp')}</div>
-                            {selectedSpec.vision ? (
-                              <div className="truncate text-[10px] text-stone-400">
-                                {t('imageUnderstandDisabledOnVision')}
-                              </div>
-                            ) : null}
+                            <div className="truncate text-[10px] opacity-80">
+                              {selectedSpec.vision
+                                ? t('imageUnderstandDisabledOnVision')
+                                : t('imageUnderstandBuiltIn')}
+                            </div>
                           </div>
-                          <Switch
-                            size="sm"
-                            checked={zhipuVisionOn}
-                            disabled={selectedSpec.vision}
-                            onCheckedChange={setZhipuVisionEnabled}
-                            aria-label={t('enableZhipuVisionMcp')}
-                          />
                         </div>
                         <button
                           type="button"
@@ -6217,43 +6218,24 @@ export default function ChatContainer() {
                                   }}
                                   className="absolute left-[calc(100%+6px)] bottom-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                                 >
-                                <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                                  <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                <div
+                                  className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                                  title={
+                                    selectedSpec.vision
+                                      ? t('imageUnderstandDisabledOnVision')
+                                      : t('zhipuVisionMcpHint')
+                                  }
+                                  aria-disabled
+                                >
+                                  <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
                                   <div className="min-w-0 flex-1">
-                                    <div className="text-sm text-stone-800 dark:text-stone-100">
-                                      {t('enableZhipuVisionMcp')}
-                                    </div>
-                                    <div className="truncate text-[10px] text-stone-400">
+                                    <div className="text-sm">{t('enableZhipuVisionMcp')}</div>
+                                    <div className="truncate text-[10px] opacity-80">
                                       {selectedSpec.vision
                                         ? t('imageUnderstandDisabledOnVision')
-                                        : isAccountBound
-                                          ? t('zhipuVisionMcpHint')
-                                          : t('zhipuVisionMcpNeedsLogin')}
+                                        : t('imageUnderstandBuiltIn')}
                                     </div>
                                   </div>
-                                  {isAccountBound ? (
-                                    <Switch
-                                      size="sm"
-                                      checked={zhipuVisionOn}
-                                      disabled={selectedSpec.vision}
-                                      onCheckedChange={setZhipuVisionEnabled}
-                                      aria-label={t('enableZhipuVisionMcp')}
-                                    />
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (selectedSpec.vision) return;
-                                        setIsSkillPickerOpen(false);
-                                        setPlusFlyout(null);
-                                        openLoginModal();
-                                      }}
-                                      disabled={selectedSpec.vision}
-                                      className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
-                                    >
-                                      {t('connectAccount')}
-                                    </button>
-                                  )}
                                 </div>
                                 <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                                   <NotionLogo className="h-3.5 w-3.5 shrink-0" />

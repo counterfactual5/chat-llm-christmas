@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { usernameFromTokenPayload } from '@/lib/account-profile';
+import { clearVaultCookie, remoteVaultConfigured } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -61,8 +62,9 @@ export async function GET(req: NextRequest) {
     const home = new URL('/', req.url);
     home.searchParams.set('connected', '1');
     const result = NextResponse.redirect(home);
-    // Vault survives SSO sign-in: it is owner-scoped, so the same account gets
-    // its MCP connections back and other accounts still can't decrypt them.
+    // With remote KV: clear browser vault so a different SSO account starts clean;
+    // same account rehydrates from KV via GET /api/integrations.
+    if (remoteVaultConfigured()) clearVaultCookie(result);
     result.cookies.set({
       name: KEY_COOKIE,
       value: apiKey,

@@ -4,8 +4,11 @@ export {
 } from '@/lib/integrations/identity';
 export {
   readVault,
+  readVaultDetailed,
   writeVaultCookie,
+  hydrateVaultCookies,
   clearVaultCookie,
+  forgetOwnerIntegrations,
   upsertNotionConnection,
   removeNotionConnection,
   getNotionAccessToken,
@@ -21,6 +24,7 @@ export {
   getGoogleAccessToken,
   googlePublicConnected,
 } from '@/lib/integrations/store';
+export { remoteVaultConfigured } from '@/lib/integrations/remote-store';
 export {
   notionMcpOAuthConfigured,
   notionMcpOAuthConfigured as notionOAuthConfigured,

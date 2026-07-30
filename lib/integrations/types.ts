@@ -1,7 +1,8 @@
 /**
- * Per-user third-party integrations (Notion MCP / GitHub MCP later).
- * Tokens are encrypted and stored in an HttpOnly cookie keyed by owner id
- * (hash of the bound llm.christmas API key) — no shared workspace secret.
+ * Per-user third-party integrations (Notion / GitHub / Google).
+ * Tokens are AES-GCM encrypted. Fast path: owner-scoped HttpOnly cookies.
+ * Durable path (optional): Vercel KV / Upstash Redis keyed by owner id
+ * (sha256 of the bound llm.christmas API key).
  */
 
 export type IntegrationProvider = 'notion' | 'github' | 'google';

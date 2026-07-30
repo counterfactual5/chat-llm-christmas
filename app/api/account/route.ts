@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { clearVaultCookie, remoteVaultConfigured } from '@/lib/integrations';
 
 export const runtime = 'edge';
 export const maxDuration = 20;
@@ -34,6 +35,16 @@ function clearUsernameCookie(response: NextResponse) {
 }
 
 /**
+ * When remote KV is configured, drop browser vault cookies on account switch /
+ * sign-out so another key never sees leftover blobs. The durable copy stays in
+ * KV and is re-hydrated after the same account signs back in.
+ * Without KV, keep cookies so same-browser reconnects still work.
+ */
+function clearBrowserVaultIfRemote(response: NextResponse) {
+  if (remoteVaultConfigured()) clearVaultCookie(response);
+}
+
+/**
  * Bound status only — no username probing against the main site.
  * Optional display name comes from an existing cookie if SSO already set one.
  */
@@ -59,9 +70,7 @@ export async function POST(req: NextRequest) {
     await validateKey(normalized);
 
     const response = NextResponse.json({ bound: true, username: null });
-    // The vault stays: it is keyed by owner id (hash of the API key), so a
-    // different account can never read it, while re-binding the same key
-    // restores that account's MCP connections without a reconnect.
+    clearBrowserVaultIfRemote(response);
     clearUsernameCookie(response);
     response.cookies.set({
       name: COOKIE_NAME,
@@ -83,9 +92,7 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   const response = NextResponse.json({ bound: false });
-  // Signing out only unbinds the key. Integration tokens stay in the
-  // owner-scoped vault (unreadable without the key) so signing back in keeps
-  // Notion / GitHub / Google connected. Per-provider Disconnect still wipes.
+  clearBrowserVaultIfRemote(response);
   clearUsernameCookie(response);
   response.cookies.set({
     name: COOKIE_NAME,

@@ -3820,10 +3820,10 @@ export default function ChatContainer() {
     // Empty content but Thought/tools already present: ask the model for the
     // visible answer without wiping Process history.
     if (emptyInterrupted && lastUser && hasProcessOrThought) {
-      const apiMessages = [
+      const apiMessages: ReturnType<typeof toApiMessages> = [
         ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
         {
-          role: 'user',
+          role: 'user' as const,
           content: [
             'Your previous turn was interrupted before any user-visible answer text.',
             'Write the final answer now. Do not restart unrelated tasks.',

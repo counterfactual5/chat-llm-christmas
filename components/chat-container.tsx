@@ -1827,8 +1827,9 @@ export default function ChatContainer() {
     scrollToBottom(true);
   }, [activeSessionId]);
 
-  // Thought stream often pauses before the first answer token. After a short idle,
-  // flip the live chrome from "Thinking…" to a dedicated generating placeholder.
+  // While the assistant turn is still open but the stream has gone idle (no new
+  // content / thought / tool), show a "Generating reply…" placeholder — including
+  // the common gap after narration and before the next tool_call token.
   useEffect(() => {
     if (!isActiveLoading || !activeSessionId) {
       setReplyWaitByMessage({});
@@ -1840,30 +1841,8 @@ export default function ChatContainer() {
       setReplyWaitByMessage({});
       return;
     }
-    if (String(msg.content || '').trim()) {
-      setReplyWaitByMessage((prev) => {
-        if (!prev[msg.id]) return prev;
-        const next = { ...prev };
-        delete next[msg.id];
-        return next;
-      });
-      return;
-    }
     const toolPending = (msg.toolRuns || []).some((r) => r.status === 'start');
-    const lastAct = msg.activity?.[msg.activity.length - 1];
-    if (toolPending || lastAct?.kind === 'tool') {
-      setReplyWaitByMessage((prev) => {
-        if (!prev[msg.id]) return prev;
-        const next = { ...prev };
-        delete next[msg.id];
-        return next;
-      });
-      return;
-    }
-    const hasThought = (msg.activity || []).some(
-      (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
-    ) || Boolean(String(msg.reasoning || '').trim());
-    if (!hasThought) {
+    if (toolPending) {
       setReplyWaitByMessage((prev) => {
         if (!prev[msg.id]) return prev;
         const next = { ...prev };
@@ -1882,20 +1861,21 @@ export default function ChatContainer() {
       setReplyWaitByMessage((prev) =>
         prev[msg.id] ? prev : { ...prev, [msg.id]: true },
       );
-    }, 700);
+    }, 500);
     return () => window.clearTimeout(timer);
   }, [
     isActiveLoading,
     activeSessionId,
-    // Re-arm whenever thought text grows or tools land.
     sessions
       .find((s) => s.id === activeSessionId)
       ?.messages.filter((m) => m.role === 'assistant')
       .slice(-1)
-      .map(
-        (m) =>
-          `${m.id}:${m.content?.length || 0}:${m.reasoning?.length || 0}:${(m.activity || []).length}`,
-      )
+      .map((m) => {
+        const tools = (m.toolRuns || [])
+          .map((r) => `${r.id}:${r.status}`)
+          .join(',');
+        return `${m.id}:${m.content?.length || 0}:${m.reasoning?.length || 0}:${(m.activity || []).length}:${tools}`;
+      })
       .join('|'),
   ]);
 
@@ -5229,12 +5209,9 @@ export default function ChatContainer() {
                           message.incomplete && !visibleContent && messageIsStreaming,
                         );
                         const replyWait = Boolean(
-                          messageIsStreaming && replyWaitByMessage[message.id],
-                        );
-                        // Thought text arrived but answer tokens are still pending —
-                        // keep a live process chrome without freezing on "Thinking…".
-                        const awaitingReplyAfterThought = Boolean(
-                          replyWait && awaitingFirstContent,
+                          messageIsStreaming &&
+                            message.incomplete &&
+                            replyWaitByMessage[message.id],
                         );
 
                         /** Group consecutive reasoning/tool steps into Process panels, split by content. */
@@ -5248,14 +5225,12 @@ export default function ChatContainer() {
                               (s): s is ProcessStep => s.kind !== 'content',
                             );
                             const segs: TimelineSegment[] = [];
-                            if (awaitingFirstContent || processSteps.length > 0) {
+                            if (awaitingFirstContent || processSteps.length > 0 || replyWait) {
                               segs.push({
                                 type: 'process',
                                 id: `${message.id}-process-0`,
                                 steps: processSteps,
-                                // Stay live while waiting for the first answer token,
-                                // even after Thought text goes idle (replyWait).
-                                live: awaitingFirstContent,
+                                live: awaitingFirstContent || replyWait,
                               });
                             }
                             if (visibleContent.trim()) {
@@ -5290,17 +5265,17 @@ export default function ChatContainer() {
                               buf.push(step);
                             }
                           }
-                          // Trailing Process (e.g. still thinking / tools after last answer chunk).
+                          // Trailing Process: in-flight tools/thought, or idle gap waiting
+                          // for the next token after narration ("正在写入……" → tool).
                           flushProcess(
                             Boolean(
                               messageIsStreaming &&
-                                (buf.length > 0 || !visibleContent || awaitingReplyAfterThought),
+                                (buf.length > 0 || !visibleContent || replyWait),
                             ),
                           );
                           // Live empty Process while waiting before any activity.
                           if (
                             messageIsStreaming &&
-                            !visibleContent &&
                             segs.length === 0
                           ) {
                             segs.push({
@@ -5778,9 +5753,9 @@ export default function ChatContainer() {
                           // Hard gate: never spin unless this session is actually
                           // streaming. Incomplete alone (e.g. after refresh) is not live.
                           const segLive = Boolean(seg.live && isActiveLoading);
-                          // Once Thought text idles waiting for the answer, freeze the
-                          // Thought chrome and show a separate generating line instead.
-                          const thoughtStreaming = segLive && !awaitingReplyAfterThought;
+                          // While the stream is idle (replyWait), freeze Thought chrome and
+                          // show a dedicated generating line under it / after content.
+                          const thoughtStreaming = segLive && !replyWait;
                           const lastIdx = seg.steps.length - 1;
                           const rendered = seg.steps
                             .map((step, i) =>
@@ -5798,11 +5773,11 @@ export default function ChatContainer() {
                             .filter(Boolean);
 
                           const showReplyPlaceholder =
-                            segLive &&
-                            (awaitingReplyAfterThought || rendered.length === 0);
+                            segLive && (replyWait || rendered.length === 0);
 
-                          // Nothing yet but the turn is in flight: a bare "Thinking…" line.
-                          if (rendered.length === 0 && !awaitingReplyAfterThought) {
+                          // Nothing yet but the turn is in flight: a bare "Thinking…" line
+                          // until the idle timer flips to generatingReply.
+                          if (rendered.length === 0 && !replyWait) {
                             if (!segLive) return null;
                             return (
                               <div

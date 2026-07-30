@@ -86,10 +86,29 @@ type TruncationHints = {
   serverReason?: string;
 };
 
+/** Body ends mid-structure even when the provider reported stop. */
+function looksAbruptlyCutOff(content: string): { truncated: boolean; reason: string } {
+  const text = (content || '').trimEnd();
+  if (!text) return { truncated: false, reason: '' };
+  // Trailing markdown heading with no body under it.
+  if (/(?:^|\n)#{1,6}[ \t]+[^\n]*\s*$/.test(text)) {
+    return { truncated: true, reason: 'Stopped mid-section' };
+  }
+  // Introduced a list/section with a colon then nothing.
+  if (/[:：]\s*$/.test(text)) {
+    return { truncated: true, reason: 'Stopped mid-sentence' };
+  }
+  // Dangling list marker.
+  if (/(?:^|\n)(?:[-*+]|\d+\.)\s*$/.test(text)) {
+    return { truncated: true, reason: 'Stopped mid-list' };
+  }
+  return { truncated: false, reason: '' };
+}
+
 /**
  * Decide whether a reply was cut off.
  * Prefer: stored hard reason → server truncated flag → finish_reason →
- * structural (code/math/think) → incomplete flag.
+ * structural (code/math/think) → abrupt body → incomplete flag.
  * Do NOT guess from “工具/工作区” body text — that false-triggers Continue.
  */
 function analyzeTruncation(
@@ -115,21 +134,26 @@ function analyzeTruncation(
     };
   }
   if (hints?.serverTruncated === false) {
-    // Still honor strong structural cuts (model said stop but left an open fence).
+    // Still honor strong structural cuts (model said stop but left an open fence / dangling heading).
     const structural = structuralTruncation(text, finishReason);
     if (structural.truncated) return structural;
+    const abrupt = looksAbruptlyCutOff(text);
+    if (abrupt.truncated) return abrupt;
     return { truncated: false, reason: '' };
   }
 
   const fromFinish = truncationFromFinishReason(finishReason);
   if (fromFinish.truncated) {
-    // After a successful tool round, a clean answer with stop/end_turn is handled
-    // above. tool_calls on the final stream still means unfinished.
     return fromFinish;
   }
 
   const structural = structuralTruncation(text, finishReason);
   if (structural.truncated) return structural;
+
+  // Provider said stop/end_turn but the body clearly dies mid-section
+  // (common after a failed tool when the model starts a rewrite outline).
+  const abrupt = looksAbruptlyCutOff(text);
+  if (abrupt.truncated) return abrupt;
 
   // User hit Stop / page refreshed mid-stream / connection dropped.
   // Do not honor incomplete when it was only paired with a soft legacy reason
@@ -139,6 +163,7 @@ function analyzeTruncation(
       return { truncated: false, reason: '' };
     }
     if (finishReason && NATURAL_FINISH_REASONS.has(finishReason)) {
+      // Natural finish + incomplete is often a stale flag; keep abrupt/structural only.
       return { truncated: false, reason: '' };
     }
     return { truncated: true, reason: 'Reply was interrupted' };
@@ -1700,12 +1725,32 @@ export default function ChatContainer() {
     if (!lastMessage.content?.trim()) {
       return { truncated: false, reason: '' };
     }
-    return analyzeTruncation(
+    const base = analyzeTruncation(
       lastMessage.content,
       lastMessage.finishReason,
       lastMessage.incomplete,
       lastMessage.truncationReason,
     );
+    if (base.truncated) return base;
+
+    // Tool failed and the model never finished a recovery answer — common when
+    // Notion/GitHub writes error mid-turn and the body dies on a heading.
+    const failedTools = (lastMessage.toolRuns || []).some(
+      (r) => r.status === 'done' && Boolean(r.error),
+    );
+    if (failedTools) {
+      const abrupt = looksAbruptlyCutOff(lastMessage.content);
+      if (abrupt.truncated) return abrupt;
+      const body = lastMessage.content.trim();
+      // Short narration after a failed write, without acknowledging the error.
+      if (
+        body.length < 500 &&
+        !/(失败|错误|无法|error|failed|invalid|page_id|缺少|参数)/i.test(body)
+      ) {
+        return { truncated: true, reason: 'Stopped after a tool error' };
+      }
+    }
+    return base;
   }, [lastMessage]);
   // Only offer Continue when we have a clear interruption signal — not for every
   // finished assistant turn.
@@ -3853,7 +3898,7 @@ export default function ChatContainer() {
     return true;
   };
 
-  const resumeIncompleteReply = async () => {
+  const resumeIncompleteReply = async (opts?: { force?: boolean }) => {
     const sessionId = activeSessionIdRef.current;
     const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
     const last = sessionMessages[sessionMessages.length - 1];
@@ -3861,7 +3906,8 @@ export default function ChatContainer() {
 
     const emptyInterrupted = last.incomplete && !last.content.trim();
     // Refuse to continue a reply that looks complete — matches the visible gate.
-    if (!emptyInterrupted) {
+    // Manual Continue (force) bypasses the soft gate so the user can always resume.
+    if (!opts?.force && !emptyInterrupted) {
       if (!last.content.trim()) return;
       const verdict = analyzeTruncation(
         last.content,
@@ -3869,7 +3915,16 @@ export default function ChatContainer() {
         last.incomplete,
         last.truncationReason,
       );
-      if (!verdict.truncated) return;
+      if (!verdict.truncated) {
+        // Still allow when a tool failed and the body looks unfinished.
+        const failedTools = (last.toolRuns || []).some(
+          (r) => r.status === 'done' && Boolean(r.error),
+        );
+        if (!failedTools || !looksAbruptlyCutOff(last.content).truncated) return;
+      }
+    }
+    if (opts?.force && !last.content.trim() && !last.reasoning?.trim() && !last.toolRuns?.length) {
+      return;
     }
 
     stickToBottomRef.current = true;
@@ -4616,9 +4671,23 @@ export default function ChatContainer() {
                           >
                             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                             <span className="min-w-0 flex-1 truncate">{t('requestReview')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /review
-                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void resumeIncompleteReply({ force: true });
+                            }}
+                            disabled={
+                              isActiveLoading ||
+                              !lastMessage ||
+                              lastMessage.role !== 'assistant' ||
+                              isAssistantError(lastMessage)
+                            }
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                            title={t('continueCommandHint')}
+                          >
+                            <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1 truncate">{t('continueCommand')}</span>
                           </button>
                         </div>
                       </motion.div>
@@ -6672,9 +6741,25 @@ export default function ChatContainer() {
                                   >
                                     <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                                     <span className="min-w-0 flex-1">{t('requestReview')}</span>
-                                    <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                                      /review
-                                    </span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsSkillPickerOpen(false);
+                                      setPlusFlyout(null);
+                                      void resumeIncompleteReply({ force: true });
+                                    }}
+                                    disabled={
+                                      isActiveLoading ||
+                                      !lastMessage ||
+                                      lastMessage.role !== 'assistant' ||
+                                      isAssistantError(lastMessage)
+                                    }
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-200 dark:hover:bg-stone-800"
+                                    title={t('continueCommandHint')}
+                                  >
+                                    <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                    <span className="min-w-0 flex-1">{t('continueCommand')}</span>
                                   </button>
                                 </motion.div>
                               )}

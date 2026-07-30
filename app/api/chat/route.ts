@@ -829,6 +829,7 @@ export async function POST(req: NextRequest) {
           }
 
           let usedTools = false;
+          let lastToolRoundHadFailure = false;
           const cursorModel = isCursorStyleModel(requestedModel);
           // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
           // For those models, run search server-side when the ask is clearly a lookup.
@@ -1083,6 +1084,26 @@ export async function POST(req: NextRequest) {
                 // Reasoning-only chunks (common on GLM with tools enabled) must fall
                 // through to the final completion pass — otherwise the bubble stays empty.
                 if (streamedContent.trim()) {
+                  // After a failed tool, narration without a retry is incomplete —
+                  // push a recovery turn while rounds remain so the model can fix args
+                  // (e.g. missing Notion page_id) instead of leaving a half outline.
+                  if (lastToolRoundHadFailure && round < MAX_TOOL_ROUNDS - 1) {
+                    workingMessages.push({
+                      role: 'assistant',
+                      content: streamedContent,
+                    });
+                    workingMessages.push({
+                      role: 'user',
+                      content: [
+                        'Your previous tool call(s) FAILED — see the tool result error payloads above.',
+                        'Either emit corrected tool_calls now (e.g. include required fields like page_id),',
+                        'OR clearly explain the failure and stop. Do not claim the write succeeded.',
+                        'Do not leave a half-written outline or empty section headings.',
+                      ].join(' '),
+                    });
+                    lastToolRoundHadFailure = false;
+                    break;
+                  }
                   send(streamCompletionPayload(roundFinishReason || 'stop'));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   controller.close();
@@ -1095,6 +1116,7 @@ export async function POST(req: NextRequest) {
               // The follow-up answer still comes from the final stage after tools execute.
 
               usedTools = true;
+              let roundHadToolFailure = false;
               workingMessages.push({
                 role: 'assistant',
                 content: streamedContent || null,
@@ -1116,12 +1138,21 @@ export async function POST(req: NextRequest) {
                   },
                   toolCtx,
                 );
+                const payload = String(result.content || '');
+                if (
+                  /"ok"\s*:\s*false/i.test(payload) ||
+                  /"error"\s*:\s*"/i.test(payload) ||
+                  /MCP error|Input validation error|invalid_type/i.test(payload)
+                ) {
+                  roundHadToolFailure = true;
+                }
                 workingMessages.push({
                   role: 'tool',
                   tool_call_id: tc.id,
                   content: result.content,
                 });
               }
+              if (roundHadToolFailure) lastToolRoundHadFailure = true;
             }
           }
 
@@ -1130,13 +1161,21 @@ export async function POST(req: NextRequest) {
                 ...workingMessages,
                 {
                   role: 'user',
-                  content: [
-                    'Write the final answer now using ONLY the tool results above.',
-                    'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
-                    'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
-                    'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
-                    'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
-                  ].join(' '),
+                  content: lastToolRoundHadFailure
+                    ? [
+                        'Write the final answer now.',
+                        'One or more tools FAILED — acknowledge the error from the tool payloads honestly.',
+                        'Do not claim Notion/GitHub/Google writes succeeded. Do not invent page URLs.',
+                        'If you can tell the user how to fix the args (e.g. missing page_id), do so briefly.',
+                        'Do not leave half-written outlines or empty section headings. Do not call tools.',
+                      ].join(' ')
+                    : [
+                        'Write the final answer now using ONLY the tool results above.',
+                        'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
+                        'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
+                        'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
+                        'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
+                      ].join(' '),
                 },
               ]
             : workingMessages;

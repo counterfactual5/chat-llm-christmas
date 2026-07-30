@@ -889,6 +889,11 @@ export async function POST(req: NextRequest) {
           if (activeToolDefs.length > 0 && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
               let streamedContent = '';
+              // The slice of streamedContent the gate kept back (narration that arrived
+              // after the first tool_call delta). Only this may be replayed as reasoning:
+              // anything already sent as content would show up twice — once in the answer
+              // and once as a Thought step landing *after* it in the timeline.
+              let withheldContent = '';
               let streamedReasoning = '';
               // Accumulate streamed tool_calls: index → {id, name, arguments}
               const toolCallDeltas = new Map<number, { id: string; name: string; arguments: string }>();
@@ -985,9 +990,10 @@ export async function POST(req: NextRequest) {
                   // the tool_calls array — we buffer that and send it as reasoning instead.
                   if (contentChunk) {
                     contentChunk = roundStampStripper.push(contentChunk);
-                    streamedContent += contentChunk;
-                    if (!hasToolCallDeltas && contentChunk) {
-                      send({ content: contentChunk });
+                    if (contentChunk) {
+                      streamedContent += contentChunk;
+                      if (hasToolCallDeltas) withheldContent += contentChunk;
+                      else send({ content: contentChunk });
                     }
                   }
                 }
@@ -1005,7 +1011,8 @@ export async function POST(req: NextRequest) {
                 const rest = roundStampStripper.flush();
                 if (rest) {
                   streamedContent += rest;
-                  if (!hasToolCallDeltas) send({ content: rest });
+                  if (hasToolCallDeltas) withheldContent += rest;
+                  else send({ content: rest });
                 }
               }
 
@@ -1020,8 +1027,11 @@ export async function POST(req: NextRequest) {
                   streamedContent &&
                   narratesSearchInsteadOfCalling(streamedContent)
                 ) {
-                  // Content was already streamed — move it to reasoning.
-                  send({ reasoning: String(streamedContent) });
+                  // The narration is already in the bubble and cannot be unsent, so
+                  // only flush whatever the gate held back.
+                  if (withheldContent.trim()) {
+                    send({ reasoning: stripMessageStamp(String(withheldContent)) });
+                  }
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
@@ -1031,8 +1041,8 @@ export async function POST(req: NextRequest) {
                 // with a blank bubble: park any narration in reasoning and fall through
                 // to the final completion pass without tools.
                 if (hasToolCallDeltas) {
-                  if (streamedContent.trim()) {
-                    send({ reasoning: stripMessageStamp(String(streamedContent)) });
+                  if (withheldContent.trim()) {
+                    send({ reasoning: stripMessageStamp(String(withheldContent)) });
                   }
                   break;
                 }
@@ -1048,10 +1058,11 @@ export async function POST(req: NextRequest) {
                 break;
               }
 
-              // Tool calls present — if we streamed content, send it as reasoning
-              // (the real answer will come from the final stage after tools execute).
-              if (streamedContent && hasToolCallDeltas) {
-                send({ reasoning: stripMessageStamp(String(streamedContent)) });
+              // Tool calls present — park only the narration the client never saw.
+              // Narration that already streamed stays where it landed in the timeline;
+              // the real answer still comes from the final stage after tools execute.
+              if (withheldContent.trim()) {
+                send({ reasoning: stripMessageStamp(String(withheldContent)) });
               }
 
               usedTools = true;

@@ -553,15 +553,6 @@ function displayAssistantParts(message: Message): { content: string; reasoning: 
   };
 }
 
-/** Crumbs like "版本。" after a content/tool seam — not worth a Thought chrome. */
-function isTrivialReasoningText(text: string): boolean {
-  const t = String(text || '').trim();
-  if (!t) return true;
-  if (t.length < 6) return true;
-  if (/^[\s\p{P}\p{S}]+$/u.test(t)) return true;
-  return false;
-}
-
 function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): boolean {
   if (pending.some((a) => Boolean(a.dataUrl || a.type.startsWith('image/')))) return true;
   return messages.some((m) => (m.images?.length || 0) > 0);
@@ -1870,8 +1861,8 @@ export default function ChatContainer() {
       return;
     }
     const hasThought = (msg.activity || []).some(
-      (s) => s.kind === 'reasoning' && !isTrivialReasoningText(s.text),
-    ) || (!isTrivialReasoningText(msg.reasoning || '') && Boolean(msg.reasoning?.trim()));
+      (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
+    ) || Boolean(String(msg.reasoning || '').trim());
     if (!hasThought) {
       setReplyWaitByMessage((prev) => {
         if (!prev[msg.id]) return prev;
@@ -2075,25 +2066,6 @@ export default function ChatContainer() {
             activity[activity.length - 1] = {
               ...last,
               text: last.text + chunk,
-            };
-          } else if (isTrivialReasoningText(chunk) && last?.kind === 'content') {
-            // Sentence tail misrouted as reasoning after a content/tool seam
-            // (e.g. "……手册" + reasoning "版本。") — splice back onto the answer.
-            activity[activity.length - 1] = {
-              ...last,
-              text: last.text + chunk,
-            };
-            return {
-              ...m,
-              content: stripMessageStamp(m.content + chunk),
-              activity,
-              incomplete: true,
-            };
-          } else if (isTrivialReasoningText(chunk)) {
-            return {
-              ...m,
-              reasoning: (m.reasoning || '') + chunk,
-              incomplete: true,
             };
           } else {
             activity.push({
@@ -5273,9 +5245,7 @@ export default function ChatContainer() {
                         const timelineSegments: TimelineSegment[] = (() => {
                           if (!hasContentSteps) {
                             const processSteps = activitySteps.filter(
-                              (s): s is ProcessStep =>
-                                s.kind !== 'content' &&
-                                !(s.kind === 'reasoning' && isTrivialReasoningText(s.text)),
+                              (s): s is ProcessStep => s.kind !== 'content',
                             );
                             const segs: TimelineSegment[] = [];
                             if (awaitingFirstContent || processSteps.length > 0) {
@@ -5316,11 +5286,6 @@ export default function ChatContainer() {
                               if (step.text.trim()) {
                                 segs.push({ type: 'content', id: step.id, text: step.text });
                               }
-                            } else if (
-                              step.kind === 'reasoning' &&
-                              isTrivialReasoningText(step.text)
-                            ) {
-                              // drop crumbs
                             } else {
                               buf.push(step);
                             }
@@ -5704,7 +5669,6 @@ export default function ChatContainer() {
                           live: boolean,
                         ) => {
                           const body = step.text.trim();
-                          if (isTrivialReasoningText(body) && !live) return null;
                           if (!body && !live) return null;
                           // Open while thinking so it streams in view, then auto-collapse
                           // once the answer starts. Explicit user toggles win.
@@ -5734,7 +5698,7 @@ export default function ChatContainer() {
                                 )}
                                 <span>{live ? t('thinking') : t('thought')}</span>
                               </button>
-                              {open && body && !isTrivialReasoningText(body) && (
+                              {open && body && (
                                 <div className="chat-markdown mt-0.5 max-h-72 overflow-y-auto pl-[18px] text-[12px] leading-5 text-stone-500 dark:text-stone-400">
                                   <ReactMarkdown
                                     remarkPlugins={[remarkMath, remarkGfm]}

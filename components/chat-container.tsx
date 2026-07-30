@@ -1561,20 +1561,6 @@ export default function ChatContainer() {
     setActiveMcpIds((prev) => (prev.includes('github') ? prev : [...prev, 'github']));
   };
 
-  const setZhipuVisionEnabled = (enabled: boolean) => {
-    if (!enabled) {
-      setActiveMcpIds((prev) => prev.filter((id) => id !== 'zhipu-vision'));
-      return;
-    }
-    if (!isAccountBound) {
-      openLoginModal();
-      return;
-    }
-    setActiveMcpIds((prev) =>
-      prev.includes('zhipu-vision') ? prev : [...prev, 'zhipu-vision'],
-    );
-  };
-
   const setGoogleServiceEnabled = (
     service: 'gmail' | 'calendar' | 'drive',
     enabled: boolean,

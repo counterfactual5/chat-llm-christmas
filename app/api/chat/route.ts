@@ -50,7 +50,9 @@ import {
 } from '@/lib/gateway-files';
 import {
   detectFakedToolNarration,
+  detectPendingToolIntent,
   buildCorrectionPrompt,
+  buildPendingIntentPrompt,
   emitReviewerStep,
   REVIEWER_SYSTEM_PROMPT,
 } from '@/lib/claim-reviewer';
@@ -1053,6 +1055,32 @@ export async function POST(req: NextRequest) {
                   if (!(await runProactiveSearch())) return;
                   break;
                 }
+                // Announced "I'll fetch/read first" with no tool_calls — force a real call.
+                // Always on when those tools are available (not only Auto-review): otherwise
+                // the turn ends on narration and the UI looks "interrupted".
+                if (streamedContent && round < MAX_TOOL_ROUNDS - 1) {
+                  const pending = detectPendingToolIntent(streamedContent, {
+                    searchEnabled,
+                    integrations: authorizedIntegrations,
+                  });
+                  if (pending.length) {
+                    emitReviewerStep(send, {
+                      status: 'done',
+                      phase: 'mid',
+                      surfaces: pending,
+                      kind: 'intent',
+                    });
+                    workingMessages.push({
+                      role: 'assistant',
+                      content: streamedContent,
+                    });
+                    workingMessages.push({
+                      role: 'user',
+                      content: buildPendingIntentPrompt(pending),
+                    });
+                    break;
+                  }
+                }
                 // Claimed a tool success (Notion / GitHub / Google / web / skill)
                 // without emitting tool_calls — Reviewer pushes a corrective turn.
                 if (autoReview && streamedContent && round < MAX_TOOL_ROUNDS - 1) {
@@ -1062,7 +1090,12 @@ export async function POST(req: NextRequest) {
                     skillCreator: skillCreatorOn,
                   });
                   if (faked.length) {
-                    emitReviewerStep(send, { status: 'done', phase: 'mid', surfaces: faked });
+                    emitReviewerStep(send, {
+                      status: 'done',
+                      phase: 'mid',
+                      surfaces: faked,
+                      kind: 'success',
+                    });
                     workingMessages.push({
                       role: 'assistant',
                       content: streamedContent,

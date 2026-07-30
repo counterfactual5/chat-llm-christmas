@@ -102,6 +102,14 @@ function looksAbruptlyCutOff(content: string): { truncated: boolean; reason: str
   if (/(?:^|\n)(?:[-*+]|\d+\.)\s*$/.test(text)) {
     return { truncated: true, reason: 'Stopped mid-list' };
   }
+  // Announced a tool action then stopped ("Let me fetch the current content first.").
+  if (
+    /(let me (first )?(fetch|read|get|load|search)|I('ll| will) (first )?(fetch|read|get)|先(读|看|获取|拉取|搜)|让我(先)?(读|看|获取|搜)|我先.{0,12}(读|看|获取)).{0,40}$/i.test(
+      text,
+    )
+  ) {
+    return { truncated: true, reason: 'Stopped before calling tools' };
+  }
   return { truncated: false, reason: '' };
 }
 

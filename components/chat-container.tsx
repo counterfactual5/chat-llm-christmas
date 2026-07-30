@@ -735,6 +735,7 @@ export default function ChatContainer() {
     id: string;
     title: string;
   } | null>(null);
+  const [confirmClearSourcesOpen, setConfirmClearSourcesOpen] = useState(false);
 
   // Skills State
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -1834,6 +1835,18 @@ export default function ChatContainer() {
 
   const updateActiveSession = (newMessages: Message[], title?: string) => {
     updateSession(activeSessionId, newMessages, title);
+  };
+
+  const clearWebSources = () => {
+    setWebSourcesCleared(true);
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSessionId
+          ? { ...s, webSources: undefined, webSourcesCleared: true }
+          : s,
+      ),
+    );
+    setConfirmClearSourcesOpen(false);
   };
 
   const markAssistantIncomplete = (
@@ -6761,34 +6774,13 @@ export default function ChatContainer() {
                               tabIndex={0}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setWebSourcesCleared(true);
-                                setSessions((prev) =>
-                                  prev.map((s) =>
-                                    s.id === activeSessionId
-                                      ? {
-                                          ...s,
-                                          webSources: undefined,
-                                          webSourcesCleared: true,
-                                        }
-                                      : s,
-                                  ),
-                                );
+                                setConfirmClearSourcesOpen(true);
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
                                   e.stopPropagation();
-                                  setWebSourcesCleared(true);
-                                  setSessions((prev) =>
-                                    prev.map((s) =>
-                                      s.id === activeSessionId
-                                        ? {
-                                            ...s,
-                                            webSources: undefined,
-                                            webSourcesCleared: true,
-                                          }
-                                        : s,
-                                    ),
-                                  );
+                                  setConfirmClearSourcesOpen(true);
                                 }
                               }}
                               className="rounded px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-400 hover:text-red-500"
@@ -6878,20 +6870,7 @@ export default function ChatContainer() {
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setWebSourcesCleared(true);
-                                        setSessions((prev) =>
-                                          prev.map((s) =>
-                                            s.id === activeSessionId
-                                              ? {
-                                                  ...s,
-                                                  webSources: undefined,
-                                                  webSourcesCleared: true,
-                                                }
-                                              : s,
-                                          ),
-                                        );
-                                      }}
+                                      onClick={() => setConfirmClearSourcesOpen(true)}
                                       className="text-[10px] text-stone-400 hover:text-red-500"
                                     >
                                       {t('clearWebSources')}
@@ -7114,6 +7093,57 @@ export default function ChatContainer() {
           {t('quote')}
         </button>
       </div>
+
+      {/* --- Clear Reference Sources Modal --- */}
+      <AnimatePresence>
+        {confirmClearSourcesOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            onClick={() => setConfirmClearSourcesOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-base font-semibold text-stone-900 dark:text-stone-100">
+                  {t('clearSourcesTitle')}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearSourcesOpen(false)}
+                  className="text-stone-400 hover:text-stone-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                {t('clearSourcesConfirm')}
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setConfirmClearSourcesOpen(false)}
+                  className="rounded-xl"
+                >
+                  {t('cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={clearWebSources}
+                  className="rounded-xl bg-red-500 text-white hover:bg-red-600"
+                >
+                  {t('clearWebSources')}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* --- Delete Chat Modal --- */}
       <AnimatePresence>

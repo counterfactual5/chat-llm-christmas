@@ -129,6 +129,9 @@ const dict = {
     googleSources: 'Google',
     referenceSources: 'Sources',
     clearWebSources: 'Clear sources',
+    clearSourcesTitle: 'Clear reference sources?',
+    clearSourcesConfirm:
+      'These sources will no longer be used in future replies. You may need to search again to restore them.',
 
     requestFailed: 'Request failed',
     retry: 'Retry',
@@ -339,6 +342,8 @@ const dict = {
     googleSources: 'Google',
     referenceSources: '来源',
     clearWebSources: '清除来源',
+    clearSourcesTitle: '清除参考来源？',
+    clearSourcesConfirm: '清除后，后续回答将不再使用这些来源。如需恢复，可能需要重新搜索。',
 
     requestFailed: '请求失败',
     retry: '重试',

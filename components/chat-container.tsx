@@ -3737,8 +3737,15 @@ export default function ChatContainer() {
     abortControllersRef.current.set(sessionId, controller);
 
     const lastUser = [...sessionMessages].reverse().find((m) => m.role === 'user');
-    // Refresh mid-Process left an empty bubble: re-answer the last user ask.
-    if (emptyInterrupted && lastUser) {
+    // Truly empty bubble (refresh mid-Process, no tokens at all): re-answer.
+    // If Thought / tools already ran, keep them — wiping felt like “Continue deleted
+    // my half reply” when GLM parked text in reasoning with empty content.
+    const hasProcessOrThought = Boolean(
+      last.reasoning?.trim() ||
+        last.activity?.length ||
+        last.toolRuns?.length,
+    );
+    if (emptyInterrupted && lastUser && !hasProcessOrThought) {
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
@@ -3774,6 +3781,66 @@ export default function ChatContainer() {
           '',
           '',
           sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
+        );
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          setSessions((prev) =>
+            prev.map((s) => {
+              if (s.id !== sessionId) return s;
+              const msgs = s.messages.map((m) => {
+                if (m.id !== last.id) return m;
+                if (m.content.trim() || m.reasoning?.trim()) {
+                  return {
+                    ...m,
+                    incomplete: true,
+                    truncationReason: error.message || 'Request failed',
+                  };
+                }
+                return {
+                  ...m,
+                  content: `Error: ${error.message || 'Request failed'}`,
+                  incomplete: false,
+                  truncationReason: undefined,
+                };
+              });
+              return { ...s, messages: msgs, updatedAt: Date.now() };
+            }),
+          );
+        } else {
+          markAssistantIncomplete(sessionId, last.id, true, {
+            truncationReason: 'Reply was interrupted',
+          });
+        }
+      } finally {
+        endLoadingIfController(sessionId, controller);
+      }
+      return;
+    }
+
+    // Empty content but Thought/tools already present: ask the model for the
+    // visible answer without wiping Process history.
+    if (emptyInterrupted && lastUser && hasProcessOrThought) {
+      const apiMessages = [
+        ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
+        {
+          role: 'user',
+          content: [
+            'Your previous turn was interrupted before any user-visible answer text.',
+            'Write the final answer now. Do not restart unrelated tasks.',
+            'Do not claim you created/updated Notion pages or invent Notion URLs unless a tool result in this thread already returned that URL.',
+          ].join(' '),
+          images: [],
+          timestamp: Date.now(),
+        },
+      ];
+      try {
+        await streamChatResponse(
+          sessionId,
+          apiMessages,
+          last.id,
+          controller.signal,
+          '',
+          '',
         );
       } catch (error: any) {
         if (error.name !== 'AbortError') {

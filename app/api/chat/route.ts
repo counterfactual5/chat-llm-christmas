@@ -61,6 +61,7 @@ import {
   buildReviewReport,
   buildFindingsResponsePrompt,
   buildReviewIssuesResponsePrompt,
+  actionableReviewIssues,
   FINDINGS_RESPONSE_SYSTEM,
   REVIEWER_SYSTEM_PROMPT,
   type ReviewFinding,
@@ -1528,8 +1529,11 @@ export async function POST(req: NextRequest) {
                       finishReason: roundFinishReason,
                       truncated: roundFinishReason === 'length',
                     });
-                    if (audit.issues.length) {
-                      await streamReviewCorrection(audit.issues, streamedContent);
+                    // Warn-level heuristics stay panel-only; only verified
+                    // errors are worth making the model amend itself.
+                    const actionable = actionableReviewIssues(audit.issues);
+                    if (actionable.length) {
+                      await streamReviewCorrection(actionable, streamedContent);
                     }
                   }
                   send(streamCompletionPayload(roundFinishReason || 'stop'));
@@ -1757,11 +1761,13 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          if (finalResult.sawContent && finalResult.auditResult.issues.length) {
-            await streamReviewCorrection(
-              finalResult.auditResult.issues,
-              finalResult.contentBuf,
-            );
+          {
+            // Warn-level heuristics stay panel-only; only verified errors are
+            // worth making the model amend itself (false warns make it cave).
+            const actionable = actionableReviewIssues(finalResult.auditResult.issues);
+            if (finalResult.sawContent && actionable.length) {
+              await streamReviewCorrection(actionable, finalResult.contentBuf);
+            }
           }
 
           if (!finalResult.sawText) {

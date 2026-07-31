@@ -1,0 +1,25 @@
+import type { Message } from '@/lib/chat/types';
+import {
+  contentHasThinkMarkup,
+  extractThinkBlocks,
+} from '@/lib/think-tags';
+import { stripFakeToolMarkup } from '@/lib/tool-tags';
+import { stripMessageStamp } from '@/lib/time-context';
+
+export function messagePlainText(message: Message): string {
+  // Count visible turn text (answer + thinking) so Context used tracks rollback.
+  return [message.content, message.reasoning].filter(Boolean).join('\n');
+}
+
+/** Strip leaked <think> / fake tool tags for display / export; merge into reasoning panel. */
+export function displayAssistantParts(message: Message): { content: string; reasoning: string } {
+  const hasThink = contentHasThinkMarkup(message.content);
+  const extracted = hasThink
+    ? extractThinkBlocks(message.content)
+    : { content: message.content, reasoning: '' };
+  return {
+    content: stripMessageStamp(stripFakeToolMarkup(extracted.content)),
+    reasoning: [message.reasoning, extracted.reasoning].filter(Boolean).join('\n\n'),
+  };
+}
+

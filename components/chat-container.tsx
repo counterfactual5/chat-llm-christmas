@@ -39,6 +39,27 @@ import {
   type TimelineSegment,
   type ToolStep,
 } from '@/lib/chat/timeline';
+import {
+  analyzeTruncation,
+  assistantMismatchesUserTopic,
+  buildContinuationPrompt,
+  hasSuccessfulRetrievalTools,
+  looksAbruptlyCutOff,
+} from '@/lib/chat/reply-truncation';
+import { displayAssistantParts, messagePlainText } from '@/lib/chat/message-display';
+import {
+  CHATS_OWNER_KEY,
+  mergeSyncedSessions,
+  normalizeRestoredSession,
+  sessionsForCloudSync,
+} from '@/lib/chat/sessions';
+import {
+  OutputPanel,
+  formatFileSize,
+  type GeneratedFileEntry,
+  type GeneratedImageEntry,
+} from '@/components/chat/output-panel';
+import { ReferencePanel } from '@/components/chat/reference-panel';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import ReactMarkdown from 'react-markdown';
@@ -85,8 +106,6 @@ import {
 import { stripMessageStamp } from '@/lib/time-context';
 import {
   compactQuoteMath,
-  hasUnclosedDisplayMath,
-  looksLikeTruncatedMath,
   markdownFromDomSelection,
   prepareChatMarkdown,
 } from '@/lib/markdown-math';
@@ -96,251 +115,12 @@ import {
   isGoogleMcpId,
   normalizeGoogleIntegrations,
 } from '@/lib/integrations/google-services';
-import {
-  NATURAL_FINISH_REASONS,
-  SOFT_TRUNCATION_REASONS,
-  truncationFromFinishReason,
-} from '@/lib/truncation';
 
 const KATEX_OPTIONS = {
   throwOnError: false,
   // Soft muted errors — never KaTeX's default piercing red.
   errorColor: 'var(--chat-math-error, #a8a29e)',
 } as const;
-
-type TruncationHints = {
-  /** Server sent truncated=true/false on the completion event. */
-  serverTruncated?: boolean | null;
-  serverReason?: string;
-};
-
-/** Body ends mid-structure even when the provider reported stop. */
-function looksAbruptlyCutOff(content: string): { truncated: boolean; reason: string } {
-  const text = (content || '').trimEnd();
-  if (!text) return { truncated: false, reason: '' };
-  // Trailing markdown heading with no body under it.
-  if (/(?:^|\n)#{1,6}[ \t]+[^\n]*\s*$/.test(text)) {
-    return { truncated: true, reason: 'Stopped mid-section' };
-  }
-  // Introduced a list/section with a colon then nothing.
-  if (/[:：]\s*$/.test(text)) {
-    return { truncated: true, reason: 'Stopped mid-sentence' };
-  }
-  // Dangling list marker.
-  if (/(?:^|\n)(?:[-*+]|\d+\.)\s*$/.test(text)) {
-    return { truncated: true, reason: 'Stopped mid-list' };
-  }
-  // Announced a tool action then stopped ("Let me fetch the current content first.").
-  // Caller should suppress this when real toolRuns already succeeded afterward.
-  if (
-    /(let me (first )?(fetch|read|get|load|search)|I('ll| will) (first )?(fetch|read|get)|先(读|看|获取|拉取|搜)|让我(先)?(读|看|获取|搜)|我先.{0,12}(读|看|获取)).{0,40}$/i.test(
-      text,
-    )
-  ) {
-    return { truncated: true, reason: 'Stopped before calling tools' };
-  }
-  return { truncated: false, reason: '' };
-}
-
-/** Retrieval tools that mean "Stopped before calling tools" is stale. */
-function hasSuccessfulRetrievalTools(
-  toolRuns?: Array<{ name?: string; status?: string; error?: string }>,
-): boolean {
-  return (toolRuns || []).some(
-    (r) =>
-      r.status === 'done' &&
-      !r.error &&
-      /web_search|web_read|web-read|proactive_search|image_understand/i.test(
-        String(r.name || ''),
-      ),
-  );
-}
-
-/**
- * Decide whether a reply was cut off.
- * Prefer: stored hard reason → server truncated flag → finish_reason →
- * structural (code/math/think) → abrupt body → incomplete flag.
- * Do NOT guess from “工具/工作区” body text — that false-triggers Continue.
- */
-function analyzeTruncation(
-  content: string,
-  finishReason?: string | null,
-  incomplete?: boolean,
-  storedReason?: string,
-  hints?: TruncationHints,
-): { truncated: boolean; reason: string } {
-  const text = (content || '').trimEnd();
-  if (!text) return { truncated: false, reason: '' };
-
-  // Sticky only for hard reasons. Soft legacy reasons are revalidated below.
-  if (storedReason && !SOFT_TRUNCATION_REASONS.has(storedReason)) {
-    return { truncated: true, reason: storedReason };
-  }
-
-  // Authoritative server completion event.
-  if (hints?.serverTruncated === true) {
-    return {
-      truncated: true,
-      reason: hints.serverReason || truncationFromFinishReason(finishReason).reason || 'Reply was interrupted',
-    };
-  }
-  if (hints?.serverTruncated === false) {
-    // Still honor strong structural cuts (model said stop but left an open fence / dangling heading).
-    const structural = structuralTruncation(text, finishReason);
-    if (structural.truncated) return structural;
-    const abrupt = looksAbruptlyCutOff(text);
-    if (abrupt.truncated) return abrupt;
-    return { truncated: false, reason: '' };
-  }
-
-  const fromFinish = truncationFromFinishReason(finishReason);
-  if (fromFinish.truncated) {
-    return fromFinish;
-  }
-
-  const structural = structuralTruncation(text, finishReason);
-  if (structural.truncated) return structural;
-
-  // Provider said stop/end_turn but the body clearly dies mid-section
-  // (common after a failed tool when the model starts a rewrite outline).
-  const abrupt = looksAbruptlyCutOff(text);
-  if (abrupt.truncated) return abrupt;
-
-  // User hit Stop / page refreshed mid-stream / connection dropped.
-  // Do not honor incomplete when it was only paired with a soft legacy reason
-  // (e.g. false “Stopped while trying to use tools” on a finished answer).
-  if (incomplete) {
-    if (storedReason && SOFT_TRUNCATION_REASONS.has(storedReason)) {
-      return { truncated: false, reason: '' };
-    }
-    if (finishReason && NATURAL_FINISH_REASONS.has(finishReason)) {
-      // Natural finish + incomplete is often a stale flag; keep abrupt/structural only.
-      return { truncated: false, reason: '' };
-    }
-    return { truncated: true, reason: 'Reply was interrupted' };
-  }
-
-  return { truncated: false, reason: '' };
-}
-
-function structuralTruncation(
-  text: string,
-  finishReason?: string | null,
-): { truncated: boolean; reason: string } {
-  if ((text.match(/```/g) || []).length % 2 === 1) {
-    return { truncated: true, reason: 'Unclosed code block' };
-  }
-  // Odd $$ is often a false positive when the model *talks about* LaTeX
-  // (“同一个 $$ 块”). Only Continue when the tail still looks like cut-off math,
-  // or the provider did not report a clean natural stop.
-  if (hasUnclosedDisplayMath(text)) {
-    const naturalStop = !finishReason || NATURAL_FINISH_REASONS.has(finishReason);
-    const endsLikeSentence = /[.!?。！？…]\s*$/.test(text);
-    if (looksLikeTruncatedMath(text) || !naturalStop || !endsLikeSentence) {
-      return { truncated: true, reason: 'Unclosed math block' };
-    }
-  }
-  {
-    const { content: visible, reasoning } = extractThinkBlocks(text);
-    if (
-      contentHasThinkMarkup(text) &&
-      /<think\b|<thinking\b/i.test(text) &&
-      !/<\/(?:think|thinking)>/i.test(text)
-    ) {
-      return { truncated: true, reason: 'Unclosed thinking block' };
-    }
-    // Long thinking then only a short bridge sentence — usually cut before the real answer.
-    if (reasoning.length > 80 && visible.trim().length > 0 && visible.trim().length < 180) {
-      return { truncated: true, reason: 'Stopped before finishing the answer' };
-    }
-  }
-  return { truncated: false, reason: '' };
-}
-
-/** Heuristic: partial reply is stuck narrating IDE/agent tool use (Continue prompt only). */
-function looksLikeToolNarration(text: string): boolean {
-  // Negated limits (“不能扫描工作区”) are capability disclaimers, not agent narration.
-  if (
-    /不能[^。\n]{0,40}(?:工作区|workspace|shell)|无法[^。\n]{0,40}(?:工作区|workspace)|do not (?:read|scan)|cannot read local/i.test(
-      text,
-    )
-  ) {
-    return false;
-  }
-  // Require IDE/workspace agent narration — bare "tool_call" matches Agent docs
-  // and Notion workflow templates, which wrongly wiped Continue mid-reply.
-  return /正在扫描(?:工作区|项目|仓库)|改用\s*shell|同步\s*I\/O|扫描工作区|定位同步|Shell\s+扫描|异步重构|排查工作区|<(?:tool_call|tool_calls|function_call)\b/i.test(
-    text,
-  );
-}
-
-/** Assistant is continuing a coding/agent task that doesn't match this chat's last user ask. */
-function assistantMismatchesUserTopic(userText: string, assistantText: string): boolean {
-  if (!looksLikeToolNarration(assistantText)) return false;
-  // Same-chat coding asks may legitimately mention workspace — don't treat as cross-bleed.
-  if (
-    /async|python|refactor|代码|工作区|workspace|shell|文件|bug|报错|debug|重构|notion|模板|template|agent/i.test(
-      userText,
-    )
-  ) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Continuation instructions tailored to whatever structure the reply was cut
- * inside, so the model resumes the same table / code block / formula instead of
- * restarting it with a fresh header.
- */
-function buildContinuationPrompt(previous: string): string {
-  const text = previous.trimEnd();
-  const tail = text.slice(-400);
-  const lines = text.split('\n');
-  const lastLine = lines[lines.length - 1] ?? '';
-
-  const rules: string[] = [
-    'Continue your previous reply from exactly where it stopped.',
-    'Your output is appended directly to the previous text, so do not repeat any sentence, row, or heading you already wrote, do not restart the answer, and do not add an intro or apology.',
-  ];
-
-  const insideCodeBlock = (text.match(/```/g) || []).length % 2 === 1;
-  const insideMath = (text.match(/\$\$/g) || []).length % 2 === 1;
-  const insideTable = /^\s*\|/.test(lastLine);
-  const toolStuck = looksLikeToolNarration(text);
-
-  if (toolStuck) {
-    rules.push(
-      'You previously tried to use workspace/shell/search tools that are NOT available in this web chat.',
-      'Do not continue scanning files, running shell, or emitting tool_call markup.',
-      'Stop the tool narration and answer the user\'s original request directly with what you know.',
-    );
-  }
-
-  if (insideCodeBlock) {
-    rules.push(
-      'You stopped inside a fenced code block. Continue the code directly with no new opening fence, and close it with ``` when the code is finished.',
-    );
-  }
-  if (insideMath) {
-    rules.push(
-      'You stopped inside a $$ math block. Continue the LaTeX from that exact point and close the block with $$. Never open a new $$ block for this formula.',
-    );
-  }
-  if (insideTable) {
-    rules.push(
-      'You stopped inside a Markdown table. Emit only the remaining data rows, starting immediately with a newline followed by |. Do not repeat the header row, do not emit another |---| separator row, and do not repeat the last row shown below.',
-    );
-  }
-  if (!insideCodeBlock && !insideMath && !insideTable && !toolStuck) {
-    rules.push(
-      'If the text was cut mid-sentence or mid-word, resume from that exact character.',
-    );
-  }
-
-  return `${rules.join('\n')}\n\nHere are the last characters you wrote — continue immediately after them:\n\n<<<TAIL\n${tail}\nTAIL>>>`;
-}
-
 
 function skillSlashName(title: string): string {
   const slug = title
@@ -359,98 +139,9 @@ function parseImageCommand(text: string): string | null {
   return m?.[1]?.trim() || null;
 }
 
-function messagePlainText(message: Message): string {
-  // Count visible turn text (answer + thinking) so Context used tracks rollback.
-  return [message.content, message.reasoning].filter(Boolean).join('\n');
-}
-
-/** Strip leaked <think> / fake tool tags for display / export; merge into reasoning panel. */
-function displayAssistantParts(message: Message): { content: string; reasoning: string } {
-  const hasThink = contentHasThinkMarkup(message.content);
-  const extracted = hasThink
-    ? extractThinkBlocks(message.content)
-    : { content: message.content, reasoning: '' };
-  return {
-    content: stripMessageStamp(stripFakeToolMarkup(extracted.content)),
-    reasoning: [message.reasoning, extracted.reasoning].filter(Boolean).join('\n\n'),
-  };
-}
-
 function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): boolean {
   if (pending.some((a) => Boolean(a.dataUrl || a.type.startsWith('image/')))) return true;
   return messages.some((m) => (m.images?.length || 0) > 0);
-}
-
-/** localStorage key recording which account owns the cached chats (anti cross-account bleed). */
-const CHATS_OWNER_KEY = 'llm_christmas_chats_owner';
-
-/** Normalize a session restored from localStorage or the cloud: close stale streams, fold think markup. */
-function normalizeRestoredSession(session: ChatSession): ChatSession {
-  return {
-    ...session,
-    messages: (session.messages || []).map((m) => {
-      let next = m;
-      // Page refresh aborts in-flight streams. An incomplete flag without an
-      // active request would leave Process spinning forever.
-      if (m.role === 'assistant' && m.incomplete) {
-        next = {
-          ...next,
-          incomplete: true,
-          truncationReason: m.truncationReason || 'Reply was interrupted',
-          toolRuns: (m.toolRuns || []).map((r) =>
-            r.status === 'start' ? { ...r, status: 'done' as const } : r,
-          ),
-        };
-      }
-      if (
-        next.role !== 'assistant' ||
-        (!contentHasThinkMarkup(next.content) && !contentHasToolMarkup(next.content))
-      ) {
-        return next;
-      }
-      const parts = displayAssistantParts(next);
-      return {
-        ...next,
-        content: parts.content,
-        reasoning: parts.reasoning || undefined,
-      };
-    }),
-  };
-}
-
-/** Merge local + cloud sessions per id, keeping the newer updatedAt (LWW). */
-function mergeSyncedSessions(local: ChatSession[], cloud: ChatSession[]): ChatSession[] {
-  const byId = new Map<string, ChatSession>();
-  for (const s of local) byId.set(s.id, s);
-  for (const raw of cloud) {
-    if (!raw?.id) continue;
-    const remote = normalizeRestoredSession(raw);
-    const existing = byId.get(remote.id);
-    if (!existing || Number(remote.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
-      byId.set(remote.id, remote);
-    }
-  }
-  return [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-}
-
-const SYNC_DATAURL_LIMIT = 100 * 1024;
-/** Deep-clone sessions for upload, blanking huge inline data: URLs (legacy images). */
-function sessionsForCloudSync(sessions: ChatSession[]): ChatSession[] {
-  const scrub = (value: unknown): unknown => {
-    if (typeof value === 'string') {
-      return value.startsWith('data:') && value.length > SYNC_DATAURL_LIMIT ? '' : value;
-    }
-    if (Array.isArray(value)) return value.map(scrub);
-    if (value && typeof value === 'object') {
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        out[k] = scrub(v);
-      }
-      return out;
-    }
-    return value;
-  };
-  return sessions.map((s) => scrub(s) as ChatSession);
 }
 
 function toApiMessages(
@@ -1424,26 +1115,6 @@ export default function ChatContainer() {
     [activeSkillIds, skills],
   );
 
-  type GeneratedImageEntry = {
-    messageId: string;
-    imageIndex: number;
-    url: string;
-    prompt: string;
-    model: string;
-    timestamp: number;
-  };
-
-  type GeneratedFileEntry = {
-    messageId: string;
-    fileIndex: number;
-    id: string;
-    name: string;
-    mimeType: string;
-    size: number;
-    url: string;
-    content?: string;
-    createdAt: number;
-  };
 
   const generatedImageHistory = useMemo((): GeneratedImageEntry[] => {
     const out: GeneratedImageEntry[] = [];
@@ -1489,20 +1160,7 @@ export default function ChatContainer() {
     return out.slice().reverse();
   }, [messages]);
 
-  const generatedOutputCount = generatedImageHistory.length + generatedFileHistory.length;
 
-  const formatGeneratedAt = (ts: number) => {
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (!Number.isFinite(bytes) || bytes < 0) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
 
   const downloadGeneratedImage = async (entry: GeneratedImageEntry) => {
     try {
@@ -7895,366 +7553,35 @@ export default function ChatContainer() {
 
                 <ScrollArea className="flex-1 px-4 py-4">
                   <div className="space-y-2">
-                    {/* Output — Images / Files groups (only when non-empty) */}
-                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setPicturesExpanded((v) => !v)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
-                      >
-                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-                          <FileText className="h-3.5 w-3.5" />
-                          {t('generatedOutput')}
-                          {generatedOutputCount > 0 && (
-                            <span className="rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                              {generatedOutputCount}
-                            </span>
-                          )}
-                        </span>
-                        <ChevronDown
-                          className={cn(
-                            'h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform',
-                            picturesExpanded && 'rotate-180',
-                          )}
-                        />
-                      </button>
-                      <AnimatePresence initial={false}>
-                        {picturesExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="max-h-72 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
-                              {generatedOutputCount === 0 ? (
-                                <div className="py-2 text-xs text-stone-400">
-                                  {t('noGeneratedOutput')}
-                                </div>
-                              ) : (
-                                <>
-                                  {generatedImageHistory.length > 0 && (
-                                    <div className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setOutputGroupsOpen((prev) => ({
-                                            ...prev,
-                                            images: !prev.images,
-                                          }))
-                                        }
-                                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
-                                      >
-                                        <span className="flex items-center gap-1.5">
-                                          <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                                          {t('outputImagesGroup')} · {generatedImageHistory.length}
-                                        </span>
-                                        <ChevronDown
-                                          className={cn(
-                                            'h-3.5 w-3.5 text-stone-400 transition-transform',
-                                            outputGroupsOpen.images && 'rotate-180',
-                                          )}
-                                        />
-                                      </button>
-                                      {outputGroupsOpen.images && (
-                                        <div className="space-y-1.5 px-1.5 pb-1.5">
-                                            {generatedImageHistory.map((entry) => (
-                                              <div
-                                                key={`${entry.messageId}-${entry.imageIndex}`}
-                                                className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
-                                              >
-                                                <button
-                                                  type="button"
-                                                  title={t('viewInChat')}
-                                                  onClick={() => scrollToMessage(entry.messageId)}
-                                                  className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
-                                                >
-                                                  <span className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
-                                                    <img
-                                                      src={entry.url}
-                                                      alt=""
-                                                      className="h-full w-full object-cover"
-                                                    />
-                                                  </span>
-                                                  <span className="min-w-0 flex-1 py-0.5">
-                                                    <span className="block truncate font-mono text-[10px] leading-4 text-stone-400">
-                                                      {formatGeneratedAt(entry.timestamp)}
-                                                      <span className="mx-1 text-stone-600">·</span>
-                                                      {entry.model}
-                                                    </span>
-                                                    <span className="mt-0.5 block line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
-                                                      {entry.prompt}
-                                                    </span>
-                                                  </span>
-                                                </button>
-                                                <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                                  <button
-                                                    type="button"
-                                                    title={t('download')}
-                                                    onClick={() => void downloadGeneratedImage(entry)}
-                                                    className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                                  >
-                                                    <Download className="h-3.5 w-3.5" />
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    title={t('delete')}
-                                                    onClick={() => removeGeneratedImage(entry)}
-                                                    className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                                  >
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                  {generatedFileHistory.length > 0 && (
-                                    <div className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setOutputGroupsOpen((prev) => ({
-                                            ...prev,
-                                            files: !prev.files,
-                                          }))
-                                        }
-                                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
-                                      >
-                                        <span className="flex items-center gap-1.5">
-                                          <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                                          {t('outputFilesGroup')} · {generatedFileHistory.length}
-                                        </span>
-                                        <ChevronDown
-                                          className={cn(
-                                            'h-3.5 w-3.5 text-stone-400 transition-transform',
-                                            outputGroupsOpen.files && 'rotate-180',
-                                          )}
-                                        />
-                                      </button>
-                                      {outputGroupsOpen.files && (
-                                        <div className="space-y-1.5 px-1.5 pb-1.5">
-                                            {generatedFileHistory.map((entry) => (
-                                              <div
-                                                key={`${entry.messageId}-${entry.id}-${entry.fileIndex}`}
-                                                className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
-                                              >
-                                                <button
-                                                  type="button"
-                                                  title={t('viewInChat')}
-                                                  onClick={() => scrollToMessage(entry.messageId)}
-                                                  className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
-                                                >
-                                                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
-                                                    <FileText className="h-4 w-4 text-stone-500" />
-                                                  </span>
-                                                  <span className="min-w-0 flex-1 py-0.5">
-                                                    <span className="block truncate font-mono text-[10px] leading-4 text-stone-400">
-                                                      {formatGeneratedAt(entry.createdAt)}
-                                                      {entry.size > 0 && (
-                                                        <>
-                                                          <span className="mx-1 text-stone-600">·</span>
-                                                          {formatFileSize(entry.size)}
-                                                        </>
-                                                      )}
-                                                    </span>
-                                                    <span className="mt-0.5 block truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
-                                                      {entry.name}
-                                                    </span>
-                                                  </span>
-                                                </button>
-                                                <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                                  <button
-                                                    type="button"
-                                                    title={t('download')}
-                                                    onClick={() => void downloadGeneratedFile(entry)}
-                                                    className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                                  >
-                                                    <Download className="h-3.5 w-3.5" />
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    title={t('delete')}
-                                                    onClick={() => removeGeneratedFile(entry)}
-                                                    className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                                  >
-                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
+                    <OutputPanel
+                      expanded={picturesExpanded}
+                      onToggleExpanded={() => setPicturesExpanded((v) => !v)}
+                      groupsOpen={outputGroupsOpen}
+                      onToggleGroup={(key) =>
+                        setOutputGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+                      }
+                      images={generatedImageHistory}
+                      files={generatedFileHistory}
+                      onScrollToMessage={scrollToMessage}
+                      onDownloadImage={(entry) => void downloadGeneratedImage(entry)}
+                      onRemoveImage={removeGeneratedImage}
+                      onDownloadFile={(entry) => void downloadGeneratedFile(entry)}
+                      onRemoveFile={removeGeneratedFile}
+                    />
 
-                    {/* Reference Material — upload anchors + tool/web sources */}
-                    <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setReferenceExpanded((v) => !v)}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
-                      >
-                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-                          <Quote className="h-3.5 w-3.5" />
-                          {t('referenceMaterial')}
-                          {(userUploadReferences.length > 0 || webSources.length > 0) && (
-                            <span className="rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-                              {userUploadReferences.length + webSources.length}
-                            </span>
-                          )}
-
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <ChevronDown
-                            className={cn(
-                              'h-3.5 w-3.5 text-stone-400 transition-transform',
-                              referenceExpanded && 'rotate-180',
-                            )}
-                          />
-                        </div>
-                      </button>
-                      <AnimatePresence initial={false}>
-                        {referenceExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="max-h-64 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
-                              {userUploadReferences.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setReferenceGroupsOpen((prev) => ({
-                                        ...prev,
-                                        uploads: !prev.uploads,
-                                      }))
-                                    }
-                                    className="flex w-full items-center justify-between rounded-md px-1.5 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/80"
-                                  >
-                                    <span>{t('uploadedReferenceFiles')} · {userUploadReferences.length}</span>
-                                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', referenceGroupsOpen.uploads && 'rotate-180')} />
-                                  </button>
-                                  {referenceGroupsOpen.uploads && (
-                                    <ul className="space-y-1">
-                                      {userUploadReferences.map((src) => {
-                                        const isImg = src.kind === 'image';
-                                        return (
-                                          <li key={`${src.messageId || 'pending'}-${src.title}-${src.url}`}>
-                                            <button
-                                              type="button"
-                                              onClick={() => openUploadReference(src)}
-                                              className="flex w-full items-start gap-2 rounded-md px-1.5 py-1.5 text-left text-xs transition-colors hover:bg-stone-100 dark:hover:bg-stone-800/80"
-                                            >
-                                              {isImg && src.url ? (
-                                                <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
-                                                  <img src={src.url} alt="" className="h-full w-full object-cover" />
-                                                </span>
-                                              ) : (
-                                                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" />
-                                              )}
-                                              <span className="min-w-0 flex-1">
-                                                <span className="block truncate font-medium text-stone-700 dark:text-stone-200">{src.title}</span>
-                                                {src.snippet ? (
-                                                  <span className="mt-0.5 block line-clamp-3 whitespace-pre-wrap text-[11px] leading-4 text-stone-500">{src.snippet}</span>
-                                                ) : null}
-                                              </span>
-                                            </button>
-                                          </li>
-                                        );
-                                      })}
-                                    </ul>
-                                  )}
-                                </div>
-                              )}
-                              {referenceSourceGroups.length > 0 && (
-                                <div className={cn('space-y-1.5', userUploadReferences.length > 0 && 'border-t border-stone-100 pt-2 dark:border-stone-800')}>
-                                  <div className="flex items-center justify-between gap-2 px-1.5">
-                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">{t('searchedSources')}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setConfirmClearSourcesOpen(true)}
-                                      className="text-[10px] text-stone-400 hover:text-red-500"
-                                    >
-                                      {t('clearWebSources')}
-                                    </button>
-                                  </div>
-                                  {referenceSourceGroups.map((group) => {
-                                    const labelKey: {
-                                      [K in ExternalReferenceSourceKind]:
-                                        | 'webSearchGroup'
-                                        | 'notionGroup'
-                                        | 'githubGroup'
-                                        | 'gmailGroup'
-                                        | 'calendarGroup'
-                                        | 'driveGroup'
-                                        | 'googleGroup';
-                                    } = {
-                                      web: 'webSearchGroup',
-                                      notion: 'notionGroup',
-                                      github: 'githubGroup',
-                                      gmail: 'gmailGroup',
-                                      calendar: 'calendarGroup',
-                                      drive: 'driveGroup',
-                                      google: 'googleGroup',
-                                    };
-                                    const groupLabel = labelKey[group.kind];
-                                    const isOpen = Boolean(referenceGroupsOpen[group.kind]);
-                                    return (
-                                      <div key={group.kind} className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setReferenceGroupsOpen((prev) => ({
-                                              ...prev,
-                                              [group.kind]: !prev[group.kind],
-                                            }))
-                                          }
-                                          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
-                                        >
-                                          <span>{t(groupLabel)} · {group.sources.length}</span>
-                                          <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', isOpen && 'rotate-180')} />
-                                        </button>
-                                        {isOpen && (
-                                          <ul className="space-y-1 px-1.5 pb-1.5">
-                                            {group.sources.map((src) => (
-                                              <li key={src.url}>
-                                                <a
-                                                  href={src.url}
-                                                  target="_blank"
-                                                  rel="noreferrer"
-                                                  className="block truncate rounded-md px-1.5 py-1 text-xs text-stone-600 hover:bg-stone-100 hover:underline dark:text-stone-300 dark:hover:bg-stone-800/80"
-                                                  title={src.snippet || src.title}
-                                                >
-                                                  {src.title || src.url}
-                                                </a>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
+                    <ReferencePanel
+                      expanded={referenceExpanded}
+                      onToggleExpanded={() => setReferenceExpanded((v) => !v)}
+                      groupsOpen={referenceGroupsOpen}
+                      onToggleGroup={(key) =>
+                        setReferenceGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+                      }
+                      userUploadReferences={userUploadReferences}
+                      referenceSourceGroups={referenceSourceGroups}
+                      webSourcesCount={webSources.length}
+                      onOpenUploadReference={openUploadReference}
+                      onRequestClearSources={() => setConfirmClearSourcesOpen(true)}
+                    />
 
                     {/* System Prompt — collapsible */}
                     <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">

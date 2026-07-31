@@ -62,6 +62,8 @@ import {
   buildFindingsResponsePrompt,
   buildReviewIssuesResponsePrompt,
   actionableReviewIssues,
+  verifyCorrectionText,
+  rejectedCorrectionNote,
   FINDINGS_RESPONSE_SYSTEM,
   REVIEWER_SYSTEM_PROMPT,
   type ReviewFinding,
@@ -1160,7 +1162,9 @@ export async function POST(req: NextRequest) {
               messages: sanitizeChatMessages(correctionMessages),
             },
           });
-          let saw = false;
+          // Buffer the whole draft, then verify locally — streaming a bad
+          // correction to the user is worse than a short delay.
+          let draft = '';
           const stampStripper = createStampLeakStripper();
           for await (const chunk of correctionStream) {
             if (clientSignal.aborted) break;
@@ -1173,20 +1177,22 @@ export async function POST(req: NextRequest) {
               const rest = stampStripper.flush();
               if (rest) content = (content || '') + rest;
             }
-            if (content) {
-              saw = true;
-              send({ review_fix: { content } });
-            }
+            if (content) draft += content;
           }
           if (!clientSignal.aborted) {
             const rest = stampStripper.flush();
-            if (rest) {
-              saw = true;
-              send({ review_fix: { content: rest } });
-            }
+            if (rest) draft += rest;
           }
+
+          const verified = verifyCorrectionText(draft, {
+            priorLength: String(priorText || '').length,
+          });
+          const out = verified.ok
+            ? verified.text
+            : rejectedCorrectionNote(verified.reason || 'failed local checks');
+          if (out) send({ review_fix: { content: out } });
           send({ review_fix: { status: 'done' } });
-          return saw;
+          return Boolean(out);
         };
 
         try {

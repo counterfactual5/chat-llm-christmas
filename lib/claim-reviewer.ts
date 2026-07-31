@@ -1808,7 +1808,17 @@ function parseAnnouncedCount(raw: string): number {
 
 /** First-person promises of more output ("接下来我会…") that never arrived. */
 const DANGLING_PROMISE_RE =
-  /(?:接下来我(?:会|将|来)|下面我(?:会|将|来)|我(?:会|将)?(?:继续|马上|稍后)|让我先|我先来|稍后我(?:会|将)|Next,?\s+I(?:'ll| will)|I'?ll continue|Let me first)/i;
+  /(?:接下来我(?:会|将|来)|下面我(?:会|将|来)|我(?:会|将)(?:继续|马上|稍后)|让我先|我先来|稍后我(?:会|将)|Next,?\s+I(?:'ll| will)|I'?ll continue|Let me first)/i;
+
+/**
+ * Interactive CTAs that invite the user to reply ("请告诉我…") are complete
+ * turns — not truncated promises of more assistant output in this message.
+ */
+function looksLikeUserPromptCta(tail: string): boolean {
+  return /请告诉我|请说明|你想要|希望的文件名|需要什么|哪[个种]|什么内容|什么类型|有什么需求|怎么帮你|\?\s*$|？\s*$/.test(
+    tail,
+  );
+}
 
 const LEFTOVER_PLACEHOLDER_RE =
   /\bTODO\b|\bFIXME\b|待补充|待完成|待确认|此处省略|（略）|\(略\)|\.\.\.\s*（后续/i;
@@ -1928,7 +1938,7 @@ export function buildCompletenessCheck(input: ReviewInput): ReviewCheck | null {
   }
 
   const tail = text.slice(-220);
-  if (DANGLING_PROMISE_RE.test(tail)) {
+  if (DANGLING_PROMISE_RE.test(tail) && !looksLikeUserPromptCta(tail)) {
     items.push({
       severity: 'warn',
       title: 'Promised more but stopped',
@@ -2959,6 +2969,14 @@ export function actionableReviewIssues(issues: ReviewIssue[]): ReviewIssue[] {
     if (/collapsed into garbage|degenerat|repeated letter|smashed URL|token soup/i.test(`${i.title} ${i.detail}`)) {
       return false;
     }
+    // Soft completeness signals (dangling CTA / list gaps) stay panel-only.
+    // Only hard unfinished signals may auto-annotate.
+    if (
+      i.kind === 'completeness' &&
+      !/cut off|Unclosed code|collapsed into garbage/i.test(`${i.title} ${i.detail}`)
+    ) {
+      return false;
+    }
     return true;
   });
 }
@@ -2970,13 +2988,30 @@ export type CorrectionVerifyResult = {
   reason?: string;
 };
 
+/** True when the "correction" largely reprints the prior answer (duplicate output). */
+export function looksLikeRestatedAnswer(draft: string, prior: string): boolean {
+  const d = String(draft || '').replace(/\s+/g, '');
+  const p = String(prior || '').replace(/\s+/g, '');
+  if (d.length < 100 || p.length < 100) return false;
+  // Short annotation restating a long answer is fine; near-equal length rewrites are not.
+  if (d.length > Math.max(280, p.length * 0.55)) {
+    const window = 72;
+    let hits = 0;
+    for (let i = 0; i + window <= p.length; i += 48) {
+      if (d.includes(p.slice(i, i + window))) hits += 1;
+      if (hits >= 2) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Re-run local checks on a post-review correction draft. Rejects drafts that
  * are degenerate, introduce new arithmetic errors, or rewrite the whole answer.
  */
 export function verifyCorrectionText(
   draft: string,
-  opts?: { priorLength?: number },
+  opts?: { priorLength?: number; priorText?: string },
 ): CorrectionVerifyResult {
   const text = String(draft || '').trim();
   if (!text) {
@@ -2995,6 +3030,15 @@ export function verifyCorrectionText(
       ok: false,
       text,
       reason: 'correction rewrote too much of the prior answer',
+    };
+  }
+
+  const priorText = String(opts?.priorText || '').trim();
+  if (priorText && looksLikeRestatedAnswer(text, priorText)) {
+    return {
+      ok: false,
+      text,
+      reason: 'correction restates the prior answer instead of a short delta note',
     };
   }
 

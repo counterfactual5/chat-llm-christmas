@@ -1265,6 +1265,7 @@ export async function POST(req: NextRequest) {
 
           const verified = verifyCorrectionText(draft, {
             priorLength: String(priorText || '').length,
+            priorText,
           });
           const out = verified.ok
             ? verified.text

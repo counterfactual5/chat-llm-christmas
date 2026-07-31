@@ -1019,13 +1019,14 @@ export const WEB_READ_TOOL = {
   function: {
     name: 'web_read',
     description:
-      'Fetch and extract the main text of a specific public webpage URL (after web_search or when the user gives a link). Returns title + cleaned markdown/text body. Use when snippets from search are not enough.',
+      'Fetch and extract the main text of a specific public webpage URL (after web_search or when the user gives a link). Returns title + cleaned markdown/text body. Use when snippets from search are not enough. Required: absolute http(s) `url` copied from a search result — never pass a search query string.',
     parameters: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
-          description: 'Absolute http(s) URL to read.',
+          description:
+            'Absolute http(s) URL to read, e.g. https://www.example.com/article. Must start with http:// or https://.',
         },
       },
       required: ['url'],

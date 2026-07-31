@@ -1555,13 +1555,27 @@ export async function POST(req: NextRequest) {
               });
 
               for (const tc of toolCalls) {
+                // Prefer a concrete URL from recent tool payloads when web_read
+                // omits `url` (common on free models that confuse it with search).
+                let fallbackQuery = userAsk || streamedContent;
+                if (/^web[_-]?read$/i.test(tc.name)) {
+                  const fromArgs = String(tc.arguments || '');
+                  const fromHistory = workingMessages
+                    .slice(-12)
+                    .filter((m) => m?.role === 'tool')
+                    .map((m) => String(m.content || ''))
+                    .join('\n');
+                  fallbackQuery = [fromArgs, streamedContent, fromHistory, userAsk]
+                    .filter(Boolean)
+                    .join('\n');
+                }
                 const result = await executeRegisteredTool(
                   enabledTools,
                   {
                     name: tc.name,
                     callId: tc.id,
                     rawArguments: tc.arguments,
-                    fallbackQuery: userAsk || streamedContent,
+                    fallbackQuery,
                   },
                   toolCtx,
                 );

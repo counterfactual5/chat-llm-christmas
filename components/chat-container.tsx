@@ -647,6 +647,78 @@ function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): b
   return messages.some((m) => (m.images?.length || 0) > 0);
 }
 
+/** localStorage key recording which account owns the cached chats (anti cross-account bleed). */
+const CHATS_OWNER_KEY = 'llm_christmas_chats_owner';
+
+/** Normalize a session restored from localStorage or the cloud: close stale streams, fold think markup. */
+function normalizeRestoredSession(session: ChatSession): ChatSession {
+  return {
+    ...session,
+    messages: (session.messages || []).map((m) => {
+      let next = m;
+      // Page refresh aborts in-flight streams. An incomplete flag without an
+      // active request would leave Process spinning forever.
+      if (m.role === 'assistant' && m.incomplete) {
+        next = {
+          ...next,
+          incomplete: true,
+          truncationReason: m.truncationReason || 'Reply was interrupted',
+          toolRuns: (m.toolRuns || []).map((r) =>
+            r.status === 'start' ? { ...r, status: 'done' as const } : r,
+          ),
+        };
+      }
+      if (
+        next.role !== 'assistant' ||
+        (!contentHasThinkMarkup(next.content) && !contentHasToolMarkup(next.content))
+      ) {
+        return next;
+      }
+      const parts = displayAssistantParts(next);
+      return {
+        ...next,
+        content: parts.content,
+        reasoning: parts.reasoning || undefined,
+      };
+    }),
+  };
+}
+
+/** Merge local + cloud sessions per id, keeping the newer updatedAt (LWW). */
+function mergeSyncedSessions(local: ChatSession[], cloud: ChatSession[]): ChatSession[] {
+  const byId = new Map<string, ChatSession>();
+  for (const s of local) byId.set(s.id, s);
+  for (const raw of cloud) {
+    if (!raw?.id) continue;
+    const remote = normalizeRestoredSession(raw);
+    const existing = byId.get(remote.id);
+    if (!existing || Number(remote.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+      byId.set(remote.id, remote);
+    }
+  }
+  return [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+const SYNC_DATAURL_LIMIT = 100 * 1024;
+/** Deep-clone sessions for upload, blanking huge inline data: URLs (legacy images). */
+function sessionsForCloudSync(sessions: ChatSession[]): ChatSession[] {
+  const scrub = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      return value.startsWith('data:') && value.length > SYNC_DATAURL_LIMIT ? '' : value;
+    }
+    if (Array.isArray(value)) return value.map(scrub);
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        out[k] = scrub(v);
+      }
+      return out;
+    }
+    return value;
+  };
+  return sessions.map((s) => scrub(s) as ChatSession);
+}
+
 function toApiMessages(
   messages: Message[],
   opts?: { vision?: boolean },
@@ -961,6 +1033,8 @@ export default function ChatContainer() {
   const [quotedSelections, setQuotedSelections] = useState<string[]>([]);
   const quoteToolbarWrapRef = useRef<HTMLDivElement>(null);
   const quoteToolbarTextRef = useRef('');
+  /** Debounce handle for cloud session sync (cross-device). */
+  const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
@@ -1032,18 +1106,22 @@ export default function ChatContainer() {
     setActiveMcpIds((prev) => prev.filter((id) => !isGoogleMcpId(id)));
   };
 
-  const refreshAccountStatus = async () => {
+  const refreshAccountStatus = async (): Promise<{
+    bound: boolean;
+    username: string | null;
+  }> => {
     try {
       const response = await fetch('/api/account', { cache: 'no-store' });
       const data = await response.json();
       const bound = Boolean(data?.bound);
+      const username = bound && data?.username ? String(data.username) : null;
       setIsAccountBound(bound);
-      setAccountUsername(bound ? (data?.username ? String(data.username) : null) : null);
-      return bound;
+      setAccountUsername(username);
+      return { bound, username };
     } catch {
       setIsAccountBound(false);
       setAccountUsername(null);
-      return false;
+      return { bound: false, username: null };
     }
   };
 
@@ -1186,10 +1264,23 @@ export default function ChatContainer() {
       }
 
       void refreshAccountStatus()
-        .then(async (bound) => {
+        .then(async ({ bound, username }) => {
           // Restore chats BEFORE waiting on models — and before any persist effect
           // runs with an empty sessions array (that used to wipe localStorage).
           if (bound) {
+            // Account switch on the same browser: drop the previous account's
+            // cached chats so histories never bleed across users.
+            const ownerKey = username || 'account';
+            try {
+              const storedOwner = localStorage.getItem(CHATS_OWNER_KEY);
+              if (storedOwner && storedOwner !== ownerKey) {
+                localStorage.removeItem('llm_christmas_chats');
+              }
+              localStorage.setItem(CHATS_OWNER_KEY, ownerKey);
+            } catch {
+              // ignore
+            }
+
             const savedChats = localStorage.getItem('llm_christmas_chats');
             if (savedChats) {
               try {
@@ -1201,38 +1292,7 @@ export default function ChatContainer() {
                       (session.mcpIds && session.mcpIds.length > 0) ||
                       (session.skillIds && session.skillIds.length > 0),
                   )
-                      .map((session) => ({
-                    ...session,
-                    messages: session.messages.map((m) => {
-                      let next = m;
-                      // Page refresh aborts in-flight streams. An incomplete flag
-                      // without an active request would leave Process spinning forever.
-                      if (m.role === 'assistant' && m.incomplete) {
-                        next = {
-                          ...next,
-                          incomplete: true,
-                          truncationReason:
-                            m.truncationReason || 'Reply was interrupted',
-                          toolRuns: (m.toolRuns || []).map((r) =>
-                            r.status === 'start' ? { ...r, status: 'done' as const } : r,
-                          ),
-                        };
-                      }
-                      if (
-                        next.role !== 'assistant' ||
-                        (!contentHasThinkMarkup(next.content) &&
-                          !contentHasToolMarkup(next.content))
-                      ) {
-                        return next;
-                      }
-                      const parts = displayAssistantParts(next);
-                      return {
-                        ...next,
-                        content: parts.content,
-                        reasoning: parts.reasoning || undefined,
-                      };
-                    }),
-                  }));
+                  .map(normalizeRestoredSession);
                 if (nonEmpty.length > 0) {
                   // Land on a blank New Chat draft (ChatGPT-style), not the
                   // most recent thread — history stays in the sidebar.
@@ -1252,6 +1312,24 @@ export default function ChatContainer() {
               }
             } else {
               createNewSession();
+            }
+
+            // Cloud merge (cross-device sync). Must finish before chatsHydrated
+            // flips on the persist/upload effects, or a stale local copy could
+            // overwrite newer cloud state.
+            try {
+              const syncRes = await fetch('/api/sync/sessions', { cache: 'no-store' });
+              if (syncRes.ok) {
+                const syncData = await syncRes.json();
+                const cloud = Array.isArray(syncData?.sessions)
+                  ? (syncData.sessions as ChatSession[])
+                  : [];
+                if (cloud.length > 0) {
+                  setSessions((prev) => mergeSyncedSessions(prev, cloud));
+                }
+              }
+            } catch {
+              // Offline / portal down: keep the local copy only.
             }
           } else {
             createNewSession();
@@ -1383,6 +1461,32 @@ export default function ChatContainer() {
     } else {
       localStorage.removeItem('llm_christmas_chats');
     }
+  }, [sessions, isAccountBound, chatsHydrated]);
+
+  // Debounced cloud sync so sessions survive device/browser switches. The portal
+  // applies LWW per session id, so replaying equal timestamps is harmless.
+  useEffect(() => {
+    if (!isAccountBound || !chatsHydrated) return;
+    if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+    cloudSyncTimerRef.current = setTimeout(() => {
+      const persisted = sessions.filter(
+        (session) =>
+          session.messages.length > 0 ||
+          (session.mcpIds && session.mcpIds.length > 0) ||
+          (session.skillIds && session.skillIds.length > 0),
+      );
+      if (persisted.length === 0) return;
+      void fetch('/api/sync/sessions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions: sessionsForCloudSync(persisted) }),
+      }).catch(() => {
+        // Offline / portal down: localStorage copy remains the fallback.
+      });
+    }, 1500);
+    return () => {
+      if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+    };
   }, [sessions, isAccountBound, chatsHydrated]);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -3144,6 +3248,14 @@ export default function ChatContainer() {
     if (controller) controller.abort();
     endLoading(id);
     setMessageQueue((prev) => prev.filter((task) => task.sessionId !== id));
+    // Delete cloud copy too, or the next cross-device merge would resurrect it.
+    if (isAccountBound) {
+      void fetch(`/api/sync/sessions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }).catch(() => {
+        // Portal down: deletion stays local until a future sync window.
+      });
+    }
     setSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== id && s.messages.length > 0);
 
@@ -3214,6 +3326,12 @@ export default function ChatContainer() {
     setGoogleStatus(null);
     setSessions([]);
     setSkills([]);
+    try {
+      localStorage.removeItem('llm_christmas_chats');
+      localStorage.removeItem(CHATS_OWNER_KEY);
+    } catch {
+      // ignore
+    }
     createNewSession();
     await fetchModels();
   };

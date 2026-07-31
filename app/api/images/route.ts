@@ -94,11 +94,10 @@ export async function POST(req: NextRequest) {
 
     let fileId: string | null = null;
     let image = '';
-    let uploadWarning: string | null = null;
 
-    // Prefer a chat/vision routing model for Files — image-gen model names are
-    // often not registered on the files channel. Query param is required because
-    // NewAPI ignores multipart `model` on POST /v1/files.
+    // Files upload is mandatory now: sessions sync cross-device via file refs,
+    // so inline data URLs are no longer an acceptable fallback. Query param +
+    // a chat routing model keep compatibility with NewAPI-style distributors.
     const filesModel =
       String(process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() || 'gpt-4o';
 
@@ -133,24 +132,14 @@ export async function POST(req: NextRequest) {
     } catch (uploadErr) {
       console.error('images file upload failed:', uploadErr);
       const { detail } = upstreamErrorMessage(uploadErr);
-      // This route is nodejs (not Edge). Inline data keeps the image visible when
-      // the gateway Files API cannot select a channel (common NewAPI /files bug).
-      if (b64) {
-        image = `data:image/png;base64,${b64}`;
-        uploadWarning = `Files API unavailable (${detail}); showing inline image.`;
-      } else if (remoteUrl) {
-        image = String(remoteUrl);
-        uploadWarning = `Files API unavailable (${detail}); using upstream URL.`;
-      } else {
-        return jsonError(
-          `Image was generated but saving to Files API failed: ${detail}`,
-          502,
-        );
-      }
+      return jsonError(
+        `Image was generated but saving to Files API failed: ${detail}`,
+        502,
+      );
     }
 
-    if (!image) {
-      return jsonError('Image was generated but no displayable result was produced.', 502);
+    if (!image || !fileId) {
+      return jsonError('Image was generated but no file id was saved.', 502);
     }
 
     return new Response(
@@ -160,7 +149,6 @@ export async function POST(req: NextRequest) {
         fileId,
         model,
         revised_prompt: item?.revised_prompt || null,
-        ...(uploadWarning ? { warning: uploadWarning } : {}),
       }),
       {
         status: 200,

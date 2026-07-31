@@ -650,7 +650,7 @@ function collectSources(record: ExecutionRecordEntry[]): ExecutionSource[] {
   const out: ExecutionSource[] = [];
   const byKey = new Map<string, ExecutionSource>();
   for (const entry of record) {
-    const hits =
+    const hits: ExecutionSource[] =
       entry.sources?.length
         ? entry.sources
         : (entry.urls || []).map((url) => ({ url }));

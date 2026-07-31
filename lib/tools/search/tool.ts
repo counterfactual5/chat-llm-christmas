@@ -52,12 +52,13 @@ export function formatWebSearchToolContent(
 }
 
 const WEB_SEARCH_SYSTEM_PROMPT = [
-  'You have a web_search tool for live web lookup.',
-  'Default: answer from your own knowledge when the question is stable textbook / domain knowledge (definitions, classifications like “which field”, classic accounting/finance/math facts, well-known history). Do NOT search just because the user forgot or asks “属于哪个领域”.',
-  'Call web_search only when: the user explicitly asks to search/look up; OR the fact is time-sensitive (news, prices, “最新/最近”, live events, changing docs); OR you are genuinely unsure about something that may have changed after training.',
+  'You have a web_search tool for live web lookup. You decide when to call it — the user does not need to say “搜一下”.',
+  'Skip search for stable knowledge you already know well: definitions, “belongs to which field”, classic formulas, textbook accounting/finance/math, settled history.',
+  'Do search (without waiting for an explicit search request) when a good answer needs live or post-training facts: news, prices, product versions, “最新/最近/现在怎么样”, people/companies/events that change, docs that may have been updated, or anything you are unsure may be outdated.',
+  'If the user explicitly asks to search/look up, call web_search.',
   'After web_search, if you need full article/docs text from a result URL, call web_read on that URL (do not rely on snippets alone for deep details).',
-  'Do not pretend to search — if you need the web, call the tool; if you do not need the web, do not call it.',
-  'When building a search query for “recent/latest/this week”, include an explicit calendar anchor from the latest message timestamp (year/month or ISO date). Never append a calendar year to timeless definition queries.',
+  'Do not pretend to search — if you need the web, call the tool; if you do not need the web, answer directly.',
+  'When the query is actually about recent/latest/this week, include a calendar anchor from the latest message timestamp. Never append a year to timeless definition queries.',
   'After tool results arrive, cite title + URL. Do not invent sources.',
   'Do not claim to read local files, run shell, or scan a workspace.',
 ].join(' ');

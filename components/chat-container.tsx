@@ -3072,6 +3072,7 @@ export default function ChatContainer() {
             });
             if (sessionId === activeSessionIdRef.current) {
               setPicturesExpanded(true);
+              setOutputGroupsOpen((prev) => ({ ...prev, files: true }));
               setIsContextPanelOpen(true);
             }
           }

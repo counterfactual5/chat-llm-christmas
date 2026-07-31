@@ -18,6 +18,27 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { mergeReviewChecks, type ReviewCheck, type ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
+import type {
+  ChatSession,
+  ExternalReferenceSourceKind,
+  Message,
+  ModelOption,
+  SkillItem,
+  WebSearchSource,
+} from '@/lib/chat/types';
+import {
+  collectUserUploadsFromMessages,
+  collectWebSourcesFromMessages,
+  formatWebSourcesForReference,
+  referenceSourceKind,
+} from '@/lib/chat/references';
+import {
+  buildActivitySteps,
+  buildTimelineSegments,
+  type ProcessStep,
+  type TimelineSegment,
+  type ToolStep,
+} from '@/lib/chat/timeline';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import ReactMarkdown from 'react-markdown';
@@ -320,283 +341,6 @@ function buildContinuationPrompt(previous: string): string {
   return `${rules.join('\n')}\n\nHere are the last characters you wrote — continue immediately after them:\n\n<<<TAIL\n${tail}\nTAIL>>>`;
 }
 
-// --- Types ---
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  /** data: URLs embedded in this turn (multimodal). */
-  images?: Array<{
-    url: string;
-    name?: string;
-    prompt?: string;
-    model?: string;
-    /** Gateway Files API id — prefer this over re-sending base64. */
-    fileId?: string;
-  }>;
-  /** Files created via create_file for this assistant turn (Output panel). */
-  files?: Array<{
-    id: string;
-    name: string;
-    mimeType: string;
-    size: number;
-    url: string;
-    /** Inline UTF-8 text for local/gateway-backed downloads. */
-    content?: string;
-    createdAt: number;
-  }>;
-  /** Marks a synthetic compacted-history bubble. */
-  compacted?: boolean;
-  /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */
-  reasoning?: string;
-  /** Built-in tool runs (e.g. web_search) for this assistant turn. */
-  toolRuns?: Array<{
-    id: string;
-    name: string;
-    status: 'start' | 'done';
-    query?: string;
-    provider?: string;
-    results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
-    error?: string;
-  }>;
-  /**
-   * Chronological activity for this turn (thinking / tools / answer chunks /
-   * generated files in arrival order). Rendered as interleaved Process
-   * segments, file cards, and content.
-   */
-  activity?: Array<
-    | { id: string; kind: 'reasoning'; text: string }
-    | { id: string; kind: 'tool'; toolRunId: string }
-    | { id: string; kind: 'content'; text: string }
-    | { id: string; kind: 'file'; fileId: string }
-  >;
-  /** True while streaming, or after a stop / refresh / truncated reply. */
-  incomplete?: boolean;
-  /** Raw finish_reason from upstream, kept so Resume can explain itself. */
-  finishReason?: string | null;
-  /** Human-readable explanation of why the reply looks cut off. */
-  truncationReason?: string;
-  /** Structured claim-vs-receipt findings from Claim Reviewer (legacy flat list). */
-  reviewFindings?: Array<{
-    id: string;
-    severity: 'error' | 'warn';
-    surface: string;
-    verdict: string;
-    claim: string;
-    evidence: string;
-  }>;
-  /** Hierarchical Review panel (mid-turn / tool receipt / citation / recalc / vulnerability). */
-  reviewReport?: {
-    phase?: string;
-    status: 'running' | 'done';
-    checks: Array<{
-      id: string;
-      kind: ReviewCheckKind;
-      status: 'running' | 'done' | 'skipped';
-      summary: string;
-      clean?: boolean;
-      items?: Array<{ severity: 'error' | 'warn'; title: string; detail: string }>;
-      body?: string;
-    }>;
-  };
-  /**
-   * Short delta fix after Auto-review findings — rendered after the Review panel,
-   * never folded into the main answer content.
-   */
-  reviewFix?: string;
-  /** True while the post-review correction stream is in flight. */
-  reviewFixStreaming?: boolean;
-}
-
-type ExternalReferenceSourceKind =
-  | 'web'
-  | 'notion'
-  | 'github'
-  | 'gmail'
-  | 'calendar'
-  | 'drive'
-  | 'google';
-
-type ReferenceSourceKind = 'upload' | ExternalReferenceSourceKind;
-
-type WebSearchSource = {
-  title: string;
-  url: string;
-  snippet?: string;
-  provider?: string;
-  query?: string;
-  sourceKind?: ReferenceSourceKind;
-  /** UI-only anchor for uploads already present in a user message. */
-  messageId?: string;
-  kind?: 'image' | 'file';
-};
-
-function referenceSourceKind(provider: string | undefined, toolName: string | undefined): ExternalReferenceSourceKind {
-  const name = String(toolName || '').toLowerCase();
-  if (name.startsWith('gmail_') || name.startsWith('gmail-')) return 'gmail';
-  if (name.startsWith('calendar_') || name.startsWith('calendar-')) return 'calendar';
-  if (name.startsWith('drive_') || name.startsWith('drive-')) return 'drive';
-  if (provider === 'notion') return 'notion';
-  if (provider === 'github') return 'github';
-  if (provider === 'google') return 'google';
-  return 'web';
-}
-
-interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  updatedAt: number;
-  /** Attached Skill ids for this chat — additive, not a System Prompt replacement. */
-  skillIds?: string[];
-  /** Per-chat MCP providers enabled for tool use (e.g. notion). */
-  mcpIds?: string[];
-  /** Per-chat claim reviewer auto switch (default on when absent). */
-  autoReview?: boolean;
-  /** Latest web search hits for this chat — shown in Reference Material. */
-  webSources?: WebSearchSource[];
-  /** User removed inherited sources; retain only sources added by later tool runs. */
-  webSourcesCleared?: boolean;
-}
-
-function formatWebSourcesForReference(sources: WebSearchSource[]): string {
-  if (!sources.length) return '';
-  const byQuery = new Map<string, WebSearchSource[]>();
-  for (const s of sources) {
-    const key = s.query?.trim() || 'web';
-    const list = byQuery.get(key) || [];
-    list.push(s);
-    byQuery.set(key, list);
-  }
-  const blocks: string[] = [];
-  let n = 1;
-  for (const [query, list] of byQuery) {
-    const provider = list[0]?.provider;
-    const header =
-      provider === 'upload'
-        ? 'Uploaded files and images in this chat:'
-        : provider === 'notion'
-        ? query && query !== 'web'
-          ? `Notion results for "${query}":`
-          : 'Notion pages:'
-        : provider === 'google'
-          ? query && query !== 'web'
-            ? `Google results for "${query}":`
-            : 'Google results:'
-          : provider === 'github'
-            ? query && query !== 'web'
-              ? `GitHub results for "${query}":`
-              : 'GitHub results:'
-        : query === 'web'
-          ? 'Web search results:'
-          : `Web search results for "${query}"${provider && provider !== 'none' ? ` (${provider})` : ''}:`;
-    blocks.push(
-      [
-        header,
-        ...list.map((s) => {
-          const title = s.title || s.url || 'Upload';
-          const snip = s.snippet?.trim() ? `\n   ${s.snippet.trim()}` : '';
-          // Uploaded images are already sent as multimodal parts (or processed by
-          // Image Understand). Never duplicate data:/blob:/file URLs as prompt text.
-          if (s.provider === 'upload') return `${n++}. ${title}${snip}`;
-          return `${n++}. [${title}](${s.url})${snip}`;
-        }),
-      ].join('\n'),
-    );
-  }
-  return blocks.join('\n\n');
-}
-
-/** Rebuild Material sources from every completed search in the chat (deduped by URL). */
-function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
-  const seen = new Set<string>();
-  const out: WebSearchSource[] = [];
-  for (const m of messages) {
-    for (const run of m.toolRuns || []) {
-      if (run.status !== 'done' || !run.results?.length) continue;
-      // Image understand injects plain text into the prompt — never a Material source.
-      if (
-        run.name === 'image_understand' ||
-        run.provider === 'zhipu-vision' ||
-        run.provider === 'image-understand' ||
-        run.provider === 'glm-ocr' ||
-        run.provider === 'nemotron-omni'
-      ) {
-        continue;
-      }
-      for (const r of run.results) {
-        if (!r.url || seen.has(r.url)) continue;
-        // Skip data: / relative / empty — those are not browseable sources.
-        if (/^(data:|blob:|\/)/i.test(r.url)) continue;
-        seen.add(r.url);
-        out.push({
-          title: r.title,
-          url: r.url,
-          snippet: r.snippet,
-          provider: run.provider,
-          query: run.query,
-          sourceKind: referenceSourceKind(run.provider, run.name),
-        });
-      }
-    }
-  }
-  return out.slice(-40);
-}
-
-/** User-uploaded images and ingested text files (not model-generated pictures). */
-function collectUserUploadsFromMessages(messages: Message[]): WebSearchSource[] {
-  const seen = new Set<string>();
-  const out: WebSearchSource[] = [];
-
-  for (const m of messages) {
-    if (m.role !== 'user') continue;
-
-    for (const img of m.images || []) {
-      const url = img.fileId
-        ? `/api/files/${encodeURIComponent(img.fileId)}`
-        : String(img.url || '').trim();
-      const key = img.fileId || url;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        title: img.name || 'Image',
-        url,
-        snippet: '',
-        provider: 'upload',
-        query: 'upload',
-        messageId: m.id,
-        kind: 'image',
-      });
-    }
-
-    const content = String(m.content || '');
-    const fileRe = /\[Attached File: ([^\]]+)\]\n([\s\S]*?)(?=\n\n---\n\n|\n\n\[Attached File:|$)/g;
-    let match: RegExpExecArray | null;
-    while ((match = fileRe.exec(content)) !== null) {
-      const name = match[1].trim();
-      const text = match[2].trim();
-      const key = `file:${m.id}:${name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        title: name,
-        url: '',
-        snippet: text.slice(0, 400),
-        provider: 'upload',
-        query: 'upload',
-        messageId: m.id,
-        kind: 'file',
-      });
-    }
-  }
-
-  return out;
-}
-
-
-
-type SkillItem = { id: string; title: string; content: string };
 
 function skillSlashName(title: string): string {
   const slug = title
@@ -613,16 +357,6 @@ const IMAGE_CMD_RE = /^(?:\/image|\/img)\s+([\s\S]+)$/i;
 function parseImageCommand(text: string): string | null {
   const m = text.trim().match(IMAGE_CMD_RE);
   return m?.[1]?.trim() || null;
-}
-
-interface ModelOption {
-  id: string;
-  owned_by: string;
-  tier: 'free' | 'paid';
-  group?: string;
-  context_window?: number | null;
-  max_output?: number | null;
-  vision?: boolean;
 }
 
 function messagePlainText(message: Message): string {
@@ -6117,119 +5851,11 @@ export default function ChatContainer() {
                         const toolById = new Map(
                           (message.toolRuns || []).map((run) => [run.id, run]),
                         );
-                        // Prefer live activity timeline; fall back for older saved messages.
-                        const activitySteps = (() => {
-                          const base =
-                            message.activity && message.activity.length > 0
-                              ? [...message.activity]
-                              : [
-                                  ...(visibleReasoning
-                                    ? [
-                                        {
-                                          id: `${message.id}-reasoning`,
-                                          kind: 'reasoning' as const,
-                                          text: visibleReasoning,
-                                        },
-                                      ]
-                                    : []),
-                                  ...(message.toolRuns || []).map((run) => ({
-                                    id: `${message.id}-tool-${run.id}`,
-                                    kind: 'tool' as const,
-                                    toolRunId: run.id,
-                                  })),
-                                ];
-                          const seen = new Set(
-                            base
-                              .filter((s): s is { id: string; kind: 'tool'; toolRunId: string } =>
-                                s.kind === 'tool',
-                              )
-                              .map((s) => s.toolRunId),
-                          );
-                          for (const run of message.toolRuns || []) {
-                            if (!seen.has(run.id)) {
-                              base.push({
-                                id: `${message.id}-tool-orphan-${run.id}`,
-                                kind: 'tool',
-                                toolRunId: run.id,
-                              });
-                            }
-                          }
-                          // Place orphan generated files after the create_file batch
-                          // (last matching tool), so Process rows stay grouped.
-                          const fileIdsInActivity = new Set(
-                            base
-                              .filter(
-                                (s): s is { id: string; kind: 'file'; fileId: string } =>
-                                  s.kind === 'file',
-                              )
-                              .map((s) => s.fileId),
-                          );
-                          const orphanFiles: Array<{
-                            id: string;
-                            kind: 'file';
-                            fileId: string;
-                          }> = [];
-                          let insertAfter = -1;
-                          for (const file of message.files || []) {
-                            if (fileIdsInActivity.has(file.id)) continue;
-                            orphanFiles.push({
-                              id: `${message.id}-file-${file.id}`,
-                              kind: 'file',
-                              fileId: file.id,
-                            });
-                            fileIdsInActivity.add(file.id);
-                            for (let i = 0; i < base.length; i++) {
-                              const s = base[i];
-                              if (s.kind !== 'tool') continue;
-                              const run = toolById.get(s.toolRunId);
-                              if (
-                                run &&
-                                (run.name === 'create_file' || run.name === 'create-file') &&
-                                (run.query === file.name ||
-                                  run.results?.[0]?.title === file.name)
-                              ) {
-                                if (i > insertAfter) insertAfter = i;
-                                break;
-                              }
-                            }
-                          }
-                          if (orphanFiles.length) {
-                            // If several create_file tools are consecutive, land after the
-                            // whole run so file cards don't split the Process panel.
-                            let spliceAt = insertAfter >= 0 ? insertAfter + 1 : base.length;
-                            if (insertAfter >= 0) {
-                              while (
-                                spliceAt < base.length &&
-                                base[spliceAt].kind === 'tool'
-                              ) {
-                                const run = toolById.get(
-                                  (base[spliceAt] as { toolRunId: string }).toolRunId,
-                                );
-                                if (
-                                  !run ||
-                                  (run.name !== 'create_file' && run.name !== 'create-file')
-                                ) {
-                                  break;
-                                }
-                                spliceAt += 1;
-                              }
-                            }
-                            base.splice(spliceAt, 0, ...orphanFiles);
-                          }
-                          return base;
-                        })();
-                        type ActivityStep = (typeof activitySteps)[number];
-                        type ToolStep = Extract<ActivityStep, { kind: 'tool' }>;
-                        type ProcessStep = Extract<
-                          ActivityStep,
-                          { kind: 'reasoning' } | { kind: 'tool' }
-                        >;
-
-                        const hasContentSteps = activitySteps.some((s) => s.kind === 'content');
-                        const hasFileSteps = activitySteps.some((s) => s.kind === 'file');
-                        // Spinner only while THIS turn is actively streaming. After a
-                        // refresh, incomplete stays true but loading is false — without
-                        // this gate Process would spin forever.
+                        const activitySteps = buildActivitySteps(
+                          message,
+                          visibleReasoning,
+                          toolById,
+                        );
                         const messageIsStreaming =
                           isActiveLoading && message.id === lastMessage?.id;
                         const awaitingFirstContent = Boolean(
@@ -6240,117 +5866,15 @@ export default function ChatContainer() {
                             message.incomplete &&
                             replyWaitByMessage[message.id],
                         );
-
-                        /** Group consecutive reasoning/tool steps into Process panels.
-                         *  Content breaks the group. Generated files are deferred so a
-                         *  batch of create_file tools stays in one Process, then all
-                         *  file cards render together underneath. */
-                        type TimelineSegment =
-                          | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean }
-                          | { type: 'content'; id: string; text: string }
-                          | { type: 'file'; id: string; fileId: string };
-
-                        const timelineSegments: TimelineSegment[] = (() => {
-                          if (!hasContentSteps && !hasFileSteps) {
-                            const processSteps = activitySteps.filter(
-                              (s): s is ProcessStep =>
-                                s.kind === 'reasoning' || s.kind === 'tool',
-                            );
-                            const segs: TimelineSegment[] = [];
-                            if (awaitingFirstContent || processSteps.length > 0 || replyWait) {
-                              segs.push({
-                                type: 'process',
-                                id: `${message.id}-process-0`,
-                                steps: processSteps,
-                                live: awaitingFirstContent || replyWait,
-                              });
-                            }
-                            if (visibleContent.trim()) {
-                              segs.push({
-                                type: 'content',
-                                id: `${message.id}-content-legacy`,
-                                text: visibleContent,
-                              });
-                            }
-                            return segs;
-                          }
-                          const segs: TimelineSegment[] = [];
-                          let buf: ProcessStep[] = [];
-                          let fileBuf: Array<{ id: string; fileId: string }> = [];
-                          let processIdx = 0;
-                          const flushFiles = () => {
-                            for (const f of fileBuf) {
-                              segs.push({ type: 'file', id: f.id, fileId: f.fileId });
-                            }
-                            fileBuf = [];
-                          };
-                          const flushProcess = (live: boolean) => {
-                            if (!buf.length && !live) return;
-                            segs.push({
-                              type: 'process',
-                              id: `${message.id}-process-${processIdx++}`,
-                              steps: buf,
-                              live,
-                            });
-                            buf = [];
-                            // File cards follow the Process block they were interleaved with.
-                            flushFiles();
-                          };
-                          for (const step of activitySteps) {
-                            if (step.kind === 'content') {
-                              flushProcess(false);
-                              // Orphan files with no surrounding process still need to emit.
-                              flushFiles();
-                              if (step.text.trim()) {
-                                segs.push({ type: 'content', id: step.id, text: step.text });
-                              }
-                            } else if (step.kind === 'file') {
-                              // Don't break Process — keep create_file rows in one panel.
-                              fileBuf.push({ id: step.id, fileId: step.fileId });
-                            } else {
-                              // Thought / other tools after a file batch: close the create_file
-                              // Process + file cards first, then start a fresh Process.
-                              if (fileBuf.length > 0) {
-                                const isCreateFileTool =
-                                  step.kind === 'tool' &&
-                                  (() => {
-                                    const run = toolById.get(step.toolRunId);
-                                    return (
-                                      run?.name === 'create_file' ||
-                                      run?.name === 'create-file'
-                                    );
-                                  })();
-                                if (!isCreateFileTool) {
-                                  flushProcess(false);
-                                  flushFiles();
-                                }
-                              }
-                              buf.push(step);
-                            }
-                          }
-                          // Trailing Process: in-flight tools/thought, or idle gap waiting
-                          // for the next token after narration ("正在写入……" → tool).
-                          flushProcess(
-                            Boolean(
-                              messageIsStreaming &&
-                                (buf.length > 0 || !visibleContent || replyWait),
-                            ),
-                          );
-                          flushFiles();
-                          // Live empty Process while waiting before any activity.
-                          if (
-                            messageIsStreaming &&
-                            segs.length === 0
-                          ) {
-                            segs.push({
-                              type: 'process',
-                              id: `${message.id}-process-live`,
-                              steps: [],
-                              live: true,
-                            });
-                          }
-                          return segs;
-                        })();
+                        const timelineSegments = buildTimelineSegments({
+                          messageId: message.id,
+                          activitySteps,
+                          toolById,
+                          visibleContent,
+                          messageIsStreaming,
+                          awaitingFirstContent,
+                          replyWait,
+                        });
                         const renderToolStep = (step: ToolStep) => {
                           const run = toolById.get(step.toolRunId);
                           if (!run) return null;

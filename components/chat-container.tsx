@@ -6276,14 +6276,14 @@ export default function ChatContainer() {
                                 },
                                 th({ children }: any) {
                                   return (
-                                    <th className="px-3.5 py-2.5 font-semibold">
+                                    <th className="px-3.5 py-2.5 font-semibold [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">
                                       {expandLiteralBreaks(children)}
                                     </th>
                                   );
                                 },
                                 td({ children }: any) {
                                   return (
-                                    <td className="px-3.5 py-2.5 align-top">
+                                    <td className="px-3.5 py-2.5 align-top [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">
                                       {expandLiteralBreaks(children)}
                                     </td>
                                   );

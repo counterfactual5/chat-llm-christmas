@@ -326,7 +326,7 @@ interface Message {
     status: 'start' | 'done';
     query?: string;
     provider?: string;
-    results?: Array<{ title: string; url: string; snippet: string }>;
+    results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
     error?: string;
   }>;
   /**
@@ -719,6 +719,9 @@ function toApiMessages(
                         title: x.title,
                         url: x.url,
                         snippet: String(x.snippet || '').slice(0, 240),
+                        ...(x.body
+                          ? { content: String(x.body).slice(0, 16_000) }
+                          : {}),
                       })),
                     }
                   : {}),
@@ -2359,7 +2362,7 @@ export default function ChatContainer() {
       status: 'start' | 'done';
       query?: string;
       provider?: string;
-      results?: Array<{ title: string; url: string; snippet: string }>;
+      results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
       error?: string;
       targetTimestamp?: number;
     },
@@ -2614,6 +2617,7 @@ export default function ChatContainer() {
                       url: x.url,
                       title: x.title,
                       snippet: x.snippet,
+                      ...(x.body ? { body: String(x.body).slice(0, 16_000) } : {}),
                     })),
                 })),
               },

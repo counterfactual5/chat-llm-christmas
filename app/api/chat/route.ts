@@ -465,7 +465,12 @@ export async function POST(req: NextRequest) {
           query?: string;
           error?: string;
           provider?: string;
-          results?: Array<{ url?: string; title?: string; snippet?: string }>;
+          results?: Array<{
+            url?: string;
+            title?: string;
+            snippet?: string;
+            body?: string;
+          }>;
         }>;
       },
     } = await req.json();

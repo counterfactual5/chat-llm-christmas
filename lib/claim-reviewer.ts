@@ -17,6 +17,7 @@ import {
   getReviewGateLevel,
   gradeClaimGap,
   haystackFor,
+  makeEvidenceUnit,
   strongestFor,
   type ClaimVerdict,
   type EvidenceStrength,
@@ -268,7 +269,7 @@ type ClientToolRun = {
   query?: string;
   error?: string;
   provider?: string;
-  results?: Array<{ url?: string; title?: string; snippet?: string }>;
+  results?: Array<{ url?: string; title?: string; snippet?: string; body?: string }>;
 };
 
 type ChatMessageLike = {
@@ -443,8 +444,36 @@ export function buildExecutionRecordFromToolRuns(toolRuns: ClientToolRun[]): Exe
           snippet: String(x?.snippet || '').trim().slice(0, 500) || undefined,
         });
       }
-      // Client toolRuns only keep short snippets — weak blurbs only.
-      const evidence = collectEvidenceUnits([{ tool: r.name, sources }]);
+      // Prefer persisted full-page body (web_read) over short UI snippets.
+      const evidence = (r.results || []).flatMap((x, i) => {
+        const url = trimUrlTail(String(x?.url || ''));
+        if (!/^https?:\/\//i.test(url)) return [];
+        const body = String(x?.body || '').trim();
+        if (body.length > 600 || (/web_read|web-read|read_url/i.test(r.name) && body)) {
+          return [
+            makeEvidenceUnit({
+              index: i,
+              url,
+              title: String(x?.title || '').trim() || undefined,
+              text: body,
+              kind: 'body',
+              tool: String(r.name || 'web_read'),
+            }),
+          ];
+        }
+        const blurb = String(x?.snippet || x?.title || '').trim();
+        if (!blurb) return [];
+        return [
+          makeEvidenceUnit({
+            index: i,
+            url,
+            title: String(x?.title || '').trim() || undefined,
+            text: blurb,
+            kind: 'blurb',
+            tool: String(r.name || 'unknown'),
+          }),
+        ];
+      });
       const urls = sources.map((s) => s.url);
       return {
         tool: String(r.name || 'unknown'),
@@ -741,7 +770,15 @@ function sourceText(source: ExecutionSource): string {
 }
 
 function clauseBefore(text: string, idx: number, lookback = 120): string {
-  const before = text.slice(Math.max(0, idx - lookback), idx);
+  let before = text.slice(Math.max(0, idx - lookback), idx);
+  // Lookback often starts mid-word / mid-`**bold**` — advance to a boundary so
+  // Review titles don't show as "ek V4**，…".
+  if (idx > lookback) {
+    const boundary = before.search(/[\s\n。！？、，,;；:：]/);
+    if (boundary > 0 && boundary < before.length - 8) {
+      before = before.slice(boundary + 1);
+    }
+  }
   const parts = before.split(/[\n。！？]|[.!?](?=\s|$)/);
   return parts.pop()?.trim() || '';
 }
@@ -799,6 +836,28 @@ export function extractCitationAnchors(assistantText: string): CitationAnchor[] 
   }
 
   return anchors.slice(0, 24);
+}
+
+/** Clean claim text for Review panel titles — strip markdown so `**bold**` doesn't
+ *  render as broken `ek V4**` after truncation. */
+export function formatReviewClaimTitle(claim: string, max = 140): string {
+  const cleaned = String(claim || '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`#]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= max) return cleaned;
+  const slice = cleaned.slice(0, max);
+  const cut = Math.max(
+    slice.lastIndexOf('，'),
+    slice.lastIndexOf('。'),
+    slice.lastIndexOf('、'),
+    slice.lastIndexOf(' '),
+    slice.lastIndexOf(','),
+    slice.lastIndexOf('—'),
+  );
+  return `${(cut > max * 0.45 ? slice.slice(0, cut) : slice).trim()}…`;
 }
 
 export type CitationAudit = {
@@ -870,16 +929,18 @@ export function auditCitations(
     const missing = facts.filter((t) => !factAppearsIn(t, hay));
     if (!missing.length) continue;
 
-    // Blurbs are partial — only flag distinctive figures (%, decimals, large nums),
-    // not a lone year that happens to be absent from a short blurb.
+    // Blurbs are partial — only flag distinctive figures (%, decimals, large nums).
+    // Bare years (2026) almost never appear in a short search blurb even when the
+    // article is about that year — only treat them as notable against full-page body.
+    const strength: EvidenceStrength = best?.strength || 'weak';
     const notable = missing.filter((t) => {
+      if (/^(?:19|20)\d{2}$/.test(String(t))) return strength === 'strong';
       if (/%/.test(t) || /\.\d/.test(t) || /,/.test(t)) return true;
       const n = Number(String(t).replace(/[^\d.]/g, ''));
       return Number.isFinite(n) && (n >= 100 || String(t).length >= 4);
     });
     if (!notable.length) continue;
 
-    const strength: EvidenceStrength = best?.strength || 'weak';
     const graded = gradeClaimGap({ missing: notable, strength });
     // Confirmed shouldn't appear here; skip info-only.
     if (graded.verdict === 'confirmed') continue;
@@ -926,7 +987,7 @@ export function buildCitationCheck(
     const isStrong = row.verdict === 'unsupported' || row.verdict === 'contradicted';
     items.push({
       severity: isStrong ? 'error' : 'warn',
-      title: row.claim.slice(0, 120) || row.url,
+      title: formatReviewClaimTitle(row.claim) || row.url,
       detail: isStrong
         ? `[${row.verdict}/${row.strength}] Cited ${row.url}, but full-page evidence does not contain: ${row.missing.join(', ')}. Evidence: ${evidenceNote}.`
         : `[${row.verdict}/${row.strength}] Cited ${row.url}; available evidence (${evidenceNote}) does not contain: ${row.missing.join(', ')}. Absence from a search blurb is not proof the article is wrong — treat as unverified.`,

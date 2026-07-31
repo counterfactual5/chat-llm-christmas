@@ -96,6 +96,8 @@ export async function runWebRead(
     },
   });
   const outcome = await webRead(target);
+  // Persist a long extract for later Request review — snippet stays short for UI.
+  const PERSIST_BODY_CHARS = 16_000;
   ctx.send({
     tool: {
       status: 'done',
@@ -108,6 +110,7 @@ export async function runWebRead(
               title: outcome.title || outcome.url || target,
               url: outcome.url || target,
               snippet: outcome.content.slice(0, 240),
+              body: outcome.content.slice(0, PERSIST_BODY_CHARS),
             },
           ]
         : [],

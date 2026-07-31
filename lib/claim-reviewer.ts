@@ -2209,10 +2209,24 @@ function runLocalChecks(input: ReviewInput): ReviewCheck[] {
  * Decide what to run. Local scans are free and self-gating; the LLM verifier is
  * capped at one call per audit and only spent when there is a reason to look
  * closer — an explicit review request, a mid-turn correction, or a local hit.
+ *
+ * Severity-aware escalation (foundry-research `deep-research-revision` verifier
+ * gating: full/targeted/skip by high-severity count). A single blurb-only
+ * `unverifiable` warn is not worth an LLM call on its own — that verdict is
+ * already final (absence from a search snippet proves nothing). Escalate on
+ * any confirmed local error, or once weak warns accumulate enough that an
+ * independent look is worth the cost.
  */
 export function planReviewChecks(input: ReviewInput): ReviewPlan {
   const checks = runLocalChecks(input);
-  const localIssues = checks.reduce((n, c) => n + (c.items?.length || 0), 0);
+  const localErrorIssues = checks.reduce(
+    (n, c) => n + (c.items?.filter((it) => it.severity === 'error').length || 0),
+    0,
+  );
+  const localWarnIssues = checks.reduce(
+    (n, c) => n + (c.items?.filter((it) => it.severity === 'warn').length || 0),
+    0,
+  );
   const fired = new Set(checks.map((c) => c.kind));
 
   const requested = input.phase === 'requested';
@@ -2227,9 +2241,12 @@ export function planReviewChecks(input: ReviewInput): ReviewPlan {
   } else if (input.midTurn) {
     llm = true;
     reason = 'mid-turn correction fired this turn';
-  } else if (localIssues) {
+  } else if (localErrorIssues) {
     llm = true;
-    reason = `${localIssues} local issue(s) worth a second opinion`;
+    reason = `${localErrorIssues} local error(s) worth a second opinion`;
+  } else if (localWarnIssues >= 3) {
+    llm = true;
+    reason = `${localWarnIssues} local warn(s) accumulated — second opinion`;
   }
 
   const lenses: ReviewLens[] = [];
@@ -2258,8 +2275,90 @@ export function buildReviewReport(
   status: ReviewReport['status'] = 'done',
   lensFindings: LensFinding[] = [],
 ): ReviewReport {
-  const checks = applyLensFindings(runLocalChecks(input), lensFindings);
+  const checks = dedupeReviewChecks(applyLensFindings(runLocalChecks(input), lensFindings));
   return { phase: input.phase, status, checks };
+}
+
+function extractNumericTokens(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of String(text || '').matchAll(/\d+(?:[.,]\d+)*%?/g)) {
+    const norm = m[0].replace(/,/g, '');
+    if (norm.length >= 2) out.add(norm);
+  }
+  return [...out];
+}
+
+function titleWords(text: string): Set<string> {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 2),
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const union = a.size + b.size - inter;
+  return union ? inter / union : 0;
+}
+
+/**
+ * Cross-check dedup (foundry-research `dedup-issues`): different lenses
+ * (consistency, citation, tool_receipt, …) can independently flag the same
+ * underlying number. Without this, the panel shows the same problem twice
+ * with different phrasing — wasted space, and it reads as two bugs instead
+ * of one. Merge same-kind-crossing items that share a distinctive numeric
+ * token and enough title overlap; keep the stronger verdict and note both
+ * lenses flagged it. Never merges within the same check (a check already
+ * dedupes its own items).
+ */
+export function dedupeReviewChecks(checks: ReviewCheck[]): ReviewCheck[] {
+  type Flat = { checkIdx: number; itemIdx: number; kind: ReviewCheckKind; item: ReviewCheckItem };
+  const flat: Flat[] = [];
+  checks.forEach((c, ci) =>
+    c.items.forEach((item, ii) => flat.push({ checkIdx: ci, itemIdx: ii, kind: c.kind, item })),
+  );
+
+  const dropKeys = new Set<string>();
+  const keyOf = (f: Flat) => `${f.checkIdx}:${f.itemIdx}`;
+
+  for (let i = 0; i < flat.length; i++) {
+    if (dropKeys.has(keyOf(flat[i]))) continue;
+    for (let j = i + 1; j < flat.length; j++) {
+      if (flat[i].kind === flat[j].kind) continue;
+      if (dropKeys.has(keyOf(flat[j]))) continue;
+      const a = flat[i].item;
+      const b = flat[j].item;
+      const numA = extractNumericTokens(`${a.title} ${a.detail}`);
+      if (!numA.length) continue;
+      const numB = extractNumericTokens(`${b.title} ${b.detail}`);
+      if (!numA.some((n) => numB.includes(n))) continue;
+      if (jaccard(titleWords(a.title), titleWords(b.title)) < 0.4) continue;
+
+      const aStrong = a.severity === 'error';
+      const bStrong = b.severity === 'error';
+      const keepFirst = aStrong === bStrong ? a.detail.length >= b.detail.length : aStrong;
+      const winner = keepFirst ? flat[i] : flat[j];
+      const loser = keepFirst ? flat[j] : flat[i];
+      const severity: ReviewCheckItem['severity'] = aStrong || bStrong ? 'error' : winner.item.severity;
+      const detail = /also flagged by/i.test(winner.item.detail)
+        ? winner.item.detail
+        : `${winner.item.detail} (also flagged by ${loser.kind})`;
+      checks[winner.checkIdx].items[winner.itemIdx] = { ...winner.item, severity, detail };
+      dropKeys.add(keyOf(loser));
+    }
+  }
+
+  if (!dropKeys.size) return checks;
+  return checks.map((c, ci) => {
+    const items = c.items.filter((_, ii) => !dropKeys.has(`${ci}:${ii}`));
+    if (items.length === c.items.length) return c;
+    return { ...c, items, clean: items.length === 0 };
+  });
 }
 
 /** One finding from an LLM lens, attributed to the check it belongs to. */

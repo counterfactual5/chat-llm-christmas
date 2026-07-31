@@ -1897,6 +1897,10 @@ export function buildStalenessCheck(
 const GENERIC_LABEL_RE =
   /^(?:值|数值|数量|内容|示例|例如|如下|结果|说明|备注|其中|比如|note|value|example|result|total)$/i;
 
+/** Hedging / filler — “实际约为 15% / 20% / 25%” across income brackets is NOT one metric. */
+const HEDGE_LABEL_RE =
+  /^(?:实际约|约为|大约|大概|将近|近|约等于|约|approx(?:imately)?|roughly|around|about|nearly|near|circa)$/i;
+
 const LABELED_NUMBER_RE =
   /([\p{L}\p{N}][\p{L}\p{N}_ ·%（）()-]{1,22})\s*(?:[:：]|是|为)\s*([-−]?\d[\d,._]*(?:\.\d+)?)\s*([%％]|万|亿|个|人|元|美元|天|小时|分钟|次|倍)?/gu;
 
@@ -1906,6 +1910,14 @@ function normalizeLabel(raw: string): string {
     .replace(/^[\s,.、，。;；:：-]+|[\s,.、，。;；:：-]+$/g, '')
     .replace(/\s+/g, ' ')
     .toLowerCase();
+}
+
+function isTrackableMetricLabel(label: string): boolean {
+  if (label.length < 2) return false;
+  if (GENERIC_LABEL_RE.test(label) || HEDGE_LABEL_RE.test(label)) return false;
+  // Trailing/leading 约 still means “approx”, not a named KPI.
+  if (/^约|约$/.test(label)) return false;
+  return true;
 }
 
 /** Same metric asserted with different values far apart in the answer. */
@@ -1918,7 +1930,7 @@ export function buildConsistencyCheck(assistantText: string): ReviewCheck | null
 
   for (const match of text.matchAll(LABELED_NUMBER_RE)) {
     const label = normalizeLabel(match[1]);
-    if (label.length < 2 || GENERIC_LABEL_RE.test(label)) continue;
+    if (!isTrackableMetricLabel(label)) continue;
     const unit = match[3] || '';
     const value = match[2].replace(/[,_\s]/g, '').replace(/[−]/g, '-');
     const key = `${label}|${unit}`;

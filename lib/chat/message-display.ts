@@ -23,3 +23,10 @@ export function displayAssistantParts(message: Message): { content: string; reas
   };
 }
 
+export function isAssistantError(message?: Message): boolean {
+  return Boolean(
+    message &&
+      message.role === 'assistant' &&
+      (message.content || '').trim().startsWith('Error:'),
+  );
+}

@@ -497,14 +497,14 @@ export const WEB_SEARCH_TOOL = {
   function: {
     name: 'web_search',
     description:
-      'Search the live web. Call this yourself when you need current information (news, prices, recent events, facts that may have changed). Do not narrate a fake search — invoke this tool. For time-sensitive queries, put calendar anchors in the query yourself using the latest message timestamp (e.g. 2026-07 or July 2026).',
+      'Search the live web for CURRENT or UNKNOWN facts (news, prices, recent events, docs that may have changed). Do NOT call for stable textbook knowledge you already know (definitions, which academic field a concept belongs to, classic formulas, historical facts that do not change). Do not narrate a fake search — invoke this tool when you truly need the web. Only for time-sensitive queries, put calendar anchors in the query using the latest message timestamp (e.g. 2026-07); never bolt a year onto non-temporal questions.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
           description:
-            'Full search query. You own time anchoring — include year/month/ISO date when the user means recent/latest/this week.',
+            'Full search query. Include year/month/ISO date ONLY when the user means recent/latest/this week — not for timeless definitions.',
         },
       },
       required: ['query'],

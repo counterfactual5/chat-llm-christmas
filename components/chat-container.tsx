@@ -46,6 +46,10 @@ import {
   isImageAttachment,
 } from '@/components/attachment-image-thumb';
 import {
+  FilePreviewOverlay,
+  type FilePreviewPayload,
+} from '@/components/file-preview-overlay';
+import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
   formatContextWindow,
@@ -938,6 +942,7 @@ export default function ChatContainer() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [attachError, setAttachError] = useState('');
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
+  const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
   const [compactNotice, setCompactNotice] = useState('');
   const [isCompacting, setIsCompacting] = useState(false);
 
@@ -1389,6 +1394,16 @@ export default function ChatContainer() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [imagePreviewSrc]);
+
+  useEffect(() => {
+    if (!filePreview) return;
+    // Overlay also listens; keep body scroll locked while open.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [filePreview]);
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const activeAutoReview = activeSession?.autoReview ?? true;
@@ -6895,41 +6910,65 @@ export default function ChatContainer() {
                             {message.images && message.images.length > 0 && (
                               <div className="flex flex-wrap gap-2">
                                 {message.images.map((img, idx) => (
-                                  <a
+                                  <button
                                     key={idx}
-                                    href={img.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="block overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+                                    type="button"
+                                    onClick={() => setImagePreviewSrc(img.url)}
+                                    className="block cursor-zoom-in overflow-hidden rounded-xl border border-stone-200 bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-800 dark:bg-stone-900"
                                   >
                                     <img
                                       src={img.url}
                                       alt={img.name || 'generated'}
                                       className="max-h-[420px] max-w-full object-contain"
                                     />
-                                  </a>
+                                  </button>
                                 ))}
                               </div>
                             )}
                             {message.files && message.files.length > 0 && (
                               <div className={cn('flex flex-col gap-2', message.images?.length ? 'mt-2' : undefined)}>
-                                {message.files.map((file) => (
+                                {message.files.map((file) => {
+                                  const canPreview = typeof file.content === 'string';
+                                  return (
                                   <div
                                     key={file.id}
-                                    className="flex max-w-md items-center gap-3 rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2.5 dark:border-stone-800 dark:bg-stone-900/60"
+                                    className="flex max-w-md items-center gap-2 rounded-xl border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-800 dark:bg-stone-900/60"
                                   >
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-200/80 dark:bg-stone-800">
-                                      <FileText className="h-4 w-4 text-stone-500" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
-                                        {file.name}
+                                    <button
+                                      type="button"
+                                      disabled={!canPreview}
+                                      title={canPreview ? t('previewFile') : file.name}
+                                      onClick={() => {
+                                        if (!canPreview) return;
+                                        setFilePreview({
+                                          id: file.id,
+                                          name: file.name,
+                                          mimeType: file.mimeType,
+                                          content: file.content || '',
+                                          size: file.size,
+                                        });
+                                      }}
+                                      className={cn(
+                                        'flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left',
+                                        canPreview
+                                          ? 'cursor-zoom-in hover:bg-white/80 dark:hover:bg-stone-950/50'
+                                          : 'cursor-default',
+                                      )}
+                                    >
+                                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-200/80 dark:bg-stone-800">
+                                        <FileText className="h-4 w-4 text-stone-500" />
                                       </div>
-                                      <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
-                                        {file.mimeType}
-                                        {file.size > 0 ? ` · ${formatFileSize(file.size)}` : ''}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
+                                          {file.name}
+                                        </div>
+                                        <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
+                                          {file.mimeType}
+                                          {file.size > 0 ? ` · ${formatFileSize(file.size)}` : ''}
+                                          {canPreview ? ` · ${t('previewFile')}` : ''}
+                                        </div>
                                       </div>
-                                    </div>
+                                    </button>
                                     <button
                                       type="button"
                                       title={t('download')}
@@ -6946,12 +6985,13 @@ export default function ChatContainer() {
                                           createdAt: file.createdAt || message.timestamp,
                                         })
                                       }
-                                      className="rounded-lg p-2 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                      className="mr-1 rounded-lg p-2 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
                                     >
                                       <Download className="h-4 w-4" />
                                     </button>
                                   </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             )}
                             {isAssistantError(message) ? (
@@ -9141,6 +9181,28 @@ export default function ChatContainer() {
       </AnimatePresence>
 
       <ImagePreviewOverlay src={imagePreviewSrc} onClose={() => setImagePreviewSrc(null)} />
+      <FilePreviewOverlay
+        file={filePreview}
+        onClose={() => setFilePreview(null)}
+        onDownload={(file) =>
+          void downloadGeneratedFile({
+            messageId: '',
+            fileIndex: 0,
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            size: file.size || 0,
+            url: `local://${file.id}`,
+            content: file.content,
+            createdAt: Date.now(),
+          })
+        }
+        labels={{
+          preview: t('previewFile'),
+          download: t('download'),
+          close: t('closePreview'),
+        }}
+      />
 
     </div>
   );

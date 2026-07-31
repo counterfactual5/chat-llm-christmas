@@ -63,22 +63,23 @@ export function detectFakedToolNarration(
       /(正在(更新|写入|创建)|已(经)?(更新|写入|创建|改好|重构)|更新页面|写入.*页面|按你的要求重构|创建了?(这个|一个)?(页面|模板))/i.test(
         t,
       ) || /(updated|created|wrote|writing)\s+(the\s+)?(notion\s+)?page/i.test(t);
-    if (claimsWrite && (hasNotionUrl || /notion|页面|模板/i.test(t))) found.push('notion');
+    // Require Notion signal — bare「更新页面」in generic docs talk is too common.
+    if (claimsWrite && (hasNotionUrl || /Notion|notion\.so/i.test(t))) found.push('notion');
   }
 
   if (set.has('github')) {
-    const hasGhUrl = /github\.com\//i.test(t);
     const claimsWrite =
-      /(创建|提交|打开|评论).{0,12}(issue|PR|pull request|拉取请求)|已(创建|提交|评论|打开).{0,12}(issue|PR)|created (an? )?(issue|PR|pull request)|opened (an? )?(PR|pull request)|commented on/i.test(
+      /(已(经)?(创建|提交|打开|评论)|正在(创建|提交|打开|评论)).{0,12}(issue|PR|pull request|拉取请求)|created (an? )?(issue|PR|pull request)|opened (an? )?(PR|pull request)|commented on (the )?(issue|PR)/i.test(
         t,
       );
-    if (claimsWrite || (hasGhUrl && /(创建|提交|issue|PR|pull request)/i.test(t))) found.push('github');
+    // Do NOT flag mere github.com links that mention issue/PR in ordinary discussion.
+    if (claimsWrite) found.push('github');
   }
 
   if (set.has('gmail')) {
     if (
       /(已(经)?(发送|回复|转发)|正在发送).{0,8}(邮件|邮箱|gmail)|sent (the )?(email|mail)|replied to/i.test(t) ||
-      (/mail\.google\.com|gmail/i.test(t) && /(发送|回复|sent|reply)/i.test(t))
+      (/mail\.google\.com/i.test(t) && /(已(经)?(发送|回复)|正在发送|sent |replied )/i.test(t))
     ) {
       found.push('gmail');
     }
@@ -86,8 +87,11 @@ export function detectFakedToolNarration(
 
   if (set.has('calendar')) {
     if (
-      /(已(经)?(创建|添加|安排)|正在(创建|添加)).{0,10}(日程|日历|会议|event)|created (a )?(calendar )?event|scheduled/i.test(t) ||
-      (/calendar\.google\.com/i.test(t) && /(创建|日程|event|scheduled)/i.test(t))
+      /(已(经)?(创建|添加|安排)|正在(创建|添加)).{0,10}(日程|日历|会议|event)|created (a )?(calendar )?event|scheduled (a )?(meeting|event)/i.test(
+        t,
+      ) ||
+      (/calendar\.google\.com/i.test(t) &&
+        /(已(经)?(创建|添加|安排)|正在(创建|添加)|created |scheduled )/i.test(t))
     ) {
       found.push('calendar');
     }
@@ -95,8 +99,11 @@ export function detectFakedToolNarration(
 
   if (set.has('drive')) {
     if (
-      /(已(经)?(上传|创建|分享)|正在(上传|创建)).{0,10}(文件|文档|Drive|网盘)|uploaded (a )?file|created (a )?doc/i.test(t) ||
-      (/drive\.google\.com/i.test(t) && /(上传|创建|分享|upload)/i.test(t))
+      /(已(经)?(上传|创建|分享)|正在(上传|创建)).{0,10}(文件|文档|Drive|网盘)|uploaded (a )?file|created (a )?doc/i.test(
+        t,
+      ) ||
+      (/drive\.google\.com/i.test(t) &&
+        /(已(经)?(上传|创建|分享)|正在(上传|创建)|uploaded |created )/i.test(t))
     ) {
       found.push('drive');
     }
@@ -104,13 +111,18 @@ export function detectFakedToolNarration(
 
   if (opts.searchEnabled) {
     if (
-      /(根据(联网)?搜索|搜索(结果|显示|表明)|查到了|检索到)|according to (my |the )?(web )?search|I found the following links/i.test(t) &&
+      /(根据(联网)?搜索|搜索(结果|显示|表明)|检索到)|according to (my |the )?(web )?search|I found the following links/i.test(
+        t,
+      ) &&
       /https?:\/\//i.test(t)
     ) {
       found.push('web_search');
     }
+    // Require first-person “I read” — 「根据该页」alone is normal when citing a user-pasted URL.
     if (
-      /(我(已经|已)?读完|根据(该|此)页|页面内容显示)|I (have )?read (the )?(page|article)|according to the page/i.test(t) &&
+      /(我(已经|已)?(读完|阅读完|抓取了|打开并读了)|I (have )?read (the )?(page|article)|according to the page I (just )?read)/i.test(
+        t,
+      ) &&
       /https?:\/\//i.test(t)
     ) {
       found.push('web_read');
@@ -126,8 +138,9 @@ export function detectFakedToolNarration(
     }
   }
 
+  // Deliverable file claims — not “生成了文件说明/文件结构” pedagogy.
   if (
-    /(已(经)?(生成|创建|保存).{0,12}(文件|\.md|\.py|\.ts|\.json)|文件已(经)?(生成|创建|保存)|created (the )?file|saved (the )?file|wrote (the )?file to)/i.test(
+    /(create_file|local:\/\/|文件卡片|已(经)?(用工具)?(生成|创建|写入|保存).{0,16}(\.md|\.py|\.ts|\.tsx|\.js|\.json|\.txt)|created (the )?file|saved (the )?file|wrote (the )?file to)/i.test(
       t,
     )
   ) {
@@ -141,8 +154,8 @@ export function detectFakedToolNarration(
  * Detect “I'll fetch/read/update first…” narration with no tool_calls.
  * Different from success-claims: the model announces intent then stops.
  *
- * web_search: require clear LIVE-web intent. Bare「查」is too broad
- * (查清区别 / 查一下定义) and false-triggers mid-turn forced searches.
+ * Keep these tight: mid-turn correction forces another round, so false
+ * positives derail ordinary explanations (especially with Notion connected).
  */
 export function detectPendingToolIntent(
   text: string,
@@ -152,7 +165,7 @@ export function detectPendingToolIntent(
   if (!t.trim()) return [];
   // Meta talk about searching (why search / don't need search) is not an intent to call.
   const skipWebIntent =
-    /(不(用|需要|该|必|再)(去)?(搜索|联网|搜)|基础知识|知识库(里面)?都有|为什么(还)?要(搜索|搜)|认知校准)/i.test(
+    /(不(用|需要|该|必|再)(去)?(搜索|联网|搜)|基础知识|知识库(里面)?都有|为什么(还)?要(搜索|搜)|认知校准|搜索不到|搜不到)/i.test(
       t,
     ) && !/(正在(联网)?搜索|立即(执行)?搜索|马上搜索|I('ll| will) search now)/i.test(t);
 
@@ -162,17 +175,19 @@ export function detectPendingToolIntent(
   const found: FakedToolSurface[] = [];
 
   if (set.has('notion')) {
+    const notionCtx = /Notion|notion\.so|notion\.site|(当前)?页面|工作区|workspace/i.test(t);
     const intendsNotion =
-      /(先(读|看|获取|拉取|打开)|让我(先)?(读|看|获取|拉取)|我(先|来)(读|看|获取).{0,16}(页面|内容|Notion)|读一下(当前)?(页面|内容)|看一下(当前)?页面|fetch (the )?(current )?(page|content)|let me (first )?(fetch|read|get|load)|I('ll| will) (first )?(fetch|read|get)|正在(读取|获取|拉取).{0,12}(页面|内容|Notion)|然后重写|then (rewrite|update)|重写——|重写—)/i.test(
+      notionCtx &&
+      /(先(读|看|获取|拉取|打开)|让我(先)?(读|看|获取|拉取)|我(先|来)(读|看|获取).{0,16}(页面|内容|Notion)|读一下(当前)?(页面|内容)|看一下(当前)?页面|fetch (the )?(current )?(page|content)|let me (first )?(fetch|read|get|load).{0,24}(page|notion)|I('ll| will) (first )?(fetch|read|get).{0,24}(page|notion)|正在(读取|获取|拉取).{0,12}(页面|内容|Notion)|然后重写|then (rewrite|update)|重写——|重写—)/i.test(
         t,
       );
     if (intendsNotion) found.push('notion');
   }
 
   if (opts.searchEnabled && !skipWebIntent) {
-    // Prefer 搜索/联网/搜一下 over bare 查 (check/clarify).
+    // Clear live-web intent only. Avoid bare「我搜索不到」/「查清区别」.
     if (
-      /(先.{0,8}(联网|上网)?(搜索|搜一下)|让我(去)?(联网|上网)?(搜索|搜一下)|我来(联网|上网)?(搜索|搜一下)|正在(联网|上网)?搜索|我(将|会|现在)?(立即|马上)?(去)?(执行)?搜索|联网查一下|上网查一下|I'll (go )?(and )?search|let me search|searching (the )?(web|internet)|look\s*up (online|on the web))/i.test(
+      /(先.{0,8}(联网|上网)?(搜索|搜一下)|让我(去)?(联网|上网)?(搜索|搜一下)|我来(联网|上网)?(搜索|搜一下)|正在(联网|上网)?搜索|我(将|会)(立即|马上)?(去)?(执行)?搜索|联网查一下|上网查一下|I'll (go )?(and )?search|let me search|searching (the )?(web|internet)|look\s*up (online|on the web))/i.test(
         t,
       )
     ) {
@@ -189,7 +204,7 @@ export function detectPendingToolIntent(
 
   if (set.has('github')) {
     if (
-      /(先(看|读|获取).{0,12}(仓库|repo|issue|PR)|let me (check|fetch|read).{0,12}(repo|issue|PR|pull))/i.test(
+      /(先(看|读|获取).{0,12}(仓库|repo|issue|PR)|let me (check|fetch|read).{0,12}(repo|issue|PR|pull)|我(先|来)(看|读|获取).{0,12}(仓库|repo|issue|PR))/i.test(
         t,
       )
     ) {

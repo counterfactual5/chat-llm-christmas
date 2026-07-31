@@ -307,16 +307,25 @@ function extractUrls(text: string, limit = 60): string[] {
 /** Pull url/title/snippet hits out of a tool payload (JSON or prose). */
 function extractSourcesFromPayload(payload: string, limit = 24): ExecutionSource[] {
   const sources: ExecutionSource[] = [];
-  const seen = new Set<string>();
+  const byKey = new Map<string, ExecutionSource>();
   const push = (raw: { url?: unknown; title?: unknown; snippet?: unknown }) => {
     const url = trimUrlTail(String(raw.url || ''));
     if (!/^https?:\/\//i.test(url)) return;
     const key = normalizeUrl(url);
-    if (!key || seen.has(key)) return;
-    seen.add(key);
+    if (!key) return;
     const title = String(raw.title || '').trim().slice(0, 200) || undefined;
     const snippet = String(raw.snippet || '').trim().slice(0, 500) || undefined;
-    sources.push({ url, title, snippet });
+    const prev = byKey.get(key);
+    if (!prev) {
+      const hit = { url, title, snippet };
+      byKey.set(key, hit);
+      sources.push(hit);
+      return;
+    }
+    // Same URL may appear as a bare link first, then again with title/snippet —
+    // keep the richest fields so citation checks see headlines, not empty husks.
+    if ((title || '').length > String(prev.title || '').length) prev.title = title;
+    if ((snippet || '').length > String(prev.snippet || '').length) prev.snippet = snippet;
   };
 
   try {
@@ -639,7 +648,7 @@ function hasRetrievalReceipt(record: ExecutionRecordEntry[]): boolean {
 
 function collectSources(record: ExecutionRecordEntry[]): ExecutionSource[] {
   const out: ExecutionSource[] = [];
-  const seen = new Set<string>();
+  const byKey = new Map<string, ExecutionSource>();
   for (const entry of record) {
     const hits =
       entry.sources?.length
@@ -647,9 +656,24 @@ function collectSources(record: ExecutionRecordEntry[]): ExecutionSource[] {
         : (entry.urls || []).map((url) => ({ url }));
     for (const hit of hits) {
       const key = normalizeUrl(hit.url);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push(hit);
+      if (!key) continue;
+      const prev = byKey.get(key);
+      if (!prev) {
+        const copy = {
+          url: hit.url,
+          title: hit.title,
+          snippet: hit.snippet,
+        };
+        byKey.set(key, copy);
+        out.push(copy);
+        continue;
+      }
+      if (String(hit.title || '').length > String(prev.title || '').length) {
+        prev.title = hit.title;
+      }
+      if (String(hit.snippet || '').length > String(prev.snippet || '').length) {
+        prev.snippet = hit.snippet;
+      }
     }
   }
   return out;
@@ -673,8 +697,40 @@ function extractFactualTokens(text: string): string[] {
   return [...tokens].slice(0, 12);
 }
 
+/**
+ * Collapse currency / thousand-separator / slug forms so `$64,000`, `64000`,
+ * and URL `usd64-000` can match each other.
+ */
+function normalizeFactBlob(text: string): string {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[\u0000-\u001f]/g, ' ')
+    .replace(/[￥$€£¥]/g, '')
+    .replace(/\b(?:usd|usdt|cny|rmb)\b/g, '')
+    .replace(/(\d)[,_\s.](?=\d{3}(?:\D|$))/g, '$1')
+    .replace(/(\d)-(?=\d{3}(?:\D|$))/g, '$1')
+    .replace(/\s+/g, ' ');
+}
+
+function factInSource(token: string, hayRaw: string, hayNorm: string): boolean {
+  const raw = String(token || '').toLowerCase();
+  if (!raw) return true;
+  if (hayRaw.includes(raw)) return true;
+  if (hayRaw.includes(raw.replace(/,/g, ''))) return true;
+  const norm = normalizeFactBlob(raw);
+  if (norm && hayNorm.includes(norm)) return true;
+  return false;
+}
+
+/** Title + snippet + URL slug — never the full article (unless web_read stored it). */
 function sourceText(source: ExecutionSource): string {
-  return [source.title, source.snippet].filter(Boolean).join(' ').toLowerCase();
+  let path = '';
+  try {
+    path = decodeURIComponent(new URL(source.url).pathname || '');
+  } catch {
+    path = source.url || '';
+  }
+  return [source.title, source.snippet, path].filter(Boolean).join(' ');
 }
 
 function clauseBefore(text: string, idx: number, lookback = 120): string {
@@ -742,13 +798,14 @@ export type CitationAudit = {
   checked: number;
   matched: number;
   unsupported: string[];
-  /** Claims whose hard facts do not appear in the matched source snippet. */
+  /** Claims whose hard facts do not appear in the matched source title/snippet/URL. */
   unsupportedClaims: Array<{ url: string; claim: string; missing: string[] }>;
 };
 
 /**
  * Citation audit: (1) URL must appear in tool hits, (2) hard facts near the
- * citation should appear in the source title/snippet when those exist.
+ * citation should appear in the source title / snippet / URL path when those
+ * exist. Does NOT fetch or read the full article body.
  */
 export function auditCitations(
   assistantText: string,
@@ -779,15 +836,14 @@ export function auditCitations(
     }
     matched++;
 
-    const hay = sourceText(source);
-    if (!hay) continue; // URL-only receipt — can't verify content yet.
+    const hayRaw = sourceText(source).toLowerCase();
+    if (!hayRaw.trim()) continue; // URL-only receipt — can't verify content yet.
+    const hayNorm = normalizeFactBlob(hayRaw);
     const facts = extractFactualTokens(anchor.claim);
     if (facts.length < 1) continue;
-    const missing = facts.filter(
-      (t) => !hay.includes(t.toLowerCase()) && !hay.includes(t.replace(/,/g, '')),
-    );
+    const missing = facts.filter((t) => !factInSource(t, hayRaw, hayNorm));
     if (!missing.length) continue;
-    // Snippets are partial — only flag distinctive figures (%, decimals, large nums),
+    // Blurbs are partial — only flag distinctive figures (%, decimals, large nums),
     // not a lone year that happens to be absent from a short blurb.
     const notable = missing.filter((t) => {
       if (/%/.test(t) || /\.\d/.test(t) || /,/.test(t)) return true;
@@ -830,13 +886,13 @@ export function buildCitationCheck(
     items.push({
       severity: 'warn',
       title: row.claim.slice(0, 120) || row.url,
-      detail: `Cited ${row.url}, but source snippet is missing: ${row.missing.join(', ')}`,
+      detail: `Cited ${row.url}, but the search title/snippet/URL do not contain: ${row.missing.join(', ')}. (Review checks retrieval blurbs only — not the full article body.)`,
     });
   }
 
   const bits = [`${audit.matched}/${audit.checked} links in receipts`];
   if (audit.unsupportedClaims.length) {
-    bits.push(`${audit.unsupportedClaims.length} claim(s) not backed by snippet`);
+    bits.push(`${audit.unsupportedClaims.length} claim(s) not backed by title/snippet`);
   }
 
   return {
@@ -2207,7 +2263,7 @@ const LENS_INSTRUCTIONS: Record<ReviewLens, string> = {
   tool_receipt:
     '- tool_receipt: narrated actions/results that no receipt supports (beyond the `findings` array above).',
   citation:
-    '- citation: a cited URL missing from `sources=`, or a figure attributed to a source whose snippet does not contain it.',
+    '- citation: a cited URL missing from `sources=`, or a figure attributed to a source whose search title/snippet/URL path do not contain it (not a full-article read).',
   consistency:
     '- consistency: the answer contradicting itself — same metric with different values, a conclusion that reverses an earlier statement, steps that do not follow from each other.',
   completeness:
@@ -2552,7 +2608,8 @@ export function buildFindingsResponsePrompt(
   const excerpt = String(assistantText || '').trim().slice(0, 2000);
   return [
     'Independent claim review produced the following findings against tool receipts.',
-    'Address each finding honestly: retract unsupported claims, acknowledge tool failures, or state what was NOT done.',
+    'The prior answer is already visible — annotate what is unsupported; do not claim to have deleted on-screen text.',
+    'Address each finding honestly: say what was NOT done or not backed by a receipt.',
     'Be brief. Do not invent notion.so / github.com / google.com links. Do not call tools.',
     '',
     '## Findings',
@@ -2563,7 +2620,7 @@ export function buildFindingsResponsePrompt(
     .join('\n');
 }
 
-/** Prompt covering every Review check issue — delta fix only, never a full rewrite. */
+/** Prompt covering every Review check issue — delta note only, never a full rewrite. */
 export function buildReviewIssuesResponsePrompt(
   issues: ReviewIssue[],
   assistantText?: string,
@@ -2583,16 +2640,18 @@ export function buildReviewIssuesResponsePrompt(
   // Tiny excerpt only for locating the bad claim — not so the model can rewrite everything.
   const excerpt = String(assistantText || '').trim().slice(0, 800);
   return [
-    'Automatic review found issues in the previous answer (already shown to the user).',
-    'Write a SHORT correction note only — the user still sees the original answer above.',
+    'Automatic review found issues in the previous answer (already shown to the user above the Review panel).',
+    'Write a SHORT annotation note only — the original answer stays visible and cannot be un-sent.',
     '',
     'Hard rules:',
     '- Do NOT repeat or rewrite the full prior answer.',
-    '- Do NOT restate sections that were already correct.',
-    '- Only fix / retract / replace the parts named in the issues below.',
+    '- Do NOT restate sections that were already fine.',
+    '- Do NOT say you “revoked / 撤销 / removed / deleted” text that the user can still see above.',
+    '- Do NOT ask the user to ignore the whole answer, and do not re-output a corrected full answer.',
     '- Prefer a few bullets or one short paragraph (usually under 120 words).',
-    '- For bad citations: remove or replace that link; do not paste the whole article again.',
+    '- For citation/title-snippet mismatches: explain what the review blurbs actually support vs what is uncertain. Example tone: “检索标题/摘要里未见 …，该处数字请谨慎采信；链接仍可作相关报道参考。” If the figure appears only in a headline, say so — do not pretend the article body was read.',
     '- For arithmetic: state the corrected equation/number only.',
+    '- For tool-receipt issues: say what was not actually done / not backed by a receipt.',
     '- Do not invent tool actions, URLs, or receipts that were never returned.',
     '- Do not call tools.',
     '',
@@ -2605,9 +2664,10 @@ export function buildReviewIssuesResponsePrompt(
 }
 
 export const FINDINGS_RESPONSE_SYSTEM = [
-  'You write a brief correction note after an automatic review.',
-  'Output ONLY the delta that fixes the listed issues — never a full restatement of the prior answer.',
-  'Be concise and honest. Prefer retracting or patching over defending unsupported claims.',
+  'You write a brief review annotation after an automatic check.',
+  'The prior answer is already on screen — you cannot unsay it. Annotate risks and limits; do not claim to have revoked or deleted visible text.',
+  'Output ONLY a short delta note — never a full restatement of the prior answer.',
+  'Be concise and honest. Prefer “未在检索摘要中核实 / 请谨慎采信” over “已撤销”.',
   'Do not call tools. Do not invent URLs or tool payloads.',
 ].join(' ');
 

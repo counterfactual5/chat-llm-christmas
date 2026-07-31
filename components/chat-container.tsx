@@ -4313,9 +4313,13 @@ export default function ChatContainer() {
     const imagePrompt = parseImageCommand(textToSend);
     if (imagePrompt) {
       if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+      // Edit/resend passes priorMessages (thread truncated before the edited user
+      // turn). Without that, generateImage reads the full session and appends a
+      // second `/image` user bubble next to the old one.
       return generateImage(imagePrompt, {
         sessionId,
         alreadyLoading: opts?.alreadyLoading,
+        baseMessages: baseMessagesOverride,
       });
     }
 

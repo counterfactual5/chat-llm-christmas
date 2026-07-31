@@ -211,8 +211,8 @@ export function escapeCurrencyDollars(content: string): string {
       .split(/(\$\$[\s\S]*?\$\$)/g)
       .map((chunk) => {
         if (chunk.startsWith('$$')) return chunk;
-        // Already-escaped \$ stays put; $64,000 / $1.5 / $100 → \$…
-        return chunk.replace(/(?<!\\)\$(?=\d)/g, '\\$');
+        // $64,000 / $**2,160** (currency pulled before **) — not $x$ math.
+        return chunk.replace(/(?<!\\)\$(?=(\d|\*\*\d))/g, '\\$');
       })
       .join(''),
   );

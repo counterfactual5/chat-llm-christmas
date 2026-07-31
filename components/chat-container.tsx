@@ -4096,8 +4096,21 @@ export default function ChatContainer() {
           quality: 'medium',
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Image generation failed');
+      const raw = await res.text();
+      let data: {
+        error?: string;
+        image?: string;
+        fileId?: string;
+      } = {};
+      try {
+        data = raw ? (JSON.parse(raw) as typeof data) : {};
+      } catch {
+        throw new Error(
+          raw.trim().slice(0, 400) ||
+            `Image API returned non-JSON (HTTP ${res.status})`,
+        );
+      }
+      if (!res.ok) throw new Error(data?.error || `Image generation failed (HTTP ${res.status})`);
       if (!data?.image) throw new Error('No image returned');
 
       setSessions((prev) =>

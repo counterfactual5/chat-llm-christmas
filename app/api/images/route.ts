@@ -6,14 +6,34 @@ import {
   uploadGatewayFile,
 } from '@/lib/gateway-files';
 
-export const runtime = 'edge';
+// Image b64 payloads are large — Node has more headroom than Edge for this route.
+export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 function jsonError(message: string, status: number = 500) {
   return new Response(JSON.stringify({ error: message }), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
+}
+
+function upstreamErrorMessage(err: unknown): { detail: string; status: number } {
+  const e = err as {
+    status?: number;
+    statusCode?: number;
+    response?: { status?: number };
+    error?: { message?: string };
+    message?: string;
+  } | null;
+  const status = Number(e?.status || e?.statusCode || e?.response?.status || 500);
+  let detail =
+    e?.error?.message || e?.message || String(err || 'Image generation failed.');
+  // OpenAI SDK sometimes embeds a non-JSON upstream body in message — keep it short.
+  detail = detail.replace(/\s+/g, ' ').trim().slice(0, 500);
+  return {
+    detail,
+    status: status >= 400 && status < 600 ? status : 500,
+  };
 }
 
 /**
@@ -28,7 +48,13 @@ export async function POST(req: NextRequest) {
       return jsonError('Image generation requires a connected llm.christmas account.', 401);
     }
 
-    const body = await req.json();
+    let body: Record<string, unknown>;
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError('Invalid JSON body.', 400);
+    }
+
     const prompt = String(body?.prompt || '').trim();
     const model = String(body?.model || 'gpt-image-1.5').trim();
     const size = String(body?.size || '1024x1024').trim();
@@ -41,17 +67,24 @@ export async function POST(req: NextRequest) {
     const openai = new OpenAI({ apiKey: boundUserKey, baseURL });
 
     // GPT Image models always return b64_json and reject `response_format`.
-    const result = await openai.images.generate({
-      model,
-      prompt,
-      n: 1,
-      size: size as '1024x1024' | '1536x1024' | '1024x1536' | 'auto',
-      ...(quality ? { quality: quality as 'low' | 'medium' | 'high' | 'auto' } : {}),
-    } as any);
+    let result: {
+      data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
+    };
+    try {
+      result = (await openai.images.generate({
+        model,
+        prompt,
+        n: 1,
+        size: size as '1024x1024' | '1536x1024' | '1024x1536' | 'auto',
+        ...(quality ? { quality: quality as 'low' | 'medium' | 'high' | 'auto' } : {}),
+      } as any)) as typeof result;
+    } catch (genErr) {
+      const { detail, status } = upstreamErrorMessage(genErr);
+      console.error('images.generate failed:', status, detail);
+      return jsonError(detail, status);
+    }
 
-    const item = result?.data?.[0] as
-      | { b64_json?: string; url?: string; revised_prompt?: string }
-      | undefined;
+    const item = result?.data?.[0];
     const b64 = item?.b64_json;
     const remoteUrl = item?.url;
 
@@ -60,7 +93,7 @@ export async function POST(req: NextRequest) {
     }
 
     let fileId: string | null = null;
-    let image = b64 ? `data:image/png;base64,${b64}` : String(remoteUrl);
+    let image = '';
 
     try {
       if (b64) {
@@ -74,22 +107,33 @@ export async function POST(req: NextRequest) {
         image = `/api/files/${encodeURIComponent(uploaded.id)}`;
       } else if (remoteUrl) {
         const fetched = await fetch(String(remoteUrl));
-        if (fetched.ok) {
-          const bytes = new Uint8Array(await fetched.arrayBuffer());
-          const uploaded = await uploadGatewayFile({
-            apiKey: boundUserKey,
-            baseURL,
-            bytes,
-            filename: `gen-${Date.now()}.png`,
-            mime: fetched.headers.get('content-type') || 'image/png',
-          });
-          fileId = uploaded.id;
-          image = `/api/files/${encodeURIComponent(uploaded.id)}`;
+        if (!fetched.ok) {
+          return jsonError(`Failed to fetch generated image URL (HTTP ${fetched.status}).`, 502);
         }
+        const bytes = new Uint8Array(await fetched.arrayBuffer());
+        const uploaded = await uploadGatewayFile({
+          apiKey: boundUserKey,
+          baseURL,
+          bytes,
+          filename: `gen-${Date.now()}.png`,
+          mime: fetched.headers.get('content-type') || 'image/png',
+        });
+        fileId = uploaded.id;
+        image = `/api/files/${encodeURIComponent(uploaded.id)}`;
       }
     } catch (uploadErr) {
-      console.error('images file upload failed, keeping inline fallback:', uploadErr);
-      if (b64) image = `data:image/png;base64,${b64}`;
+      console.error('images file upload failed:', uploadErr);
+      // Do not fall back to multi-MB data: URIs in the JSON body — that often
+      // blows Edge/proxy limits and surfaces as a plain-text platform error.
+      const { detail } = upstreamErrorMessage(uploadErr);
+      return jsonError(
+        `Image was generated but saving to Files API failed: ${detail}`,
+        502,
+      );
+    }
+
+    if (!image || !fileId) {
+      return jsonError('Image was generated but no file id was saved.', 502);
     }
 
     return new Response(
@@ -102,17 +146,12 @@ export async function POST(req: NextRequest) {
       }),
       {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
       },
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('images route error:', err);
-    const status = err?.status || err?.statusCode || err?.response?.status || 500;
-    const detail =
-      err?.error?.message || err?.message || String(err || 'Image generation failed.');
-    return jsonError(
-      `${detail}${status ? ` (HTTP ${status})` : ''}`,
-      status >= 400 && status < 600 ? status : 500,
-    );
+    const { detail, status } = upstreamErrorMessage(err);
+    return jsonError(detail, status);
   }
 }

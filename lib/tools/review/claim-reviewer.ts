@@ -571,6 +571,14 @@ function hasSuccessfulTool(record: ExecutionRecordEntry[], surface: FakedToolSur
   return record.some((e) => e.ok && patterns.some((p) => p.test(e.tool)));
 }
 
+/** Drop surfaces that already have a successful receipt in this turn. */
+export function filterSurfacesMissingReceipt(
+  surfaces: FakedToolSurface[],
+  record: ExecutionRecordEntry[],
+): FakedToolSurface[] {
+  return surfaces.filter((s) => !hasSuccessfulTool(record, s));
+}
+
 function findFailedTool(
   record: ExecutionRecordEntry[],
   surface: FakedToolSurface,

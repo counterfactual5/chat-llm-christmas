@@ -55,6 +55,7 @@ import {
   buildPendingIntentPrompt,
   buildExecutionRecordFromMessages,
   buildExecutionRecordFromToolRuns,
+  filterSurfacesMissingReceipt,
   runFullClaimAudit,
   emitMidTurnReview,
   emitReviewReport,
@@ -1617,14 +1618,20 @@ export async function POST(req: NextRequest) {
                 }
                 // Claimed a tool success (Notion / GitHub / Google / web / skill)
                 // without emitting tool_calls — Reviewer pushes a corrective turn.
+                // Skip surfaces that already have successful receipts earlier this turn
+                // (e.g. answer cites「根据搜索结果」after a real web_search round).
                 if (autoReview && streamedContent && round < MAX_TOOL_ROUNDS - 1) {
                   const faked = detectFakedToolNarration(streamedContent, {
                     searchEnabled,
                     integrations: authorizedIntegrations,
                     skillCreator: skillCreatorOn,
                   });
-                  if (faked.length) {
-                    midTurnCorrection = { surfaces: faked, kind: 'success' };
+                  const turnRecord = buildExecutionRecordFromMessages(workingMessages, {
+                    afterIndex: autoReviewTurnBoundary,
+                  });
+                  const missing = filterSurfacesMissingReceipt(faked, turnRecord);
+                  if (missing.length) {
+                    midTurnCorrection = { surfaces: missing, kind: 'success' };
                     emitMidTurnReview(send, midTurnCorrection);
                     workingMessages.push({
                       role: 'assistant',
@@ -1632,7 +1639,7 @@ export async function POST(req: NextRequest) {
                     });
                     workingMessages.push({
                       role: 'user',
-                      content: buildCorrectionPrompt(faked),
+                      content: buildCorrectionPrompt(missing),
                     });
                     break;
                   }

@@ -179,17 +179,44 @@ export function looksLikeTruncatedMath(text: string): boolean {
  * CommonMark won't treat `**“…”**` as bold when CJK quotation marks sit flush
  * against the markers. Move the quotes outside so emphasis still parses:
  * `**“text”**` → `“**text**”`.
+ *
+ * Also: `**更正引用：**文中` fails because a closing `**` preceded by punctuation
+ * must be followed by whitespace/punctuation — move the trailing punct out:
+ * `**更正引用：**文` → `**更正引用**：文`.
  */
 export function fixFlankingEmphasis(content: string): string {
-  return String(content || '').replace(
-    /\*\*([“「『"'])([\s\S]*?)([”」』"'])\*\*/g,
-    '$1**$2**$3',
+  let out = String(content || '');
+  out = out.replace(/\*\*([“「『"'])([\s\S]*?)([”」』"'])\*\*/g, '$1**$2**$3');
+  // Trailing punct inside **…** that blocks the closer when the next char is prose.
+  out = out.replace(
+    /\*\*((?:(?!\*\*).)+?)([：:。.，,、！!？?；;])\*\*(?=\S)/g,
+    '**$1**$2',
+  );
+  return out;
+}
+
+/**
+ * `$64,000` … `$64,400` is parsed as one giant inline-math span by remark-math,
+ * which eats markdown (`**bold**` → KaTeX ∗) between the prices. Escape $-before-
+ * digits (currency) outside fences / $$ blocks. Real math still uses `$x$` / `$$`.
+ */
+export function escapeCurrencyDollars(content: string): string {
+  return mapOutsideFences(String(content || ''), (segment) =>
+    segment
+      .split(/(\$\$[\s\S]*?\$\$)/g)
+      .map((chunk) => {
+        if (chunk.startsWith('$$')) return chunk;
+        // Already-escaped \$ stays put; $64,000 / $1.5 / $100 → \$…
+        return chunk.replace(/(?<!\\)\$(?=\d)/g, '\\$');
+      })
+      .join(''),
   );
 }
 
 export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
   let out = normalizeMathDelimiters(String(content || ''));
   out = liftQuotedMathBlocks(out);
+  out = escapeCurrencyDollars(out);
   out = fixFlankingEmphasis(out);
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the

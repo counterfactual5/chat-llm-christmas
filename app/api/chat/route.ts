@@ -282,8 +282,18 @@ function looksLikeSearchRequest(text: string): boolean {
 
 /** Cursor often narrates “I'll search…” instead of emitting tool_calls. */
 function narratesSearchInsteadOfCalling(text: string): boolean {
-  return /先.{0,10}(查|搜)|正在(查|搜|联网)|让我(去)?(查|搜)|我来(查|搜)|I'll (go )?(and )?(search|look\s*up)|let me (search|look\s*up)|searching (the )?(web|internet)/i.test(
-    String(text || ''),
+  const t = String(text || '');
+  // Meta / retract talk is not a pending search.
+  if (
+    /(不(用|需要|该|必|再)(去)?(搜索|联网|搜)|基础知识|知识库|为什么(还)?要(搜索|搜)|认知校准)/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  // Bare「查」is ambiguous — require clear web-search wording.
+  return /先.{0,8}(联网|上网)?(搜索|搜一下)|正在(联网|上网)?搜索|让我(去)?(联网|上网)?(搜索|搜一下)|我来(联网|上网)?(搜索|搜一下)|联网查一下|上网查一下|I'll (go )?(and )?search|let me search|searching (the )?(web|internet)|look\s*up (online|on the web)/i.test(
+    t,
   );
 }
 

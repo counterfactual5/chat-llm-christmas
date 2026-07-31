@@ -140,6 +140,9 @@ export function detectFakedToolNarration(
 /**
  * Detect “I'll fetch/read/update first…” narration with no tool_calls.
  * Different from success-claims: the model announces intent then stops.
+ *
+ * web_search: require clear LIVE-web intent. Bare「查」is too broad
+ * (查清区别 / 查一下定义) and false-triggers mid-turn forced searches.
  */
 export function detectPendingToolIntent(
   text: string,
@@ -147,6 +150,12 @@ export function detectPendingToolIntent(
 ): FakedToolSurface[] {
   const t = String(text || '');
   if (!t.trim()) return [];
+  // Meta talk about searching (why search / don't need search) is not an intent to call.
+  const skipWebIntent =
+    /(不(用|需要|该|必|再)(去)?(搜索|联网|搜)|基础知识|知识库(里面)?都有|为什么(还)?要(搜索|搜)|认知校准)/i.test(
+      t,
+    ) && !/(正在(联网)?搜索|立即(执行)?搜索|马上搜索|I('ll| will) search now)/i.test(t);
+
   const set = new Set(
     (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
   );
@@ -160,9 +169,10 @@ export function detectPendingToolIntent(
     if (intendsNotion) found.push('notion');
   }
 
-  if (opts.searchEnabled) {
+  if (opts.searchEnabled && !skipWebIntent) {
+    // Prefer 搜索/联网/搜一下 over bare 查 (check/clarify).
     if (
-      /(先.{0,10}(查|搜)|让我(去)?(查|搜)|我来(查|搜)|I'll (go )?(and )?(search|look\s*up)|let me (search|look\s*up)|searching (the )?(web|internet))/i.test(
+      /(先.{0,8}(联网|上网)?(搜索|搜一下)|让我(去)?(联网|上网)?(搜索|搜一下)|我来(联网|上网)?(搜索|搜一下)|正在(联网|上网)?搜索|我(将|会|现在)?(立即|马上)?(去)?(执行)?搜索|联网查一下|上网查一下|I'll (go )?(and )?search|let me search|searching (the )?(web|internet)|look\s*up (online|on the web))/i.test(
         t,
       )
     ) {
@@ -225,9 +235,20 @@ export function buildCorrectionPrompt(surfaces: FakedToolSurface[]): string {
 
 export function buildPendingIntentPrompt(surfaces: FakedToolSurface[]): string {
   const list = surfaces.map((s) => INTENT_LABELS[s]).join(', ');
+  const webOnly = surfaces.every((s) => s === 'web_search' || s === 'web_read');
+  if (webOnly) {
+    return [
+      `You announced you would use tools (${list}) but you did not emit any tool_calls in THIS turn.`,
+      'Choose ONE now:',
+      '(A) If the live web is actually needed — emit real API tool_calls immediately (no more narration-only).',
+      '(B) If this is stable knowledge you already know (definitions, textbook facts, “which field”) — retract the search announcement and answer directly from knowledge. Do NOT invent a pointless web_search.',
+      'Do not claim you already searched until tools return results.',
+    ].join(' ');
+  }
   return [
     `You announced you would use tools (${list}) but you did not emit any tool_calls in THIS turn — the reply stopped after the announcement.`,
-    'Stop narrating. Immediately emit real API tool_calls now.',
+    'Stop narrating. Immediately emit real API tool_calls now,',
+    'OR clearly retract and say you will not call those tools.',
     'For Notion: call notion-fetch or notion-search first to get page_id, then notion-update-page with top-level page_id if writing.',
     'Do not claim you already read or updated anything until tools return success.',
   ].join(' ');

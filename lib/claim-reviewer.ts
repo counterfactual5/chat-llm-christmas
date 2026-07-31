@@ -2,7 +2,29 @@
  * Claim Reviewer — single layer that catches narrated tool successes without
  * real tool_calls (mid-turn correction + post-audit). Product capability, not
  * MCP, not a model-callable tool.
+ *
+ * Reviewer v2 borrows from foundry-research (evidence units + claim verdicts)
+ * and OpenScience (strength-graded findings, L0/L1 gate). Citation checks go
+ * through `lib/review/evidence.ts` — blurbs cannot prove a figure wrong.
  */
+
+import {
+  buildEvidenceIndex,
+  citeEvidence,
+  collectEvidenceUnits,
+  extractEvidenceFromPayload,
+  factAppearsIn,
+  getReviewGateLevel,
+  gradeClaimGap,
+  haystackFor,
+  strongestFor,
+  type ClaimVerdict,
+  type EvidenceStrength,
+  type EvidenceUnit,
+} from './review/evidence';
+
+export { getReviewGateLevel } from './review/evidence';
+export type { ClaimVerdict, EvidenceStrength, EvidenceUnit, ReviewGateLevel } from './review/evidence';
 
 export type FakedToolSurface =
   | 'notion'
@@ -233,6 +255,11 @@ export type ExecutionRecordEntry = {
   urls?: string[];
   /** Richer hits (title/snippet) when the tool payload carries them. */
   sources?: ExecutionSource[];
+  /**
+   * Evidence units for claim verification (may include full web_read body).
+   * Built at receipt time so citation checks can judge by evidence strength.
+   */
+  evidence?: EvidenceUnit[];
 };
 
 type ClientToolRun = {
@@ -382,6 +409,7 @@ export function buildExecutionRecordFromMessages(messages: ChatMessageLike[]): E
         /"error"\s*:\s*"/i.test(payload) ||
         /MCP error|Input validation error|invalid_type/i.test(payload);
       const sources = extractSourcesFromPayload(payload);
+      const evidence = extractEvidenceFromPayload(name, payload);
       const urls = sources.map((s) => s.url);
       entries.push({
         tool: name,
@@ -389,6 +417,7 @@ export function buildExecutionRecordFromMessages(messages: ChatMessageLike[]): E
         error: failed ? extractErrorSnippet(payload) : undefined,
         ...(urls.length ? { urls } : {}),
         ...(sources.length ? { sources } : {}),
+        ...(evidence.length ? { evidence } : {}),
       });
     }
   }
@@ -414,6 +443,8 @@ export function buildExecutionRecordFromToolRuns(toolRuns: ClientToolRun[]): Exe
           snippet: String(x?.snippet || '').trim().slice(0, 500) || undefined,
         });
       }
+      // Client toolRuns only keep short snippets — weak blurbs only.
+      const evidence = collectEvidenceUnits([{ tool: r.name, sources }]);
       const urls = sources.map((s) => s.url);
       return {
         tool: String(r.name || 'unknown'),
@@ -423,6 +454,7 @@ export function buildExecutionRecordFromToolRuns(toolRuns: ClientToolRun[]): Exe
         query: r.query,
         ...(urls.length ? { urls } : {}),
         ...(sources.length ? { sources } : {}),
+        ...(evidence.length ? { evidence } : {}),
       };
     });
 }
@@ -697,31 +729,6 @@ function extractFactualTokens(text: string): string[] {
   return [...tokens].slice(0, 12);
 }
 
-/**
- * Collapse currency / thousand-separator / slug forms so `$64,000`, `64000`,
- * and URL `usd64-000` can match each other.
- */
-function normalizeFactBlob(text: string): string {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/[\u0000-\u001f]/g, ' ')
-    .replace(/[￥$€£¥]/g, '')
-    .replace(/\b(?:usd|usdt|cny|rmb)\b/g, '')
-    .replace(/(\d)[,_\s.](?=\d{3}(?:\D|$))/g, '$1')
-    .replace(/(\d)-(?=\d{3}(?:\D|$))/g, '$1')
-    .replace(/\s+/g, ' ');
-}
-
-function factInSource(token: string, hayRaw: string, hayNorm: string): boolean {
-  const raw = String(token || '').toLowerCase();
-  if (!raw) return true;
-  if (hayRaw.includes(raw)) return true;
-  if (hayRaw.includes(raw.replace(/,/g, ''))) return true;
-  const norm = normalizeFactBlob(raw);
-  if (norm && hayNorm.includes(norm)) return true;
-  return false;
-}
-
 /** Title + snippet + URL slug — never the full article (unless web_read stored it). */
 function sourceText(source: ExecutionSource): string {
   let path = '';
@@ -798,14 +805,27 @@ export type CitationAudit = {
   checked: number;
   matched: number;
   unsupported: string[];
-  /** Claims whose hard facts do not appear in the matched source title/snippet/URL. */
-  unsupportedClaims: Array<{ url: string; claim: string; missing: string[] }>;
+  /**
+   * Claims whose hard facts do not appear in available evidence.
+   * Verdict depends on evidence strength (Foundry + OpenScience):
+   *  - unverifiable: only search blurbs — absence ≠ false
+   *  - unsupported: full page body was read and still missing
+   */
+  unsupportedClaims: Array<{
+    url: string;
+    claim: string;
+    missing: string[];
+    verdict: ClaimVerdict;
+    strength: EvidenceStrength;
+    evidenceId?: string;
+  }>;
 };
 
 /**
- * Citation audit: (1) URL must appear in tool hits, (2) hard facts near the
- * citation should appear in the source title / snippet / URL path when those
- * exist. Does NOT fetch or read the full article body.
+ * Citation audit against evidence units (not the live web).
+ * (1) URL must appear in tool hits.
+ * (2) Hard facts near the citation should appear in the strongest evidence
+ *     for that URL. Blurb-only gaps → unverifiable; body gaps → unsupported.
  */
 export function auditCitations(
   assistantText: string,
@@ -814,6 +834,11 @@ export function auditCitations(
   if (!hasRetrievalReceipt(record)) return null;
   const sources = collectSources(record);
   if (!sources.length) return null;
+
+  const units = collectEvidenceUnits(record);
+  const index = buildEvidenceIndex(units.length ? units : collectEvidenceUnits(
+    sources.map((s) => ({ sources: [s], tool: 'unknown' })),
+  ), normalizeUrl);
 
   const byUrl = new Map(sources.map((s) => [normalizeUrl(s.url), s]));
   const anchors = extractCitationAnchors(assistantText);
@@ -836,13 +861,15 @@ export function auditCitations(
     }
     matched++;
 
-    const hayRaw = sourceText(source).toLowerCase();
-    if (!hayRaw.trim()) continue; // URL-only receipt — can't verify content yet.
-    const hayNorm = normalizeFactBlob(hayRaw);
+    const best = strongestFor(index, key);
+    const hay = haystackFor(index, key) || sourceText(source);
+    if (!hay.trim()) continue; // URL-only receipt — can't verify content yet.
+
     const facts = extractFactualTokens(anchor.claim);
     if (facts.length < 1) continue;
-    const missing = facts.filter((t) => !factInSource(t, hayRaw, hayNorm));
+    const missing = facts.filter((t) => !factAppearsIn(t, hay));
     if (!missing.length) continue;
+
     // Blurbs are partial — only flag distinctive figures (%, decimals, large nums),
     // not a lone year that happens to be absent from a short blurb.
     const notable = missing.filter((t) => {
@@ -851,10 +878,19 @@ export function auditCitations(
       return Number.isFinite(n) && (n >= 100 || String(t).length >= 4);
     });
     if (!notable.length) continue;
+
+    const strength: EvidenceStrength = best?.strength || 'weak';
+    const graded = gradeClaimGap({ missing: notable, strength });
+    // Confirmed shouldn't appear here; skip info-only.
+    if (graded.verdict === 'confirmed') continue;
+
     unsupportedClaims.push({
       url: anchor.url,
       claim: anchor.claim,
       missing: notable.slice(0, 4),
+      verdict: graded.verdict,
+      strength,
+      evidenceId: best?.id,
     });
   }
 
@@ -874,26 +910,36 @@ export function buildCitationCheck(
   const audit = auditCitations(assistantText, record);
   if (!audit) return null;
 
+  const index = buildEvidenceIndex(collectEvidenceUnits(record), normalizeUrl);
   const items: ReviewCheckItem[] = [];
   for (const url of audit.unsupported.slice(0, 8)) {
     items.push({
       severity: 'warn',
       title: `Link not in tool results: ${url}`,
-      detail: 'This URL never appeared in any retrieval payload — verify it or remove it.',
+      detail:
+        'This URL never appeared in any retrieval payload — unverifiable (no evidence unit). Verify it or remove it.',
     });
   }
   for (const row of audit.unsupportedClaims.slice(0, 8)) {
+    const best = strongestFor(index, normalizeUrl(row.url));
+    const evidenceNote = citeEvidence(best);
+    const isStrong = row.verdict === 'unsupported' || row.verdict === 'contradicted';
     items.push({
-      severity: 'warn',
+      severity: isStrong ? 'error' : 'warn',
       title: row.claim.slice(0, 120) || row.url,
-      detail: `Cited ${row.url}, but the search title/snippet/URL do not contain: ${row.missing.join(', ')}. (Review checks retrieval blurbs only — not the full article body.)`,
+      detail: isStrong
+        ? `[${row.verdict}/${row.strength}] Cited ${row.url}, but full-page evidence does not contain: ${row.missing.join(', ')}. Evidence: ${evidenceNote}.`
+        : `[${row.verdict}/${row.strength}] Cited ${row.url}; available evidence (${evidenceNote}) does not contain: ${row.missing.join(', ')}. Absence from a search blurb is not proof the article is wrong — treat as unverified.`,
     });
   }
 
   const bits = [`${audit.matched}/${audit.checked} links in receipts`];
-  if (audit.unsupportedClaims.length) {
-    bits.push(`${audit.unsupportedClaims.length} claim(s) not backed by title/snippet`);
-  }
+  const strongN = audit.unsupportedClaims.filter(
+    (c) => c.verdict === 'unsupported' || c.verdict === 'contradicted',
+  ).length;
+  const weakN = audit.unsupportedClaims.length - strongN;
+  if (strongN) bits.push(`${strongN} unsupported vs page body`);
+  if (weakN) bits.push(`${weakN} unverifiable vs blurb`);
 
   return {
     id: 'citation',
@@ -2394,7 +2440,7 @@ const LENS_INSTRUCTIONS: Record<ReviewLens, string> = {
   tool_receipt:
     '- tool_receipt: narrated actions/results that no receipt supports (beyond the `findings` array above).',
   citation:
-    '- citation: a cited URL missing from `sources=`, or a figure attributed to a source whose search title/snippet/URL path do not contain it (not a full-article read).',
+    '- citation: a cited URL missing from receipts, or a figure attributed to a source whose evidence units do not contain it. Distinguish unverifiable (search blurb only) from unsupported (web_read body). Never treat blurb absence as proof the article is wrong.',
   consistency:
     '- consistency: the answer contradicting itself — same metric with different values, a conclusion that reverses an earlier statement, steps that do not follow from each other.',
   completeness:
@@ -2699,16 +2745,24 @@ export type ReviewIssue = {
 
 /**
  * Only high-confidence findings may drive the model to amend its own answer.
- * Heuristic warns (citation blurb gaps, consistency guesses, staleness hints)
- * stay in the Review panel for the user — feeding them to the model makes it
- * "correct" things that were never wrong.
+ * Heuristic warns (citation blurb gaps / unverifiable, consistency guesses,
+ * staleness hints) stay in the Review panel — feeding them to the model makes
+ * it "correct" things that were never proven wrong.
+ *
+ * Gate level 0 (REVIEW_GATE_LEVEL=0): annotate-only — never auto-correct.
+ * Gate level 1/2 (default 1): soft gate — errors may drive a correction note.
  *
  * Model-collapse / garbage tails are also panel-only: asking the same soft model
  * to rewrite the broken stretch often produces more garbage.
  */
 export function actionableReviewIssues(issues: ReviewIssue[]): ReviewIssue[] {
+  if (getReviewGateLevel() === 0) return [];
   return issues.filter((i) => {
     if (i.severity !== 'error') return false;
+    // Blurb-only / unverifiable must never drive correction (Foundry: unverifiable ≠ wrong).
+    if (/\[unverifiable\b/i.test(i.detail) || /\bunverifiable\b/i.test(`${i.title} ${i.detail}`)) {
+      return false;
+    }
     if (/collapsed into garbage|degenerat|repeated letter|smashed URL|token soup/i.test(`${i.title} ${i.detail}`)) {
       return false;
     }
@@ -2864,7 +2918,7 @@ export function buildReviewIssuesResponsePrompt(
     '- Do NOT say you “revoked / 撤销 / removed / deleted” text that the user can still see above.',
     '- Do NOT ask the user to ignore the whole answer, and do not re-output a corrected full answer.',
     '- Prefer a few bullets or one short paragraph (usually under 120 words).',
-    '- For citation/title-snippet mismatches: explain what the review blurbs actually support vs what is uncertain. Example tone: “检索标题/摘要里未见 …，该处数字请谨慎采信；链接仍可作相关报道参考。” If the figure appears only in a headline, say so — do not pretend the article body was read.',
+    '- For citation issues marked unsupported (full page evidence): say the figure is not backed by the read page text. For unverifiable (search blurb only): say the number was not in the retrieval headline — do not claim the article is wrong, and do not pretend the body was read.',
     '- For arithmetic: state the corrected equation/number only.',
     '- For tool-receipt issues: say what was not actually done / not backed by a receipt.',
     '- Do not invent tool actions, URLs, or receipts that were never returned.',
@@ -2882,7 +2936,7 @@ export const FINDINGS_RESPONSE_SYSTEM = [
   'You write a brief review annotation after an automatic check.',
   'The prior answer is already on screen — you cannot unsay it. Annotate risks and limits; do not claim to have revoked or deleted visible text.',
   'Output ONLY a short delta note — never a full restatement of the prior answer.',
-  'Be concise and honest. Prefer “未在检索摘要中核实 / 请谨慎采信” over “已撤销”.',
+  'Be concise and honest. Prefer “未在检索摘要中核实 / 请谨慎采信” for unverifiable blurbs; use “全文摘录中未见” only when evidence was a full page read.',
   'Do not call tools. Do not invent URLs or tool payloads.',
 ].join(' ');
 

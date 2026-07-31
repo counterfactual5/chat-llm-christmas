@@ -9,7 +9,7 @@ import {
   resolveOwnerId,
   upsertNotionConnection,
 } from '@/lib/integrations';
-import { NotionMcpClient } from '@/lib/notion/mcp-client';
+import { NotionMcpClient } from '@/lib/mcp/notion/client';
 
 export const runtime = 'edge';
 export const maxDuration = 30;

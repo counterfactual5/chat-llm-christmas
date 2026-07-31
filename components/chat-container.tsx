@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { mergeReviewChecks, type ReviewCheck, type ReviewCheckKind } from '@/lib/claim-reviewer';
+import { mergeReviewChecks, type ReviewCheck, type ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import ReactMarkdown from 'react-markdown';
@@ -38,7 +38,7 @@ import {
   parseImageArchiveRefs,
   stripImageArchiveBlock,
   stripUserMessageArtifactsForDisplay,
-} from '@/lib/image-understand';
+} from '@/lib/tools/image-understand/persist';
 import { BUILTIN_SKILLS, isSkillCreatorId } from '@/lib/skill-creator';
 import {
   AttachmentImageThumb,

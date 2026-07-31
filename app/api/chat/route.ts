@@ -9,7 +9,7 @@ import {
   getModelSpec,
   isCursorStyleModel,
 } from '@/lib/model-specs';
-import type { SearchOutcome } from '@/lib/web-search';
+import type { SearchOutcome } from '@/lib/tools/search/engine';
 import {
   createStampLeakStripper,
   stampMessageText,
@@ -29,7 +29,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/image-understand';
+import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand/persist';
 import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
@@ -72,7 +72,7 @@ import {
   type ReviewIssue,
   type ClaimAuditResult,
   type MidTurnCorrection,
-} from '@/lib/claim-reviewer';
+} from '@/lib/tools/review/claim-reviewer';
 import { isSkillCreatorId } from '@/lib/skill-creator';
 
 export const runtime = 'edge';

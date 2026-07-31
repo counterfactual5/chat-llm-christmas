@@ -3,7 +3,7 @@ import {
   callNotionMcpTool,
   listNotionMcpTools,
   type McpToolDefinition,
-} from '@/lib/notion/mcp-client';
+} from '@/lib/mcp/notion/client';
 
 const NOTION_SYSTEM_PROMPT = [
   "You have Notion MCP tools for the user's connected workspace (full page access matching their Notion permissions).",

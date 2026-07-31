@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { webSearch } from '@/lib/web-search';
+import { webSearch } from '@/lib/tools/search/engine';
 
 export const runtime = 'edge';
 export const maxDuration = 60;

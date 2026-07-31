@@ -1,13 +1,13 @@
 import type { ChatTool, ToolRuntimeFlags } from '@/lib/tools/registry';
 import { selectTools } from '@/lib/tools/registry';
-import { createWebSearchTool } from '@/lib/tools/web-search-tool';
-import { createWebReadTool } from '@/lib/tools/web-reader-tool';
-import { createImageUnderstandTool } from '@/lib/tools/image-understand-tool';
-import { createNotionMcpTools } from '@/lib/tools/notion-tools';
-import { createGitHubMcpTools } from '@/lib/tools/github-tools';
-import { createGoogleTools } from '@/lib/tools/google-tools';
-import { createSaveSkillTool } from '@/lib/tools/save-skill-tool';
-import { createCreateFileTool } from '@/lib/tools/create-file-tool';
+import { createWebSearchTool } from '@/lib/tools/search/tool';
+import { createWebReadTool } from '@/lib/tools/web-read/tool';
+import { createImageUnderstandTool } from '@/lib/tools/image-understand/tool';
+import { createNotionMcpTools } from '@/lib/mcp/notion/tools';
+import { createGitHubMcpTools } from '@/lib/mcp/github/tools';
+import { createGoogleTools } from '@/lib/mcp/google/tools';
+import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
+import { createCreateFileTool } from '@/lib/tools/create-file/tool';
 import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google-services';
 
 /** Built-in tools shipped with the chat app. */
@@ -84,21 +84,21 @@ export {
   runWebSearch,
   formatWebSearchToolContent,
   parseSearchQuery,
-} from '@/lib/tools/web-search-tool';
+} from '@/lib/tools/search/tool';
 
-export { createWebReadTool, runWebRead, parseReadUrl } from '@/lib/tools/web-reader-tool';
+export { createWebReadTool, runWebRead, parseReadUrl } from '@/lib/tools/web-read/tool';
 
 export {
   createImageUnderstandTool,
   parseImageUnderstandArgs,
-} from '@/lib/tools/image-understand-tool';
+} from '@/lib/tools/image-understand/tool';
 
 export {
   createCreateFileTool,
   sanitizeGeneratedFilename,
   mimeFromFilename,
-} from '@/lib/tools/create-file-tool';
+} from '@/lib/tools/create-file/tool';
 
-export { createNotionMcpTools } from '@/lib/tools/notion-tools';
-export { createGitHubMcpTools } from '@/lib/tools/github-tools';
-export { createGoogleTools, createGoogleMcpTools } from '@/lib/tools/google-tools';
+export { createNotionMcpTools } from '@/lib/mcp/notion/tools';
+export { createGitHubMcpTools } from '@/lib/mcp/github/tools';
+export { createGoogleTools, createGoogleMcpTools } from '@/lib/mcp/google/tools';

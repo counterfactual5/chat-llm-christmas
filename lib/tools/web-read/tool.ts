@@ -3,7 +3,7 @@ import {
   formatWebReadForModel,
   webRead,
   type WebReadOutcome,
-} from '@/lib/web-reader';
+} from '@/lib/tools/web-read/reader';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 const URL_IN_TEXT = /https?:\/\/[^\s"'`<>)\]}{,]+/gi;

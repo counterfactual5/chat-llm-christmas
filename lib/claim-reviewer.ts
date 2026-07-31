@@ -1790,65 +1790,8 @@ export function buildCodeQualityCheck(assistantText: string): ReviewCheck | null
 }
 
 // ---------------------------------------------------------------------------
-// Completeness (was the answer actually finished?)
+// Completeness — structural / severe only (no semantic CTA heuristics)
 // ---------------------------------------------------------------------------
-
-const CN_NUMERALS: Record<string, number> = {
-  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
-};
-
-function parseAnnouncedCount(raw: string): number {
-  const digits = Number(raw);
-  if (Number.isFinite(digits)) return digits;
-  if (raw.length === 1) return CN_NUMERALS[raw] ?? 0;
-  if (raw === '十一') return 11;
-  if (raw === '十二') return 12;
-  return 0;
-}
-
-/** First-person promises of more output ("接下来我会…") that never arrived. */
-const DANGLING_PROMISE_RE =
-  /(?:接下来我(?:会|将|来)|下面我(?:会|将|来)|我(?:会|将)(?:继续|马上|稍后)|让我先|我先来|稍后我(?:会|将)|Next,?\s+I(?:'ll| will)|I'?ll continue|Let me first)/i;
-
-/**
- * Interactive CTAs that invite the user to reply ("请告诉我…") are complete
- * turns — not truncated promises of more assistant output in this message.
- */
-function looksLikeUserPromptCta(tail: string): boolean {
-  return /请告诉我|请说明|你想要|希望的文件名|需要什么|哪[个种]|什么内容|什么类型|有什么需求|怎么帮你|\?\s*$|？\s*$/.test(
-    tail,
-  );
-}
-
-const LEFTOVER_PLACEHOLDER_RE =
-  /\bTODO\b|\bFIXME\b|待补充|待完成|待确认|此处省略|（略）|\(略\)|\.\.\.\s*（后续/i;
-
-function listItemNumbers(text: string): number[] {
-  const nums: number[] = [];
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s{0,3}(\d{1,2})[.)、]\s+\S/);
-    if (m) nums.push(Number(m[1]));
-  }
-  return nums;
-}
-
-function countTopLevelListItems(text: string): number {
-  let n = 0;
-  for (const line of text.split('\n')) {
-    if (/^\s{0,3}(?:[-*+]|\d{1,2}[.)、])\s+\S/.test(line)) n++;
-  }
-  return n;
-}
-
-function hasEmptyMarkdownTable(text: string): boolean {
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length - 1; i++) {
-    if (!lines[i].includes('|') || !isTableSeparator(lines[i + 1] || '')) continue;
-    const next = lines[i + 2] || '';
-    if (!next.includes('|') || !next.trim()) return true;
-  }
-  return false;
-}
 
 /**
  * Detect mid-generation collapse: long runs of the same character, smashed URL
@@ -1890,7 +1833,11 @@ export function detectDegenerateOutput(text: string): string | null {
   return null;
 }
 
-/** Did the answer finish? Null when no truncation / omission signal fires. */
+/**
+ * Structural completeness only: token/stream cutoff, unclosed fences, collapse.
+ * Semantic “did they finish the thought / is this a CTA?” is out of scope —
+ * regex cannot judge that reliably and only adds false positives.
+ */
 export function buildCompletenessCheck(input: ReviewInput): ReviewCheck | null {
   const raw = String(input.assistantText || '');
   if (!raw.trim()) return null;
@@ -1926,81 +1873,16 @@ export function buildCompletenessCheck(input: ReviewInput): ReviewCheck | null {
     });
   }
 
-  const text = stripCodeBlocks(raw);
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  const lastLine = lines[lines.length - 1] || '';
-  if (lastLine.length > 12 && /[,:，、：；;（(\[{—-]$/.test(lastLine)) {
-    items.push({
-      severity: 'warn',
-      title: 'Ends mid-sentence',
-      detail: `Last line stops at "${lastLine.slice(-40)}".`,
-    });
-  }
-
-  const tail = text.slice(-220);
-  if (DANGLING_PROMISE_RE.test(tail) && !looksLikeUserPromptCta(tail)) {
-    items.push({
-      severity: 'warn',
-      title: 'Promised more but stopped',
-      detail: 'The reply announces further work at the very end without delivering it.',
-    });
-  }
-
-  const nums = listItemNumbers(text);
-  // A number lower than its predecessor is a NEW list starting over (1. 2. 3.
-  // then 1. 2. in the next section) — only forward jumps signal a missing step.
-  const gap = nums.find((n, i) => i > 0 && n > nums[i - 1] + 1);
-  if (nums.length >= 3 && gap !== undefined) {
-    items.push({
-      severity: 'warn',
-      title: 'Numbered list has a gap',
-      detail: `Item numbering jumps to ${gap} — a step may be missing.`,
-    });
-  }
-
-  const announced = text.match(/(?:分为|共有|共|一共|总共)\s*(\d{1,2}|[一二三四五六七八九十]{1,2})\s*(?:个|步|点|项|条|类|方面|部分|阶段)/);
-  if (announced) {
-    const expected = parseAnnouncedCount(announced[1]);
-    // Sections are often delivered as headings or bold lead-ins, not list items.
-    const headings = (text.match(/^\s{0,3}#{1,6}\s+\S/gm) || []).length;
-    const boldLeads = (text.match(/^\s{0,3}\*\*[^\n*]{1,40}\*\*/gm) || []).length;
-    const delivered = Math.max(countTopLevelListItems(text), nums.length, headings, boldLeads);
-    if (expected >= 2 && delivered > 0 && delivered < expected) {
-      items.push({
-        severity: 'warn',
-        title: `Announced ${expected}, delivered ${delivered}`,
-        detail: `The reply says "${announced[0]}" but only ${delivered} item(s) follow.`,
-      });
-    }
-  }
-
-  if (hasEmptyMarkdownTable(text)) {
-    items.push({
-      severity: 'warn',
-      title: 'Empty table',
-      detail: 'A table header was rendered with no data rows.',
-    });
-  }
-
-  const placeholder = text.match(LEFTOVER_PLACEHOLDER_RE);
-  if (placeholder) {
-    items.push({
-      severity: 'warn',
-      title: `Placeholder left in answer: ${placeholder[0]}`,
-      detail: 'Fill it in or drop it — the reader cannot act on a placeholder.',
-    });
-  }
-
   if (!items.length) return null;
-  const errors = items.filter((i) => i.severity === 'error').length;
   return {
     id: 'completeness',
     kind: 'completeness',
     status: 'done',
     clean: false,
-    summary: errors
-      ? `Answer looks unfinished (${items.length} signal(s))`
-      : `${items.length} completeness gap(s)`,
+    summary:
+      items.length === 1
+        ? items[0]!.title
+        : `Answer looks unfinished (${items.length} signal(s))`,
     items,
   };
 }
@@ -2647,7 +2529,7 @@ const LENS_INSTRUCTIONS: Record<ReviewLens, string> = {
   consistency:
     '- consistency: the answer contradicting itself — same metric with different values, a conclusion that reverses an earlier statement, steps that do not follow from each other.',
   completeness:
-    '- completeness: the answer not covering what USER ASK requested, promising follow-up it never delivers, or listing fewer items than it announced.',
+    '- completeness: ONLY structural unfinished signals — token/stream cutoff, unclosed ``` fences, or collapsed garbage tails. Do NOT flag normal CTAs that ask the user what to do next.',
   staleness:
     '- staleness: present-tense claims ("currently", "latest") that rest on nothing recent, or a stated cutoff older than the sources.',
   code_quality:
@@ -2969,8 +2851,7 @@ export function actionableReviewIssues(issues: ReviewIssue[]): ReviewIssue[] {
     if (/collapsed into garbage|degenerat|repeated letter|smashed URL|token soup/i.test(`${i.title} ${i.detail}`)) {
       return false;
     }
-    // Soft completeness signals (dangling CTA / list gaps) stay panel-only.
-    // Only hard unfinished signals may auto-annotate.
+    // Completeness auto-correct only for hard structural failures.
     if (
       i.kind === 'completeness' &&
       !/cut off|Unclosed code|collapsed into garbage/i.test(`${i.title} ${i.detail}`)

@@ -10,7 +10,7 @@
 
 import OpenAI from 'openai';
 import { toImageContentPart } from '@/lib/gateway-files';
-import { zhipuApiKey } from '@/lib/mcp/zhipu';
+import { zhipuApiKey } from '@/lib/tools/zhipu/credentials';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';
 /** Optional second understand backend on the CPA gateway (multimodal). */

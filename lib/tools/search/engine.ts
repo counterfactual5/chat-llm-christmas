@@ -7,10 +7,8 @@ import {
   freshnessForQuery,
   type Freshness,
 } from '@/lib/time-context';
-import {
-  zhipuMcpEnabled,
-  zhipuMcpWebSearch,
-} from '@/lib/mcp/zhipu';
+import { zhipuMcpEnabled } from '@/lib/tools/zhipu/credentials';
+import { zhipuMcpWebSearch } from '@/lib/tools/search/zhipu';
 
 export type SearchHit = {
   title: string;

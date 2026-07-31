@@ -3,10 +3,8 @@
  * Order: Zhipu Coding Plan MCP → Tavily Extract → Jina → bare fetch.
  */
 
-import {
-  zhipuMcpEnabled,
-  zhipuMcpWebRead,
-} from '@/lib/mcp/zhipu';
+import { zhipuMcpEnabled } from '@/lib/tools/zhipu/credentials';
+import { zhipuMcpWebRead } from '@/lib/tools/web-read/zhipu';
 
 export type WebReadOutcome = {
   provider: string;

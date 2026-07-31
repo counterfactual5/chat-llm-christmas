@@ -21,6 +21,18 @@ const BATCH_TIMEOUT_CAP_MS = 90_000;
 const OCR_TIMEOUT_MS = 60_000;
 const ZHIPU_LAYOUT_PARSING_URL =
   'https://open.bigmodel.cn/api/paas/v4/layout_parsing';
+const ZHIPU_CHAT_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+
+/** PaaS REST (layout_parsing / chat) — prefer non-Coding keys. */
+function zhipuPaasApiKey(): string | undefined {
+  return (
+    process.env.ZHIPU_API_KEY?.trim() ||
+    process.env.ZHIPUAI_API_KEY?.trim() ||
+    process.env.BIGMODEL_API_KEY?.trim() ||
+    process.env.ZHIPU_CODING_API_KEY?.trim() ||
+    zhipuApiKey()
+  );
+}
 
 export interface ImageUnderstandInput {
   /** Image URL (https / data URI) or gateway file id. */
@@ -277,7 +289,7 @@ async function callGlmOcr(
   imageUrl: string,
   gateway: { apiKey: string; baseURL: string },
 ): Promise<string> {
-  const key = zhipuApiKey();
+  const key = zhipuPaasApiKey();
   if (!key) throw new Error('ZHIPU_API_KEY missing for glm-ocr');
 
   const file = await resolveFileForLayoutParsing(imageUrl, gateway);
@@ -350,7 +362,8 @@ export function splitBatchImageTexts(
 }
 
 /**
- * Call vision backends: understand first, OCR only after understand fails.
+ * Call vision backends: portal-local first (avoids CF large-body blocks), then
+ * gateway VLMs, then OCR.
  */
 export async function understandImages(
   imageUrls: string[],
@@ -367,8 +380,51 @@ export async function understandImages(
     };
   }
 
+  const errors: string[] = [];
+
+  // —— Stage 0: portal-local understand (file ids only) ——
+  // Vercel must not POST multi-MB data URLs back through Cloudflare at
+  // api.llm.christmas — CF 1010 blocks them, and every gateway VLM fails together.
+  // Portal reads the file from disk and calls new-api on localhost.
+  const portalFileIds = urls.map(gatewayFileIdFromRef);
+  if (portalFileIds.every(Boolean)) {
+    try {
+      const texts: string[] = [];
+      let provider = 'portal-vision';
+      for (let i = 0; i < portalFileIds.length; i++) {
+        const one = await callPortalVisionUnderstand(
+          portalFileIds[i],
+          userPrompt,
+          gateway,
+        );
+        texts.push(one.text);
+        provider = one.provider || provider;
+      }
+      const text =
+        texts.length > 1
+          ? texts.map((t, i) => `【图${i + 1}】\n${t}`).join('\n\n')
+          : texts[0] || '';
+      if (text.trim()) {
+        return {
+          ok: true,
+          text,
+          texts,
+          mode: 'understand',
+          provider,
+        };
+      }
+      errors.push('portal-vision: empty');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`portal-vision: ${message}`);
+      console.warn(
+        '[image-understand] portal vision failed, trying gateway backends:',
+        message,
+      );
+    }
+  }
+
   // Expand portal file ids → data URLs before calling upstream VLMs.
-  // Bare ids worked (sort of) when new-api owned Files; portal Files do not.
   const resolvedUrls: string[] = [];
   try {
     for (const url of urls) {
@@ -377,6 +433,16 @@ export async function understandImages(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn('[image-understand] resolve image for vision failed:', message);
+    // If portal already failed and we cannot inline, surface both.
+    if (errors.length) {
+      const detail = [...errors, `resolve: ${message}`].join(' · ').slice(0, 400);
+      return {
+        ok: false,
+        text: `Failed to understand the image (${detail}).`,
+        mode: 'error',
+        texts: urls.map(() => `Failed to understand the image (${detail}).`),
+      };
+    }
     return {
       ok: false,
       text: `Failed to load image for understanding (${message}).`,
@@ -402,13 +468,16 @@ export async function understandImages(
   const client = new OpenAI({
     apiKey: gateway.apiKey,
     baseURL: gateway.baseURL,
+    defaultHeaders: {
+      // Cloudflare bot fight on api.llm.christmas rejects large POSTs without a UA.
+      'User-Agent': 'ChristmasChat-ImageUnderstand/1.0',
+    },
   });
 
   const system = buildImageUnderstandSystemPrompt(userPrompt, urls.length);
   const timeoutMs = batchTimeoutMs(urls.length);
-  const errors: string[] = [];
 
-  // —— Stage 1: understand (scene / UI / answer the user's question) ——
+  // —— Stage 1: understand via gateway VLMs ——
   for (const backend of understandBackends()) {
     try {
       const text = await callVision(
@@ -439,9 +508,36 @@ export async function understandImages(
     }
   }
 
+  // —— Stage 1b: Zhipu PaaS direct (bypasses api.llm.christmas / CF) ——
+  const paasKey = zhipuPaasApiKey();
+  if (paasKey) {
+    try {
+      const text = await callZhipuPaasVision(
+        paasKey,
+        resolvedUrls,
+        system,
+        timeoutMs,
+      );
+      if (text) {
+        const texts = splitBatchImageTexts(text, urls.length);
+        return {
+          ok: true,
+          text,
+          texts,
+          mode: 'understand',
+          provider: 'zhipu-paas-vision',
+        };
+      }
+      errors.push('zhipu-paas-vision: empty');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`zhipu-paas-vision: ${message}`);
+      console.warn('[image-understand] zhipu paas vision failed:', message);
+    }
+  }
+
   // —— Stage 2: OCR-only (after understand exhausted) ——
-  // 2a) Dedicated glm-ocr (layout_parsing) — true text extraction.
-  if (zhipuApiKey()) {
+  if (zhipuPaasApiKey()) {
     try {
       const texts: string[] = [];
       for (const url of urls) {
@@ -522,7 +618,7 @@ export async function understandImages(
   }
 
   console.warn('[image-understand] all backends failed:', errors.join(' | '));
-  const detail = errors.slice(0, 3).join(' · ').slice(0, 400);
+  const detail = errors.slice(0, 4).join(' · ').slice(0, 400);
   return {
     ok: false,
     text: detail
@@ -535,6 +631,92 @@ export async function understandImages(
         : 'Failed to understand the image. Please try a vision-capable model for best results.',
     ],
   };
+}
+
+async function callPortalVisionUnderstand(
+  fileId: string,
+  userPrompt: string,
+  gateway: { apiKey: string; baseURL: string },
+): Promise<{ text: string; provider?: string }> {
+  const base = gateway.baseURL.replace(/\/$/, '');
+  const res = await withTimeout(
+    fetch(`${base}/vision/understand`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${gateway.apiKey}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'ChristmasChat-ImageUnderstand/1.0',
+      },
+      body: JSON.stringify({
+        file_id: fileId,
+        prompt: userPrompt,
+        model: IMAGE_UNDERSTAND_MODEL,
+      }),
+    }),
+    BATCH_TIMEOUT_CAP_MS,
+  );
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok || data.ok === false) {
+    const err = data.error as { message?: string } | undefined;
+    throw new Error(
+      err?.message ||
+        String(data.text || data.message || `portal vision HTTP ${res.status}`),
+    );
+  }
+  const text = String(data.text || '').trim();
+  if (!text) throw new Error('portal vision returned empty text');
+  return {
+    text,
+    provider: String(data.provider || 'portal-vision'),
+  };
+}
+
+async function callZhipuPaasVision(
+  apiKey: string,
+  dataUrls: string[],
+  system: string,
+  timeoutMs: number,
+): Promise<string> {
+  const n = dataUrls.length;
+  const lead =
+    n === 1
+      ? '请根据系统说明观察这张图片。'
+      : `请根据系统说明依次观察这 ${n} 张图片，并按【图1】…【图${n}】分段输出。`;
+  const content: Array<Record<string, unknown>> = [
+    { type: 'text', text: lead },
+    ...dataUrls.map((url) => ({
+      type: 'image_url',
+      image_url: { url },
+    })),
+  ];
+  const res = await withTimeout(
+    fetch(ZHIPU_CHAT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: IMAGE_UNDERSTAND_MODEL,
+        max_tokens: 2048,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content },
+        ],
+      }),
+    }),
+    timeoutMs,
+  );
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = data.error as { message?: string } | undefined;
+    throw new Error(
+      err?.message ||
+        String(data.message || data.msg || `zhipu paas HTTP ${res.status}`),
+    );
+  }
+  const choices = data.choices as Array<{ message?: unknown }> | undefined;
+  return visionMessageText(choices?.[0]?.message);
 }
 
 /**

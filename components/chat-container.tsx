@@ -7885,7 +7885,7 @@ export default function ChatContainer() {
                       >
                         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
                           <ImageIcon className="h-3.5 w-3.5" />
-                          {t('generationHistory')}
+                          {t('generatedOutput')}
                           <span className="font-mono font-normal normal-case tracking-normal text-stone-400">
                             ({generatedImageHistory.length})
                           </span>

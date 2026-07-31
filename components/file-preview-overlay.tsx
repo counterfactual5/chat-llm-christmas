@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { CodeBlock } from '@/components/markdown/code-block';
-import { prepareChatMarkdown } from '@/lib/markdown-math';
+import { prepareChatMarkdown } from '@/lib/markdown/math';
 import { cn } from '@/lib/utils';
 
 const KATEX_OPTIONS = {

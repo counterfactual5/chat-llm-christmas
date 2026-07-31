@@ -1,5 +1,5 @@
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
-import { SKILL_CREATOR_ID } from '@/lib/skill-creator';
+import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 
 const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/skills';
 

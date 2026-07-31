@@ -9,7 +9,7 @@
  */
 
 import OpenAI from 'openai';
-import { toImageContentPart } from '@/lib/gateway-files';
+import { toImageContentPart } from '@/lib/files/gateway';
 import { zhipuApiKey } from '@/lib/tools/zhipu/credentials';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';

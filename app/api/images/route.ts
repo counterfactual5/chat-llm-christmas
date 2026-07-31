@@ -4,7 +4,7 @@ import {
   gatewayBaseURL,
   uploadGatewayBase64Png,
   uploadGatewayFile,
-} from '@/lib/gateway-files';
+} from '@/lib/files/gateway';
 
 // Image b64 payloads are large — Node has more headroom than Edge for this route.
 export const runtime = 'nodejs';

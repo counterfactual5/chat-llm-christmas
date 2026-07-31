@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
-import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
-import { getModelSpec, isChatPickerModel } from '@/lib/model-specs';
+import { fetchFreeModelNames, looksFreeByName } from '@/lib/models/pricing';
+import { getModelSpec, isChatPickerModel } from '@/lib/models/specs';
 
 export const runtime = 'edge';
 export const maxDuration = 30;

@@ -3,7 +3,7 @@ import {
   gatewayBaseURL,
   uploadGatewayDataUrl,
   uploadGatewayFile,
-} from '@/lib/gateway-files';
+} from '@/lib/files/gateway';
 
 export const runtime = 'edge';
 export const maxDuration = 60;

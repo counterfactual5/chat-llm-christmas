@@ -1,21 +1,21 @@
 /**
  * Client-side reply truncation / Continue helpers.
- * Builds on provider finish_reason signals in `@/lib/truncation`.
+ * Builds on provider finish_reason signals in `@/lib/chat/truncation`.
  */
 
 import {
   hasUnclosedDisplayMath,
   looksLikeTruncatedMath,
-} from '@/lib/markdown-math';
+} from '@/lib/markdown/math';
 import {
   contentHasThinkMarkup,
   extractThinkBlocks,
-} from '@/lib/think-tags';
+} from '@/lib/chat/think-tags';
 import {
   NATURAL_FINISH_REASONS,
   SOFT_TRUNCATION_REASONS,
   truncationFromFinishReason,
-} from '@/lib/truncation';
+} from '@/lib/chat/truncation';
 
 export type TruncationHints = {
   /** Server sent truncated=true/false on the completion event. */

@@ -1,7 +1,7 @@
 import type { ChatSession } from '@/lib/chat/types';
 import { displayAssistantParts } from '@/lib/chat/message-display';
-import { contentHasThinkMarkup } from '@/lib/think-tags';
-import { contentHasToolMarkup } from '@/lib/tool-tags';
+import { contentHasThinkMarkup } from '@/lib/chat/think-tags';
+import { contentHasToolMarkup } from '@/lib/chat/tool-tags';
 
 /** localStorage key recording which account owns the cached chats (anti cross-account bleed). */
 export const CHATS_OWNER_KEY = 'llm_christmas_chats_owner';

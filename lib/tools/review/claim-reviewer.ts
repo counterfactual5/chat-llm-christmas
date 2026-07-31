@@ -22,10 +22,10 @@ import {
   type ClaimVerdict,
   type EvidenceStrength,
   type EvidenceUnit,
-} from '@/lib/review/evidence';
+} from '@/lib/tools/review/evidence';
 
-export { getReviewGateLevel } from '@/lib/review/evidence';
-export type { ClaimVerdict, EvidenceStrength, EvidenceUnit, ReviewGateLevel } from '@/lib/review/evidence';
+export { getReviewGateLevel } from '@/lib/tools/review/evidence';
+export type { ClaimVerdict, EvidenceStrength, EvidenceUnit, ReviewGateLevel } from '@/lib/tools/review/evidence';
 
 export type FakedToolSurface =
   | 'notion'

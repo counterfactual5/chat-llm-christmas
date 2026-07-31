@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { NextRequest } from 'next/server';
-import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
+import { fetchFreeModelNames, looksFreeByName } from '@/lib/models/pricing';
 
 export const runtime = 'edge';
 export const maxDuration = 60;

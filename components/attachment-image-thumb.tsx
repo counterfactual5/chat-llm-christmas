@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { ImageOff, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { IngestedAttachment } from '@/lib/file-ingest';
+import type { IngestedAttachment } from '@/lib/files/ingest';
 
 export function attachmentImageSrc(
   a: Pick<IngestedAttachment, 'previewUrl' | 'dataUrl' | 'fileId'>,

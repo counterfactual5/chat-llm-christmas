@@ -70,7 +70,7 @@ import 'katex/dist/katex.min.css';
 import { CodeBlock } from './markdown/code-block';
 import { BrandMark } from '@/components/brand-mark';
 import { NotionLogo } from '@/components/notion-logo';
-import { ingestFiles, type IngestedAttachment } from '@/lib/file-ingest';
+import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import {
   buildPersistedUserMessageContent,
   hasPersistedImageTranscription,
@@ -81,7 +81,7 @@ import {
   stripImageArchiveBlock,
   stripUserMessageArtifactsForDisplay,
 } from '@/lib/tools/image-understand/persist';
-import { BUILTIN_SKILLS, isSkillCreatorId } from '@/lib/skill-creator';
+import { BUILTIN_SKILLS, isSkillCreatorId } from '@/lib/skills/creator';
 import {
   AttachmentImageThumb,
   ImagePreviewOverlay,
@@ -96,20 +96,20 @@ import {
   estimateTokensFromText,
   formatContextWindow,
   getModelSpec,
-} from '@/lib/model-specs';
-import { contentHasThinkMarkup, createThinkStreamParser, extractThinkBlocks } from '@/lib/think-tags';
+} from '@/lib/models/specs';
+import { contentHasThinkMarkup, createThinkStreamParser, extractThinkBlocks } from '@/lib/chat/think-tags';
 import {
   contentHasToolMarkup,
   createToolCallStripper,
   stripFakeToolMarkup,
-} from '@/lib/tool-tags';
-import { stripMessageStamp } from '@/lib/time-context';
+} from '@/lib/chat/tool-tags';
+import { stripMessageStamp } from '@/lib/chat/time-context';
 import {
   compactQuoteMath,
   markdownFromDomSelection,
   prepareChatMarkdown,
-} from '@/lib/markdown-math';
-import { expandLiteralBreaks } from '@/lib/markdown-breaks';
+} from '@/lib/markdown/math';
+import { expandLiteralBreaks } from '@/lib/markdown/breaks';
 import { useLocale } from '@/lib/i18n';
 import {
   isGoogleMcpId,

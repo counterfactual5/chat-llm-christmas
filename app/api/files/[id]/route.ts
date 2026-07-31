@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { gatewayBaseURL } from '@/lib/gateway-files';
+import { gatewayBaseURL } from '@/lib/files/gateway';
 
 export const runtime = 'edge';
 export const maxDuration = 60;

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchFreeModelNames, looksFreeByName } from '@/lib/pricing';
+import { fetchFreeModelNames, looksFreeByName } from '@/lib/models/pricing';
 import {
   CURSOR_WEB_CHAT_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
@@ -8,7 +8,7 @@ import {
   conversationIsolationPrompt,
   getModelSpec,
   isCursorStyleModel,
-} from '@/lib/model-specs';
+} from '@/lib/models/specs';
 import type { SearchOutcome } from '@/lib/tools/search/engine';
 import {
   createStampLeakStripper,
@@ -19,7 +19,7 @@ import {
   enrichSearchQuery,
   englishRecencyQuery,
   getClockContext,
-} from '@/lib/time-context';
+} from '@/lib/chat/time-context';
 import {
   executeRegisteredTool,
   formatWebSearchToolContent,
@@ -30,7 +30,7 @@ import {
   type ToolRuntimeContext,
 } from '@/lib/tools';
 import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand/persist';
-import { streamCompletionPayload } from '@/lib/truncation';
+import { streamCompletionPayload } from '@/lib/chat/truncation';
 import {
   getNotionMcpAccessToken,
   getGitHubAccessToken,
@@ -47,7 +47,7 @@ import {
   generatedImageAssistantSummary,
   toImageContentPart,
   uploadGatewayDataUrl,
-} from '@/lib/gateway-files';
+} from '@/lib/files/gateway';
 import {
   detectFakedToolNarration,
   detectPendingToolIntent,
@@ -73,7 +73,7 @@ import {
   type ClaimAuditResult,
   type MidTurnCorrection,
 } from '@/lib/tools/review/claim-reviewer';
-import { isSkillCreatorId } from '@/lib/skill-creator';
+import { isSkillCreatorId } from '@/lib/skills/creator';
 
 export const runtime = 'edge';
 export const maxDuration = 300;

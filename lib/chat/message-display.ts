@@ -2,9 +2,9 @@ import type { Message } from '@/lib/chat/types';
 import {
   contentHasThinkMarkup,
   extractThinkBlocks,
-} from '@/lib/think-tags';
-import { stripFakeToolMarkup } from '@/lib/tool-tags';
-import { stripMessageStamp } from '@/lib/time-context';
+} from '@/lib/chat/think-tags';
+import { stripFakeToolMarkup } from '@/lib/chat/tool-tags';
+import { stripMessageStamp } from '@/lib/chat/time-context';
 
 export function messagePlainText(message: Message): string {
   // Count visible turn text (answer + thinking) so Context used tracks rollback.

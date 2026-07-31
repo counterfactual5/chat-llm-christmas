@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { usernameFromTokenPayload } from '@/lib/account-profile';
+import { usernameFromTokenPayload } from '@/lib/account/profile';
 import { clearVaultCookie, remoteVaultConfigured } from '@/lib/integrations';
 
 export const runtime = 'edge';

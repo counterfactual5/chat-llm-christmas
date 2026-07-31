@@ -6,7 +6,7 @@
 import {
   freshnessForQuery,
   type Freshness,
-} from '@/lib/time-context';
+} from '@/lib/chat/time-context';
 import { zhipuMcpEnabled } from '@/lib/tools/zhipu/credentials';
 import { zhipuMcpWebSearch } from '@/lib/tools/search/zhipu';
 

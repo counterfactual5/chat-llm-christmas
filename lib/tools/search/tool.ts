@@ -4,7 +4,7 @@ import {
   webSearch,
   type SearchOutcome,
 } from '@/lib/tools/search/engine';
-import { freshnessForQuery } from '@/lib/time-context';
+import { freshnessForQuery } from '@/lib/chat/time-context';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 export function parseSearchQuery(rawArgs: string, fallback: string): string {

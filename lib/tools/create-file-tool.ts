@@ -80,6 +80,10 @@ export function mimeFromFilename(filename: string, explicit?: string): string {
   return EXT_MIME[ext] || 'text/plain';
 }
 
+function localFileId(): string {
+  return `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function createCreateFileTool(): ChatTool {
   return {
     name: 'create_file',
@@ -112,16 +116,6 @@ export function createCreateFileTool(): ChatTool {
     systemPrompt: CREATE_FILE_SYSTEM_PROMPT,
     enabled: () => true,
     async execute({ rawArguments }, ctx) {
-      const apiKey = String(ctx.gateway?.apiKey || '').trim();
-      if (!apiKey) {
-        return {
-          content: JSON.stringify({
-            ok: false,
-            error: 'File creation requires a connected API key.',
-          }),
-        };
-      }
-
       let args: { filename?: string; content?: string; mimeType?: string } = {};
       try {
         args = JSON.parse(rawArguments || '{}') || {};
@@ -170,65 +164,76 @@ export function createCreateFileTool(): ChatTool {
         },
       });
 
-      try {
-        const uploaded = await uploadGatewayFile({
-          apiKey,
-          baseURL: ctx.gateway?.baseURL,
-          bytes,
-          filename,
-          mime: mimeType,
-          purpose: 'assistants',
-        });
-        const file = {
-          id: uploaded.id,
-          name: uploaded.filename || filename,
-          mimeType,
-          size: typeof uploaded.bytes === 'number' ? uploaded.bytes : bytes.byteLength,
-          url: `/api/files/${encodeURIComponent(uploaded.id)}`,
-          createdAt: Date.now(),
-        };
-        ctx.send({ file_created: file });
-        ctx.send({
-          tool: {
-            status: 'done',
-            name: 'create_file',
-            provider: 'files',
-            query: file.name,
-            results: [
-              {
-                title: file.name,
-                url: file.url,
-                snippet: `${file.mimeType} · ${file.size} bytes`,
-              },
-            ],
-          },
-        });
-        return {
-          content: JSON.stringify({
-            ok: true,
-            file: {
-              id: file.id,
-              name: file.name,
-              mimeType: file.mimeType,
-              size: file.size,
-              url: file.url,
-            },
-          }),
-          data: file,
-        };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'create_file failed';
-        ctx.send({
-          tool: {
-            status: 'done',
-            name: 'create_file',
-            provider: 'files',
-            query: filename,
-            error: message,
-          },
-        });
-        return { content: JSON.stringify({ ok: false, error: message }) };
+      // Always succeed locally first. Gateway Files API is image-oriented and can
+      // reject text uploads with opaque errors ("Model name not specified").
+      const localId = localFileId();
+      let file = {
+        id: localId,
+        name: filename,
+        mimeType,
+        size: bytes.byteLength,
+        url: `local://${localId}`,
+        content,
+        createdAt: Date.now(),
+        stored: 'local' as 'local' | 'gateway',
+      };
+
+      const apiKey = String(ctx.gateway?.apiKey || '').trim();
+      if (apiKey) {
+        try {
+          const uploaded = await uploadGatewayFile({
+            apiKey,
+            baseURL: ctx.gateway?.baseURL,
+            bytes,
+            filename,
+            mime: mimeType,
+            purpose: 'assistants',
+          });
+          file = {
+            id: uploaded.id,
+            name: uploaded.filename || filename,
+            mimeType,
+            size: typeof uploaded.bytes === 'number' ? uploaded.bytes : bytes.byteLength,
+            url: `/api/files/${encodeURIComponent(uploaded.id)}`,
+            content,
+            createdAt: Date.now(),
+            stored: 'gateway',
+          };
+        } catch {
+          // Keep local file — download still works from inline content.
+        }
       }
+
+      ctx.send({ file_created: file });
+      ctx.send({
+        tool: {
+          status: 'done',
+          name: 'create_file',
+          provider: 'files',
+          query: file.name,
+          results: [
+            {
+              title: file.name,
+              url: file.url.startsWith('local://') ? '' : file.url,
+              snippet: `${file.mimeType} · ${file.size} bytes`,
+            },
+          ],
+        },
+      });
+      return {
+        content: JSON.stringify({
+          ok: true,
+          file: {
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            size: file.size,
+            url: file.url.startsWith('local://') ? undefined : file.url,
+            stored: file.stored,
+          },
+        }),
+        data: file,
+      };
     },
   };
 }

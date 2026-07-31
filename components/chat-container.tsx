@@ -338,6 +338,8 @@ interface Message {
     mimeType: string;
     size: number;
     url: string;
+    /** Inline UTF-8 text for local/gateway-backed downloads. */
+    content?: string;
     createdAt: number;
   }>;
   /** Marks a synthetic compacted-history bubble. */
@@ -1580,6 +1582,7 @@ export default function ChatContainer() {
     mimeType: string;
     size: number;
     url: string;
+    content?: string;
     createdAt: number;
   };
 
@@ -1619,6 +1622,7 @@ export default function ChatContainer() {
           mimeType: file.mimeType,
           size: file.size,
           url: file.url,
+          content: file.content,
           createdAt: file.createdAt || m.timestamp,
         });
       });
@@ -1658,8 +1662,17 @@ export default function ChatContainer() {
 
   const downloadGeneratedFile = async (entry: GeneratedFileEntry) => {
     try {
-      const res = await fetch(entry.url);
-      const blob = await res.blob();
+      let blob: Blob;
+      if (typeof entry.content === 'string') {
+        blob = new Blob([entry.content], {
+          type: entry.mimeType || 'text/plain;charset=utf-8',
+        });
+      } else if (entry.url && !entry.url.startsWith('local://')) {
+        const res = await fetch(entry.url);
+        blob = await res.blob();
+      } else {
+        throw new Error('No file content available');
+      }
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
@@ -1667,7 +1680,9 @@ export default function ChatContainer() {
       a.click();
       URL.revokeObjectURL(objectUrl);
     } catch {
-      window.open(entry.url, '_blank', 'noopener,noreferrer');
+      if (entry.url && !entry.url.startsWith('local://')) {
+        window.open(entry.url, '_blank', 'noopener,noreferrer');
+      }
     }
   };
 
@@ -1736,18 +1751,22 @@ export default function ChatContainer() {
       mimeType: string;
       size: number;
       url: string;
+      content?: string;
       createdAt?: number;
     },
   ) => {
+    const content =
+      typeof file.content === 'string' ? file.content : undefined;
     const entry = {
       id: String(file.id || '').trim(),
       name: String(file.name || 'file').trim() || 'file',
       mimeType: String(file.mimeType || 'text/plain').trim() || 'text/plain',
       size: typeof file.size === 'number' ? file.size : 0,
-      url: String(file.url || '').trim(),
+      url: String(file.url || '').trim() || (content != null ? `local://${String(file.id || '').trim()}` : ''),
+      ...(content != null ? { content } : {}),
       createdAt: typeof file.createdAt === 'number' ? file.createdAt : Date.now(),
     };
-    if (!entry.id || !entry.url) return;
+    if (!entry.id || (!entry.url && content == null)) return;
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id !== sessionId) return s;
@@ -3068,6 +3087,7 @@ export default function ChatContainer() {
               mimeType: String(raw.mimeType || 'text/plain'),
               size: typeof raw.size === 'number' ? raw.size : 0,
               url: String(raw.url || ''),
+              content: typeof raw.content === 'string' ? raw.content : undefined,
               createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
             });
             if (sessionId === activeSessionIdRef.current) {

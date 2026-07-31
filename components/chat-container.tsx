@@ -60,6 +60,7 @@ import {
   type GeneratedImageEntry,
 } from '@/components/chat/output-panel';
 import { ReferencePanel } from '@/components/chat/reference-panel';
+import { ChatSidebar } from '@/components/chat/sidebar';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/theme-provider';
 import ReactMarkdown from 'react-markdown';
@@ -81,7 +82,7 @@ import {
   stripImageArchiveBlock,
   stripUserMessageArtifactsForDisplay,
 } from '@/lib/tools/image-understand/persist';
-import { BUILTIN_SKILLS, isSkillCreatorId } from '@/lib/skills/creator';
+import { BUILTIN_SKILLS, isSkillCreatorId, skillSlashName } from '@/lib/skills/creator';
 import {
   AttachmentImageThumb,
   ImagePreviewOverlay,
@@ -122,14 +123,6 @@ const KATEX_OPTIONS = {
   errorColor: 'var(--chat-math-error, #a8a29e)',
 } as const;
 
-function skillSlashName(title: string): string {
-  const slug = title
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\u4e00-\u9fff-]/g, '');
-  return slug.slice(0, 48) || 'skill';
-}
 
 /** Explicit image-gen command: `/image a cat` or `/img a cat`. */
 const IMAGE_CMD_RE = /^(?:\/image|\/img)\s+([\s\S]+)$/i;
@@ -339,7 +332,6 @@ export default function ChatContainer() {
   /** Per-session streaming flags — multiple chats can run in parallel. */
   const [loadingBySession, setLoadingBySession] = useState<Record<string, boolean>>({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageContent, setEditingMessageContent] = useState('');
   const [editingMessageAttachments, setEditingMessageAttachments] = useState<IngestedAttachment[]>(
@@ -390,14 +382,11 @@ export default function ChatContainer() {
   const [chatsHydrated, setChatsHydrated] = useState(false);
 
   // Settings State
-  const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
   const [sessionPendingDelete, setSessionPendingDelete] = useState<{
     id: string;
     title: string;
   } | null>(null);
   const [confirmClearSourcesOpen, setConfirmClearSourcesOpen] = useState(false);
-  /** Past-day sidebar groups start collapsed; toggles remembered for this page load. */
-  const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
   /**
    * After Thought / answer text goes idle but the turn is still open, show a
    * textless spinner under the bubble (not a fake "Thinking…" label).
@@ -407,10 +396,6 @@ export default function ChatContainer() {
   // Skills State
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [isSavingSkill, setIsSavingSkill] = useState(false);
-  const [skillsExpanded, setSkillsExpanded] = useState(false);
-  const [mcpExpanded, setMcpExpanded] = useState(false);
-  const [toolsExpanded, setToolsExpanded] = useState(false);
-  const [commandsExpanded, setCommandsExpanded] = useState(false);
   const [googleMcpMenuOpen, setGoogleMcpMenuOpen] = useState(false);
   const [plusFlyout, setPlusFlyout] = useState<
     null | 'commands' | 'skills' | 'mcp' | 'tools'
@@ -471,7 +456,6 @@ export default function ChatContainer() {
   const editImeEnterLockRef = useRef(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
@@ -1590,68 +1574,6 @@ export default function ChatContainer() {
     });
   }, [chatsHydrated, loadingBySession]);
 
-  // Empty drafts stay in state for the composer, but do not appear in the sidebar
-  // until the first message is sent. Order by last activity so resumed chats
-  // jump back to the top of today's group.
-  const sidebarSessions = useMemo(
-    () =>
-      [...sessions]
-        .filter((session) => session.messages.length > 0)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    [sessions],
-  );
-
-  /** Local calendar day key (YYYY-MM-DD) for grouping. */
-  const dayKeyOf = (ts: number) => {
-    const d = new Date(ts);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-
-  const todayKey = dayKeyOf(Date.now());
-
-  type SidebarDayGroup = { key: string; sessions: ChatSession[]; isToday: boolean };
-
-  const sidebarDayGroups = useMemo(() => {
-    const map = new Map<string, ChatSession[]>();
-    for (const session of sidebarSessions) {
-      const key = dayKeyOf(session.updatedAt);
-      const list = map.get(key);
-      if (list) list.push(session);
-      else map.set(key, [session]);
-    }
-    const groups: SidebarDayGroup[] = [...map.entries()].map(([key, list]) => ({
-      key,
-      sessions: list,
-      isToday: key === todayKey,
-    }));
-    // Keys are YYYY-MM-DD so string desc ≈ chronological desc.
-    groups.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
-    return groups;
-  }, [sidebarSessions, todayKey]);
-
-  const formatDayGroupLabel = (key: string) => {
-    if (key === todayKey) return t('today');
-    const [ys, ms, ds] = key.split('-').map(Number);
-    const date = new Date(ys, ms - 1, ds);
-    const yesterday = new Date();
-    yesterday.setHours(0, 0, 0, 0);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (
-      date.getFullYear() === yesterday.getFullYear() &&
-      date.getMonth() === yesterday.getMonth() &&
-      date.getDate() === yesterday.getDate()
-    ) {
-      return t('yesterday');
-    }
-    if (locale === 'zh') {
-      return `${date.getMonth() + 1}月${date.getDate()}日`;
-    }
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
   const NEAR_BOTTOM_PX = 96;
 
   const isNearBottom = () => {
@@ -2677,7 +2599,6 @@ export default function ChatContainer() {
       return filtered;
     });
     setSessionPendingDelete(null);
-    setSessionMenuOpenId(null);
   };
 
   const saveUserKey = async () => {
@@ -2863,57 +2784,6 @@ export default function ChatContainer() {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [isModelMenuOpen]);
-
-  // Close account menu on outside click / Escape.
-  useEffect(() => {
-    if (!isAccountMenuOpen) return;
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-      if (accountMenuRef.current && target && !accountMenuRef.current.contains(target)) {
-        setIsAccountMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsAccountMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [isAccountMenuOpen]);
-
-  // Close session "more" menu on outside click / Escape.
-  useEffect(() => {
-    if (!sessionMenuOpenId) return;
-    const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) return;
-      if (
-        target.closest(`[data-session-menu="${sessionMenuOpenId}"]`) ||
-        target.closest(`[data-session-menu-trigger="${sessionMenuOpenId}"]`)
-      ) {
-        return;
-      }
-      setSessionMenuOpenId(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSessionMenuOpenId(null);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('touchstart', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('touchstart', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [sessionMenuOpenId]);
 
   // Focus search when the model menu opens.
   useEffect(() => {
@@ -4418,7 +4288,6 @@ export default function ChatContainer() {
     a.download = `${session.title}.md`;
     a.click();
     URL.revokeObjectURL(url);
-    setSessionMenuOpenId(null);
   };
 
   const isEnterSubmitBlockedByIme = (
@@ -4608,629 +4477,61 @@ export default function ChatContainer() {
         </div>
       )}
       
-      {/* --- Sidebar --- */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 280, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            className="h-full shrink-0 border-r border-stone-200 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/60 flex flex-col"
-          >
-            <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
-                  <BrandMark className="h-7 w-7 shadow-sm" />
-                  Christmas Chat
-                </div>
-              </div>
-
-              <Button 
-                onClick={createNewSession}
-                className="w-full justify-start gap-2 bg-white text-stone-700 hover:bg-stone-50 border border-stone-200 shadow-sm dark:bg-stone-800 dark:text-stone-200 dark:border-stone-700 dark:hover:bg-stone-700"
-              >
-                <Plus className="h-4 w-4" />
-                {t('newChat')}
-              </Button>
-
-              {/* Skills entry under New Chat (ChatGPT-style tools area) */}
-              <div className="space-y-1 pt-1">
-                {/* Command layer — one-shot actions */}
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCommandsExpanded((v) => !v);
-                      setSkillsExpanded(false);
-                      setMcpExpanded(false);
-                      setToolsExpanded(false);
-                    }}
-                    className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                  >
-                    <span className="flex items-center gap-2 font-medium">
-                      <Terminal className="h-4 w-4 text-stone-500" />
-                      {t('commandLayer')}
-                    </span>
-                    <ChevronDown
-                      className={cn(
-                        'h-3.5 w-3.5 text-stone-400 transition-transform',
-                        commandsExpanded ? 'rotate-180' : '',
-                      )}
-                    />
-                  </button>
-
-                  <AnimatePresence initial={false}>
-                    {commandsExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden pl-2"
-                      >
-                        <div className="space-y-0.5 pb-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                openLoginModal();
-                                return;
-                              }
-                              setInput('/image ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                          >
-                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1 truncate">{t('generateImage')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /image
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                openLoginModal();
-                                return;
-                              }
-                              void requestClaimReview();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                          >
-                            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1 truncate">{t('requestReview')}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void resumeIncompleteReply({ force: true });
-                            }}
-                            disabled={
-                              isActiveLoading ||
-                              !lastMessage ||
-                              lastMessage.role !== 'assistant' ||
-                              isAssistantError(lastMessage)
-                            }
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                            title={t('continueCommandHint')}
-                          >
-                            <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1 truncate">{t('continueCommand')}</span>
-                          </button>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!isAccountBound) {
-                        openLoginModal();
-                        return;
-                      }
-                      setSkillsExpanded((v) => !v);
-                      setMcpExpanded(false);
-                      setToolsExpanded(false);
-                      setCommandsExpanded(false);
-                      if (skills.length === 0) fetchSkills();
-                    }}
-                    className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                  >
-                    <span className="flex items-center gap-2 font-medium">
-                      <ScrollText className="h-4 w-4 text-stone-500" />
-                      {t('skills')}
-                    </span>
-                    <ChevronDown className={cn('h-3.5 w-3.5 text-stone-400 transition-transform', skillsExpanded && isAccountBound ? 'rotate-180' : '')} />
-                  </button>
-
-                  <AnimatePresence initial={false}>
-                    {isAccountBound && skillsExpanded && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden pl-2"
-                      >
-                        <div className="space-y-0.5 pb-1">
-                          <button
-                            type="button"
-                            onClick={openNewSkillModal}
-                            className="mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-stone-500 hover:bg-stone-200/50 hover:text-stone-700 dark:text-stone-400 dark:hover:bg-stone-800/50 dark:hover:text-stone-200"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            {t('newSkill')}
-                          </button>
-                          {BUILTIN_SKILLS.map((skill) => {
-                            const on = activeSkillIds.includes(skill.id);
-                            return (
-                              <div
-                                key={skill.id}
-                                className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSkill(skill.id)}
-                                  className={cn(
-                                    'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
-                                    on
-                                      ? 'text-stone-900 dark:text-stone-100'
-                                      : 'text-stone-600 dark:text-stone-300',
-                                  )}
-                                  title={on ? t('skillCreatorOnHint') : t('skillCreatorOffHint')}
-                                >
-                                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
-                                  <span className="truncate">{skill.title}</span>
-                                  {on && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />}
-                                </button>
-                              </div>
-                            );
-                          })}
-                          {skills.map((skill) => (
-                              <div
-                                key={skill.id}
-                                className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    toggleSkill(skill.id);
-                                  }}
-                                  className={cn(
-                                    'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
-                                    activeSkillIds.includes(skill.id)
-                                      ? 'text-stone-900 dark:text-stone-100'
-                                      : 'text-stone-600 dark:text-stone-300',
-                                  )}
-                                  title={
-                                    activeSkillIds.includes(skill.id)
-                                      ? `已启用 /${skillSlashName(skill.title)} — 再点取消`
-                                      : `启用 Skill · /${skillSlashName(skill.title)}`
-                                  }
-                                >
-                                  <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                  <span className="truncate">{skill.title}</span>
-                                  {activeSkillIds.includes(skill.id) && (
-                                    <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => requestDeleteSkill(skill.id, e)}
-                                  className="mr-1 rounded p-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/20"
-                                  title="Delete skill"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* MCP — same collapsible pattern as Skills; click Notion for connect/disconnect card */}
-                <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isAccountBound) {
-                      openLoginModal();
-                      return;
-                    }
-                    setMcpExpanded((v) => !v);
-                    setSkillsExpanded(false);
-                    setToolsExpanded(false);
-                    setCommandsExpanded(false);
-                    void fetchIntegrations();
-                  }}
-                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2 font-medium">
-                    <Blocks className="h-4 w-4 text-stone-500" />
-                    {t('mcpTools')}
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      'h-3.5 w-3.5 text-stone-400 transition-transform',
-                      mcpExpanded && isAccountBound ? 'rotate-180' : '',
-                    )}
-                  />
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {isAccountBound && mcpExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden pl-2"
-                    >
-                      <div className="space-y-0.5 pb-1">
-                        <button
-                          type="button"
-                          onClick={() => openNotionModal()}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <NotionLogo className="h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">Notion</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openGitHubModal()}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <GitHubLogo className="h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">GitHub</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openGoogleModal()}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">Google</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                </div>
-
-                {/* Tool layer — persistent capabilities, not MCP. */}
-                <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setToolsExpanded((v) => !v);
-                    setMcpExpanded(false);
-                    setSkillsExpanded(false);
-                    setCommandsExpanded(false);
-                  }}
-                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2 font-medium">
-                    <SlidersHorizontal className="h-4 w-4 text-stone-500" />
-                    {t('toolLayer')}
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      'h-3.5 w-3.5 text-stone-400 transition-transform',
-                      toolsExpanded ? 'rotate-180' : '',
-                    )}
-                  />
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {toolsExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden pl-2"
-                    >
-                      <div className="space-y-0.5 pb-1">
-                        <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
-                          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                              {t('autoReview')}
-                            </div>
-                            <div className="truncate text-[10px] text-stone-400">
-                              {t('autoReviewHint')}
-                            </div>
-                          </div>
-                          <Switch
-                            size="sm"
-                            checked={activeAutoReview}
-                            onCheckedChange={setActiveAutoReview}
-                            aria-label={t('autoReview')}
-                          />
-                        </div>
-                        <div
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                          title={
-                            selectedSpec.vision
-                              ? t('imageUnderstandDisabledOnVision')
-                              : t('zhipuVisionMcpHint')
-                          }
-                          aria-disabled
-                        >
-                          <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate">{t('enableZhipuVisionMcp')}</div>
-                            <div className="truncate text-[10px] opacity-80">
-                              {selectedSpec.vision
-                                ? t('imageUnderstandDisabledOnVision')
-                                : t('imageUnderstandBuiltIn')}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                </div>
-              </div>
-            </div>
-
-            <ScrollArea className="flex-1 px-3 py-2">
-              <div className="space-y-3">
-                {sidebarDayGroups.map((group) => {
-                  const open = group.isToday || Boolean(pastDayOpen[group.key]);
-                  const label = formatDayGroupLabel(group.key);
-                  return (
-                    <div key={group.key} className="space-y-1">
-                      {group.isToday ? (
-                        <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                          {label}
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setPastDayOpen((prev) => ({
-                              ...prev,
-                              [group.key]: !prev[group.key],
-                            }))
-                          }
-                          className="flex w-full items-center gap-1 rounded-lg px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-200/40 hover:text-stone-600 dark:hover:bg-stone-800/40 dark:hover:text-stone-300"
-                        >
-                          <ChevronDown
-                            className={cn(
-                              'h-3 w-3 shrink-0 opacity-60 transition-transform',
-                              open ? 'rotate-0' : '-rotate-90',
-                            )}
-                          />
-                          <span className="min-w-0 flex-1 truncate">{label}</span>
-                          <span className="opacity-50">{group.sessions.length}</span>
-                        </button>
-                      )}
-                      {open &&
-                        group.sessions.map((session) => (
-                          <div key={session.id} className="relative group">
-                            <div
-                              onClick={() => {
-                                setActiveSessionId(session.id);
-                                setWebSourcesCleared(false);
-                                setQuotedSelections([]);
-                                setSessionMenuOpenId(null);
-                              }}
-                              className={cn(
-                                'flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
-                                activeSessionId === session.id
-                                  ? 'bg-white text-stone-900 shadow-sm border border-stone-200 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-700'
-                                  : 'text-stone-600 hover:bg-stone-200/50 dark:text-stone-400 dark:hover:bg-stone-800/50',
-                              )}
-                            >
-                              <div className="flex w-full items-center gap-2 overflow-hidden pr-6">
-                                <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                                {isSessionLoading(session.id) && (
-                                  <Loader2
-                                    className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-500"
-                                    aria-label={t('generating')}
-                                  />
-                                )}
-                              </div>
-                            </div>
-
-                            <button
-                              type="button"
-                              data-session-menu-trigger={session.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSessionMenuOpenId(
-                                  sessionMenuOpenId === session.id ? null : session.id,
-                                );
-                              }}
-                              className={cn(
-                                'absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity',
-                                sessionMenuOpenId === session.id
-                                  ? 'opacity-100'
-                                  : 'opacity-0 group-hover:opacity-100',
-                              )}
-                            >
-                              <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
-                            </button>
-
-                            <AnimatePresence>
-                              {sessionMenuOpenId === session.id && (
-                                <motion.div
-                                  data-session-menu={session.id}
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  exit={{ opacity: 0, scale: 0.95 }}
-                                  className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                                >
-                                  <div className="px-2 py-1.5 border-b border-stone-100 dark:border-stone-800/50 mb-1 flex items-center gap-2 text-xs text-stone-400">
-                                    <Clock className="h-3 w-3" />
-                                    {new Date(session.updatedAt).toLocaleString(undefined, {
-                                      month: 'short',
-                                      day: 'numeric',
-                                      hour: 'numeric',
-                                      minute: '2-digit',
-                                    })}
-                                  </div>
-
-                                  <div className="px-2 py-1 text-xs text-stone-500">
-                                    {session.messages.length} messages
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      exportChat(session.id, e);
-                                      setSessionMenuOpenId(null);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 rounded-md dark:text-stone-300 dark:hover:bg-stone-800"
-                                  >
-                                    <Download className="h-3.5 w-3.5" />
-                                    {t('exportMarkdown')}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSessionMenuOpenId(null);
-                                      setSessionPendingDelete({
-                                        id: session.id,
-                                        title: session.title,
-                                      });
-                                    }}
-                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md dark:text-red-400 dark:hover:bg-red-900/20"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    {t('deleteChat')}
-                                  </button>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                        ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </ScrollArea>
-              
-              {/* Sidebar Footer: Account / Language / Theme */}
-              <div className="relative p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80" ref={accountMenuRef}>
-                <AnimatePresence>
-                  {isAccountMenuOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 6 }}
-                      className="absolute bottom-full left-3 right-3 mb-2 z-50 overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                    >
-                      <div className="px-2.5 py-2 border-b border-stone-100 dark:border-stone-800 mb-1">
-                        <div className="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
-                          {accountDisplayName}
-                        </div>
-                        <div className="truncate text-[11px] text-stone-400">
-                          {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                      >
-                        <Globe className="h-3.5 w-3.5 text-stone-400" />
-                        <span className="flex-1 text-left">{t('language')}</span>
-                        <span className="text-xs text-stone-400">
-                          {locale === 'zh' ? t('languageZh') : t('languageEn')}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => toggleTheme()}
-                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                      >
-                        {preference === 'system' ? (
-                          <Monitor className="h-3.5 w-3.5 text-stone-400" />
-                        ) : theme === 'dark' ? (
-                          <Sun className="h-3.5 w-3.5 text-stone-400" />
-                        ) : (
-                          <Moon className="h-3.5 w-3.5 text-stone-400" />
-                        )}
-                        <span className="flex-1 text-left">{t('theme')}</span>
-                        <span className="text-xs text-stone-400">
-                          {preference === 'system'
-                            ? t('themeSystem')
-                            : preference === 'dark'
-                              ? t('themeDark')
-                              : t('themeLight')}
-                        </span>
-                      </button>
-
-                      <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
-
-                      {isAccountBound ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsAccountMenuOpen(false);
-                            void disconnectAccount();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                        >
-                          <LogOut className="h-3.5 w-3.5" />
-                          {t('signOut')}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsAccountMenuOpen(false);
-                            openLoginModal();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
-                        >
-                          <Key className="h-3.5 w-3.5" />
-                          {t('connect')}
-                        </button>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                <button
-                  type="button"
-                  onClick={() => setIsAccountMenuOpen((v) => !v)}
-                  className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white p-2.5 text-left transition-colors hover:bg-stone-50 hover:border-stone-300 focus-visible:ring-2 focus-visible:ring-stone-300 dark:border-stone-700 dark:bg-stone-800 dark:hover:bg-stone-700/80 dark:hover:border-stone-600 dark:focus-visible:ring-stone-600"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <div
-                      className={cn(
-                        'relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border bg-stone-100 text-stone-700',
-                        'border-stone-200 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200',
-                      )}
-                    >
-                      <Key className="h-3.5 w-3.5" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
-                        {accountDisplayName}
-                      </div>
-                      <div className="truncate text-[10px] text-stone-400">
-                        {isAccountBound ? t('accountConnectedHint') : t('connectAccountHint')}
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform', isAccountMenuOpen && 'rotate-180')} />
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      <ChatSidebar
+        open={isSidebarOpen}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        isSessionLoading={isSessionLoading}
+        skills={skills}
+        activeSkillIds={activeSkillIds}
+        autoReviewEnabled={activeAutoReview}
+        modelSupportsVision={Boolean(selectedSpec?.vision)}
+        isAccountBound={isAccountBound}
+        accountDisplayName={
+          isAccountBound
+            ? accountUsername || t('accountConnected')
+            : t('connectAccount')
+        }
+        canContinue={Boolean(
+          !isActiveLoading &&
+            lastMessage &&
+            lastMessage.role === 'assistant' &&
+            !isAssistantError(lastMessage),
+        )}
+        onCreateSession={createNewSession}
+        onSelectSession={(sessionId) => {
+          setActiveSessionId(sessionId);
+          setWebSourcesCleared(false);
+          setQuotedSelections([]);
+        }}
+        onRequestDeleteSession={(id, title) =>
+          setSessionPendingDelete({ id, title })
+        }
+        onExportSession={exportChat}
+        onInsertImageCommand={() => {
+          setInput('/image ');
+          textareaRef.current?.focus();
+        }}
+        onRequestClaimReview={() => {
+          void requestClaimReview();
+        }}
+        onContinueReply={() => {
+          void resumeIncompleteReply({ force: true });
+        }}
+        onOpenNewSkillModal={openNewSkillModal}
+        onToggleSkill={toggleSkill}
+        onRequestDeleteSkill={requestDeleteSkill}
+        onFetchSkills={fetchSkills}
+        onFetchIntegrations={() => {
+          void fetchIntegrations();
+        }}
+        onOpenNotionModal={openNotionModal}
+        onOpenGitHubModal={openGitHubModal}
+        onOpenGoogleModal={openGoogleModal}
+        onOpenLoginModal={openLoginModal}
+        onSetAutoReview={setActiveAutoReview}
+        onDisconnectAccount={disconnectAccount}
+      />
 
         {/* --- Main Area --- */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">

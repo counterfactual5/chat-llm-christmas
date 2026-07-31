@@ -37,3 +37,13 @@ export const BUILTIN_SKILLS: BuiltinSkill[] = [
 export function isSkillCreatorId(id: string): boolean {
   return String(id || '').trim() === SKILL_CREATOR_ID;
 }
+
+export function skillSlashName(title: string): string {
+  const slug = title
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\u4e00-\u9fff-]/g, '');
+  return slug.slice(0, 48) || 'skill';
+}
+

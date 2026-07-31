@@ -1230,12 +1230,23 @@ export async function POST(req: NextRequest) {
             looksLikeSearchRequest(userAsk);
 
           // Normally hand all tools to the model (tool_choice: auto).
-          // Exception: this same request just ran Image Understand (server-side).
-          // Chaining glm-4.7 tools+thinking right after a long vision call commonly
-          // yields an empty/hung stream — UI shows "Image Understand" then silence.
-          // Answer from the transcription first; follow-up turns still get full tools.
-          const activeToolDefs = didImageUnderstand ? [] : toolDefs;
-          if (activeToolDefs.length > 0 && modelNeedsThinkingForTools(requestedModel)) {
+          // After Image Understand on this same request: keep web_read/search/etc.
+          // so the model can still open links the user pasted. Only drop
+          // image_understand (pixels are already transcribed). Stripping ALL
+          // tools here caused empty replies on free text models (e.g. hy3-free)
+          // that wanted to fetch the page — Retry then worked because the
+          // client had persisted the transcription and tools were back on.
+          const activeToolDefs = didImageUnderstand
+            ? toolDefs.filter((t) => t?.function?.name !== 'image_understand')
+            : toolDefs;
+          if (didImageUnderstand) {
+            // Long vision then tools+thinking → empty/hung stream on some GLM
+            // routes. Keep tools, but skip thinking for this turn.
+            thinking = false;
+          } else if (
+            activeToolDefs.length > 0 &&
+            modelNeedsThinkingForTools(requestedModel)
+          ) {
             thinking = true;
           }
           // Never fold reasoning into content server-side. The client always
@@ -1640,6 +1651,7 @@ export async function POST(req: NextRequest) {
           const runFinalCompletion = async (opts: {
             enableThinking: boolean;
             foldReasoning: boolean;
+            messages?: any[];
           }) => {
             const finalStream = streamChatCompletionsRaw({
               apiKey,
@@ -1648,7 +1660,7 @@ export async function POST(req: NextRequest) {
               body: {
                 model: requestedModel,
                 temperature,
-                messages: sanitizeChatMessages(finalMessages),
+                messages: sanitizeChatMessages(opts.messages || finalMessages),
                 ...(opts.enableThinking ? { enable_thinking: true } : {}),
               },
             });
@@ -1769,6 +1781,31 @@ export async function POST(req: NextRequest) {
             finalResult = await runFinalCompletion({
               enableThinking: false,
               foldReasoning: false,
+            });
+          }
+
+          // After server-side Image Understand, a few free models still return an
+          // empty final stream even though the transcription is in context. Nudge
+          // once in-request so the user does not need a manual Retry.
+          if (!finalResult.sawText && didImageUnderstand) {
+            console.warn(
+              'empty final completion after image understand; nudging',
+              requestedModel,
+            );
+            finalResult = await runFinalCompletion({
+              enableThinking: false,
+              foldReasoning: false,
+              messages: [
+                ...workingMessages,
+                {
+                  role: 'user',
+                  content: [
+                    'The image has already been transcribed into the prior user message.',
+                    'Answer the user now using that transcription and any URLs they shared.',
+                    'Do not say you cannot see the image. Do not call tools.',
+                  ].join(' '),
+                },
+              ],
             });
           }
 

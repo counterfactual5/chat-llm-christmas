@@ -500,7 +500,10 @@ function collectWebSourcesFromMessages(messages: Message[]): WebSearchSource[] {
       // Image understand injects plain text into the prompt — never a Material source.
       if (
         run.name === 'image_understand' ||
-        run.provider === 'zhipu-vision'
+        run.provider === 'zhipu-vision' ||
+        run.provider === 'image-understand' ||
+        run.provider === 'glm-ocr' ||
+        run.provider === 'nemotron-omni'
       ) {
         continue;
       }
@@ -2489,7 +2492,11 @@ export default function ChatContainer() {
             );
           }
           const isImageUnderstand =
-            run.name === 'image_understand' || run.provider === 'zhipu-vision';
+            run.name === 'image_understand' ||
+            run.provider === 'zhipu-vision' ||
+            run.provider === 'image-understand' ||
+            run.provider === 'glm-ocr' ||
+            run.provider === 'nemotron-omni';
           if (isImageUnderstand) {
             const { body, imageCount } = injectionBodyFromToolResults(run.results || []);
             if (body) {
@@ -5945,7 +5952,10 @@ export default function ChatContainer() {
                             run.name === 'web_read' || run.name === 'web-read';
                           const isImageUnderstand =
                             run.name === 'image_understand' ||
-                            run.provider === 'zhipu-vision';
+                            run.provider === 'zhipu-vision' ||
+                            run.provider === 'image-understand' ||
+                            run.provider === 'glm-ocr' ||
+                            run.provider === 'nemotron-omni';
                           const isClaimReviewer =
                             run.provider === 'claim-reviewer';
                           if (isClaimReviewer) return null;

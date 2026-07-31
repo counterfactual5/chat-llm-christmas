@@ -739,6 +739,17 @@ function hasRetrievalReceipt(record: ExecutionRecordEntry[]): boolean {
   );
 }
 
+/** Freshness only follows live web lookup — not image understand / Notion / etc. */
+function hasWebSearchOrReadReceipt(record: ExecutionRecordEntry[]): boolean {
+  return record.some(
+    (e) =>
+      e.ok &&
+      /^(web_search|web_read|web-read|proactive_search|read_url)$/i.test(
+        String(e.tool || '').trim(),
+      ),
+  );
+}
+
 function collectSources(record: ExecutionRecordEntry[]): ExecutionSource[] {
   const out: ExecutionSource[] = [];
   const byKey = new Map<string, ExecutionSource>();
@@ -1907,12 +1918,20 @@ function yearsIn(text: string): number[] {
   return [...String(text || '').matchAll(/\b(19|20)\d{2}\b/g)].map((m) => Number(m[0]));
 }
 
-/** Time-sensitive assertions vs retrieval freshness. Null when nothing time-bound. */
+/**
+ * Time-sensitive assertions vs retrieval freshness.
+ * Only runs when this turn actually called web_search / web_read — otherwise
+ * present-tense words in image transcripts ("最新告警") false-trigger.
+ * Null when nothing to check.
+ */
 export function buildStalenessCheck(
   assistantText: string,
   record: ExecutionRecordEntry[],
   now: Date = new Date(),
 ): ReviewCheck | null {
+  // Freshness is a property of web retrieval, not of every answer that says「最新」.
+  if (!hasWebSearchOrReadReceipt(record)) return null;
+
   const text = stripCodeBlocks(assistantText);
   if (!text.trim()) return null;
 
@@ -1942,25 +1961,16 @@ export function buildStalenessCheck(
 
   if (!timeBoundSentences) return null;
 
-  const retrieval = hasRetrievalReceipt(record);
-  if (!retrieval) {
+  const sourceYears = collectSources(record).flatMap((s) =>
+    yearsIn([s.title, s.snippet].filter(Boolean).join(' ')),
+  );
+  const newest = sourceYears.length ? Math.max(...sourceYears) : null;
+  if (newest !== null && currentYear - newest >= 2) {
     items.push({
       severity: 'warn',
-      title: `${timeBoundSentences} time-sensitive claim(s) with no retrieval`,
-      detail: 'Nothing was searched this turn, so "current / latest" rests on training data.',
+      title: `Newest source is from ${newest}`,
+      detail: `Answer speaks about the present but sources stop at ${newest}.`,
     });
-  } else {
-    const sourceYears = collectSources(record).flatMap((s) =>
-      yearsIn([s.title, s.snippet].filter(Boolean).join(' ')),
-    );
-    const newest = sourceYears.length ? Math.max(...sourceYears) : null;
-    if (newest !== null && currentYear - newest >= 2) {
-      items.push({
-        severity: 'warn',
-        title: `Newest source is from ${newest}`,
-        detail: `Answer speaks about the present but sources stop at ${newest}.`,
-      });
-    }
   }
 
   return {
@@ -2531,7 +2541,7 @@ const LENS_INSTRUCTIONS: Record<ReviewLens, string> = {
   completeness:
     '- completeness: ONLY structural unfinished signals — token/stream cutoff, unclosed ``` fences, or collapsed garbage tails. Do NOT flag normal CTAs that ask the user what to do next.',
   staleness:
-    '- staleness: present-tense claims ("currently", "latest") that rest on nothing recent, or a stated cutoff older than the sources.',
+    '- staleness: only when this turn ran web_search/web_read — present-tense claims ("currently", "latest") whose sources look stale, or a stated cutoff older than the sources. Skip when there was no web retrieval (e.g. image transcription).',
   code_quality:
     '- code_quality: logic/API bugs in the proposed code that are NOT security issues (wrong bounds, missing await, wrong types, dead branches).',
 };

@@ -1135,13 +1135,13 @@ export async function POST(req: NextRequest) {
           );
         };
 
-        /** After review finds issues, ask the main model to revise the answer. */
+        /** After review finds issues, ask the main model for a short delta fix (not a full rewrite). */
         const streamReviewCorrection = async (
           issues: ReviewIssue[],
           priorText: string,
         ) => {
           if (!issues.length || clientSignal.aborted) return false;
-          send({ content: '\n\n---\n\n' });
+          send({ review_fix: { status: 'start' } });
           const correctionMessages = [
             { role: 'system', content: FINDINGS_RESPONSE_SYSTEM },
             {
@@ -1155,7 +1155,7 @@ export async function POST(req: NextRequest) {
             signal: clientSignal,
             body: {
               model: requestedModel,
-              temperature: 0.3,
+              temperature: 0.2,
               messages: sanitizeChatMessages(correctionMessages),
             },
           });
@@ -1174,16 +1174,17 @@ export async function POST(req: NextRequest) {
             }
             if (content) {
               saw = true;
-              send({ content });
+              send({ review_fix: { content } });
             }
           }
           if (!clientSignal.aborted) {
             const rest = stampStripper.flush();
             if (rest) {
               saw = true;
-              send({ content: rest });
+              send({ review_fix: { content: rest } });
             }
           }
+          send({ review_fix: { status: 'done' } });
           return saw;
         };
 

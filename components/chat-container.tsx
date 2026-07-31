@@ -367,6 +367,13 @@ interface Message {
       body?: string;
     }>;
   };
+  /**
+   * Short delta fix after Auto-review findings — rendered after the Review panel,
+   * never folded into the main answer content.
+   */
+  reviewFix?: string;
+  /** True while the post-review correction stream is in flight. */
+  reviewFixStreaming?: boolean;
 }
 
 type ExternalReferenceSourceKind =
@@ -668,6 +675,12 @@ function toApiMessages(
 
     // Rebuild tool_calls + tool receipts so follow-up turns can see what really ran.
     // claim_reviewer is UI-only and must not be replayed as an API tool.
+    // Post-review delta fixes stay out of the bubble body but join history as a note.
+    const fix = String(m.reviewFix || '').trim();
+    if (fix && m.role === 'assistant') {
+      content = `${String(content || '').trim()}\n\n[Correction]\n${fix}`.trim();
+    }
+
     if (m.role === 'assistant') {
       const runs = (m.toolRuns || []).filter(
         (r) => r?.name && r.name !== 'claim_reviewer' && r.status === 'done',
@@ -2158,6 +2171,7 @@ export default function ChatContainer() {
                   incomplete,
                   finishReason: meta?.finishReason ?? m.finishReason,
                   truncationReason: incomplete ? meta?.truncationReason : undefined,
+                  ...(!incomplete ? { reviewFixStreaming: false } : {}),
                 }
               : m,
           ),
@@ -2191,6 +2205,38 @@ export default function ChatContainer() {
             });
           }
           return { ...m, content: nextContent, activity, incomplete: true };
+        });
+        return { ...s, messages: msgs, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const appendToAssistantReviewFix = (
+    sessionId: string,
+    assistantId: string,
+    payload: { status?: 'start' | 'done'; content?: string },
+  ) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        if (!s.messages.some((m) => m.id === assistantId)) return s;
+        const msgs = s.messages.map((m) => {
+          if (m.id !== assistantId) return m;
+          if (payload.status === 'start') {
+            return { ...m, reviewFix: '', reviewFixStreaming: true, incomplete: true };
+          }
+          if (payload.status === 'done') {
+            return { ...m, reviewFixStreaming: false };
+          }
+          if (payload.content) {
+            return {
+              ...m,
+              reviewFix: String(m.reviewFix || '') + payload.content,
+              reviewFixStreaming: true,
+              incomplete: true,
+            };
+          }
+          return m;
         });
         return { ...s, messages: msgs, updatedAt: Date.now() };
       }),
@@ -2804,6 +2850,16 @@ export default function ChatContainer() {
             upsertReviewFindings(sessionId, parsed.reviewer_findings.targetMessageId || assistantId, {
               findings: parsed.reviewer_findings.findings,
               allowEmpty: true,
+            });
+          }
+          if (parsed.review_fix) {
+            const fix = parsed.review_fix as {
+              status?: 'start' | 'done';
+              content?: string;
+            };
+            appendToAssistantReviewFix(sessionId, assistantId, {
+              status: fix.status,
+              content: typeof fix.content === 'string' ? fix.content : undefined,
             });
           }
           if (parsed.tool) {
@@ -6649,6 +6705,26 @@ export default function ChatContainer() {
                                   ),
                                 )}
                                 {renderReviewPanel()}
+                                {(message.reviewFix || message.reviewFixStreaming) && (
+                                  <div className="mt-3 space-y-1.5 border-t border-stone-200/70 pt-3 dark:border-stone-800/80">
+                                    <div className="flex items-center gap-1.5 text-[12px] font-medium text-amber-800/90 dark:text-amber-200/90">
+                                      {message.reviewFixStreaming ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : null}
+                                      <span>{t('reviewCorrection')}</span>
+                                    </div>
+                                    {message.reviewFix ? (
+                                      renderAnswerMarkdown(
+                                        message.reviewFix,
+                                        Boolean(message.reviewFixStreaming),
+                                      )
+                                    ) : message.reviewFixStreaming ? (
+                                      <p className="text-[13px] text-stone-400 dark:text-stone-500">
+                                        …
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                )}
                                 {streamGapSpinner}
                               </>
                             )}

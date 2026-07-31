@@ -2563,7 +2563,7 @@ export function buildFindingsResponsePrompt(
     .join('\n');
 }
 
-/** Prompt covering every Review check issue (验算 / 引用 / 完整性 / …), not only tool receipts. */
+/** Prompt covering every Review check issue — delta fix only, never a full rewrite. */
 export function buildReviewIssuesResponsePrompt(
   issues: ReviewIssue[],
   assistantText?: string,
@@ -2571,7 +2571,7 @@ export function buildReviewIssuesResponsePrompt(
   if (!issues.length) {
     return [
       'Automatic review found no issues in the previous answer.',
-      'Reply briefly confirming the answer stands. Do not call tools.',
+      'Reply with a single short sentence confirming nothing needs changing. Do not call tools.',
     ].join(' ');
   }
   const list = issues
@@ -2580,28 +2580,34 @@ export function buildReviewIssuesResponsePrompt(
         `${i + 1}. [${issue.severity}/${issue.kind}] ${issue.title}\n   ${issue.detail}`,
     )
     .join('\n');
-  const excerpt = String(assistantText || '').trim().slice(0, 2400);
+  // Tiny excerpt only for locating the bad claim — not so the model can rewrite everything.
+  const excerpt = String(assistantText || '').trim().slice(0, 800);
   return [
-    'Automatic review finished and found issues in the previous answer.',
-    'Revise the answer to address each issue below.',
-    'Rules:',
-    '- Fix arithmetic, retract unsupported citations/claims, fill gaps, or correct unsafe/buggy code as needed.',
-    '- Prefer a corrected final answer over a meta commentary about the review.',
+    'Automatic review found issues in the previous answer (already shown to the user).',
+    'Write a SHORT correction note only — the user still sees the original answer above.',
+    '',
+    'Hard rules:',
+    '- Do NOT repeat or rewrite the full prior answer.',
+    '- Do NOT restate sections that were already correct.',
+    '- Only fix / retract / replace the parts named in the issues below.',
+    '- Prefer a few bullets or one short paragraph (usually under 120 words).',
+    '- For bad citations: remove or replace that link; do not paste the whole article again.',
+    '- For arithmetic: state the corrected equation/number only.',
     '- Do not invent tool actions, URLs, or receipts that were never returned.',
-    '- Do not call tools in this correction turn.',
+    '- Do not call tools.',
     '',
     '## Review issues',
     list,
-    excerpt ? `\n## Prior answer excerpt\n${excerpt}` : '',
+    excerpt ? `\n## Prior answer excerpt (context only — do not reprint)\n${excerpt}` : '',
   ]
     .filter(Boolean)
     .join('\n');
 }
 
 export const FINDINGS_RESPONSE_SYSTEM = [
-  'You are responding to an automatic review report on your previous answer.',
-  'Produce a corrected reply that fixes the listed issues.',
-  'Be concise and honest. Prefer retracting or fixing over defending unsupported claims.',
+  'You write a brief correction note after an automatic review.',
+  'Output ONLY the delta that fixes the listed issues — never a full restatement of the prior answer.',
+  'Be concise and honest. Prefer retracting or patching over defending unsupported claims.',
   'Do not call tools. Do not invent URLs or tool payloads.',
 ].join(' ');
 

@@ -183,10 +183,15 @@ export function looksLikeTruncatedMath(text: string): boolean {
  * Also: `**更正引用：**文中` fails because a closing `**` preceded by punctuation
  * must be followed by whitespace/punctuation — move the trailing punct out:
  * `**更正引用：**文` → `**更正引用**：文`.
+ *
+ * Also: `约**$2,160**` fails — `$` is punctuation, so `**` after a letter is not
+ * left-flanking. Move the currency symbol out: `约$**2,160**`.
  */
 export function fixFlankingEmphasis(content: string): string {
   let out = String(content || '');
   out = out.replace(/\*\*([“「『"'])([\s\S]*?)([”」』"'])\*\*/g, '$1**$2**$3');
+  // `**$2,160**` / `**€99**` after CJK/Latin letters — pull currency before opener.
+  out = out.replace(/\*\*([￥$€£¥]+)(?=\d)/g, '$1**');
   // Trailing punct inside **…** that blocks the closer when the next char is prose.
   out = out.replace(
     /\*\*((?:(?!\*\*).)+?)([：:。.，,、！!？?；;])\*\*(?=\S)/g,
@@ -216,8 +221,9 @@ export function escapeCurrencyDollars(content: string): string {
 export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
   let out = normalizeMathDelimiters(String(content || ''));
   out = liftQuotedMathBlocks(out);
-  out = escapeCurrencyDollars(out);
+  // Flanking first (while `$` is still raw), then escape currency for remark-math.
   out = fixFlankingEmphasis(out);
+  out = escapeCurrencyDollars(out);
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
   // rest of the message into one giant math/“quote-looking” block (even after

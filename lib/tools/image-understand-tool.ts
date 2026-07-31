@@ -110,7 +110,7 @@ export function createImageUnderstandTool(): ChatTool {
           status: 'start',
           name: 'image_understand',
           query,
-          provider: 'zhipu-vision',
+          provider: 'image-understand',
         },
       });
 
@@ -125,7 +125,7 @@ export function createImageUnderstandTool(): ChatTool {
             status: 'done',
             name: 'image_understand',
             query,
-            provider: 'zhipu-vision',
+            provider: result.provider || 'image-understand',
             results: result.ok
               ? [
                   {
@@ -146,7 +146,7 @@ export function createImageUnderstandTool(): ChatTool {
             status: 'done',
             name: 'image_understand',
             query,
-            provider: 'zhipu-vision',
+            provider: 'image-understand',
             results: [],
             error: message,
           },

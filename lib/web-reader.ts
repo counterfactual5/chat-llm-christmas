@@ -980,6 +980,7 @@ export async function webRead(urlInput: string): Promise<WebReadOutcome> {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err || 'failed');
       errors.push(`${provider.name}: ${message}`);
+      console.warn(`[web_read] ${provider.name} failed, trying next:`, message);
     }
   }
 

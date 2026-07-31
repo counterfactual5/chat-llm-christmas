@@ -41,11 +41,20 @@ export function zhipuMcpEnabled(): boolean {
 function parseMaybeJson(text: string): unknown {
   const raw = String(text || '').trim();
   if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
+  // Zhipu MCP often returns a JSON-encoded string that itself contains JSON
+  // (double-encoded array/object). Unwrap up to twice.
+  let cur: unknown = raw;
+  for (let i = 0; i < 2; i++) {
+    if (typeof cur !== 'string') return cur;
+    const s = cur.trim();
+    if (!s || (s[0] !== '{' && s[0] !== '[' && s[0] !== '"')) return cur;
+    try {
+      cur = JSON.parse(s);
+    } catch {
+      return i === 0 ? raw : cur;
+    }
   }
+  return cur;
 }
 
 function createZhipuMcpClient(serverUrl: string): McpHttpClient {
@@ -135,8 +144,12 @@ export async function zhipuMcpWebSearch(query: string): Promise<ZhipuMcpSearchHi
     });
   }
 
-  // Some MCP responses return a prose dump — treat as a single synthetic hit.
+  // Some MCP responses return a prose dump — only then treat as failure text.
   if (!hits.length && typeof parsed === 'string' && parsed.trim()) {
+    // Still looks like JSON we failed to unwrap — don't throw the raw blob as "error".
+    if (/^\s*[\[{]/.test(parsed)) {
+      throw new Error(`Zhipu MCP ${toolName} returned unparseable JSON results`);
+    }
     throw new Error(parsed.slice(0, 300));
   }
   if (!hits.length) throw new Error(`Zhipu MCP ${toolName} returned no results`);

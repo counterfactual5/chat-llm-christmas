@@ -1,17 +1,26 @@
 /**
- * Image understanding via GLM-4.6V through CPA gateway.
+ * Image → text preprocessor for text-only chat models.
  *
- * Vision model runs with a system prompt (enough detail for the text model, aligned with the
- * user's chat message). Multiple images in the same turn are sent in one request when possible.
- * The text-only chat model receives that transcription instead of pixels.
+ * Fallback order (correct product logic):
+ *   1) Understand stage — VLMs that describe scene/UI/intent (glm-4.6v, optional nano-omni)
+ *   2) OCR stage — text-extraction only (glm-ocr layout_parsing, then VLM OCR prompt as last resort)
+ *
+ * Never start with OCR-only backends; those cannot answer “what is happening in this screenshot”.
  */
 
 import OpenAI from 'openai';
 import { toImageContentPart } from '@/lib/gateway-files';
+import { zhipuApiKey } from '@/lib/zhipu-mcp';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';
+/** Optional second understand backend on the CPA gateway (multimodal). */
+export const IMAGE_UNDERSTAND_FALLBACK_MODEL = 'nemotron-3-nano-omni-free';
+export const IMAGE_OCR_MODEL = 'glm-ocr';
 const UNDERSTAND_TIMEOUT_MS = 45_000;
 const BATCH_TIMEOUT_CAP_MS = 90_000;
+const OCR_TIMEOUT_MS = 60_000;
+const ZHIPU_LAYOUT_PARSING_URL =
+  'https://open.bigmodel.cn/api/paas/v4/layout_parsing';
 
 export interface ImageUnderstandInput {
   /** Image URL (https / data URI) or gateway file id. */
@@ -30,6 +39,8 @@ export interface ImageUnderstandResult {
   /** Plain-text description for the text-only chat model. */
   text: string;
   mode: 'understand' | 'ocr' | 'error';
+  /** Which backend produced the text (for Process / debugging). */
+  provider?: string;
 }
 
 function toVisionImagePart(imageUrl: string): Record<string, unknown> | null {
@@ -98,6 +109,7 @@ function batchTimeoutMs(imageCount: number): number {
 
 async function callVision(
   client: OpenAI,
+  model: string,
   imageParts: Record<string, unknown>[],
   system: string,
   timeoutMs: number,
@@ -110,7 +122,7 @@ async function callVision(
 
   const res = await withTimeout(
     client.chat.completions.create({
-      model: IMAGE_UNDERSTAND_MODEL,
+      model,
       messages: [
         { role: 'system', content: system },
         {
@@ -122,6 +134,112 @@ async function callVision(
     timeoutMs,
   );
   return String(res.choices?.[0]?.message?.content || '').trim();
+}
+
+/** Resolve image ref to a URL or raw base64 string for Zhipu layout_parsing. */
+async function resolveFileForLayoutParsing(
+  imageUrl: string,
+  gateway: { apiKey: string; baseURL: string },
+): Promise<string> {
+  const raw = String(imageUrl || '').trim();
+  if (!raw) throw new Error('Empty image URL');
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('data:')) {
+    const m = raw.match(/^data:[^;]+;base64,(.+)$/i);
+    if (!m?.[1]) throw new Error('Invalid data URL for OCR');
+    return m[1];
+  }
+
+  let fileId = raw;
+  if (raw.startsWith('/api/files/')) {
+    fileId = decodeURIComponent(
+      raw.slice('/api/files/'.length).split(/[?#]/)[0] || '',
+    );
+  }
+  if (!fileId) throw new Error('Missing gateway file id for OCR');
+
+  const base = gateway.baseURL.replace(/\/$/, '');
+  const res = await fetch(`${base}/files/${encodeURIComponent(fileId)}/content`, {
+    headers: { Authorization: `Bearer ${gateway.apiKey}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Gateway file fetch for OCR failed: HTTP ${res.status}`);
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < buf.length; i += chunk) {
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function layoutParsingText(data: Record<string, unknown>): string {
+  const md = String(data.md_results || '').trim();
+  if (md) return md;
+
+  const details = data.layout_details;
+  if (!Array.isArray(details)) return '';
+  const lines: string[] = [];
+  for (const page of details) {
+    if (!Array.isArray(page)) continue;
+    for (const el of page) {
+      if (!el || typeof el !== 'object') continue;
+      const row = el as { label?: string; content?: string };
+      const content = String(row.content || '').trim();
+      if (!content) continue;
+      if (row.label === 'image') continue;
+      lines.push(content);
+    }
+  }
+  return lines.join('\n').trim();
+}
+
+/** Dedicated OCR via Zhipu GLM-OCR (layout_parsing). Text extraction only. */
+async function callGlmOcr(
+  imageUrl: string,
+  gateway: { apiKey: string; baseURL: string },
+): Promise<string> {
+  const key = zhipuApiKey();
+  if (!key) throw new Error('ZHIPU_API_KEY missing for glm-ocr');
+
+  const file = await resolveFileForLayoutParsing(imageUrl, gateway);
+  const res = await withTimeout(
+    fetch(ZHIPU_LAYOUT_PARSING_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: IMAGE_OCR_MODEL, file }),
+    }),
+    OCR_TIMEOUT_MS,
+  );
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = data.error as { message?: string } | undefined;
+    throw new Error(
+      err?.message ||
+        String(data.message || data.msg || `glm-ocr HTTP ${res.status}`),
+    );
+  }
+  const text = layoutParsingText(data);
+  if (!text) throw new Error('glm-ocr returned empty text');
+  return text;
+}
+
+type UnderstandBackend = {
+  id: string;
+  model: string;
+};
+
+/** Stage 1: scene/UI understanding (not OCR-only). */
+function understandBackends(): UnderstandBackend[] {
+  return [
+    { id: 'zhipu-vision', model: IMAGE_UNDERSTAND_MODEL },
+    // Second VLM on the same gateway when the primary understand call fails.
+    { id: 'nemotron-omni', model: IMAGE_UNDERSTAND_FALLBACK_MODEL },
+  ];
 }
 
 /**
@@ -155,7 +273,7 @@ export function splitBatchImageTexts(
 }
 
 /**
- * Call GLM-4.6V with system prompt + one or more images.
+ * Call vision backends: understand first, OCR only after understand fails.
  */
 export async function understandImages(
   imageUrls: string[],
@@ -193,44 +311,122 @@ export async function understandImages(
 
   const system = buildImageUnderstandSystemPrompt(userPrompt, urls.length);
   const timeoutMs = batchTimeoutMs(urls.length);
+  const errors: string[] = [];
 
-  try {
-    const text = await callVision(client, imageParts, system, timeoutMs);
-    if (text) {
-      const texts = splitBatchImageTexts(text, urls.length);
-      return { ok: true, text, texts, mode: 'understand' };
+  // —— Stage 1: understand (scene / UI / answer the user's question) ——
+  for (const backend of understandBackends()) {
+    try {
+      const text = await callVision(
+        client,
+        backend.model,
+        imageParts,
+        system,
+        timeoutMs,
+      );
+      if (text) {
+        const texts = splitBatchImageTexts(text, urls.length);
+        return {
+          ok: true,
+          text,
+          texts,
+          mode: 'understand',
+          provider: backend.id,
+        };
+      }
+      errors.push(`${backend.id}: empty`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${backend.id}: ${message}`);
+      console.warn(
+        `[image-understand] understand backend ${backend.id} failed, trying next:`,
+        message,
+      );
     }
-  } catch (err) {
-    console.warn('image-understand: vision call failed, trying OCR fallback', err);
   }
 
+  // —— Stage 2: OCR-only (after understand exhausted) ——
+  // 2a) Dedicated glm-ocr (layout_parsing) — true text extraction.
+  if (zhipuApiKey()) {
+    try {
+      const texts: string[] = [];
+      for (const url of urls) {
+        texts.push(await callGlmOcr(url, gateway));
+      }
+      const text =
+        texts.length > 1
+          ? texts.map((t, i) => `【图${i + 1}】\n${t}`).join('\n\n')
+          : texts[0] || '';
+      if (text.trim()) {
+        return {
+          ok: true,
+          text,
+          texts,
+          mode: 'ocr',
+          provider: 'glm-ocr',
+        };
+      }
+      errors.push('glm-ocr: empty');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`glm-ocr: ${message}`);
+      console.warn(
+        '[image-understand] glm-ocr failed, trying VLM OCR prompt:',
+        message,
+      );
+    }
+  }
+
+  // 2b) Last resort: same VLM with OCR-only system prompt (still after understand).
   try {
-    const text = await callVision(client, imageParts, OCR_RETRY_SYSTEM, timeoutMs);
+    const text = await callVision(
+      client,
+      IMAGE_UNDERSTAND_MODEL,
+      imageParts,
+      OCR_RETRY_SYSTEM,
+      timeoutMs,
+    );
     if (text) {
       const texts = splitBatchImageTexts(text, urls.length);
-      return { ok: true, text, texts, mode: 'ocr' };
+      return {
+        ok: true,
+        text,
+        texts,
+        mode: 'ocr',
+        provider: 'zhipu-vision-ocr-prompt',
+      };
     }
+    errors.push('zhipu-vision-ocr-prompt: empty');
   } catch (err) {
-    console.warn('image-understand: OCR fallback also failed', err);
+    const message = err instanceof Error ? err.message : String(err);
+    errors.push(`zhipu-vision-ocr-prompt: ${message}`);
+    console.warn('[image-understand] OCR prompt fallback also failed', message);
   }
 
   // Batch failed — fall back to one-by-one so partial success is still useful.
   if (urls.length > 1) {
     const texts: string[] = [];
     let anyOk = false;
+    let mode: ImageUnderstandResult['mode'] = 'error';
+    let provider: string | undefined;
     for (const url of urls) {
       const one = await understandImage({ imageUrl: url, userPrompt }, gateway);
       texts.push(one.text);
-      if (one.ok) anyOk = true;
+      if (one.ok) {
+        anyOk = true;
+        mode = one.mode;
+        provider = one.provider || provider;
+      }
     }
     return {
       ok: anyOk,
       text: texts.map((t, i) => `【图${i + 1}】\n${t}`).join('\n\n'),
       texts,
-      mode: anyOk ? 'understand' : 'error',
+      mode: anyOk ? mode : 'error',
+      provider,
     };
   }
 
+  console.warn('[image-understand] all backends failed:', errors.join(' | '));
   return {
     ok: false,
     text: 'Failed to understand the image. Please try a vision-capable model for best results.',
@@ -253,7 +449,7 @@ export async function understandImage(
     input.userPrompt || input.instruction || '',
     gateway,
   );
-  return { ok: result.ok, text: result.text, mode: result.mode };
+  return { ok: result.ok, text: result.text, mode: result.mode, provider: result.provider };
 }
 
 function textPartsFromMessageContent(parts: any[]): string {
@@ -576,7 +772,7 @@ export async function rewriteMessagesWithImageDescriptions(
         status: 'start',
         name: 'image_understand',
         query,
-        provider: 'zhipu-vision',
+        provider: 'image-understand',
         targetTimestamp:
           typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
       },
@@ -594,7 +790,7 @@ export async function rewriteMessagesWithImageDescriptions(
         status: 'done',
         name: 'image_understand',
         query,
-        provider: 'zhipu-vision',
+        provider: batch.provider || 'image-understand',
         targetTimestamp:
           typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
         results: batch.ok

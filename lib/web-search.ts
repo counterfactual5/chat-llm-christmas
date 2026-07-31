@@ -410,8 +410,11 @@ export async function webSearch(
         return { provider: provider.name, query: q, results };
       }
       errors.push(`${provider.name}: empty`);
+      console.warn(`[web_search] ${provider.name} returned empty, trying next`);
     } catch (err: any) {
-      errors.push(`${provider.name}: ${err?.message || String(err)}`);
+      const message = err?.message || String(err);
+      errors.push(`${provider.name}: ${message}`);
+      console.warn(`[web_search] ${provider.name} failed, trying next:`, message);
     }
   }
 

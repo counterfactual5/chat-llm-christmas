@@ -879,6 +879,7 @@ function clauseAfter(text: string, end: number, lookahead = 160): string {
 /**
  * Extract citation anchors: markdown links + bare URLs, each with a short claim
  * window (the sentence / clause that the link is backing).
+ * Markdown images `![alt](url)` are illustrations, not citations — skipped.
  */
 export function extractCitationAnchors(assistantText: string): CitationAnchor[] {
   const text = stripCodeBlocks(assistantText);
@@ -886,6 +887,8 @@ export function extractCitationAnchors(assistantText: string): CitationAnchor[] 
 
   const anchors: CitationAnchor[] = [];
   const seen = new Set<string>();
+  // Image targets are not citations, but must still be excluded from bare-URL pickup.
+  const covered = new Set<string>();
 
   const push = (url: string, claim: string) => {
     const host = hostOf(url);
@@ -897,20 +900,26 @@ export function extractCitationAnchors(assistantText: string): CitationAnchor[] 
   };
 
   // Markdown links: [label](url) — claim = surrounding clause (before + after) + label.
+  // Skip `![alt](url)` images (the `!` sits immediately before `[`).
   const mdLinkRe = /\[([^\]]{1,120})\]\((https?:\/\/[^)\s]+)\)/g;
   for (const match of text.matchAll(mdLinkRe)) {
     const label = match[1].trim();
     const url = match[2];
     const idx = match.index ?? 0;
+    if (idx > 0 && text[idx - 1] === '!') {
+      covered.add(normalizeUrl(url));
+      continue;
+    }
     const end = idx + match[0].length;
     const claim = [clauseBefore(text, idx), label, clauseAfter(text, end)]
       .filter(Boolean)
       .join(' — ');
     push(url, claim || label || url);
+    covered.add(normalizeUrl(url));
   }
 
-  // Bare URLs not already covered as markdown targets.
-  const covered = new Set(anchors.map((a) => normalizeUrl(a.url)));
+  // Bare URLs not already covered as markdown link/image targets.
+  for (const a of anchors) covered.add(normalizeUrl(a.url));
   for (const match of text.matchAll(URL_RE)) {
     const url = trimUrlTail(match[0]);
     if (covered.has(normalizeUrl(url))) continue;
@@ -1328,6 +1337,13 @@ function verifyInlineEquations(text: string): {
 const TOTAL_ROW_RE =
   /^\s*\**\s*(?:合计|总计|小计|总和|汇总|(?:total|totals|sum|subtotal)\b)/i;
 
+/**
+ * Labels that look like totals but are averages / weighted figures — summing
+ * the column would false-positive (e.g. 「合计(均价)」).
+ */
+const NON_SUM_TOTAL_RE =
+  /均价|均值|平均|加权|avg\b|average|mean|weighted|median|中位/i;
+
 function splitTableRow(line: string): string[] {
   return line
     .trim()
@@ -1373,7 +1389,10 @@ function verifyTableTotals(text: string): {
       j++;
     }
 
-    const totalRows = body.filter((row) => TOTAL_ROW_RE.test(row[0] || ''));
+    const totalRows = body.filter((row) => {
+      const label = row[0] || '';
+      return TOTAL_ROW_RE.test(label) && !NON_SUM_TOTAL_RE.test(label);
+    });
     const dataRows = body.filter((row) => !TOTAL_ROW_RE.test(row[0] || ''));
 
     if (totalRows.length && dataRows.length >= 2) {
@@ -1480,6 +1499,27 @@ type VulnRule = {
 const PLACEHOLDER_RE =
   /your[_-]?|placeholder|example|sample|changeme|change[_-]?me|dummy|redacted|\bfake\b|xxx+|\.{3,}|\*{3,}|<[^>]{1,40}>|\$\{|process\.env|os\.environ|secrets?\./i;
 
+/**
+ * "Here's the WRONG way to do it" teaching callouts (common in security
+ * explainers / code review answers). Pattern-smell rules (injection, weak
+ * hash, hardcoded-credential, …) should not fire when the surrounding text
+ * is explicitly presenting the snippet as a bad example — only the specific,
+ * hard-format secret leaks (aws-key/openai-key/…) skip this exemption, since
+ * a real key pasted under an "example" label is still a real leak.
+ */
+const NEGATIVE_EXAMPLE_RE =
+  /反例|错误(?:示例|写法|做法)|不(?:要|安全)(?:这样|的)|不推荐|bad\s*example|bad\s*practice|anti-?pattern|insecure\s*(?:example|code)|wrong\s*way|do\s*not\s*do\s*this|❌/i;
+
+/** These are unambiguous secret formats — a "示例/example" caption doesn't make a real key safe. */
+const HARD_LEAK_RULE_IDS = new Set([
+  'aws-key',
+  'openai-key',
+  'github-pat',
+  'google-key',
+  'slack-token',
+  'private-key',
+]);
+
 /** Graded rule set: secrets anywhere, injection / sink patterns inside code only. */
 const VULN_RULES: VulnRule[] = [
   {
@@ -1516,6 +1556,7 @@ const VULN_RULES: VulnRule[] = [
     detail: 'Restrict and rotate the key; keep it server-side.',
     severity: 'error',
     scope: 'both',
+    skipPlaceholders: true,
   },
   {
     id: 'slack-token',
@@ -1524,6 +1565,7 @@ const VULN_RULES: VulnRule[] = [
     detail: 'Revoke immediately — Slack tokens grant workspace access.',
     severity: 'error',
     scope: 'both',
+    skipPlaceholders: true,
   },
   {
     id: 'private-key',
@@ -1663,6 +1705,16 @@ export function buildVulnerabilityCheck(assistantText: string): ReviewCheck | nu
     const hit = haystack.match(rule.re);
     if (!hit) continue;
     if (rule.skipPlaceholders && PLACEHOLDER_RE.test(hit[0])) continue;
+    if (!HARD_LEAK_RULE_IDS.has(rule.id)) {
+      // For code-scoped rules the "反例" caption usually sits in the prose
+      // around the fence, not inside the extracted code itself — check the
+      // full original text near where this snippet actually appears.
+      const idx = rule.scope === 'code' ? text.indexOf(hit[0]) : hit.index ?? 0;
+      if (idx >= 0) {
+        const window = text.slice(Math.max(0, idx - 100), idx + hit[0].length + 100);
+        if (NEGATIVE_EXAMPLE_RE.test(window)) continue;
+      }
+    }
     items.push({ severity: rule.severity, title: rule.title, detail: rule.detail });
     if (items.length >= 12) break;
   }
@@ -1718,10 +1770,16 @@ type CodeQualityRule = {
   langs?: CodeLang[];
 };
 
+// Scoped to loop headers only — a bare `index <= arr.length` in an ordinary
+// boundary check (e.g. "is this a valid insert position?") is correct, not a
+// bug. Off-by-one is specifically about walking one step past the last index.
+const OFF_BY_ONE_RE =
+  /\bfor\s*\([^{)]*?<=\s*(?:\w+(?:\.\w+)*\.length\b|len\s*\([^)]*\))[^{)]*?\)|\bwhile\s*\([^{)]*?<=\s*(?:\w+(?:\.\w+)*\.length\b|len\s*\([^)]*\))[^{)]*?\)|\bwhile\s+[^:\n]*?<=\s*len\s*\([^)]*\)[^:\n]*:/;
+
 const CODE_QUALITY_RULES: CodeQualityRule[] = [
   {
     id: 'off-by-one',
-    re: /(?:<=\s*\w+(?:\.\w+)*\.length\b|<=\s*len\s*\([^)]*\))/,
+    re: OFF_BY_ONE_RE,
     title: 'Off-by-one loop bound',
     detail: '`<= length` runs one iteration past the last index — use `<`.',
     severity: 'error',
@@ -1733,14 +1791,6 @@ const CODE_QUALITY_RULES: CodeQualityRule[] = [
     detail: 'Python evaluates defaults once — use `None` and build inside the function.',
     severity: 'error',
     langs: ['py'],
-  },
-  {
-    id: 'loose-equality',
-    re: /(?<![=!<>])==(?!=)|(?<!!)!=(?!=)/,
-    title: 'Loose equality (== / !=)',
-    detail: 'Type coercion causes surprises — prefer `===` / `!==`.',
-    severity: 'warn',
-    langs: ['js'],
   },
   {
     id: 'empty-catch',
@@ -1774,14 +1824,6 @@ const CODE_QUALITY_RULES: CodeQualityRule[] = [
     severity: 'warn',
   },
   {
-    id: 'state-mutation',
-    re: /\b(?:state|props)(?:\.\w+)+\s*=(?!=)|\b(?:state|props)\[[^\]]+\]\s*=(?!=)/,
-    title: 'Direct state/props mutation',
-    detail: 'React state must be replaced, not mutated, or renders are skipped.',
-    severity: 'warn',
-    langs: ['js'],
-  },
-  {
     id: 'unawaited-promise',
     re: /^\s*(?!return|await|void|yield)(?:\w+\.)*\w+\([^)]*\)\.then\s*\([^)]*\)\s*;?\s*$/m,
     title: 'Floating promise',
@@ -1790,6 +1832,37 @@ const CODE_QUALITY_RULES: CodeQualityRule[] = [
     langs: ['js'],
   },
 ];
+
+const LOOSE_EQ_RE = /(?<![=!<>])(==|!=)(?!=)/g;
+
+/**
+ * `x == null` / `x != undefined` is a deliberate, widely-endorsed idiom that
+ * catches both null and undefined in one check — not a coercion bug. Only
+ * flag loose equality that isn't a null/undefined guard.
+ */
+function hasNonNullLooseEquality(code: string): boolean {
+  for (const match of code.matchAll(LOOSE_EQ_RE)) {
+    const idx = match.index ?? 0;
+    const before = code.slice(Math.max(0, idx - 16), idx);
+    const after = code.slice(idx + match[0].length, idx + match[0].length + 16);
+    const isNullGuard =
+      /(?:\bnull|\bundefined)\s*$/.test(before) || /^\s*(?:null\b|undefined\b)/.test(after);
+    if (!isNullGuard) return true;
+  }
+  return false;
+}
+
+// Bare `state.x =` / `props.x =` is only a React bug inside React code — the
+// same names are ordinary variables in state machines, reducers, game loops,
+// etc. Require an actual React signal in the same block before flagging.
+const REACT_CONTEXT_RE =
+  /\buseState\b|\buseReducer\b|\bthis\.(?:state|props)\b|\bReact\.(?:Component|PureComponent)\b|\bextends\s+(?:React\.)?(?:Pure)?Component\b|<[A-Z]\w*[\s/>]|\breturn\s*\(?\s*<[a-zA-Z]/;
+const STATE_PROPS_MUTATION_RE =
+  /\b(?:state|props)(?:\.\w+)+\s*=(?!=)|\b(?:state|props)\[[^\]]+\]\s*=(?!=)/;
+
+function hasReactStateMutation(code: string): boolean {
+  return REACT_CONTEXT_RE.test(code) && STATE_PROPS_MUTATION_RE.test(code);
+}
 
 /** `.map(...)` returning JSX without a `key` prop. */
 function hasMissingReactKey(code: string): boolean {
@@ -1826,6 +1899,22 @@ export function buildCodeQualityCheck(assistantText: string): ReviewCheck | null
         id: 'missing-react-key',
         title: 'List render without `key`',
         detail: 'React needs a stable `key` on mapped elements to reconcile correctly.',
+        severity: 'warn',
+      });
+    }
+    if (lang === 'js' && hasNonNullLooseEquality(block.code)) {
+      add({
+        id: 'loose-equality',
+        title: 'Loose equality (== / !=)',
+        detail: 'Type coercion causes surprises — prefer `===` / `!==`.',
+        severity: 'warn',
+      });
+    }
+    if (lang === 'js' && hasReactStateMutation(block.code)) {
+      add({
+        id: 'state-mutation',
+        title: 'Direct state/props mutation',
+        detail: 'React state must be replaced, not mutated, or renders are skipped.',
         severity: 'warn',
       });
     }

@@ -94,6 +94,13 @@ export async function POST(req: NextRequest) {
 
     let fileId: string | null = null;
     let image = '';
+    let uploadWarning: string | null = null;
+
+    // Prefer a chat/vision routing model for Files — image-gen model names are
+    // often not registered on the files channel. Query param is required because
+    // NewAPI ignores multipart `model` on POST /v1/files.
+    const filesModel =
+      String(process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() || 'gpt-4o';
 
     try {
       if (b64) {
@@ -102,7 +109,7 @@ export async function POST(req: NextRequest) {
           baseURL,
           b64,
           filename: `gen-${Date.now()}.png`,
-          model,
+          model: filesModel,
         });
         fileId = uploaded.id;
         image = `/api/files/${encodeURIComponent(uploaded.id)}`;
@@ -118,24 +125,32 @@ export async function POST(req: NextRequest) {
           bytes,
           filename: `gen-${Date.now()}.png`,
           mime: fetched.headers.get('content-type') || 'image/png',
-          model,
+          model: filesModel,
         });
         fileId = uploaded.id;
         image = `/api/files/${encodeURIComponent(uploaded.id)}`;
       }
     } catch (uploadErr) {
       console.error('images file upload failed:', uploadErr);
-      // Do not fall back to multi-MB data: URIs in the JSON body — that often
-      // blows Edge/proxy limits and surfaces as a plain-text platform error.
       const { detail } = upstreamErrorMessage(uploadErr);
-      return jsonError(
-        `Image was generated but saving to Files API failed: ${detail}`,
-        502,
-      );
+      // This route is nodejs (not Edge). Inline data keeps the image visible when
+      // the gateway Files API cannot select a channel (common NewAPI /files bug).
+      if (b64) {
+        image = `data:image/png;base64,${b64}`;
+        uploadWarning = `Files API unavailable (${detail}); showing inline image.`;
+      } else if (remoteUrl) {
+        image = String(remoteUrl);
+        uploadWarning = `Files API unavailable (${detail}); using upstream URL.`;
+      } else {
+        return jsonError(
+          `Image was generated but saving to Files API failed: ${detail}`,
+          502,
+        );
+      }
     }
 
-    if (!image || !fileId) {
-      return jsonError('Image was generated but no file id was saved.', 502);
+    if (!image) {
+      return jsonError('Image was generated but no displayable result was produced.', 502);
     }
 
     return new Response(
@@ -145,6 +160,7 @@ export async function POST(req: NextRequest) {
         fileId,
         model,
         revised_prompt: item?.revised_prompt || null,
+        ...(uploadWarning ? { warning: uploadWarning } : {}),
       }),
       {
         status: 200,

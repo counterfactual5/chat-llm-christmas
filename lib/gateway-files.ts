@@ -24,12 +24,20 @@ function parseDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } | nu
   return { mime, bytes };
 }
 
+function resolveUploadModel(explicit?: string): string {
+  return (
+    String(explicit || process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() || 'gpt-4o'
+  );
+}
+
 /**
  * Upload bytes to the gateway Files API. Returns a reusable file id.
  * Prefer purpose `vision` for images; fall back to `assistants` if rejected.
  *
- * llm.christmas / NewAPI-style gateways require a non-empty `model` on upload
- * (billing / routing), even though upstream OpenAI Files API does not.
+ * NewAPI's distributor skips reading `model` from multipart bodies on `/v1/files`
+ * (it only parses JSON / non-multipart). The empty model then fails with
+ * "Model name not specified…". Pass `model` as a query param (and still in the
+ * form for forks that do read PostForm).
  */
 export async function uploadGatewayFile(opts: {
   apiKey: string;
@@ -42,9 +50,7 @@ export async function uploadGatewayFile(opts: {
   model?: string;
 }): Promise<GatewayFileRef> {
   const baseURL = (opts.baseURL || gatewayBaseURL()).replace(/\/$/, '');
-  const model =
-    String(opts.model || process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() ||
-    'gpt-4o';
+  const model = resolveUploadModel(opts.model);
   const purposes = opts.purpose
     ? [opts.purpose]
     : opts.mime?.startsWith('image/')
@@ -64,9 +70,16 @@ export async function uploadGatewayFile(opts: {
     form.append('purpose', purpose);
     form.append('model', model);
 
-    const res = await fetch(`${baseURL}/files`, {
+    // Query param is what NewAPI-compatible distributors can see when the body
+    // is multipart (form fields are ignored for channel selection on /files).
+    const url = `${baseURL}/files?model=${encodeURIComponent(model)}`;
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${opts.apiKey}` },
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        // Some forks also accept an explicit routing header.
+        'X-Model': model,
+      },
       body: form,
     });
     const data = await res.json().catch(() => ({}));

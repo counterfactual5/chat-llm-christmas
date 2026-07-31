@@ -159,6 +159,32 @@ function batchTimeoutMs(imageCount: number): number {
   );
 }
 
+function visionMessageText(message: unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const m = message as Record<string, unknown>;
+  const content = m.content;
+  if (typeof content === 'string' && content.trim()) return content.trim();
+  if (Array.isArray(content)) {
+    const joined = content
+      .map((part) => {
+        if (!part || typeof part !== 'object') return '';
+        const p = part as Record<string, unknown>;
+        return String(p.text || p.content || '').trim();
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    if (joined) return joined;
+  }
+  // GLM vision often puts the whole answer in reasoning_content when thinking
+  // runs, leaving content empty — still usable as an image transcription.
+  for (const key of ['reasoning_content', 'reasoning', 'thinking_content', 'thinking']) {
+    const v = m[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
 async function callVision(
   client: OpenAI,
   model: string,
@@ -172,20 +198,37 @@ async function callVision(
       ? '请根据系统说明观察这张图片。'
       : `请根据系统说明依次观察这 ${n} 张图片，并按【图1】…【图${n}】分段输出。`;
 
-  const res = await withTimeout(
-    client.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        {
-          role: 'user',
-          content: [{ type: 'text', text: lead }, ...imageParts] as any,
-        },
-      ],
-    }),
-    timeoutMs,
-  );
-  return String(res.choices?.[0]?.message?.content || '').trim();
+  const create = (extra: Record<string, unknown> = {}) =>
+    withTimeout(
+      client.chat.completions.create({
+        model,
+        max_tokens: 2048,
+        messages: [
+          { role: 'system', content: system },
+          {
+            role: 'user',
+            content: [{ type: 'text', text: lead }, ...imageParts] as any,
+          },
+        ],
+        ...extra,
+      } as any),
+      timeoutMs,
+    );
+
+  // Prefer no thinking: Image Understand needs a plain transcription, and some
+  // GLM vision routes put the entire answer in reasoning_content otherwise.
+  let res: any;
+  try {
+    res = await create({ enable_thinking: false });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/enable_thinking/i.test(msg)) {
+      res = await create();
+    } else {
+      throw err;
+    }
+  }
+  return visionMessageText(res?.choices?.[0]?.message);
 }
 
 /** Resolve image ref to a URL or raw base64 string for Zhipu layout_parsing. */
@@ -479,12 +522,17 @@ export async function understandImages(
   }
 
   console.warn('[image-understand] all backends failed:', errors.join(' | '));
+  const detail = errors.slice(0, 3).join(' · ').slice(0, 400);
   return {
     ok: false,
-    text: 'Failed to understand the image. Please try a vision-capable model for best results.',
+    text: detail
+      ? `Failed to understand the image (${detail}). Please try a vision-capable model for best results.`
+      : 'Failed to understand the image. Please try a vision-capable model for best results.',
     mode: 'error',
     texts: [
-      'Failed to understand the image. Please try a vision-capable model for best results.',
+      detail
+        ? `Failed to understand the image (${detail}). Please try a vision-capable model for best results.`
+        : 'Failed to understand the image. Please try a vision-capable model for best results.',
     ],
   };
 }

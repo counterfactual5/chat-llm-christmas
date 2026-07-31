@@ -38,13 +38,13 @@ import {
 import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
-} from '@/components/chat/output-panel';
-import { ChatSidebar } from '@/components/chat/sidebar';
-import { ChatComposer } from '@/components/chat/composer';
-import { ChatMessageList } from '@/components/chat/message-list';
-import { ChatContextPanel } from '@/components/chat/context-panel';
-import { ChatModals } from '@/components/chat/modals';
-import { ChatQuoteToolbar } from '@/components/chat/quote-toolbar';
+} from '@/components/chat/panels/OutputPanel';
+import { ChatSidebar } from '@/components/chat/session/ChatSidebar';
+import { ChatComposer } from '@/components/chat/composer/ChatComposer';
+import { ChatMessageList } from '@/components/chat/message/ChatMessageList';
+import { ChatContextPanel } from '@/components/chat/panels/ChatContextPanel';
+import { ChatModals } from '@/components/chat/overlays/ChatModals';
+import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import {
   appendQuotedSelection,
   parseQuotedUserMessage,
@@ -59,8 +59,8 @@ import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream-r
 import { cn } from '@/lib/utils';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import { BUILTIN_SKILLS, isSkillCreatorId, skillSlashName } from '@/lib/skills/creator';
-import { isImageAttachment } from '@/components/attachment-image-thumb';
-import type { FilePreviewPayload } from '@/components/file-preview-overlay';
+import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
+import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
@@ -85,7 +85,7 @@ export default function ChatContainer() {
   const [editingMessageAttachments, setEditingMessageAttachments] = useState<IngestedAttachment[]>(
     [],
   );
-  
+
   // Model & Auth State
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState(() => {
@@ -2239,7 +2239,7 @@ export default function ChatContainer() {
           </div>
         </div>
       )}
-      
+
       <ChatSidebar
         open={isSidebarOpen}
         sessions={sessions}
@@ -2298,7 +2298,7 @@ export default function ChatContainer() {
 
         {/* --- Main Area --- */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
-        
+
         {/* Minimal Header */}
         <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-[#F9F8F6] dark:bg-stone-950 z-10 shrink-0">
           <div className="flex items-center gap-3">
@@ -2310,9 +2310,9 @@ export default function ChatContainer() {
           </div>
 
           <div className="flex items-center gap-1">
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
               className={cn("text-xs gap-1.5", isContextPanelOpen ? "bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100" : "text-stone-500")}
             >
@@ -2324,7 +2324,7 @@ export default function ChatContainer() {
 
         {/* Messages and Context Split */}
         <div className="flex-1 flex min-h-0 overflow-hidden relative">
-          
+
           {/* Messages Area */}
           <div className="flex-1 flex flex-col min-w-0">
             <ChatMessageList

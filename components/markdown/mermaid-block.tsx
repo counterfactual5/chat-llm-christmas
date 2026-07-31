@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useState } from 'react';
 import { Check, Copy, Loader2 } from 'lucide-react';
-import { useTheme } from '@/components/theme-provider';
+import { useTheme } from '@/components/theme/ThemeProvider';
 import { cn } from '@/lib/utils';
 
 type MermaidBlockProps = {

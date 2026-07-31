@@ -21,28 +21,30 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
-  ListOrdered,
-  Search,
   Send,
   Square,
 } from 'lucide-react';
-import { NotionLogo } from '@/components/notion-logo';
-import { GitHubLogo } from '@/components/github-logo';
-import { GoogleLogo } from '@/components/google-logo';
+import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
+import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
+import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import {
   AttachmentImageThumb,
   isImageAttachment,
-} from '@/components/attachment-image-thumb';
+} from '@/components/files/AttachmentImageThumb';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message, ModelOption, SkillItem } from '@/lib/chat/types';
 import { BUILTIN_SKILLS, skillSlashName } from '@/lib/skills/creator';
-import { formatContextWindow } from '@/lib/models/specs';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
+import {
+  ComposerQueuePanel,
+  type ComposerQueuedTask,
+} from './ComposerQueuePanel';
+import { ComposerModelMenu } from './ComposerModelMenu';
 
 const KATEX_OPTIONS = {
   throwOnError: false,
@@ -53,10 +55,7 @@ export type SlashMenuItem =
   | { kind: 'command'; id: string; title: string; insert: string; hint: string }
   | { kind: 'skill'; skill: SkillItem };
 
-export type ComposerQueuedTask = {
-  id: string;
-  content: string;
-};
+
 
 export type ComposerIntegrationStatus = {
   connected: boolean;
@@ -253,102 +252,16 @@ export function ChatComposer(props: ChatComposerProps) {
       {/* Floating Input Area */}
       <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
   <div className="mx-auto w-full max-w-[960px] px-1 md:px-4 relative">
-    {/* Compact message queue */}
-    <AnimatePresence>
-      {activeQueue.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 8 }}
-          className="mb-3 overflow-hidden rounded-2xl border border-stone-200/80 bg-white/90 shadow-sm backdrop-blur-sm dark:border-stone-700/80 dark:bg-stone-900/90"
-        >
-          <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-stone-100 dark:border-stone-800">
-            <button
-              type="button"
-              onClick={() => setQueueExpanded((v) => !v)}
-              className="flex min-w-0 items-center gap-2 text-left"
-            >
-              <ListOrdered className="h-3.5 w-3.5 shrink-0 text-stone-400" />
-              <span className="text-xs font-medium text-stone-700 dark:text-stone-300">
-                {activeQueue.length} {t('queued')}
-              </span>
-              {queuePaused && (
-                <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                  {t('queuePaused')}
-                </span>
-              )}
-              <ChevronDown
-                className={cn(
-                  'h-3 w-3 shrink-0 text-stone-400 transition-transform',
-                  queueExpanded ? 'rotate-180' : '',
-                )}
-              />
-            </button>
-            <div className="flex items-center gap-1 shrink-0">
-              {queuePaused && (
-                <button
-                  type="button"
-                  onClick={resumeQueue}
-                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950/30"
-                >
-                  <Play className="h-3 w-3 fill-current" />
-                  {t('resumeQueue')}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={clearQueue}
-                className="rounded-lg px-2 py-1 text-xs text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-300"
-              >
-                {t('clear')}
-              </button>
-            </div>
-          </div>
-
-          <AnimatePresence initial={false}>
-            {queueExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="max-h-36 overflow-y-auto"
-              >
-                <ul className="divide-y divide-stone-100 dark:divide-stone-800">
-                  {activeQueue.map((task, idx) => (
-                    <li
-                      key={task.id}
-                      className="group flex items-center gap-2 px-3 py-1.5 text-sm"
-                    >
-                      <span className="w-4 shrink-0 text-center text-[11px] tabular-nums text-stone-400">
-                        {idx + 1}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-stone-600 dark:text-stone-300">
-                        {task.content}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => jumpQueueAndSubmit(task.id)}
-                        className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-orange-600 opacity-70 hover:bg-orange-50 hover:opacity-100 group-hover:opacity-100 dark:text-orange-400 dark:hover:bg-orange-950/30"
-                      >
-                        Send
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => cancelQueuedMessage(task.id)}
-                        className="shrink-0 rounded-md p-0.5 text-stone-300 opacity-70 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-950/20"
-                        title="Remove"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <ComposerQueuePanel
+      activeQueue={activeQueue}
+      queueExpanded={queueExpanded}
+      setQueueExpanded={setQueueExpanded}
+      queuePaused={queuePaused}
+      resumeQueue={resumeQueue}
+      clearQueue={clearQueue}
+      jumpQueueAndSubmit={jumpQueueAndSubmit}
+      cancelQueuedMessage={cancelQueuedMessage}
+    />
 
     {(attachError || compactNotice) && (
       <div className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
@@ -1080,180 +993,26 @@ export function ChatComposer(props: ChatComposerProps) {
             </AnimatePresence>
           </div>
 
-          <div className="relative" ref={modelMenuRef}>
-            <button 
-              onClick={() => {
-                setIsModelMenuOpen((open) => {
-                  if (open) setModelSearchQuery('');
-                  return !open;
-                });
-              }}
-              className="flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-stone-100 text-xs font-medium text-stone-600 transition-colors dark:text-stone-400 dark:hover:bg-stone-800"
-            >
-              <span className="truncate max-w-[140px] sm:max-w-[200px] text-left">
-                {modelsLoading 
-                  ? t('loadingModels')
-                  : (availableModels.find(m => m.id === selectedModel)?.id || selectedModel || t('selectModel'))}
-              </span>
-              <ChevronDown className="h-3 w-3 text-stone-400" />
-            </button>
-
-            <AnimatePresence>
-              {isModelMenuOpen && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 5 }}
-                  className="absolute left-0 bottom-10 mb-2 z-30 flex w-[280px] sm:w-80 max-h-[420px] flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                >
-                  <div className="shrink-0 space-y-2 border-b border-stone-100 p-2 dark:border-stone-800">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
-                      <input
-                        ref={modelSearchRef}
-                        type="text"
-                        value={modelSearchQuery}
-                        onChange={(e) => setModelSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.stopPropagation()}
-                        placeholder={t('searchModels')}
-                        className="w-full rounded-lg border border-stone-200 bg-stone-50 py-1.5 pl-8 pr-8 text-xs text-stone-800 outline-none placeholder:text-stone-400 focus:border-orange-300 focus:ring-2 focus:ring-orange-200/60 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:placeholder:text-stone-500 dark:focus:border-orange-700 dark:focus:ring-orange-900/40"
-                      />
-                      {modelSearchQuery && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setModelSearchQuery('');
-                            modelSearchRef.current?.focus();
-                          }}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
-                          aria-label="Clear search"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-                        {isAccountBound ? t('allModels') : t('freeModels')}
-                      </span>
-                      <span className="text-[10px] text-stone-400">
-                        {modelSearchQuery.trim()
-                          ? `${filteredModels.length} / ${availableModels.length}`
-                          : `${availableModels.length} models`}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-                  {availableModels.length === 0 && !modelsLoading && (
-                    <div className="p-4 text-center text-xs text-stone-400">
-                      {isAccountBound ? 'No models found. Check connection.' : 'No free models available.'}
-                    </div>
-                  )}
-                  {modelsLoading && availableModels.length === 0 && (
-                    <div className="p-4 text-center text-xs text-stone-400">
-                      Loading...
-                    </div>
-                  )}
-                  {availableModels.length > 0 && filteredModels.length === 0 && (
-                    <div className="p-4 text-center text-xs text-stone-400">
-                      No models match “{modelSearchQuery.trim()}”
-                    </div>
-                  )}
-                  {filteredModels.map(m => {
-                    // Vision models auto-disable Image Understand. Don't trap users:
-                    // logged-in accounts can pick a text model again — we re-enable
-                    // Image Understand on select. Guests still need a Vision model.
-                    const blocked =
-                      hasImages && !m.vision && !zhipuVisionOn && !isAccountBound;
-                    const softWarn = hasImages && !m.vision && isAccountBound;
-                    return (
-                    <button
-                      key={m.id}
-                      disabled={blocked}
-                      onClick={() => {
-                        if (blocked) return;
-                        if (hasImages && !m.vision && isAccountBound) {
-                          setActiveMcpIds((prev) =>
-                            prev.includes('zhipu-vision')
-                              ? prev
-                              : [...prev, 'zhipu-vision'],
-                          );
-                        }
-                        setSelectedModel(m.id);
-                        setIsModelMenuOpen(false);
-                        setModelSearchQuery('');
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors text-left gap-2",
-                        blocked && "opacity-40 cursor-not-allowed",
-                        selectedModel === m.id 
-                          ? "bg-stone-100 text-stone-900 font-medium dark:bg-stone-800 dark:text-stone-100" 
-                          : "hover:bg-stone-100 text-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-                      )}
-                      title={
-                        blocked
-                          ? t('imagesNeedVision')
-                          : softWarn
-                            ? t('imagesPreferVision')
-                            : undefined
-                      }
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate">{m.id}</div>
-                        {blocked && (
-                          <div className="text-[10px] text-stone-400">{t('textOnlyNeedsVision')}</div>
-                        )}
-                        {softWarn && (
-                          <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                            {t('textOnlyViaImageUnderstand')}
-                          </div>
-                        )}
-                      </div>
-                      <span
-                        className="text-[9px] font-mono text-stone-400 shrink-0 tabular-nums"
-                        title={m.context_window != null ? `${m.context_window.toLocaleString()} context` : 'Unknown context'}
-                      >
-                        {formatContextWindow(m.context_window)}
-                      </span>
-                      {m.vision && (
-                        <span
-                          title="Vision"
-                          className="text-[8px] font-semibold leading-none rounded border border-stone-200 bg-stone-50 px-1 py-px text-stone-500 shrink-0 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-400"
-                        >
-                          V
-                        </span>
-                      )}
-                      {m.tier === 'paid' ? (
-                        <span className="text-[8px] font-semibold leading-none rounded bg-orange-500 px-1 py-px text-white shrink-0">
-                          Pro
-                        </span>
-                      ) : (
-                        <span className="text-[8px] font-semibold leading-none rounded border border-orange-200 bg-orange-50 px-1 py-px text-orange-700 shrink-0 dark:border-orange-900/50 dark:bg-orange-950/40 dark:text-orange-300">
-                          Free
-                        </span>
-                      )}
-                      {selectedModel === m.id && <Check className="h-3.5 w-3.5 text-stone-500 shrink-0" />}
-                    </button>
-                    );
-                  })}
-                  </div>
-                  {!isAccountBound && (
-                    <div className="shrink-0 border-t border-stone-100 p-2 dark:border-stone-800">
-                      <button 
-                        onClick={() => { setIsModelMenuOpen(false); setModelSearchQuery(''); openLoginModal(); }}
-                        className="w-full text-center text-xs font-medium text-orange-600 hover:underline"
-                      >
-                        🔓 Sign in to unlock {availableModels.length > 0 ? 'all models' : 'premium'}
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <ComposerModelMenu
+            isModelMenuOpen={isModelMenuOpen}
+            setIsModelMenuOpen={setIsModelMenuOpen}
+            modelMenuRef={modelMenuRef}
+            modelSearchRef={modelSearchRef}
+            modelSearchQuery={modelSearchQuery}
+            setModelSearchQuery={setModelSearchQuery}
+            modelsLoading={modelsLoading}
+            selectedModel={selectedModel}
+            availableModels={availableModels}
+            filteredModels={filteredModels}
+            hasImages={hasImages}
+            zhipuVisionOn={zhipuVisionOn}
+            isAccountBound={isAccountBound}
+            setActiveMcpIds={setActiveMcpIds}
+            setSelectedModel={setSelectedModel}
+            openLoginModal={openLoginModal}
+          />
           </div>
-        </div>
-        
+
         <div className="flex items-center gap-2">
           {isActiveLoading ? (
             <Button 

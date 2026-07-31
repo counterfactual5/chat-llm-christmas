@@ -5,7 +5,7 @@ import { parseImageCommand } from '@/lib/chat/image-command';
 import { useLocale } from '@/lib/i18n';
 import { formatQuotedMessage } from '@/lib/chat/quotes';
 import { toApiMessages, ingestedToMessageImages } from '@/lib/chat/api-messages';
-import { isImageAttachment } from '@/components/attachment-image-thumb';
+import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { isAssistantError, messagePlainText } from '@/lib/chat/message-display';
 import { estimateTokensFromText } from '@/lib/models/specs';

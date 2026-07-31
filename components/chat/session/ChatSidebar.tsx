@@ -27,15 +27,15 @@ import {
   LogOut,
   Key,
 } from 'lucide-react';
-import { BrandMark } from '@/components/brand-mark';
-import { NotionLogo } from '@/components/notion-logo';
-import { GitHubLogo } from '@/components/github-logo';
-import { GoogleLogo } from '@/components/google-logo';
+import { BrandMark } from '@/components/branding/BrandMark';
+import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
+import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
+import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { useLocale } from '@/lib/i18n';
-import { useTheme } from '@/components/theme-provider';
+import { useTheme } from '@/components/theme/ThemeProvider';
 import { cn } from '@/lib/utils';
 import type { ChatSession, SkillItem } from '@/lib/chat/types';
 import {

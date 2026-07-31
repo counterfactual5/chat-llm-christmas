@@ -26,16 +26,16 @@ import {
   X,
   Download,
 } from 'lucide-react';
-import { BrandMark } from '@/components/brand-mark';
-import { NotionLogo } from '@/components/notion-logo';
-import { GitHubLogo } from '@/components/github-logo';
-import { GoogleLogo } from '@/components/google-logo';
+import { BrandMark } from '@/components/branding/BrandMark';
+import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
+import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
+import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Textarea } from '@/components/ui/textarea';
 import { CodeBlock } from '@/components/markdown/code-block';
 import {
   AttachmentImageThumb,
   isImageAttachment,
-} from '@/components/attachment-image-thumb';
+} from '@/components/files/AttachmentImageThumb';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
@@ -49,7 +49,7 @@ import {
   type ToolStep,
 } from '@/lib/chat/timeline';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
-import { formatFileSize } from '@/components/chat/output-panel';
+import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
 import { expandLiteralBreaks } from '@/lib/markdown/breaks';
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
@@ -188,7 +188,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
             t('starter3'),
             t('starter4'),
           ].map(hint => (
-            <button 
+            <button
               key={hint}
               onClick={() => handleSubmit(hint)}
               className="rounded-xl border border-stone-200/80 bg-white p-4 text-left text-sm text-stone-700 transition-all hover:border-stone-400 hover:shadow-md dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-stone-600"

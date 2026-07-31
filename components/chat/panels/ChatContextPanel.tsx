@@ -14,8 +14,8 @@ import {
   OutputPanel,
   type GeneratedFileEntry,
   type GeneratedImageEntry,
-} from '@/components/chat/output-panel';
-import { ReferencePanel } from '@/components/chat/reference-panel';
+} from './OutputPanel';
+import { ReferencePanel } from './ReferencePanel';
 
 const SYSTEM_PRESETS = [
   { label: 'Concise', value: 'Answer concisely. Prefer short, direct sentences and skip preamble.' },

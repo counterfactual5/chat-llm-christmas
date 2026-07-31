@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, Source_Serif_4 } from 'next/font/google';
-import { ThemeProvider } from '@/components/theme-provider';
+import { ThemeProvider } from '@/components/theme/ThemeProvider';
 import { LocaleProvider } from '@/lib/i18n';
 import './globals.css';
 

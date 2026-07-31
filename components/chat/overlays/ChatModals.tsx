@@ -2,21 +2,21 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ScrollText } from 'lucide-react';
-import { BrandMark } from '@/components/brand-mark';
-import { NotionLogo } from '@/components/notion-logo';
-import { GitHubLogo } from '@/components/github-logo';
-import { GoogleLogo } from '@/components/google-logo';
+import { BrandMark } from '@/components/branding/BrandMark';
+import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
+import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
+import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ImagePreviewOverlay } from '@/components/attachment-image-thumb';
+import { ImagePreviewOverlay } from '@/components/files/AttachmentImageThumb';
 import {
   FilePreviewOverlay,
   type FilePreviewPayload,
-} from '@/components/file-preview-overlay';
+} from '@/components/files/FilePreviewOverlay';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { SkillItem } from '@/lib/chat/types';
-import type { GeneratedFileEntry } from '@/components/chat/output-panel';
+import type { GeneratedFileEntry } from '../panels/OutputPanel';
 
 export type IntegrationStatus = {
   connected: boolean;

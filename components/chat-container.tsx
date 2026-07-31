@@ -361,13 +361,15 @@ interface Message {
     error?: string;
   }>;
   /**
-   * Chronological activity for this turn (thinking / tools / answer chunks in
-   * arrival order). Rendered as interleaved Process segments + content.
+   * Chronological activity for this turn (thinking / tools / answer chunks /
+   * generated files in arrival order). Rendered as interleaved Process
+   * segments, file cards, and content.
    */
   activity?: Array<
     | { id: string; kind: 'reasoning'; text: string }
     | { id: string; kind: 'tool'; toolRunId: string }
     | { id: string; kind: 'content'; text: string }
+    | { id: string; kind: 'file'; fileId: string }
   >;
   /** True while streaming, or after a stop / refresh / truncated reply. */
   incomplete?: boolean;
@@ -1737,24 +1739,15 @@ export default function ChatContainer() {
           .map((m) => {
             if (m.id !== entry.messageId || !m.files?.length) return m;
             const files = m.files.filter((_, idx) => idx !== entry.fileIndex);
-            return { ...m, files: files.length ? files : undefined };
+            const activity = (m.activity || []).filter(
+              (step) => !(step.kind === 'file' && step.fileId === entry.id),
+            );
+            return {
+              ...m,
+              files: files.length ? files : undefined,
+              activity: activity.length ? activity : undefined,
+            };
           })
-          .filter((m) => !isEmptyAssistantShell(m));
-        return { ...s, messages: nextMessages, updatedAt: Date.now() };
-      }),
-    );
-  };
-
-  const clearGeneratedImages = () => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== activeSessionId) return s;
-        const nextMessages = s.messages
-          .map((m) =>
-            m.role === 'assistant' && (m.images?.length || m.files?.length)
-              ? { ...m, images: undefined, files: undefined }
-              : m,
-          )
           .filter((m) => !isEmptyAssistantShell(m));
         return { ...s, messages: nextMessages, updatedAt: Date.now() };
       }),
@@ -1796,7 +1789,22 @@ export default function ChatContainer() {
             if (m.id !== assistantId) return m;
             const existing = m.files || [];
             if (existing.some((f) => f.id === entry.id)) return m;
-            return { ...m, files: [...existing, entry] };
+            const activity = [...(m.activity || [])];
+            const alreadyInTimeline = activity.some(
+              (step) => step.kind === 'file' && step.fileId === entry.id,
+            );
+            if (!alreadyInTimeline) {
+              activity.push({
+                id: `${assistantId}-file-${entry.id}`,
+                kind: 'file',
+                fileId: entry.id,
+              });
+            }
+            return {
+              ...m,
+              files: [...existing, entry],
+              activity,
+            };
           }),
         };
       }),
@@ -6024,13 +6032,56 @@ export default function ChatContainer() {
                               });
                             }
                           }
+                          // Place orphan generated files on the timeline after the
+                          // matching create_file tool (or at the end).
+                          const fileIdsInActivity = new Set(
+                            base
+                              .filter(
+                                (s): s is { id: string; kind: 'file'; fileId: string } =>
+                                  s.kind === 'file',
+                              )
+                              .map((s) => s.fileId),
+                          );
+                          const usedToolSlots = new Set<number>();
+                          for (const file of message.files || []) {
+                            if (fileIdsInActivity.has(file.id)) continue;
+                            const step = {
+                              id: `${message.id}-file-${file.id}`,
+                              kind: 'file' as const,
+                              fileId: file.id,
+                            };
+                            let insertAt = -1;
+                            for (let i = 0; i < base.length; i++) {
+                              if (usedToolSlots.has(i)) continue;
+                              const s = base[i];
+                              if (s.kind !== 'tool') continue;
+                              const run = toolById.get(s.toolRunId);
+                              if (
+                                run &&
+                                (run.name === 'create_file' || run.name === 'create-file') &&
+                                (run.query === file.name ||
+                                  run.results?.[0]?.title === file.name)
+                              ) {
+                                insertAt = i + 1;
+                                usedToolSlots.add(i);
+                                break;
+                              }
+                            }
+                            if (insertAt >= 0) base.splice(insertAt, 0, step);
+                            else base.push(step);
+                            fileIdsInActivity.add(file.id);
+                          }
                           return base;
                         })();
                         type ActivityStep = (typeof activitySteps)[number];
                         type ToolStep = Extract<ActivityStep, { kind: 'tool' }>;
-                        type ProcessStep = Exclude<ActivityStep, { kind: 'content' }>;
+                        type ProcessStep = Extract<
+                          ActivityStep,
+                          { kind: 'reasoning' } | { kind: 'tool' }
+                        >;
 
                         const hasContentSteps = activitySteps.some((s) => s.kind === 'content');
+                        const hasFileSteps = activitySteps.some((s) => s.kind === 'file');
                         // Spinner only while THIS turn is actively streaming. After a
                         // refresh, incomplete stays true but loading is false — without
                         // this gate Process would spin forever.
@@ -6045,15 +6096,18 @@ export default function ChatContainer() {
                             replyWaitByMessage[message.id],
                         );
 
-                        /** Group consecutive reasoning/tool steps into Process panels, split by content. */
+                        /** Group consecutive reasoning/tool steps into Process panels;
+                         *  content and generated files break the group (timeline order). */
                         type TimelineSegment =
                           | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean }
-                          | { type: 'content'; id: string; text: string };
+                          | { type: 'content'; id: string; text: string }
+                          | { type: 'file'; id: string; fileId: string };
 
                         const timelineSegments: TimelineSegment[] = (() => {
-                          if (!hasContentSteps) {
+                          if (!hasContentSteps && !hasFileSteps) {
                             const processSteps = activitySteps.filter(
-                              (s): s is ProcessStep => s.kind !== 'content',
+                              (s): s is ProcessStep =>
+                                s.kind === 'reasoning' || s.kind === 'tool',
                             );
                             const segs: TimelineSegment[] = [];
                             if (awaitingFirstContent || processSteps.length > 0 || replyWait) {
@@ -6092,6 +6146,9 @@ export default function ChatContainer() {
                               if (step.text.trim()) {
                                 segs.push({ type: 'content', id: step.id, text: step.text });
                               }
+                            } else if (step.kind === 'file') {
+                              flushProcess(false);
+                              segs.push({ type: 'file', id: step.id, fileId: step.fileId });
                             } else {
                               buf.push(step);
                             }
@@ -6938,75 +6995,6 @@ export default function ChatContainer() {
                                 ))}
                               </div>
                             )}
-                            {message.files && message.files.length > 0 && (
-                              <div className={cn('flex flex-col gap-2', message.images?.length ? 'mt-2' : undefined)}>
-                                {message.files.map((file) => {
-                                  const canPreview = typeof file.content === 'string';
-                                  return (
-                                  <div
-                                    key={file.id}
-                                    className="flex max-w-md items-center gap-2 rounded-xl border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-800 dark:bg-stone-900/60"
-                                  >
-                                    <button
-                                      type="button"
-                                      disabled={!canPreview}
-                                      title={canPreview ? t('previewFile') : file.name}
-                                      onClick={() => {
-                                        if (!canPreview) return;
-                                        setFilePreview({
-                                          id: file.id,
-                                          name: file.name,
-                                          mimeType: file.mimeType,
-                                          content: file.content || '',
-                                          size: file.size,
-                                        });
-                                      }}
-                                      className={cn(
-                                        'flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left',
-                                        canPreview
-                                          ? 'cursor-zoom-in hover:bg-white/80 dark:hover:bg-stone-950/50'
-                                          : 'cursor-default',
-                                      )}
-                                    >
-                                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-200/80 dark:bg-stone-800">
-                                        <FileText className="h-4 w-4 text-stone-500" />
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
-                                          {file.name}
-                                        </div>
-                                        <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
-                                          {file.mimeType}
-                                          {file.size > 0 ? ` · ${formatFileSize(file.size)}` : ''}
-                                          {canPreview ? ` · ${t('previewFile')}` : ''}
-                                        </div>
-                                      </div>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      title={t('download')}
-                                      onClick={() =>
-                                        void downloadGeneratedFile({
-                                          messageId: message.id,
-                                          fileIndex: 0,
-                                          id: file.id,
-                                          name: file.name,
-                                          mimeType: file.mimeType,
-                                          size: file.size,
-                                          url: file.url,
-                                          content: file.content,
-                                          createdAt: file.createdAt || message.timestamp,
-                                        })
-                                      }
-                                      className="mr-1 rounded-lg p-2 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                    >
-                                      <Download className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                  );
-                                })}
-                              </div>
-                            )}
                             {isAssistantError(message) ? (
                               <div className="rounded-xl border border-red-200 bg-red-50/80 px-3.5 py-3 dark:border-red-900/50 dark:bg-red-950/30">
                                 <p className="text-sm font-medium text-red-700 dark:text-red-300">
@@ -7031,6 +7019,78 @@ export default function ChatContainer() {
                                 {timelineSegments.map((seg) =>
                                   seg.type === 'process' ? (
                                     renderProcessPanel(seg)
+                                  ) : seg.type === 'file' ? (
+                                    (() => {
+                                      const file = (message.files || []).find(
+                                        (f) => f.id === seg.fileId,
+                                      );
+                                      if (!file) return null;
+                                      const canPreview = typeof file.content === 'string';
+                                      return (
+                                        <div
+                                          key={seg.id}
+                                          className="flex max-w-md items-center gap-2 rounded-xl border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-800 dark:bg-stone-900/60"
+                                        >
+                                          <button
+                                            type="button"
+                                            disabled={!canPreview}
+                                            title={canPreview ? t('previewFile') : file.name}
+                                            onClick={() => {
+                                              if (!canPreview) return;
+                                              setFilePreview({
+                                                id: file.id,
+                                                name: file.name,
+                                                mimeType: file.mimeType,
+                                                content: file.content || '',
+                                                size: file.size,
+                                              });
+                                            }}
+                                            className={cn(
+                                              'flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 text-left',
+                                              canPreview
+                                                ? 'cursor-zoom-in hover:bg-white/80 dark:hover:bg-stone-950/50'
+                                                : 'cursor-default',
+                                            )}
+                                          >
+                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-200/80 dark:bg-stone-800">
+                                              <FileText className="h-4 w-4 text-stone-500" />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
+                                                {file.name}
+                                              </div>
+                                              <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
+                                                {file.mimeType}
+                                                {file.size > 0
+                                                  ? ` · ${formatFileSize(file.size)}`
+                                                  : ''}
+                                                {canPreview ? ` · ${t('previewFile')}` : ''}
+                                              </div>
+                                            </div>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            title={t('download')}
+                                            onClick={() =>
+                                              void downloadGeneratedFile({
+                                                messageId: message.id,
+                                                fileIndex: 0,
+                                                id: file.id,
+                                                name: file.name,
+                                                mimeType: file.mimeType,
+                                                size: file.size,
+                                                url: file.url,
+                                                content: file.content,
+                                                createdAt: file.createdAt || message.timestamp,
+                                              })
+                                            }
+                                            className="mr-1 rounded-lg p-2 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                          >
+                                            <Download className="h-4 w-4" />
+                                          </button>
+                                        </div>
+                                      );
+                                    })()
                                   ) : (
                                     <div key={seg.id}>
                                       {renderAnswerMarkdown(
@@ -8151,34 +8211,12 @@ export default function ChatContainer() {
                             </span>
                           )}
                         </span>
-                        <div className="flex items-center gap-1">
-                          {generatedOutputCount > 0 && (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                clearGeneratedImages();
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.stopPropagation();
-                                  clearGeneratedImages();
-                                }
-                              }}
-                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-400 hover:text-red-500"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                              {t('clearHistory')}
-                            </span>
+                        <ChevronDown
+                          className={cn(
+                            'h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform',
+                            picturesExpanded && 'rotate-180',
                           )}
-                          <ChevronDown
-                            className={cn(
-                              'h-3.5 w-3.5 text-stone-400 transition-transform',
-                              picturesExpanded && 'rotate-180',
-                            )}
-                          />
-                        </div>
+                        />
                       </button>
                       <AnimatePresence initial={false}>
                         {picturesExpanded && (

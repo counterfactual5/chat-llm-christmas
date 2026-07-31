@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import hljs from 'highlight.js/lib/common';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { MermaidBlock, isMermaidLanguage } from '@/components/markdown/mermaid-block';
 
 interface CodeBlockProps {
   language: string;
@@ -54,6 +55,10 @@ function highlightCode(value: string, language: string) {
 export function CodeBlock({ language, value }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const highlighted = useMemo(() => highlightCode(value, language), [value, language]);
+
+  if (isMermaidLanguage(language)) {
+    return <MermaidBlock value={value} />;
+  }
 
   const copyToClipboard = async () => {
     try {

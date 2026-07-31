@@ -6442,7 +6442,7 @@ export default function ChatContainer() {
                             const hasItems = (check.items?.length || 0) > 0;
                             const checkOpen =
                               reasoningOpen[checkKey] ??
-                              (check.status === 'running' || hasItems || Boolean(check.body));
+                              (check.status === 'running' || hasItems);
                             const running = check.status === 'running';
                             const Icon = CheckIcon(check.kind);
                             const tone =

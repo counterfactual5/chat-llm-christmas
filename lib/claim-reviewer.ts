@@ -872,7 +872,8 @@ export function buildToolReceiptCheck(
       ? 'All checked claims match tool receipts'
       : `${items.length} issue(s) in tool usage`,
     items,
-    body: formatExecutionRecordForVerifier(record),
+    // UI gets a short receipt list; the verifier prompt still uses the full dump.
+    body: formatExecutionRecordForUi(record) || undefined,
   };
 }
 
@@ -2253,6 +2254,22 @@ export function formatExecutionRecordForVerifier(record: ExecutionRecordEntry[])
         bits.push(`sources=${preview}`);
       }
       return bits.join(' | ');
+    })
+    .join('\n');
+}
+
+/** Compact receipt list for the Review panel — not the full verifier dump. */
+export function formatExecutionRecordForUi(record: ExecutionRecordEntry[]): string {
+  if (!record.length) return '';
+  return record
+    .map((e, i) => {
+      const status = e.ok ? 'ok' : 'failed';
+      const hits = e.urls?.length || e.sources?.length || 0;
+      const parts = [`${i + 1}. ${e.tool} (${status})`];
+      if (e.query) parts.push(e.query.slice(0, 72));
+      if (hits) parts.push(`${hits} hit(s)`);
+      if (!e.ok && e.error) parts.push(e.error.slice(0, 100));
+      return parts.join(' · ');
     })
     .join('\n');
 }

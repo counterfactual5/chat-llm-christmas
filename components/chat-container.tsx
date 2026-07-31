@@ -6032,8 +6032,8 @@ export default function ChatContainer() {
                               });
                             }
                           }
-                          // Place orphan generated files on the timeline after the
-                          // matching create_file tool (or at the end).
+                          // Place orphan generated files after the create_file batch
+                          // (last matching tool), so Process rows stay grouped.
                           const fileIdsInActivity = new Set(
                             base
                               .filter(
@@ -6042,17 +6042,21 @@ export default function ChatContainer() {
                               )
                               .map((s) => s.fileId),
                           );
-                          const usedToolSlots = new Set<number>();
+                          const orphanFiles: Array<{
+                            id: string;
+                            kind: 'file';
+                            fileId: string;
+                          }> = [];
+                          let insertAfter = -1;
                           for (const file of message.files || []) {
                             if (fileIdsInActivity.has(file.id)) continue;
-                            const step = {
+                            orphanFiles.push({
                               id: `${message.id}-file-${file.id}`,
-                              kind: 'file' as const,
+                              kind: 'file',
                               fileId: file.id,
-                            };
-                            let insertAt = -1;
+                            });
+                            fileIdsInActivity.add(file.id);
                             for (let i = 0; i < base.length; i++) {
-                              if (usedToolSlots.has(i)) continue;
                               const s = base[i];
                               if (s.kind !== 'tool') continue;
                               const run = toolById.get(s.toolRunId);
@@ -6062,14 +6066,33 @@ export default function ChatContainer() {
                                 (run.query === file.name ||
                                   run.results?.[0]?.title === file.name)
                               ) {
-                                insertAt = i + 1;
-                                usedToolSlots.add(i);
+                                if (i > insertAfter) insertAfter = i;
                                 break;
                               }
                             }
-                            if (insertAt >= 0) base.splice(insertAt, 0, step);
-                            else base.push(step);
-                            fileIdsInActivity.add(file.id);
+                          }
+                          if (orphanFiles.length) {
+                            // If several create_file tools are consecutive, land after the
+                            // whole run so file cards don't split the Process panel.
+                            let spliceAt = insertAfter >= 0 ? insertAfter + 1 : base.length;
+                            if (insertAfter >= 0) {
+                              while (
+                                spliceAt < base.length &&
+                                base[spliceAt].kind === 'tool'
+                              ) {
+                                const run = toolById.get(
+                                  (base[spliceAt] as { toolRunId: string }).toolRunId,
+                                );
+                                if (
+                                  !run ||
+                                  (run.name !== 'create_file' && run.name !== 'create-file')
+                                ) {
+                                  break;
+                                }
+                                spliceAt += 1;
+                              }
+                            }
+                            base.splice(spliceAt, 0, ...orphanFiles);
                           }
                           return base;
                         })();
@@ -6096,8 +6119,10 @@ export default function ChatContainer() {
                             replyWaitByMessage[message.id],
                         );
 
-                        /** Group consecutive reasoning/tool steps into Process panels;
-                         *  content and generated files break the group (timeline order). */
+                        /** Group consecutive reasoning/tool steps into Process panels.
+                         *  Content breaks the group. Generated files are deferred so a
+                         *  batch of create_file tools stays in one Process, then all
+                         *  file cards render together underneath. */
                         type TimelineSegment =
                           | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean }
                           | { type: 'content'; id: string; text: string }
@@ -6129,7 +6154,14 @@ export default function ChatContainer() {
                           }
                           const segs: TimelineSegment[] = [];
                           let buf: ProcessStep[] = [];
+                          let fileBuf: Array<{ id: string; fileId: string }> = [];
                           let processIdx = 0;
+                          const flushFiles = () => {
+                            for (const f of fileBuf) {
+                              segs.push({ type: 'file', id: f.id, fileId: f.fileId });
+                            }
+                            fileBuf = [];
+                          };
                           const flushProcess = (live: boolean) => {
                             if (!buf.length && !live) return;
                             segs.push({
@@ -6139,17 +6171,38 @@ export default function ChatContainer() {
                               live,
                             });
                             buf = [];
+                            // File cards follow the Process block they were interleaved with.
+                            flushFiles();
                           };
                           for (const step of activitySteps) {
                             if (step.kind === 'content') {
                               flushProcess(false);
+                              // Orphan files with no surrounding process still need to emit.
+                              flushFiles();
                               if (step.text.trim()) {
                                 segs.push({ type: 'content', id: step.id, text: step.text });
                               }
                             } else if (step.kind === 'file') {
-                              flushProcess(false);
-                              segs.push({ type: 'file', id: step.id, fileId: step.fileId });
+                              // Don't break Process — keep create_file rows in one panel.
+                              fileBuf.push({ id: step.id, fileId: step.fileId });
                             } else {
+                              // Thought / other tools after a file batch: close the create_file
+                              // Process + file cards first, then start a fresh Process.
+                              if (fileBuf.length > 0) {
+                                const isCreateFileTool =
+                                  step.kind === 'tool' &&
+                                  (() => {
+                                    const run = toolById.get(step.toolRunId);
+                                    return (
+                                      run?.name === 'create_file' ||
+                                      run?.name === 'create-file'
+                                    );
+                                  })();
+                                if (!isCreateFileTool) {
+                                  flushProcess(false);
+                                  flushFiles();
+                                }
+                              }
                               buf.push(step);
                             }
                           }
@@ -6161,6 +6214,7 @@ export default function ChatContainer() {
                                 (buf.length > 0 || !visibleContent || replyWait),
                             ),
                           );
+                          flushFiles();
                           // Live empty Process while waiting before any activity.
                           if (
                             messageIsStreaming &&

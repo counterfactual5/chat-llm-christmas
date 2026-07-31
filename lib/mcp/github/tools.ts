@@ -4,7 +4,7 @@ import {
   listMcpTools,
   type McpToolDefinition,
 } from '@/lib/mcp/http-client';
-import { githubMcpServerUrl } from '@/lib/integrations/github-oauth';
+import { githubMcpServerUrl } from '@/lib/integrations/github/oauth';
 
 const GITHUB_SYSTEM_PROMPT = [
   "You have GitHub MCP tools for the user's connected account (repos, issues, PRs, Actions, etc.).",

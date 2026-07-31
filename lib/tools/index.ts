@@ -8,7 +8,7 @@ import { createGitHubMcpTools } from '@/lib/mcp/github/tools';
 import { createGoogleTools } from '@/lib/mcp/google/tools';
 import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
 import { createCreateFileTool } from '@/lib/tools/create-file/tool';
-import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google-services';
+import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google/services';
 
 /** Built-in tools shipped with the chat app. */
 export function builtinToolRegistry(): ChatTool[] {

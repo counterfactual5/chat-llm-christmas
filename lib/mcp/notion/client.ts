@@ -3,7 +3,7 @@
  */
 
 import { McpHttpClient, type McpToolDefinition } from '@/lib/mcp/http-client';
-import { NOTION_MCP_SERVER_URL } from '@/lib/integrations/notion-mcp-oauth';
+import { NOTION_MCP_SERVER_URL } from '@/lib/integrations/notion/oauth';
 
 export type { McpToolDefinition };
 

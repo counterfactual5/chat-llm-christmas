@@ -39,7 +39,7 @@ export {
   encodePkceCookie,
   decodePkceCookie,
   NOTION_MCP_SERVER_URL,
-} from '@/lib/integrations/notion-mcp-oauth';
+} from '@/lib/integrations/notion/oauth';
 export {
   githubOAuthConfigured,
   githubOAuthRedirectUri,
@@ -50,7 +50,7 @@ export {
   githubConnectionFromToken,
   GITHUB_MCP_SERVER_URL,
   githubMcpServerUrl,
-} from '@/lib/integrations/github-oauth';
+} from '@/lib/integrations/github/oauth';
 export {
   googleOAuthConfigured,
   googleOAuthRedirectUri,
@@ -63,8 +63,8 @@ export {
   GOOGLE_API_SCOPES,
   GOOGLE_MCP_SERVERS,
   googleOAuthScopes,
-} from '@/lib/integrations/google-oauth';
-export { probeGoogleApis } from '@/lib/integrations/google-rest';
+} from '@/lib/integrations/google/oauth';
+export { probeGoogleApis } from '@/lib/integrations/google/rest';
 export {
   GOOGLE_SERVICE_IDS,
   wantsGoogleToken,
@@ -73,7 +73,7 @@ export {
   isGoogleMcpId,
   isGoogleServiceId,
   type GoogleServiceId,
-} from '@/lib/integrations/google-services';
+} from '@/lib/integrations/google/services';
 export type {
   IntegrationProvider,
   IntegrationVault,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleAccessToken, resolveOwnerId } from '@/lib/integrations';
-import { probeGoogleApis } from '@/lib/integrations/google-rest';
+import { probeGoogleApis } from '@/lib/integrations/google/rest';
 
 export const runtime = 'edge';
 export const maxDuration = 30;

@@ -114,7 +114,7 @@ import { useLocale } from '@/lib/i18n';
 import {
   isGoogleMcpId,
   normalizeGoogleIntegrations,
-} from '@/lib/integrations/google-services';
+} from '@/lib/integrations/google/services';
 
 const KATEX_OPTIONS = {
   throwOnError: false,

@@ -56,7 +56,7 @@ import {
   gmailTrashMessage,
   gmailUntrashMessage,
   gmailUpdateLabel,
-} from '@/lib/integrations/google-rest';
+} from '@/lib/integrations/google/rest';
 
 const GMAIL_SYSTEM_PROMPT = [
   'You have Gmail MCP tools for the user\'s connected Google account.',

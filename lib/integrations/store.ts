@@ -5,7 +5,7 @@ import {
   discoverNotionMcpOAuthMetadata,
   notionConnectionFromMcpToken,
   refreshNotionMcpToken,
-} from '@/lib/integrations/notion-mcp-oauth';
+} from '@/lib/integrations/notion/oauth';
 import {
   deleteRemoteVault,
   readRemoteVault,
@@ -302,7 +302,7 @@ export async function getGoogleAccessToken(
 
   try {
     const { refreshGoogleToken, googleConnectionFromToken } = await import(
-      '@/lib/integrations/google-oauth'
+      '@/lib/integrations/google/oauth'
     );
     const token = await refreshGoogleToken({
       refreshToken: google.refreshToken,

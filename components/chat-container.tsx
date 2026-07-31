@@ -1445,21 +1445,25 @@ export default function ChatContainer() {
       .filter((group) => group.sources.length > 0);
   }, [webSources]);
 
+  const scrollToMessage = (messageId: string) => {
+    const element = document.getElementById(`message-${messageId}`);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element?.animate(
+      [
+        { backgroundColor: 'transparent' },
+        { backgroundColor: 'rgba(245, 158, 11, 0.14)' },
+        { backgroundColor: 'transparent' },
+      ],
+      { duration: 1200, easing: 'ease-out' },
+    );
+  };
+
   const openUploadReference = (source: WebSearchSource) => {
     if (source.messageId) {
-      const element = document.getElementById(`message-${source.messageId}`);
-      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      element?.animate(
-        [
-          { backgroundColor: 'transparent' },
-          { backgroundColor: 'rgba(245, 158, 11, 0.14)' },
-          { backgroundColor: 'transparent' },
-        ],
-        { duration: 1200, easing: 'ease-out' },
-      );
-      return;
+      scrollToMessage(source.messageId);
+    } else if (source.url && !source.url.startsWith('data:') && !source.url.startsWith('/api/files/')) {
+      window.open(source.url, '_blank', 'noopener,noreferrer');
     }
-    if (source.kind === 'image' && source.url) setImagePreviewSrc(source.url);
   };
   const notionMcpOn =
     Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
@@ -5943,7 +5947,11 @@ export default function ChatContainer() {
                       </div>
                     </div>
                   ) : (
-                    <div key={message.id} className="w-full pr-8 sm:pr-16 space-y-3">
+                    <div
+                      id={`message-${message.id}`}
+                      key={message.id}
+                      className="w-full scroll-mt-8 space-y-3 pr-8 sm:pr-16"
+                    >
                       {(() => {
                         const parts = displayAssistantParts(message);
                         const visibleContent = parts.content;
@@ -6900,6 +6908,49 @@ export default function ChatContainer() {
                                       className="max-h-[420px] max-w-full object-contain"
                                     />
                                   </a>
+                                ))}
+                              </div>
+                            )}
+                            {message.files && message.files.length > 0 && (
+                              <div className={cn('flex flex-col gap-2', message.images?.length ? 'mt-2' : undefined)}>
+                                {message.files.map((file) => (
+                                  <div
+                                    key={file.id}
+                                    className="flex max-w-md items-center gap-3 rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2.5 dark:border-stone-800 dark:bg-stone-900/60"
+                                  >
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-200/80 dark:bg-stone-800">
+                                      <FileText className="h-4 w-4 text-stone-500" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
+                                        {file.name}
+                                      </div>
+                                      <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
+                                        {file.mimeType}
+                                        {file.size > 0 ? ` · ${formatFileSize(file.size)}` : ''}
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      title={t('download')}
+                                      onClick={() =>
+                                        void downloadGeneratedFile({
+                                          messageId: message.id,
+                                          fileIndex: 0,
+                                          id: file.id,
+                                          name: file.name,
+                                          mimeType: file.mimeType,
+                                          size: file.size,
+                                          url: file.url,
+                                          content: file.content,
+                                          createdAt: file.createdAt || message.timestamp,
+                                        })
+                                      }
+                                      className="rounded-lg p-2 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </button>
+                                  </div>
                                 ))}
                               </div>
                             )}
@@ -8121,28 +8172,30 @@ export default function ChatContainer() {
                                                 key={`${entry.messageId}-${entry.imageIndex}`}
                                                 className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
                                               >
-                                                <a
-                                                  href={entry.url}
-                                                  target="_blank"
-                                                  rel="noreferrer"
-                                                  className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
+                                                <button
+                                                  type="button"
+                                                  title={t('viewInChat')}
+                                                  onClick={() => scrollToMessage(entry.messageId)}
+                                                  className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
                                                 >
-                                                  <img
-                                                    src={entry.url}
-                                                    alt=""
-                                                    className="h-full w-full object-cover"
-                                                  />
-                                                </a>
-                                                <div className="min-w-0 flex-1 py-0.5">
-                                                  <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
-                                                    {formatGeneratedAt(entry.timestamp)}
-                                                    <span className="mx-1 text-stone-600">·</span>
-                                                    {entry.model}
-                                                  </div>
-                                                  <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
-                                                    {entry.prompt}
-                                                  </div>
-                                                </div>
+                                                  <span className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
+                                                    <img
+                                                      src={entry.url}
+                                                      alt=""
+                                                      className="h-full w-full object-cover"
+                                                    />
+                                                  </span>
+                                                  <span className="min-w-0 flex-1 py-0.5">
+                                                    <span className="block truncate font-mono text-[10px] leading-4 text-stone-400">
+                                                      {formatGeneratedAt(entry.timestamp)}
+                                                      <span className="mx-1 text-stone-600">·</span>
+                                                      {entry.model}
+                                                    </span>
+                                                    <span className="mt-0.5 block line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
+                                                      {entry.prompt}
+                                                    </span>
+                                                  </span>
+                                                </button>
                                                 <div className="flex shrink-0 flex-col justify-center gap-0.5">
                                                   <button
                                                     type="button"
@@ -8197,23 +8250,30 @@ export default function ChatContainer() {
                                                 key={`${entry.messageId}-${entry.id}-${entry.fileIndex}`}
                                                 className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
                                               >
-                                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
-                                                  <FileText className="h-4 w-4 text-stone-500" />
-                                                </div>
-                                                <div className="min-w-0 flex-1 py-0.5">
-                                                  <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
-                                                    {formatGeneratedAt(entry.createdAt)}
-                                                    {entry.size > 0 && (
-                                                      <>
-                                                        <span className="mx-1 text-stone-600">·</span>
-                                                        {formatFileSize(entry.size)}
-                                                      </>
-                                                    )}
-                                                  </div>
-                                                  <div className="mt-0.5 truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
-                                                    {entry.name}
-                                                  </div>
-                                                </div>
+                                                <button
+                                                  type="button"
+                                                  title={t('viewInChat')}
+                                                  onClick={() => scrollToMessage(entry.messageId)}
+                                                  className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
+                                                >
+                                                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
+                                                    <FileText className="h-4 w-4 text-stone-500" />
+                                                  </span>
+                                                  <span className="min-w-0 flex-1 py-0.5">
+                                                    <span className="block truncate font-mono text-[10px] leading-4 text-stone-400">
+                                                      {formatGeneratedAt(entry.createdAt)}
+                                                      {entry.size > 0 && (
+                                                        <>
+                                                          <span className="mx-1 text-stone-600">·</span>
+                                                          {formatFileSize(entry.size)}
+                                                        </>
+                                                      )}
+                                                    </span>
+                                                    <span className="mt-0.5 block truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
+                                                      {entry.name}
+                                                    </span>
+                                                  </span>
+                                                </button>
                                                 <div className="flex shrink-0 flex-col justify-center gap-0.5">
                                                   <button
                                                     type="button"

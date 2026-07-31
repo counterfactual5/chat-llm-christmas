@@ -1,4 +1,3 @@
-import { uploadGatewayFile } from '@/lib/gateway-files';
 import type { ChatTool } from '@/lib/tools/registry';
 
 /** Soft cap for generated text files (UTF-8 bytes). */
@@ -164,45 +163,18 @@ export function createCreateFileTool(): ChatTool {
         },
       });
 
-      // Always succeed locally first. Gateway Files API is image-oriented and can
-      // reject text uploads with opaque errors ("Model name not specified").
-      const localId = localFileId();
-      let file = {
-        id: localId,
+      // One copy only: attach to the assistant message (same pattern as /image).
+      // Do not upload a second gateway copy — Output is an index into the chat.
+      const id = localFileId();
+      const file = {
+        id,
         name: filename,
         mimeType,
         size: bytes.byteLength,
-        url: `local://${localId}`,
+        url: `local://${id}`,
         content,
         createdAt: Date.now(),
-        stored: 'local' as 'local' | 'gateway',
       };
-
-      const apiKey = String(ctx.gateway?.apiKey || '').trim();
-      if (apiKey) {
-        try {
-          const uploaded = await uploadGatewayFile({
-            apiKey,
-            baseURL: ctx.gateway?.baseURL,
-            bytes,
-            filename,
-            mime: mimeType,
-            purpose: 'assistants',
-          });
-          file = {
-            id: uploaded.id,
-            name: uploaded.filename || filename,
-            mimeType,
-            size: typeof uploaded.bytes === 'number' ? uploaded.bytes : bytes.byteLength,
-            url: `/api/files/${encodeURIComponent(uploaded.id)}`,
-            content,
-            createdAt: Date.now(),
-            stored: 'gateway',
-          };
-        } catch {
-          // Keep local file — download still works from inline content.
-        }
-      }
 
       ctx.send({ file_created: file });
       ctx.send({
@@ -214,7 +186,7 @@ export function createCreateFileTool(): ChatTool {
           results: [
             {
               title: file.name,
-              url: file.url.startsWith('local://') ? '' : file.url,
+              url: '',
               snippet: `${file.mimeType} · ${file.size} bytes`,
             },
           ],
@@ -228,8 +200,6 @@ export function createCreateFileTool(): ChatTool {
             name: file.name,
             mimeType: file.mimeType,
             size: file.size,
-            url: file.url.startsWith('local://') ? undefined : file.url,
-            stored: file.stored,
           },
         }),
         data: file,

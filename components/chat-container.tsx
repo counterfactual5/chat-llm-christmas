@@ -65,6 +65,7 @@ import {
   markdownFromDomSelection,
   prepareChatMarkdown,
 } from '@/lib/markdown-math';
+import { expandLiteralBreaks } from '@/lib/markdown-breaks';
 import { useLocale } from '@/lib/i18n';
 import {
   isGoogleMcpId,
@@ -2628,8 +2629,37 @@ export default function ChatContainer() {
     });
 
     const sessionForReview = sessionsRef.current.find((s) => s.id === sessionId);
-    const lastAssistantForReview = requestReview
-      ? [...(sessionForReview?.messages || [])].reverse().find((m) => m.role === 'assistant')
+    const serializeReviewToolRuns = (
+      runs: NonNullable<Message['toolRuns']> | undefined,
+    ) =>
+      (runs || []).map((r) => ({
+        name: r.name,
+        status: r.status,
+        query: r.query,
+        error: r.error,
+        provider: r.provider,
+        results: (r.results || [])
+          .filter((x) => x?.url || x?.snippet || x?.body)
+          .slice(0, 20)
+          .map((x) => ({
+            url: x.url,
+            title: x.title,
+            snippet: x.snippet,
+            ...(x.body ? { body: String(x.body).slice(0, 16_000) } : {}),
+          })),
+      }));
+
+    const assistantTurnsForReview = requestReview
+      ? (sessionForReview?.messages || [])
+          .filter((m) => m.role === 'assistant' && String(m.content || '').trim())
+          .map((m) => ({
+            messageId: m.id,
+            assistantText: m.content,
+            toolRuns: serializeReviewToolRuns(m.toolRuns),
+          }))
+      : [];
+    const lastAssistantForReview = assistantTurnsForReview.length
+      ? assistantTurnsForReview[assistantTurnsForReview.length - 1]
       : undefined;
 
     const response = await fetch('/api/chat', {
@@ -2648,24 +2678,10 @@ export default function ChatContainer() {
           ? {
               requestReview: true,
               reviewContext: {
-                targetMessageId: lastAssistantForReview.id,
-                assistantText: lastAssistantForReview.content,
-                toolRuns: (lastAssistantForReview.toolRuns || []).map((r) => ({
-                  name: r.name,
-                  status: r.status,
-                  query: r.query,
-                  error: r.error,
-                  provider: r.provider,
-                  results: (r.results || [])
-                    .filter((x) => x?.url)
-                    .slice(0, 20)
-                    .map((x) => ({
-                      url: x.url,
-                      title: x.title,
-                      snippet: x.snippet,
-                      ...(x.body ? { body: String(x.body).slice(0, 16_000) } : {}),
-                    })),
-                })),
+                targetMessageId: lastAssistantForReview.messageId,
+                assistantText: lastAssistantForReview.assistantText,
+                toolRuns: lastAssistantForReview.toolRuns,
+                turns: assistantTurnsForReview,
               },
             }
           : requestReview
@@ -6259,10 +6275,18 @@ export default function ChatContainer() {
                                   return <tr className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50">{children}</tr>;
                                 },
                                 th({ children }: any) {
-                                  return <th className="px-3.5 py-2.5 font-semibold">{children}</th>;
+                                  return (
+                                    <th className="px-3.5 py-2.5 font-semibold">
+                                      {expandLiteralBreaks(children)}
+                                    </th>
+                                  );
                                 },
                                 td({ children }: any) {
-                                  return <td className="px-3.5 py-2.5 align-top">{children}</td>;
+                                  return (
+                                    <td className="px-3.5 py-2.5 align-top">
+                                      {expandLiteralBreaks(children)}
+                                    </td>
+                                  );
                                 },
                                 code({ inline, className, children, ...props }: any) {
                                   const match = /language-(\w+)/.exec(className || '');

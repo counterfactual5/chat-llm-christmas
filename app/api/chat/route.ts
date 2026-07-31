@@ -64,6 +64,8 @@ import {
   actionableReviewIssues,
   verifyCorrectionText,
   rejectedCorrectionNote,
+  lastUserMessageIndex,
+  synthesizeFindings,
   FINDINGS_RESPONSE_SYSTEM,
   REVIEWER_SYSTEM_PROMPT,
   type ReviewFinding,
@@ -455,7 +457,7 @@ export async function POST(req: NextRequest) {
       /** Tool layer: claim reviewer. */
       autoReview = true,
       requestReview = false,
-      /** Prior assistant turn to audit (request review). */
+      /** Prior assistant turn(s) to audit (request review). */
       reviewContext = null as null | {
         targetMessageId?: string;
         assistantText?: string;
@@ -470,6 +472,24 @@ export async function POST(req: NextRequest) {
             title?: string;
             snippet?: string;
             body?: string;
+          }>;
+        }>;
+        /** Full-thread Request Review: each assistant turn + its own receipts. */
+        turns?: Array<{
+          messageId: string;
+          assistantText: string;
+          toolRuns?: Array<{
+            name: string;
+            status: string;
+            query?: string;
+            error?: string;
+            provider?: string;
+            results?: Array<{
+              url?: string;
+              title?: string;
+              snippet?: string;
+              body?: string;
+            }>;
           }>;
         }>;
       },
@@ -620,7 +640,7 @@ export async function POST(req: NextRequest) {
     }
     if (requestReview) {
       systemParts.push(
-        'The user explicitly requested a claim review of your latest assistant answer. In your reply: verify each claim of tool success/search against the tool results in this conversation; if a claim lacks a real tool receipt, retract it and state the action was NOT performed. Otherwise confirm verification briefly.',
+        'The user explicitly requested a claim review of the conversation. Verify each assistant turn against that turn’s own tool receipts (not a pooled bag of all tools). If a claim lacks a real tool receipt for its turn, retract it. Otherwise confirm briefly.',
       );
     }
     if (autoReview || requestReview) {
@@ -964,30 +984,67 @@ export async function POST(req: NextRequest) {
               'claim verifier',
             );
 
+          type ReviewToolRun = NonNullable<
+            NonNullable<typeof reviewContext>['toolRuns']
+          >[number];
+          type ReviewTurn = {
+            messageId: string;
+            assistantText: string;
+            toolRuns?: ReviewToolRun[];
+          };
+          const rawTurns = Array.isArray(reviewContext?.turns)
+            ? reviewContext!.turns!
+            : [];
+          const turns: ReviewTurn[] = rawTurns
+            .map((t: { messageId?: string; assistantText?: string; toolRuns?: ReviewToolRun[] }) => ({
+              messageId: String(t?.messageId || '').trim(),
+              assistantText: String(t?.assistantText || '').trim(),
+              toolRuns: t?.toolRuns,
+            }))
+            .filter((t: ReviewTurn) => t.messageId && t.assistantText);
+          // Backward compat: single-turn payload without `turns`.
+          if (!turns.length && priorText) {
+            turns.push({
+              messageId: String(reviewContext?.targetMessageId || '').trim() || 'last',
+              assistantText: priorText,
+              toolRuns: reviewContext?.toolRuns,
+            });
+          }
+
           let findings: ReviewFinding[] = [];
           let reviewIssues: ReviewIssue[] = [];
           try {
-            if (priorText) {
-              const priorRecord = buildExecutionRecordFromToolRuns(
-                reviewContext?.toolRuns || [],
-              );
-              const audit = await runFullClaimAudit(
-                send,
-                priorText,
-                priorRecord,
-                auditOpts,
-                'requested',
-                verifierComplete,
-                {
-                  forceLlm: true,
-                  targetMessageId: reviewContext?.targetMessageId,
-                  emitEmpty: true,
-                  userAsk,
-                  signal: clientSignal,
-                },
-              );
-              findings = audit.findings;
-              reviewIssues = audit.issues;
+            if (turns.length) {
+              const focusId =
+                String(reviewContext?.targetMessageId || '').trim() ||
+                turns[turns.length - 1]!.messageId;
+              for (const turn of turns) {
+                const priorRecord = buildExecutionRecordFromToolRuns(turn.toolRuns || []);
+                // Spend the LLM verifier on the focused (usually latest) turn, and
+                // on earlier turns only when local heuristics already found errors.
+                const earlyErrors = synthesizeFindings(
+                  turn.assistantText,
+                  priorRecord,
+                  auditOpts,
+                ).some((f) => f.severity === 'error');
+                const audit = await runFullClaimAudit(
+                  send,
+                  turn.assistantText,
+                  priorRecord,
+                  auditOpts,
+                  'requested',
+                  verifierComplete,
+                  {
+                    forceLlm: turn.messageId === focusId || earlyErrors,
+                    targetMessageId: turn.messageId,
+                    emitEmpty: true,
+                    userAsk,
+                    signal: clientSignal,
+                  },
+                );
+                findings = findings.concat(audit.findings);
+                reviewIssues = reviewIssues.concat(audit.issues);
+              }
             } else {
               emitReviewReport(
                 send,
@@ -1007,8 +1064,8 @@ export async function POST(req: NextRequest) {
               {
                 role: 'user',
                 content: reviewIssues.length
-                  ? buildReviewIssuesResponsePrompt(reviewIssues, priorText)
-                  : buildFindingsResponsePrompt(findings, priorText),
+                  ? buildReviewIssuesResponsePrompt(reviewIssues, priorText || turns.map((t) => t.assistantText).join('\n\n'))
+                  : buildFindingsResponsePrompt(findings, priorText || turns.map((t) => t.assistantText).join('\n\n')),
               },
             ];
             const reviewStream = streamChatCompletionsRaw({
@@ -1091,6 +1148,9 @@ export async function POST(req: NextRequest) {
           skillCreator: skillCreatorOn,
         };
         let midTurnCorrection: MidTurnCorrection | null = null;
+        // Snapshot before this turn's tool rounds so Auto-review ignores
+        // historically replayed receipts from earlier assistant turns.
+        const autoReviewTurnBoundary = lastUserMessageIndex(workingMessages);
         const verifierComplete = async (
           msgs: Array<{ role: string; content: string }>,
         ) =>
@@ -1124,7 +1184,9 @@ export async function POST(req: NextRequest) {
             err.name = 'AbortError';
             throw err;
           }
-          const record = buildExecutionRecordFromMessages(workingMessages);
+          const record = buildExecutionRecordFromMessages(workingMessages, {
+            afterIndex: autoReviewTurnBoundary,
+          });
           return runFullClaimAudit(
             send,
             text,

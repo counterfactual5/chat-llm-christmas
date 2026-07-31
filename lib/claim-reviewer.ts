@@ -389,11 +389,23 @@ function extractSourcesFromPayload(payload: string, limit = 24): ExecutionSource
 }
 
 /** Build a receipt list from OpenAI-style tool messages in the current turn. */
-export function buildExecutionRecordFromMessages(messages: ChatMessageLike[]): ExecutionRecordEntry[] {
+export function buildExecutionRecordFromMessages(
+  messages: ChatMessageLike[],
+  opts?: {
+    /**
+     * Only include tool receipts that appear AFTER this message index.
+     * Used by Auto-review so historical replayed tools do not pollute
+     * the current turn's audit.
+     */
+    afterIndex?: number;
+  },
+): ExecutionRecordEntry[] {
+  const start = Math.max(0, (opts?.afterIndex ?? -1) + 1);
   const pending = new Map<string, string>();
   const entries: ExecutionRecordEntry[] = [];
 
-  for (const m of messages) {
+  for (let i = start; i < messages.length; i++) {
+    const m = messages[i];
     if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
       for (const tc of m.tool_calls) {
         const id = String(tc.id || '').trim();
@@ -423,6 +435,14 @@ export function buildExecutionRecordFromMessages(messages: ChatMessageLike[]): E
     }
   }
   return entries;
+}
+
+/** Index of the last user message — Auto-review turn boundary. */
+export function lastUserMessageIndex(messages: ChatMessageLike[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') return i;
+  }
+  return -1;
 }
 
 /** Build receipts from persisted assistant toolRuns (request-review of a prior turn). */

@@ -7,6 +7,7 @@ import { createNotionMcpTools } from '@/lib/tools/notion-tools';
 import { createGitHubMcpTools } from '@/lib/tools/github-tools';
 import { createGoogleTools } from '@/lib/tools/google-tools';
 import { createSaveSkillTool } from '@/lib/tools/save-skill-tool';
+import { createCreateFileTool } from '@/lib/tools/create-file-tool';
 import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google-services';
 
 /** Built-in tools shipped with the chat app. */
@@ -16,6 +17,7 @@ export function builtinToolRegistry(): ChatTool[] {
     createWebReadTool(),
     createImageUnderstandTool(),
     createSaveSkillTool(),
+    createCreateFileTool(),
   ];
 }
 
@@ -90,6 +92,12 @@ export {
   createImageUnderstandTool,
   parseImageUnderstandArgs,
 } from '@/lib/tools/image-understand-tool';
+
+export {
+  createCreateFileTool,
+  sanitizeGeneratedFilename,
+  mimeFromFilename,
+} from '@/lib/tools/create-file-tool';
 
 export { createNotionMcpTools } from '@/lib/tools/notion-tools';
 export { createGitHubMcpTools } from '@/lib/tools/github-tools';

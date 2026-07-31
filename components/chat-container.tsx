@@ -331,6 +331,15 @@ interface Message {
     /** Gateway Files API id — prefer this over re-sending base64. */
     fileId?: string;
   }>;
+  /** Files created via create_file for this assistant turn (Output panel). */
+  files?: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    url: string;
+    createdAt: number;
+  }>;
   /** Marks a synthetic compacted-history bubble. */
   compacted?: boolean;
   /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */
@@ -917,6 +926,8 @@ export default function ChatContainer() {
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   /** Per-source groups within Reference Material; all start collapsed. */
   const [referenceGroupsOpen, setReferenceGroupsOpen] = useState<Record<string, boolean>>({});
+  /** Images / Files subgroups inside Output; all start collapsed. */
+  const [outputGroupsOpen, setOutputGroupsOpen] = useState<Record<string, boolean>>({});
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
   /** When the user explicitly clears web sources, suppress auto-restore from history. */
@@ -1561,6 +1572,17 @@ export default function ChatContainer() {
     timestamp: number;
   };
 
+  type GeneratedFileEntry = {
+    messageId: string;
+    fileIndex: number;
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    url: string;
+    createdAt: number;
+  };
+
   const generatedImageHistory = useMemo((): GeneratedImageEntry[] => {
     const out: GeneratedImageEntry[] = [];
     for (let i = 0; i < messages.length; i++) {
@@ -1584,10 +1606,39 @@ export default function ChatContainer() {
     return out.slice().reverse();
   }, [messages]);
 
+  const generatedFileHistory = useMemo((): GeneratedFileEntry[] => {
+    const out: GeneratedFileEntry[] = [];
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.files?.length) continue;
+      m.files.forEach((file, fileIndex) => {
+        out.push({
+          messageId: m.id,
+          fileIndex,
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType,
+          size: file.size,
+          url: file.url,
+          createdAt: file.createdAt || m.timestamp,
+        });
+      });
+    }
+    return out.slice().reverse();
+  }, [messages]);
+
+  const generatedOutputCount = generatedImageHistory.length + generatedFileHistory.length;
+
   const formatGeneratedAt = (ts: number) => {
     const d = new Date(ts);
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes < 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const downloadGeneratedImage = async (entry: GeneratedImageEntry) => {
@@ -1605,6 +1656,29 @@ export default function ChatContainer() {
     }
   };
 
+  const downloadGeneratedFile = async (entry: GeneratedFileEntry) => {
+    try {
+      const res = await fetch(entry.url);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = entry.name || `file-${entry.createdAt}`;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(entry.url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const isEmptyAssistantShell = (m: Message) =>
+    m.role === 'assistant' &&
+    !m.content?.trim() &&
+    !m.images?.length &&
+    !m.files?.length &&
+    !m.reasoning &&
+    !m.toolRuns?.length;
+
   const removeGeneratedImage = (entry: GeneratedImageEntry) => {
     setSessions((prev) =>
       prev.map((s) => {
@@ -1615,16 +1689,23 @@ export default function ChatContainer() {
             const images = m.images.filter((_, idx) => idx !== entry.imageIndex);
             return { ...m, images: images.length ? images : undefined };
           })
-          .filter(
-            (m) =>
-              !(
-                m.role === 'assistant' &&
-                !m.content?.trim() &&
-                !m.images?.length &&
-                !m.reasoning &&
-                !m.toolRuns?.length
-              ),
-          );
+          .filter((m) => !isEmptyAssistantShell(m));
+        return { ...s, messages: nextMessages, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const removeGeneratedFile = (entry: GeneratedFileEntry) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const nextMessages = s.messages
+          .map((m) => {
+            if (m.id !== entry.messageId || !m.files?.length) return m;
+            const files = m.files.filter((_, idx) => idx !== entry.fileIndex);
+            return { ...m, files: files.length ? files : undefined };
+          })
+          .filter((m) => !isEmptyAssistantShell(m));
         return { ...s, messages: nextMessages, updatedAt: Date.now() };
       }),
     );
@@ -1636,21 +1717,50 @@ export default function ChatContainer() {
         if (s.id !== activeSessionId) return s;
         const nextMessages = s.messages
           .map((m) =>
-            m.role === 'assistant' && m.images?.length
-              ? { ...m, images: undefined }
+            m.role === 'assistant' && (m.images?.length || m.files?.length)
+              ? { ...m, images: undefined, files: undefined }
               : m,
           )
-          .filter(
-            (m) =>
-              !(
-                m.role === 'assistant' &&
-                !m.content?.trim() &&
-                !m.images?.length &&
-                !m.reasoning &&
-                !m.toolRuns?.length
-              ),
-          );
+          .filter((m) => !isEmptyAssistantShell(m));
         return { ...s, messages: nextMessages, updatedAt: Date.now() };
+      }),
+    );
+  };
+
+  const appendAssistantGeneratedFile = (
+    sessionId: string,
+    assistantId: string,
+    file: {
+      id: string;
+      name: string;
+      mimeType: string;
+      size: number;
+      url: string;
+      createdAt?: number;
+    },
+  ) => {
+    const entry = {
+      id: String(file.id || '').trim(),
+      name: String(file.name || 'file').trim() || 'file',
+      mimeType: String(file.mimeType || 'text/plain').trim() || 'text/plain',
+      size: typeof file.size === 'number' ? file.size : 0,
+      url: String(file.url || '').trim(),
+      createdAt: typeof file.createdAt === 'number' ? file.createdAt : Date.now(),
+    };
+    if (!entry.id || !entry.url) return;
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
+          updatedAt: Date.now(),
+          messages: s.messages.map((m) => {
+            if (m.id !== assistantId) return m;
+            const existing = m.files || [];
+            if (existing.some((f) => f.id === entry.id)) return m;
+            return { ...m, files: [...existing, entry] };
+          }),
+        };
       }),
     );
   };
@@ -2948,6 +3058,21 @@ export default function ChatContainer() {
               !parsed.tool.error
             ) {
               void fetchSkills();
+            }
+          }
+          if (parsed.file_created && typeof parsed.file_created === 'object') {
+            const raw = parsed.file_created as Record<string, unknown>;
+            appendAssistantGeneratedFile(sessionId, assistantId, {
+              id: String(raw.id || ''),
+              name: String(raw.name || ''),
+              mimeType: String(raw.mimeType || 'text/plain'),
+              size: typeof raw.size === 'number' ? raw.size : 0,
+              url: String(raw.url || ''),
+              createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+            });
+            if (sessionId === activeSessionIdRef.current) {
+              setPicturesExpanded(true);
+              setIsContextPanelOpen(true);
             }
           }
           if (parsed.content) {
@@ -5966,6 +6091,7 @@ export default function ChatContainer() {
                             );
                           const isWebRead =
                             run.name === 'web_read' || run.name === 'web-read';
+                          const isCreateFile = run.name === 'create_file';
                           const isImageUnderstand =
                             run.name === 'image_understand' ||
                             run.provider === 'zhipu-vision' ||
@@ -6024,9 +6150,11 @@ export default function ChatContainer() {
                                       ? t('searchingGitHub')
                                       : isImageUnderstand
                                         ? t('understandingImage')
-                                        : isWebRead
-                                          ? t('readingWeb')
-                                          : t('searchingWeb')
+                                        : isCreateFile
+                                          ? t('creatingFile')
+                                          : isWebRead
+                                            ? t('readingWeb')
+                                            : t('searchingWeb')
                               : failed
                                 ? t('toolFailed')
                                 : isNotionWrite
@@ -6039,9 +6167,11 @@ export default function ChatContainer() {
                                         ? t('searchedGitHub')
                                         : isImageUnderstand
                                           ? t('understoodImage')
-                                          : isWebRead
-                                            ? t('readWeb')
-                                            : t('searchedWeb');
+                                          : isCreateFile
+                                            ? t('createdFile')
+                                            : isWebRead
+                                              ? t('readWeb')
+                                              : t('searchedWeb');
                           return (
                             <div key={step.id} className="overflow-hidden">
                               <button
@@ -6076,6 +6206,8 @@ export default function ChatContainer() {
                                   <GoogleLogo className="h-3 w-3 shrink-0" />
                                 ) : isImageUnderstand ? (
                                   <ImageIcon className="h-3 w-3 shrink-0 opacity-60" />
+                                ) : isCreateFile ? (
+                                  <FileText className="h-3 w-3 shrink-0 opacity-60" />
                                 ) : (
                                   <Globe className="h-3 w-3 shrink-0 opacity-60" />
                                 )}
@@ -6087,6 +6219,7 @@ export default function ChatContainer() {
                                   !isGitHub &&
                                   !isGoogle &&
                                   !isImageUnderstand &&
+                                  !isCreateFile &&
                                   !isClaimReviewer && (
                                     <span className="opacity-50">
                                       {t('searchedVia').replace(
@@ -6095,7 +6228,7 @@ export default function ChatContainer() {
                                       )}
                                     </span>
                                   )}
-                                {run.query && (isNotion || isGoogle) && !searching && (
+                                {run.query && (isNotion || isGoogle || isCreateFile) && !searching && (
                                   <span className="min-w-0 truncate opacity-50">
                                     ·{' '}
                                     {isNotionFetch && run.results?.[0]?.title
@@ -7876,7 +8009,7 @@ export default function ChatContainer() {
 
                 <ScrollArea className="flex-1 px-4 py-4">
                   <div className="space-y-2">
-                    {/* Generated pictures — collapsible history bars */}
+                    {/* Output — generated images + create_file artifacts */}
                     <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
                       <button
                         type="button"
@@ -7884,14 +8017,14 @@ export default function ChatContainer() {
                         className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-stone-50 dark:hover:bg-stone-800/50"
                       >
                         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
-                          <ImageIcon className="h-3.5 w-3.5" />
+                          <FileText className="h-3.5 w-3.5" />
                           {t('generatedOutput')}
                           <span className="font-mono font-normal normal-case tracking-normal text-stone-400">
-                            ({generatedImageHistory.length})
+                            ({generatedOutputCount})
                           </span>
                         </span>
                         <div className="flex items-center gap-1">
-                          {generatedImageHistory.length > 0 && (
+                          {generatedOutputCount > 0 && (
                             <span
                               role="button"
                               tabIndex={0}
@@ -7928,58 +8061,158 @@ export default function ChatContainer() {
                             className="overflow-hidden"
                           >
                             <div className="max-h-72 space-y-2 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
-                              {generatedImageHistory.length === 0 ? (
+                              {generatedOutputCount === 0 ? (
                                 <div className="py-2 text-xs text-stone-400">
-                                  {t('noGeneratedImages')}
+                                  {t('noGeneratedOutput')}
                                 </div>
                               ) : (
-                                generatedImageHistory.map((entry) => (
-                                  <div
-                                    key={`${entry.messageId}-${entry.imageIndex}`}
-                                    className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-700 dark:bg-stone-900/40"
-                                  >
-                                    <a
-                                      href={entry.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
+                                <>
+                                  {generatedImageHistory.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOutputGroupsOpen((prev) => ({
+                                            ...prev,
+                                            images: !prev.images,
+                                          }))
+                                        }
+                                        className="flex w-full items-center justify-between rounded-md px-1.5 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/80"
+                                      >
+                                        <span>
+                                          {t('outputImagesGroup')} · {generatedImageHistory.length}
+                                        </span>
+                                        <ChevronDown
+                                          className={cn(
+                                            'h-3.5 w-3.5 transition-transform',
+                                            outputGroupsOpen.images && 'rotate-180',
+                                          )}
+                                        />
+                                      </button>
+                                      {outputGroupsOpen.images &&
+                                        generatedImageHistory.map((entry) => (
+                                          <div
+                                            key={`${entry.messageId}-${entry.imageIndex}`}
+                                            className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-700 dark:bg-stone-900/40"
+                                          >
+                                            <a
+                                              href={entry.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
+                                            >
+                                              <img
+                                                src={entry.url}
+                                                alt=""
+                                                className="h-full w-full object-cover"
+                                              />
+                                            </a>
+                                            <div className="min-w-0 flex-1 py-0.5">
+                                              <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
+                                                {formatGeneratedAt(entry.timestamp)}
+                                                <span className="mx-1 text-stone-600">·</span>
+                                                {entry.model}
+                                              </div>
+                                              <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
+                                                {entry.prompt}
+                                              </div>
+                                            </div>
+                                            <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                              <button
+                                                type="button"
+                                                title={t('download')}
+                                                onClick={() => void downloadGeneratedImage(entry)}
+                                                className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                              >
+                                                <Download className="h-3.5 w-3.5" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                title={t('delete')}
+                                                onClick={() => removeGeneratedImage(entry)}
+                                                className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  )}
+                                  {generatedFileHistory.length > 0 && (
+                                    <div
+                                      className={cn(
+                                        'space-y-1.5',
+                                        generatedImageHistory.length > 0 &&
+                                          'border-t border-stone-100 pt-2 dark:border-stone-800',
+                                      )}
                                     >
-                                      <img
-                                        src={entry.url}
-                                        alt=""
-                                        className="h-full w-full object-cover"
-                                      />
-                                    </a>
-                                    <div className="min-w-0 flex-1 py-0.5">
-                                      <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
-                                        {formatGeneratedAt(entry.timestamp)}
-                                        <span className="mx-1 text-stone-600">·</span>
-                                        {entry.model}
-                                      </div>
-                                      <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
-                                        {entry.prompt}
-                                      </div>
-                                    </div>
-                                    <div className="flex shrink-0 flex-col justify-center gap-0.5">
                                       <button
                                         type="button"
-                                        title={t('download')}
-                                        onClick={() => void downloadGeneratedImage(entry)}
-                                        className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                        onClick={() =>
+                                          setOutputGroupsOpen((prev) => ({
+                                            ...prev,
+                                            files: !prev.files,
+                                          }))
+                                        }
+                                        className="flex w-full items-center justify-between rounded-md px-1.5 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/80"
                                       >
-                                        <Download className="h-3.5 w-3.5" />
+                                        <span>
+                                          {t('outputFilesGroup')} · {generatedFileHistory.length}
+                                        </span>
+                                        <ChevronDown
+                                          className={cn(
+                                            'h-3.5 w-3.5 transition-transform',
+                                            outputGroupsOpen.files && 'rotate-180',
+                                          )}
+                                        />
                                       </button>
-                                      <button
-                                        type="button"
-                                        title={t('delete')}
-                                        onClick={() => removeGeneratedImage(entry)}
-                                        className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      </button>
+                                      {outputGroupsOpen.files &&
+                                        generatedFileHistory.map((entry) => (
+                                          <div
+                                            key={`${entry.messageId}-${entry.id}-${entry.fileIndex}`}
+                                            className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-700 dark:bg-stone-900/40"
+                                          >
+                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
+                                              <FileText className="h-4 w-4 text-stone-500" />
+                                            </div>
+                                            <div className="min-w-0 flex-1 py-0.5">
+                                              <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
+                                                {formatGeneratedAt(entry.createdAt)}
+                                                {entry.size > 0 && (
+                                                  <>
+                                                    <span className="mx-1 text-stone-600">·</span>
+                                                    {formatFileSize(entry.size)}
+                                                  </>
+                                                )}
+                                              </div>
+                                              <div className="mt-0.5 truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
+                                                {entry.name}
+                                              </div>
+                                            </div>
+                                            <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                              <button
+                                                type="button"
+                                                title={t('download')}
+                                                onClick={() => void downloadGeneratedFile(entry)}
+                                                className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                              >
+                                                <Download className="h-3.5 w-3.5" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                title={t('delete')}
+                                                onClick={() => removeGeneratedFile(entry)}
+                                                className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
                                     </div>
-                                  </div>
-                                ))
+                                  )}
+                                </>
                               )}
                             </div>
                           </motion.div>

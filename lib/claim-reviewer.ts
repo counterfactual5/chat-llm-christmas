@@ -35,7 +35,8 @@ export type FakedToolSurface =
   | 'drive'
   | 'web_search'
   | 'web_read'
-  | 'save_skill';
+  | 'save_skill'
+  | 'create_file';
 
 export const REVIEWER_SYSTEM_PROMPT = [
   '【Claim Reviewer — 硬性约束】',
@@ -125,6 +126,14 @@ export function detectFakedToolNarration(
     }
   }
 
+  if (
+    /(已(经)?(生成|创建|保存).{0,12}(文件|\.md|\.py|\.ts|\.json)|文件已(经)?(生成|创建|保存)|created (the )?file|saved (the )?file|wrote (the )?file to)/i.test(
+      t,
+    )
+  ) {
+    found.push('create_file');
+  }
+
   return found;
 }
 
@@ -190,6 +199,7 @@ const SURFACE_LABELS: Record<FakedToolSurface, string> = {
   web_search: 'web_search',
   web_read: 'web_read',
   save_skill: 'save_skill',
+  create_file: 'create_file',
 };
 
 const INTENT_LABELS: Record<FakedToolSurface, string> = {
@@ -201,6 +211,7 @@ const INTENT_LABELS: Record<FakedToolSurface, string> = {
   web_search: 'web_search',
   web_read: 'web_read',
   save_skill: 'save_skill',
+  create_file: 'create_file',
 };
 
 export function buildCorrectionPrompt(surfaces: FakedToolSurface[]): string {
@@ -288,6 +299,7 @@ const SURFACE_TOOL_PATTERNS: Record<FakedToolSurface, RegExp[]> = {
   web_search: [/web_search/i, /proactive_search/i],
   web_read: [/web_read/i, /web-read/i, /read_url/i],
   save_skill: [/save_skill/i],
+  create_file: [/create_file/i],
 };
 
 function extractErrorSnippet(payload: string): string {
@@ -2589,6 +2601,7 @@ const VALID_SURFACES = new Set<string>([
   'web_search',
   'web_read',
   'save_skill',
+  'create_file',
 ]);
 
 const VALID_VERDICTS = new Set<string>([
@@ -2604,7 +2617,7 @@ export const VERIFIER_SYSTEM_PROMPT = [
   'You only compare ASSISTANT TEXT against EXECUTION RECORD (tool receipts).',
   'Do not invent tools that are not in the record. Do not trust the assistant narrative.',
   'Output ONLY valid JSON (no markdown fences) with this shape:',
-  '{"findings":[{"severity":"error"|"warn","surface":"notion"|"github"|"gmail"|"calendar"|"drive"|"web_search"|"web_read"|"save_skill","verdict":"pending_intent"|"unsupported"|"tool_failed"|"no_receipt","claim":"short quote or paraphrase","evidence":"which receipt contradicts or is missing"}],"summary":"one sentence"}',
+  '{"findings":[{"severity":"error"|"warn","surface":"notion"|"github"|"gmail"|"calendar"|"drive"|"web_search"|"web_read"|"save_skill"|"create_file","verdict":"pending_intent"|"unsupported"|"tool_failed"|"no_receipt","claim":"short quote or paraphrase","evidence":"which receipt contradicts or is missing"}],"summary":"one sentence"}',
   'Rules:',
   '- pending_intent: announced they would call a tool but record has no matching call.',
   '- no_receipt: claimed success/search result but no matching successful receipt.',

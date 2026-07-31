@@ -655,6 +655,9 @@ export async function POST(req: NextRequest) {
     const hasGeneratedImages = (messages as any[]).some(
       (m) => m?.role === 'assistant' && Array.isArray(m.images) && m.images.length > 0,
     );
+    const hasGeneratedFiles = (messages as any[]).some(
+      (m) => m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0,
+    );
     if (hasGeneratedImages) {
       systemParts.push(
         [
@@ -662,6 +665,15 @@ export async function POST(req: NextRequest) {
           'They are shown in the UI and may be attached to later user turns for vision models.',
           'Never claim those images failed to generate, and never blame missing folders/workspaces.',
           'If the user asks about “这张图/刚才的图/生成的图”, refer to the generated image in this chat — do not web-search for substitutes unless asked.',
+        ].join(' '),
+      );
+    }
+    if (hasGeneratedFiles) {
+      systemParts.push(
+        [
+          'This chat already contains downloadable file(s) created via create_file.',
+          'They appear in the Output panel. Refer to those existing files when the user asks about them.',
+          'To add more files, call create_file again — do not pretend a file exists without a successful create_file receipt.',
         ].join(' '),
       );
     }

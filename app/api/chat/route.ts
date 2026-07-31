@@ -29,7 +29,7 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/image-understand';
+import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/image-understand';
 import { streamCompletionPayload } from '@/lib/truncation';
 import {
   getNotionMcpAccessToken,
@@ -707,7 +707,23 @@ export async function POST(req: NextRequest) {
       return { url, prompt };
     };
 
-    const toVisionPart = (img: ImageRef) => toImageContentPart(img);
+    // Portal Files ids are opaque to upstream VLMs — expand to data URLs first.
+    const toVisionPart = async (img: ImageRef) => {
+      const part = toImageContentPart(img);
+      if (!part) return null;
+      const ref = String((part as { image_url?: { url?: string } })?.image_url?.url || '').trim();
+      if (!ref || /^https?:\/\//i.test(ref) || ref.startsWith('data:')) return part;
+      try {
+        const dataUrl = await resolveImageUrlForVision(ref, { apiKey, baseURL });
+        return toImageContentPart({ url: dataUrl });
+      } catch (err) {
+        console.warn(
+          '[chat] resolve portal file for vision failed:',
+          err instanceof Error ? err.message : err,
+        );
+        return null;
+      }
+    };
 
     const normalizedMessages: any[] = [];
     /** Generated pics can't ride on assistant turns — attach to the next user turn. */
@@ -764,9 +780,9 @@ export async function POST(req: NextRequest) {
 
       if (Array.isArray(m.content)) {
         if (carryAssistantImages && pendingAssistantImages.length && role === 'user') {
-          const extra = pendingAssistantImages
-            .map((img) => toVisionPart(img))
-            .filter(Boolean);
+          const extra = (
+            await Promise.all(pendingAssistantImages.map((img) => toVisionPart(img)))
+          ).filter(Boolean);
           pendingAssistantImages = [];
           const content = Array.isArray(m.content)
             ? [...extra, ...m.content]
@@ -858,8 +874,12 @@ export async function POST(req: NextRequest) {
                 ]
               : []),
             ...(visibleText ? [{ type: 'text', text: visibleText }] : []),
-            ...carried.map((img) => toVisionPart(img)).filter(Boolean),
-            ...resolvedUploads.map((img) => toVisionPart(img)).filter(Boolean),
+            ...(
+              await Promise.all([
+                ...carried.map((img) => toVisionPart(img)),
+                ...resolvedUploads.map((img) => toVisionPart(img)),
+              ])
+            ).filter(Boolean),
           ];
           normalizedMessages.push({ role, timestamp, content: parts });
         } else if (carried.length > 0) {
@@ -873,7 +893,9 @@ export async function POST(req: NextRequest) {
               ].join(' '),
             },
             { type: 'text', text: stripImageArchiveBlock(text) },
-            ...carried.map((img) => toVisionPart(img)).filter(Boolean),
+            ...(
+              await Promise.all(carried.map((img) => toVisionPart(img)))
+            ).filter(Boolean),
           ];
           normalizedMessages.push({ role, timestamp, content: parts });
         } else {
@@ -946,7 +968,9 @@ export async function POST(req: NextRequest) {
               ]
             : []),
           ...(text ? [{ type: 'text', text }] : []),
-          ...allImages.map((img) => toVisionPart(img)).filter(Boolean),
+          ...(
+            await Promise.all(allImages.map((img) => toVisionPart(img)))
+          ).filter(Boolean),
         ];
         normalizedMessages.push({
           role,

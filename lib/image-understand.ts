@@ -43,9 +43,61 @@ export interface ImageUnderstandResult {
   provider?: string;
 }
 
+function bytesToBase64(buf: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < buf.length; i += chunk) {
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Bare portal/new-api file id, or `/api/files/<id>` path. */
+function gatewayFileIdFromRef(imageUrl: string): string {
+  const raw = String(imageUrl || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('/api/files/')) {
+    return decodeURIComponent(
+      raw.slice('/api/files/'.length).split(/[?#]/)[0] || '',
+    );
+  }
+  // https / data / absolute paths are not gateway ids
+  if (/^(https?:\/\/|data:)/i.test(raw) || raw.includes('/')) return '';
+  return raw;
+}
+
+/**
+ * Portal Files ids are not resolvable by upstream VLMs as bare `image_url`
+ * strings (new-api no longer owns /v1/files). Fetch bytes and inline as a
+ * data URL so glm-4.6v / OCR backends can actually see the pixels.
+ */
+export async function resolveImageUrlForVision(
+  imageUrl: string,
+  gateway: { apiKey: string; baseURL: string },
+): Promise<string> {
+  const raw = String(imageUrl || '').trim();
+  if (!raw) throw new Error('Empty image URL');
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('data:')) return raw;
+
+  const fileId = gatewayFileIdFromRef(raw);
+  if (!fileId) throw new Error('Invalid image reference');
+
+  const base = gateway.baseURL.replace(/\/$/, '');
+  const res = await fetch(`${base}/files/${encodeURIComponent(fileId)}/content`, {
+    headers: { Authorization: `Bearer ${gateway.apiKey}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Gateway file fetch failed: HTTP ${res.status}`);
+  }
+  const mime = (res.headers.get('content-type') || 'image/png').split(';')[0].trim();
+  const buf = new Uint8Array(await res.arrayBuffer());
+  return `data:${mime || 'image/png'};base64,${bytesToBase64(buf)}`;
+}
+
 function toVisionImagePart(imageUrl: string): Record<string, unknown> | null {
   const raw = String(imageUrl || '').trim();
   if (!raw) return null;
+  // Prefer real URLs / data URIs. Bare file ids only as a last resort (legacy).
   const part = toImageContentPart(
     raw.startsWith('http') || raw.startsWith('data:')
       ? { url: raw }
@@ -150,28 +202,10 @@ async function resolveFileForLayoutParsing(
     return m[1];
   }
 
-  let fileId = raw;
-  if (raw.startsWith('/api/files/')) {
-    fileId = decodeURIComponent(
-      raw.slice('/api/files/'.length).split(/[?#]/)[0] || '',
-    );
-  }
-  if (!fileId) throw new Error('Missing gateway file id for OCR');
-
-  const base = gateway.baseURL.replace(/\/$/, '');
-  const res = await fetch(`${base}/files/${encodeURIComponent(fileId)}/content`, {
-    headers: { Authorization: `Bearer ${gateway.apiKey}` },
-  });
-  if (!res.ok) {
-    throw new Error(`Gateway file fetch for OCR failed: HTTP ${res.status}`);
-  }
-  const buf = new Uint8Array(await res.arrayBuffer());
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < buf.length; i += chunk) {
-    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
-  }
-  return btoa(binary);
+  const dataUrl = await resolveImageUrlForVision(raw, gateway);
+  const m = dataUrl.match(/^data:[^;]+;base64,(.+)$/i);
+  if (!m?.[1]) throw new Error('Invalid data URL for OCR');
+  return m[1];
 }
 
 function layoutParsingText(data: Record<string, unknown>): string {
@@ -290,8 +324,26 @@ export async function understandImages(
     };
   }
 
+  // Expand portal file ids → data URLs before calling upstream VLMs.
+  // Bare ids worked (sort of) when new-api owned Files; portal Files do not.
+  const resolvedUrls: string[] = [];
+  try {
+    for (const url of urls) {
+      resolvedUrls.push(await resolveImageUrlForVision(url, gateway));
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[image-understand] resolve image for vision failed:', message);
+    return {
+      ok: false,
+      text: `Failed to load image for understanding (${message}).`,
+      mode: 'error',
+      texts: urls.map(() => `Failed to load image for understanding (${message}).`),
+    };
+  }
+
   const imageParts: Record<string, unknown>[] = [];
-  for (const url of urls) {
+  for (const url of resolvedUrls) {
     const part = toVisionImagePart(url);
     if (!part) {
       return {

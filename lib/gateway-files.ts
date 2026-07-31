@@ -27,6 +27,9 @@ function parseDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } | nu
 /**
  * Upload bytes to the gateway Files API. Returns a reusable file id.
  * Prefer purpose `vision` for images; fall back to `assistants` if rejected.
+ *
+ * llm.christmas / NewAPI-style gateways require a non-empty `model` on upload
+ * (billing / routing), even though upstream OpenAI Files API does not.
  */
 export async function uploadGatewayFile(opts: {
   apiKey: string;
@@ -35,8 +38,13 @@ export async function uploadGatewayFile(opts: {
   filename: string;
   mime?: string;
   purpose?: string;
+  /** Gateway routing model — required by NewAPI; defaults from env or gpt-4o. */
+  model?: string;
 }): Promise<GatewayFileRef> {
   const baseURL = (opts.baseURL || gatewayBaseURL()).replace(/\/$/, '');
+  const model =
+    String(opts.model || process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() ||
+    'gpt-4o';
   const purposes = opts.purpose
     ? [opts.purpose]
     : opts.mime?.startsWith('image/')
@@ -54,6 +62,7 @@ export async function uploadGatewayFile(opts: {
     });
     form.append('file', blob, opts.filename);
     form.append('purpose', purpose);
+    form.append('model', model);
 
     const res = await fetch(`${baseURL}/files`, {
       method: 'POST',
@@ -80,6 +89,7 @@ export async function uploadGatewayDataUrl(opts: {
   baseURL?: string;
   dataUrl: string;
   filename?: string;
+  model?: string;
 }): Promise<GatewayFileRef> {
   const parsed = parseDataUrl(opts.dataUrl);
   if (!parsed) throw new Error('Invalid data URL for file upload');
@@ -90,6 +100,7 @@ export async function uploadGatewayDataUrl(opts: {
     bytes: parsed.bytes,
     mime: parsed.mime,
     filename: opts.filename || `upload.${ext}`,
+    model: opts.model,
   });
 }
 
@@ -98,12 +109,14 @@ export async function uploadGatewayBase64Png(opts: {
   baseURL?: string;
   b64: string;
   filename?: string;
+  model?: string;
 }): Promise<GatewayFileRef> {
   return uploadGatewayDataUrl({
     apiKey: opts.apiKey,
     baseURL: opts.baseURL,
     dataUrl: `data:image/png;base64,${opts.b64}`,
     filename: opts.filename || `image-${Date.now()}.png`,
+    model: opts.model,
   });
 }
 

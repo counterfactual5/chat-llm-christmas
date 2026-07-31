@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
           baseURL,
           b64,
           filename: `gen-${Date.now()}.png`,
+          model,
         });
         fileId = uploaded.id;
         image = `/api/files/${encodeURIComponent(uploaded.id)}`;
@@ -117,6 +118,7 @@ export async function POST(req: NextRequest) {
           bytes,
           filename: `gen-${Date.now()}.png`,
           mime: fetched.headers.get('content-type') || 'image/png',
+          model,
         });
         fileId = uploaded.id;
         image = `/api/files/${encodeURIComponent(uploaded.id)}`;

@@ -12,6 +12,8 @@ export const NATURAL_FINISH_REASONS = new Set(['stop', 'end_turn']);
 export const SOFT_TRUNCATION_REASONS = new Set([
   'Stopped while trying to use tools',
   'Model tried to use a tool (unsupported here)',
+  // Intent narration before mid-turn tools; becomes stale once tools succeed.
+  'Stopped before calling tools',
 ]);
 
 export function truncationFromFinishReason(

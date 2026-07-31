@@ -105,6 +105,7 @@ function looksAbruptlyCutOff(content: string): { truncated: boolean; reason: str
     return { truncated: true, reason: 'Stopped mid-list' };
   }
   // Announced a tool action then stopped ("Let me fetch the current content first.").
+  // Caller should suppress this when real toolRuns already succeeded afterward.
   if (
     /(let me (first )?(fetch|read|get|load|search)|I('ll| will) (first )?(fetch|read|get)|先(读|看|获取|拉取|搜)|让我(先)?(读|看|获取|搜)|我先.{0,12}(读|看|获取)).{0,40}$/i.test(
       text,
@@ -113,6 +114,20 @@ function looksAbruptlyCutOff(content: string): { truncated: boolean; reason: str
     return { truncated: true, reason: 'Stopped before calling tools' };
   }
   return { truncated: false, reason: '' };
+}
+
+/** Retrieval tools that mean "Stopped before calling tools" is stale. */
+function hasSuccessfulRetrievalTools(
+  toolRuns?: Array<{ name?: string; status?: string; error?: string }>,
+): boolean {
+  return (toolRuns || []).some(
+    (r) =>
+      r.status === 'done' &&
+      !r.error &&
+      /web_search|web_read|web-read|proactive_search|image_understand/i.test(
+        String(r.name || ''),
+      ),
+  );
 }
 
 /**
@@ -1839,12 +1854,21 @@ export default function ChatContainer() {
     if (!lastMessage.content?.trim()) {
       return { truncated: false, reason: '' };
     }
+    const toolsOk = hasSuccessfulRetrievalTools(lastMessage.toolRuns);
     const base = analyzeTruncation(
       lastMessage.content,
       lastMessage.finishReason,
       lastMessage.incomplete,
-      lastMessage.truncationReason,
+      // Ignore stale intent-stop stamp once retrieval tools have succeeded.
+      toolsOk && lastMessage.truncationReason === 'Stopped before calling tools'
+        ? undefined
+        : lastMessage.truncationReason,
     );
+    // Mid-turn often leaves the bubble ending on "我先去读…" even after tools
+    // already ran — don't keep offering Continue / "Stopped before calling tools".
+    if (base.truncated && base.reason === 'Stopped before calling tools' && toolsOk) {
+      return { truncated: false, reason: '' };
+    }
     if (base.truncated) return base;
 
     // Tool failed and the model never finished a recovery answer — common when
@@ -2449,6 +2473,21 @@ export default function ChatContainer() {
         });
         let mergedMsgs = msgs;
         if (run.status === 'done') {
+          // Tools actually ran — drop stale "Stopped before calling tools" stamp
+          // left over from the pre-tool narration bubble.
+          if (
+            /web_search|web_read|web-read|proactive_search|image_understand/i.test(
+              String(run.name || ''),
+            ) &&
+            !run.error
+          ) {
+            mergedMsgs = mergedMsgs.map((m) =>
+              m.id === assistantId &&
+              m.truncationReason === 'Stopped before calling tools'
+                ? { ...m, truncationReason: undefined }
+                : m,
+            );
+          }
           const isImageUnderstand =
             run.name === 'image_understand' || run.provider === 'zhipu-vision';
           if (isImageUnderstand) {
@@ -6381,7 +6420,11 @@ export default function ChatContainer() {
                             return <div key={seg.id}>{rendered}</div>;
                           }
 
-                          const open = reasoningOpen[seg.id] ?? segLive;
+                          // Keep Process open when it contains tool calls — otherwise a
+                          // later Review panel (default-open) makes it look like tools
+                          // never ran, while receipts only appear inside Review.
+                          const hasToolSteps = seg.steps.some((s) => s.kind === 'tool');
+                          const open = reasoningOpen[seg.id] ?? (segLive || hasToolSteps);
                           const segStepCount = rendered.length;
                           return (
                             <div

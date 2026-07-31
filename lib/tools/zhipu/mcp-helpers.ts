@@ -69,3 +69,59 @@ export async function resolveToolName(
   }
   return preferred[0]!;
 }
+
+/** True inside Vercel Edge isolates (not Node serverless). */
+export function isVercelEdgeRuntime(): boolean {
+  return typeof (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime !== 'undefined';
+}
+
+function internalProxyOrigin(): string {
+  const explicit = (process.env.CHAT_PUBLIC_URL || process.env.NEXT_PUBLIC_APP_URL || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (explicit) return explicit;
+  const vercel = (process.env.VERCEL_URL || '').trim().replace(/\/$/, '');
+  if (vercel) return vercel.startsWith('http') ? vercel : `https://${vercel}`;
+  return 'https://chat.llm.christmas';
+}
+
+function internalProxySecret(): string {
+  return (
+    process.env.INTERNAL_PROVIDER_SECRET?.trim() ||
+    process.env.ZHIPU_CODING_API_KEY?.trim() ||
+    process.env.ZHIPU_API_KEY?.trim() ||
+    ''
+  );
+}
+
+/**
+ * On Edge, call the Node.js `/api/internal/zhipu-mcp` proxy.
+ * Direct Edge → open.bigmodel.cn frequently returns HTML 405.
+ */
+export async function callZhipuMcpViaNodeProxy(body: {
+  action: 'search' | 'read';
+  query?: string;
+  url?: string;
+}): Promise<unknown> {
+  const secret = internalProxySecret();
+  if (!secret) throw new Error('ZHIPU_API_KEY missing for Edge→Node proxy');
+  const res = await fetch(`${internalProxyOrigin()}/api/internal/zhipu-mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-christmas-internal': secret,
+    },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    hits?: unknown;
+    page?: unknown;
+  };
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || `Zhipu Node proxy HTTP ${res.status}`);
+  }
+  return data;
+}

@@ -4,7 +4,9 @@
 
 import {
   ZHIPU_MCP_SEARCH_URL,
+  callZhipuMcpViaNodeProxy,
   createZhipuMcpClient,
+  isVercelEdgeRuntime,
   parseMaybeJson,
   resolveToolName,
 } from '@/lib/tools/zhipu/mcp-helpers';
@@ -16,11 +18,52 @@ export type ZhipuMcpSearchHit = {
   media?: string;
 };
 
+function hitsFromRows(rows: unknown[]): ZhipuMcpSearchHit[] {
+  const hits: ZhipuMcpSearchHit[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const url = String(r.link || r.url || r.href || '').trim();
+    if (!url) continue;
+    hits.push({
+      title: String(r.title || r.media || r.siteName || url).trim(),
+      url,
+      snippet: String(r.content || r.snippet || r.summary || r.description || '').trim(),
+      media: r.media ? String(r.media) : r.siteName ? String(r.siteName) : undefined,
+    });
+  }
+  return hits;
+}
+
+function hitsFromParsed(parsed: unknown): ZhipuMcpSearchHit[] {
+  const rows: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { search_result?: unknown[] })?.search_result)
+      ? ((parsed as { search_result: unknown[] }).search_result)
+      : Array.isArray((parsed as { results?: unknown[] })?.results)
+        ? ((parsed as { results: unknown[] }).results)
+        : typeof parsed === 'object' && parsed
+          ? [parsed]
+          : [];
+  return hitsFromRows(rows);
+}
+
 /**
  * Call Coding Plan web search MCP (`webSearchPrime` / `web_search_prime`).
  * Returns normalized hits; throws on MCP / tool errors.
  */
 export async function zhipuMcpWebSearch(query: string): Promise<ZhipuMcpSearchHit[]> {
+  // Edge → open.bigmodel.cn often returns HTML 405; hop through Node proxy.
+  if (isVercelEdgeRuntime()) {
+    const data = (await callZhipuMcpViaNodeProxy({
+      action: 'search',
+      query: String(query || '').trim(),
+    })) as { hits?: ZhipuMcpSearchHit[] };
+    const hits = Array.isArray(data.hits) ? data.hits : [];
+    if (!hits.length) throw new Error('Zhipu MCP web_search_prime returned no results');
+    return hits;
+  }
+
   const client = createZhipuMcpClient(ZHIPU_MCP_SEARCH_URL);
   // Community curls that succeed use snake_case; docs list camelCase.
   const toolName = await resolveToolName(client, [
@@ -35,29 +78,7 @@ export async function zhipuMcpWebSearch(query: string): Promise<ZhipuMcpSearchHi
   if (isError) throw new Error(content.slice(0, 300) || `${toolName} failed`);
 
   const parsed = parseMaybeJson(content);
-  const rows: unknown[] = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray((parsed as { search_result?: unknown[] })?.search_result)
-      ? ((parsed as { search_result: unknown[] }).search_result)
-      : Array.isArray((parsed as { results?: unknown[] })?.results)
-        ? ((parsed as { results: unknown[] }).results)
-        : typeof parsed === 'object' && parsed
-          ? [parsed]
-          : [];
-
-  const hits: ZhipuMcpSearchHit[] = [];
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue;
-    const r = row as Record<string, unknown>;
-    const url = String(r.link || r.url || r.href || '').trim();
-    if (!url) continue;
-    hits.push({
-      title: String(r.title || r.media || r.siteName || url).trim(),
-      url,
-      snippet: String(r.content || r.snippet || r.summary || r.description || '').trim(),
-      media: r.media ? String(r.media) : r.siteName ? String(r.siteName) : undefined,
-    });
-  }
+  const hits = hitsFromParsed(parsed);
 
   // Some MCP responses return a prose dump — only then treat as failure text.
   if (!hits.length && typeof parsed === 'string' && parsed.trim()) {

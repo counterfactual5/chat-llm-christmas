@@ -154,8 +154,8 @@ export class McpHttpClient {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.opts.accessToken}`,
       'Content-Type': 'application/json',
-      // Zhipu examples prefer event-stream first.
-      Accept: 'text/event-stream, application/json',
+      // Prefer JSON; some Edge/CDN paths mishandle event-stream-first Accept.
+      Accept: 'application/json, text/event-stream',
       'User-Agent': this.opts.userAgent || 'ChristmasChat-MCP/1.0',
       ...this.opts.extraHeaders,
     };

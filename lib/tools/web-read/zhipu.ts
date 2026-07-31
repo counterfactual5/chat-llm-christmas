@@ -4,7 +4,9 @@
 
 import {
   ZHIPU_MCP_READER_URL,
+  callZhipuMcpViaNodeProxy,
   createZhipuMcpClient,
+  isVercelEdgeRuntime,
   parseMaybeJson,
   resolveToolName,
 } from '@/lib/tools/zhipu/mcp-helpers';
@@ -21,8 +23,22 @@ export type ZhipuMcpReadResult = {
  * Returns page markdown/text; throws on MCP / tool errors.
  */
 export async function zhipuMcpWebRead(url: string): Promise<ZhipuMcpReadResult> {
+  // Edge → open.bigmodel.cn often returns HTML 405; hop through Node proxy.
+  if (isVercelEdgeRuntime()) {
+    const data = (await callZhipuMcpViaNodeProxy({
+      action: 'read',
+      url: String(url || '').trim(),
+    })) as { page?: ZhipuMcpReadResult };
+    const page = data.page;
+    if (!page?.content?.trim()) {
+      throw new Error('Zhipu MCP webReader returned empty content');
+    }
+    return page;
+  }
+
   const client = createZhipuMcpClient(ZHIPU_MCP_READER_URL);
-  const toolName = await resolveToolName(client, ['web_reader', 'webReader']);
+  // Live server advertises camelCase `webReader`.
+  const toolName = await resolveToolName(client, ['webReader', 'web_reader']);
 
   const { content, isError } = await client.callTool(toolName, {
     url: String(url || '').trim(),

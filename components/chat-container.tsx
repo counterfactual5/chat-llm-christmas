@@ -5,7 +5,6 @@ import {
   Menu,
   PanelRightOpen,
   PanelRightClose,
-  Quote,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { mergeReviewChecks, type ReviewCheck, type ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
@@ -53,6 +52,18 @@ import { ChatComposer } from '@/components/chat/composer';
 import { ChatMessageList } from '@/components/chat/message-list';
 import { ChatContextPanel } from '@/components/chat/context-panel';
 import { ChatModals } from '@/components/chat/modals';
+import { ChatQuoteToolbar } from '@/components/chat/quote-toolbar';
+import {
+  appendQuotedSelection,
+  formatQuotedMessage,
+  parseQuotedUserMessage,
+} from '@/lib/chat/quotes';
+import {
+  ingestedToMessageImages,
+  messageImagesToIngested,
+  sessionHasImages,
+  toApiMessages,
+} from '@/lib/chat/api-messages';
 import { cn } from '@/lib/utils';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import {
@@ -81,7 +92,6 @@ import {
   stripFakeToolMarkup,
 } from '@/lib/chat/tool-tags';
 import { stripMessageStamp } from '@/lib/chat/time-context';
-import { markdownFromDomSelection } from '@/lib/markdown/math';
 import { useLocale } from '@/lib/i18n';
 import {
   isGoogleMcpId,
@@ -96,187 +106,6 @@ const IMAGE_CMD_RE = /^(?:\/image|\/img)\s+([\s\S]+)$/i;
 function parseImageCommand(text: string): string | null {
   const m = text.trim().match(IMAGE_CMD_RE);
   return m?.[1]?.trim() || null;
-}
-
-function sessionHasImages(messages: Message[], pending: IngestedAttachment[]): boolean {
-  if (pending.some((a) => Boolean(a.dataUrl || a.type.startsWith('image/')))) return true;
-  return messages.some((m) => (m.images?.length || 0) > 0);
-}
-
-function toApiMessages(
-  messages: Message[],
-  opts?: { vision?: boolean },
-) {
-  const vision = Boolean(opts?.vision);
-  let lastUserIdx = -1;
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === 'user') lastUserIdx = i;
-  }
-
-  return messages.flatMap((m, i) => {
-    let content = m.content;
-    let images =
-      m.images?.map((img) => ({
-        url: img.url,
-        fileId: img.fileId,
-        prompt: img.prompt,
-        name: img.name,
-      })) || [];
-
-    if (m.role === 'user') {
-      const transcribed = hasPersistedImageTranscription(content || '');
-      if (vision) {
-        const archived = mergePersistedImageRefs(
-          imageRefsFromMessageImages(m.images),
-          parseImageArchiveRefs(content || ''),
-        );
-        if (archived.length > 0) {
-          images = archived.map((r) => ({
-            fileId: r.fileId,
-            url: r.fileId
-              ? `/api/files/${encodeURIComponent(r.fileId)}`
-              : r.url || '',
-            name: r.label,
-            prompt: undefined,
-          }));
-        }
-        if (transcribed) {
-          // Prefer pixels; drop injection + archive metadata from the prompt.
-          content = stripUserMessageArtifactsForDisplay(content || '');
-          if (!content.trim() && images.length > 0) content = '(image)';
-        }
-      } else if (transcribed) {
-        // Text path: keep transcription, omit pixels + archive block (archive is
-        // only for local recovery / later vision switches).
-        images = [];
-        content = stripImageArchiveBlock(content || '');
-      } else if (i !== lastUserIdx) {
-        // Older untranscribed uploads: keep lightweight refs only (no data:
-        // pixels). The server renders them as 【历史图片引用（未转写）】 markers so
-        // the model can transcribe a specific one on demand.
-        images = images
-          .filter((img) => img.fileId || !String(img.url || '').startsWith('data:'))
-          .map((img) => ({
-            ...img,
-            url: img.fileId
-              ? `/api/files/${encodeURIComponent(img.fileId)}`
-              : img.url,
-          }));
-      }
-    }
-
-    // Rebuild tool_calls + tool receipts so follow-up turns can see what really ran.
-    // claim_reviewer is UI-only and must not be replayed as an API tool.
-    // Post-review delta fixes stay out of the bubble body but join history as a note.
-    const fix = String(m.reviewFix || '').trim();
-    if (fix && m.role === 'assistant') {
-      content = `${String(content || '').trim()}\n\n[Correction]\n${fix}`.trim();
-    }
-
-    if (m.role === 'assistant') {
-      const runs = (m.toolRuns || []).filter(
-        (r) => r?.name && r.name !== 'claim_reviewer' && r.status === 'done',
-      );
-      if (runs.length) {
-        const out: Array<Record<string, unknown>> = [];
-        const tool_calls = runs.map((r, idx) => ({
-          id: String(r.id || `hist_${m.id}_${idx}`),
-          type: 'function',
-          function: {
-            name: r.name,
-            arguments: JSON.stringify(
-              r.query
-                ? { query: r.query }
-                : {},
-            ),
-          },
-        }));
-        out.push({
-          role: 'assistant',
-          content: '',
-          tool_calls,
-          timestamp: m.timestamp,
-        });
-        for (let idx = 0; idx < runs.length; idx++) {
-          const r = runs[idx];
-          const payload = r.error
-            ? { ok: false, error: r.error, ...(r.query ? { query: r.query } : {}) }
-            : {
-                ok: true,
-                ...(r.query ? { query: r.query } : {}),
-                ...(r.provider ? { provider: r.provider } : {}),
-                ...(r.results?.length
-                  ? {
-                      results: r.results.slice(0, 8).map((x) => ({
-                        title: x.title,
-                        url: x.url,
-                        snippet: String(x.snippet || '').slice(0, 240),
-                        ...(x.body
-                          ? { content: String(x.body).slice(0, 16_000) }
-                          : {}),
-                      })),
-                    }
-                  : {}),
-              };
-          out.push({
-            role: 'tool',
-            tool_call_id: tool_calls[idx].id,
-            content: JSON.stringify(payload),
-            timestamp: m.timestamp,
-          });
-        }
-        if (String(content || '').trim()) {
-          out.push({
-            role: 'assistant',
-            content,
-            images: [],
-            timestamp: m.timestamp,
-          });
-        }
-        return out;
-      }
-    }
-
-    return [
-      {
-        role: m.role,
-        content,
-        images,
-        timestamp: m.timestamp as number | undefined,
-      },
-    ];
-  });
-}
-
-function messageImagesToIngested(images: Message['images']): IngestedAttachment[] {
-  return (images || []).map((img) => {
-    const url = img.url;
-    const isData = url.startsWith('data:');
-    const apiPreview = img.fileId
-      ? `/api/files/${encodeURIComponent(img.fileId)}`
-      : url;
-    return {
-      id: crypto.randomUUID(),
-      name: img.name || 'image.png',
-      type: 'image/png',
-      size: 0,
-      dataUrl: isData ? url : undefined,
-      previewUrl: isData ? url : apiPreview,
-      fileId: img.fileId,
-    };
-  });
-}
-
-function ingestedToMessageImages(items: IngestedAttachment[]): NonNullable<Message['images']> {
-  return items
-    .filter((a) => a.dataUrl || a.fileId || a.previewUrl)
-    .map((a) => ({
-      url: a.fileId
-        ? `/api/files/${encodeURIComponent(a.fileId)}`
-        : a.dataUrl || a.previewUrl!,
-      name: a.name,
-      fileId: a.fileId,
-    }));
 }
 
 type QueuedTask = {
@@ -405,8 +234,6 @@ export default function ChatContainer() {
   const [toolRunOpen, setToolRunOpen] = useState<Record<string, boolean>>({});
   /** Text snippets quoted from message selection into the composer (multi-select). */
   const [quotedSelections, setQuotedSelections] = useState<string[]>([]);
-  const quoteToolbarWrapRef = useRef<HTMLDivElement>(null);
-  const quoteToolbarTextRef = useRef('');
   /** Debounce handle for cloud session sync (cross-device). */
   const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -3006,102 +2833,10 @@ export default function ChatContainer() {
     };
   }, [isSkillPickerOpen]);
 
-  // Floating "Quote" button when selecting text inside the message list.
-  // Shown/positioned via DOM only — no setState — so React re-renders cannot
-  // collapse the browser selection highlight.
-  useEffect(() => {
-    let raf = 0;
-    const wrap = () => quoteToolbarWrapRef.current;
-
-    const hideToolbar = () => {
-      const el = wrap();
-      if (el) el.style.display = 'none';
-      quoteToolbarTextRef.current = '';
-    };
-
-    const updateFromSelection = () => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.rangeCount) {
-        hideToolbar();
-        return;
-      }
-      const text = markdownFromDomSelection(sel);
-      if (!text) {
-        hideToolbar();
-        return;
-      }
-      const root = messagesContentRef.current;
-      if (!root) {
-        hideToolbar();
-        return;
-      }
-      const anchor = sel.anchorNode;
-      const focus = sel.focusNode;
-      if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) {
-        hideToolbar();
-        return;
-      }
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      if (!rect.width && !rect.height) {
-        hideToolbar();
-        return;
-      }
-      const clipped = text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
-      const x = Math.min(window.innerWidth - 12, Math.max(12, rect.left + rect.width / 2));
-      // Sit just above the selection; wrapper uses translate(-50%, -100%).
-      const y = Math.max(8, rect.top - 10);
-      const el = wrap();
-      if (el) {
-        el.style.display = 'block';
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
-      }
-      quoteToolbarTextRef.current = clipped;
-    };
-
-    const scheduleUpdate = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(updateFromSelection);
-    };
-
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') hideToolbar();
-      else if (e.shiftKey || e.key.startsWith('Arrow')) scheduleUpdate();
-    };
-
-    document.addEventListener('selectionchange', scheduleUpdate);
-    document.addEventListener('keyup', onKeyUp);
-    document.addEventListener('mouseup', scheduleUpdate);
-    const scroller = scrollRef.current;
-    scroller?.addEventListener('scroll', scheduleUpdate, { passive: true });
-    window.addEventListener('resize', scheduleUpdate);
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener('selectionchange', scheduleUpdate);
-      document.removeEventListener('keyup', onKeyUp);
-      document.removeEventListener('mouseup', scheduleUpdate);
-      scroller?.removeEventListener('scroll', scheduleUpdate);
-      window.removeEventListener('resize', scheduleUpdate);
-    };
-  }, []);
-
-  const MAX_QUOTED_SELECTIONS = 8;
-
   const quoteSelectedText = (text: string) => {
     const clean = text.trim();
     if (!clean) return;
-    setQuotedSelections((prev) => {
-      if (prev.some((q) => q === clean)) return prev;
-      if (prev.length >= MAX_QUOTED_SELECTIONS) {
-        return [...prev.slice(1), clean];
-      }
-      return [...prev, clean];
-    });
-    quoteToolbarTextRef.current = '';
-    const el = quoteToolbarWrapRef.current;
-    if (el) el.style.display = 'none';
-    window.getSelection()?.removeAllRanges();
+    setQuotedSelections((prev) => appendQuotedSelection(prev, clean));
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
@@ -3110,65 +2845,6 @@ export default function ChatContainer() {
   };
 
   /** Encode one or more quotes as Markdown blockquotes ahead of the user body. */
-  const formatQuotedMessage = (userText: string, quotes: string | string[]) => {
-    const list = (Array.isArray(quotes) ? quotes : [quotes])
-      .map((q) => q.trim())
-      .filter(Boolean);
-    const body = userText.trim();
-    if (!list.length) return body;
-    const blocks = list
-      .map((q) =>
-        q
-          .split('\n')
-          .map((line) => `> ${line}`)
-          .join('\n'),
-      )
-      .join('\n\n');
-    return body ? `${blocks}\n\n${body}` : blocks;
-  };
-
-  /** Split a sent user message that was built by formatQuotedMessage into quotes + body. */
-  const parseQuotedUserMessage = (content: string): { quotes: string[]; body: string } => {
-    const text = String(content || '');
-    if (!text.startsWith('>')) return { quotes: [], body: text };
-    const lines = text.split('\n');
-    const quotes: string[] = [];
-    let current: string[] = [];
-    let i = 0;
-
-    const flush = () => {
-      const q = current.join('\n').trim();
-      if (q) quotes.push(q);
-      current = [];
-    };
-
-    for (; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith('> ') || line === '>') {
-        current.push(line.startsWith('> ') ? line.slice(2) : '');
-        continue;
-      }
-      if (line.trim() === '') {
-        let j = i + 1;
-        while (j < lines.length && lines[j].trim() === '') j += 1;
-        if (j < lines.length && (lines[j].startsWith('> ') || lines[j] === '>')) {
-          flush();
-          i = j - 1;
-          continue;
-        }
-        flush();
-        i = j;
-        break;
-      }
-      flush();
-      break;
-    }
-    while (i < lines.length && lines[i].trim() === '') i += 1;
-    return {
-      quotes,
-      body: lines.slice(i).join('\n'),
-    };
-  };
 
   const beginLoading = (sessionId: string) => {
     setLoadingBySession((prev) => ({ ...prev, [sessionId]: true }));
@@ -4691,34 +4367,11 @@ export default function ChatContainer() {
         </div>
       </div>
 
-      {/* Floating quote action for message text selection.
-          Outer wrapper owns fixed positioning + translate so nothing can
-          clobber `translate(-50%, -100%)` and drop the chip onto the text.
-          Visibility/position are written via the ref (no setState). */}
-      <div
-        ref={quoteToolbarWrapRef}
-        style={{
-          position: 'fixed',
-          display: 'none',
-          left: 0,
-          top: 0,
-          transform: 'translate(-50%, -100%)',
-          zIndex: 60,
-          pointerEvents: 'none',
-        }}
-      >
-        <button
-          type="button"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            quoteSelectedText(quoteToolbarTextRef.current);
-          }}
-          className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 shadow-lg dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
-        >
-          <Quote className="h-3.5 w-3.5 text-orange-500" />
-          {t('quote')}
-        </button>
-      </div>
+      <ChatQuoteToolbar
+        messagesContentRef={messagesContentRef}
+        scrollRef={scrollRef}
+        onQuote={quoteSelectedText}
+      />
 
       <ChatModals
         confirmClearSourcesOpen={confirmClearSourcesOpen}

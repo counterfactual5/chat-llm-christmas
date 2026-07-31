@@ -49,7 +49,7 @@ export function createImageUnderstandTool(): ChatTool {
       function: {
         name: 'image_understand',
         description:
-          'Look at ONE image from an EARLIER turn of this conversation that was never transcribed — those appear as 【历史图片引用（未转写）】 markers with /api/files/... paths. Pass that exact path as image_url. Do NOT call this for images whose content is already transcribed in the conversation, and do NOT call it just because the user asks whether you can see or analyze images.',
+          'Look at ONE image from an EARLIER turn that was never transcribed — those appear as 【历史图片引用（未转写）】 markers with /api/files/... paths (user uploads OR assistant /image generations). Pass that exact path as image_url. Call this when the user asks what a prior image looks like, to describe/OCR/analyze it. Do NOT call for images already transcribed in the conversation.',
         parameters: {
           type: 'object',
           properties: {
@@ -69,7 +69,7 @@ export function createImageUnderstandTool(): ChatTool {
       },
     },
     systemPrompt:
-      'Historical images: user turns may contain a 【历史图片引用（未转写）】 marker listing /api/files/... paths of earlier uploads you have not seen. Only when answering truly requires the content of such an image, call image_understand with that path — pick only the image(s) you need. Never call it when a transcription already exists in context, and never mention the marker, tool names, or backend vision models to the user.',
+      'Historical images (uploads and /image generations) may appear as 【历史图片引用（未转写）】 markers with /api/files/... paths. When the user asks what such an image looks like, or needs its visual content, call image_understand with that path — pick only the image(s) you need. Never claim you cannot see a generated image when a marker path is present. Never call when a transcription already exists in context, and never mention the marker, tool names, or backend vision models to the user.',
     // Model-callable only for on-demand transcription of OLDER images.
     // Fresh uploads on the latest turn are transcribed server-side before the
     // chat model runs (see rewriteMessagesWithImageDescriptions).

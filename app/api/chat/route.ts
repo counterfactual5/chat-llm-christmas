@@ -898,7 +898,23 @@ export async function POST(req: NextRequest) {
             .filter((p): p is string => Boolean(p && String(p).trim()));
           const summary =
             text.trim() || generatedImageAssistantSummary(promptHint);
-          normalizedMessages.push({ role, timestamp, content: summary });
+          // Text-only models cannot see pixels on assistant turns. Expose
+          // /api/files/... markers so image_understand can fetch them on demand
+          // when the user asks what a generated picture looks like.
+          const refs = !carryAssistantImages
+            ? images.map((img) => imageMarkerPath(img)).filter(Boolean)
+            : [];
+          const marker = refs.length
+            ? [
+                '【历史图片引用（未转写）】',
+                ...refs.map((p, i) => `- 图${i + 1}: ${p}`),
+              ].join('\n')
+            : '';
+          normalizedMessages.push({
+            role,
+            timestamp,
+            content: [summary, marker].filter(Boolean).join('\n\n'),
+          });
         } else {
           // Empty string fails some gateways' ChatCompletionRequestAssistantMessageContent.
           normalizedMessages.push({

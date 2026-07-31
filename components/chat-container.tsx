@@ -4091,6 +4091,7 @@ export default function ChatContainer() {
       );
       if (sessionId === activeSessionIdRef.current) {
         setPicturesExpanded(true);
+        setOutputGroupsOpen((prev) => ({ ...prev, images: true }));
         setIsContextPanelOpen(true);
       }
     } catch (error: any) {
@@ -8010,7 +8011,7 @@ export default function ChatContainer() {
 
                 <ScrollArea className="flex-1 px-4 py-4">
                   <div className="space-y-2">
-                    {/* Output — generated images + create_file artifacts */}
+                    {/* Output — Images / Files groups (only when non-empty) */}
                     <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
                       <button
                         type="button"
@@ -8020,9 +8021,11 @@ export default function ChatContainer() {
                         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-500">
                           <FileText className="h-3.5 w-3.5" />
                           {t('generatedOutput')}
-                          <span className="font-mono font-normal normal-case tracking-normal text-stone-400">
-                            ({generatedOutputCount})
-                          </span>
+                          {generatedOutputCount > 0 && (
+                            <span className="rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                              {generatedOutputCount}
+                            </span>
+                          )}
                         </span>
                         <div className="flex items-center gap-1">
                           {generatedOutputCount > 0 && (
@@ -8061,7 +8064,7 @@ export default function ChatContainer() {
                             exit={{ height: 0, opacity: 0 }}
                             className="overflow-hidden"
                           >
-                            <div className="max-h-72 space-y-2 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+                            <div className="max-h-72 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
                               {generatedOutputCount === 0 ? (
                                 <div className="py-2 text-xs text-stone-400">
                                   {t('noGeneratedOutput')}
@@ -8069,7 +8072,7 @@ export default function ChatContainer() {
                               ) : (
                                 <>
                                   {generatedImageHistory.length > 0 && (
-                                    <div className="space-y-1.5">
+                                    <div className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
                                       <button
                                         type="button"
                                         onClick={() =>
@@ -8078,76 +8081,74 @@ export default function ChatContainer() {
                                             images: !prev.images,
                                           }))
                                         }
-                                        className="flex w-full items-center justify-between rounded-md px-1.5 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/80"
+                                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
                                       >
-                                        <span>
+                                        <span className="flex items-center gap-1.5">
+                                          <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                           {t('outputImagesGroup')} · {generatedImageHistory.length}
                                         </span>
                                         <ChevronDown
                                           className={cn(
-                                            'h-3.5 w-3.5 transition-transform',
+                                            'h-3.5 w-3.5 text-stone-400 transition-transform',
                                             outputGroupsOpen.images && 'rotate-180',
                                           )}
                                         />
                                       </button>
-                                      {outputGroupsOpen.images &&
-                                        generatedImageHistory.map((entry) => (
-                                          <div
-                                            key={`${entry.messageId}-${entry.imageIndex}`}
-                                            className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-700 dark:bg-stone-900/40"
-                                          >
-                                            <a
-                                              href={entry.url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
-                                            >
-                                              <img
-                                                src={entry.url}
-                                                alt=""
-                                                className="h-full w-full object-cover"
-                                              />
-                                            </a>
-                                            <div className="min-w-0 flex-1 py-0.5">
-                                              <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
-                                                {formatGeneratedAt(entry.timestamp)}
-                                                <span className="mx-1 text-stone-600">·</span>
-                                                {entry.model}
-                                              </div>
-                                              <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
-                                                {entry.prompt}
-                                              </div>
-                                            </div>
-                                            <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                              <button
-                                                type="button"
-                                                title={t('download')}
-                                                onClick={() => void downloadGeneratedImage(entry)}
-                                                className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                      {outputGroupsOpen.images && (
+                                        <div className="space-y-1.5 px-1.5 pb-1.5">
+                                            {generatedImageHistory.map((entry) => (
+                                              <div
+                                                key={`${entry.messageId}-${entry.imageIndex}`}
+                                                className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
                                               >
-                                                <Download className="h-3.5 w-3.5" />
-                                              </button>
-                                              <button
-                                                type="button"
-                                                title={t('delete')}
-                                                onClick={() => removeGeneratedImage(entry)}
-                                                className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                              >
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                              </button>
-                                            </div>
-                                          </div>
-                                        ))}
+                                                <a
+                                                  href={entry.url}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800"
+                                                >
+                                                  <img
+                                                    src={entry.url}
+                                                    alt=""
+                                                    className="h-full w-full object-cover"
+                                                  />
+                                                </a>
+                                                <div className="min-w-0 flex-1 py-0.5">
+                                                  <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
+                                                    {formatGeneratedAt(entry.timestamp)}
+                                                    <span className="mx-1 text-stone-600">·</span>
+                                                    {entry.model}
+                                                  </div>
+                                                  <div className="mt-0.5 line-clamp-2 text-[12px] leading-4 text-stone-700 dark:text-stone-200">
+                                                    {entry.prompt}
+                                                  </div>
+                                                </div>
+                                                <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                                  <button
+                                                    type="button"
+                                                    title={t('download')}
+                                                    onClick={() => void downloadGeneratedImage(entry)}
+                                                    className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                                  >
+                                                    <Download className="h-3.5 w-3.5" />
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    title={t('delete')}
+                                                    onClick={() => removeGeneratedImage(entry)}
+                                                    className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+                                                  >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   {generatedFileHistory.length > 0 && (
-                                    <div
-                                      className={cn(
-                                        'space-y-1.5',
-                                        generatedImageHistory.length > 0 &&
-                                          'border-t border-stone-100 pt-2 dark:border-stone-800',
-                                      )}
-                                    >
+                                    <div className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
                                       <button
                                         type="button"
                                         onClick={() =>
@@ -8156,61 +8157,65 @@ export default function ChatContainer() {
                                             files: !prev.files,
                                           }))
                                         }
-                                        className="flex w-full items-center justify-between rounded-md px-1.5 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800/80"
+                                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
                                       >
-                                        <span>
+                                        <span className="flex items-center gap-1.5">
+                                          <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />
                                           {t('outputFilesGroup')} · {generatedFileHistory.length}
                                         </span>
                                         <ChevronDown
                                           className={cn(
-                                            'h-3.5 w-3.5 transition-transform',
+                                            'h-3.5 w-3.5 text-stone-400 transition-transform',
                                             outputGroupsOpen.files && 'rotate-180',
                                           )}
                                         />
                                       </button>
-                                      {outputGroupsOpen.files &&
-                                        generatedFileHistory.map((entry) => (
-                                          <div
-                                            key={`${entry.messageId}-${entry.id}-${entry.fileIndex}`}
-                                            className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-700 dark:bg-stone-900/40"
-                                          >
-                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
-                                              <FileText className="h-4 w-4 text-stone-500" />
-                                            </div>
-                                            <div className="min-w-0 flex-1 py-0.5">
-                                              <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
-                                                {formatGeneratedAt(entry.createdAt)}
-                                                {entry.size > 0 && (
-                                                  <>
-                                                    <span className="mx-1 text-stone-600">·</span>
-                                                    {formatFileSize(entry.size)}
-                                                  </>
-                                                )}
-                                              </div>
-                                              <div className="mt-0.5 truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
-                                                {entry.name}
-                                              </div>
-                                            </div>
-                                            <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                              <button
-                                                type="button"
-                                                title={t('download')}
-                                                onClick={() => void downloadGeneratedFile(entry)}
-                                                className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                      {outputGroupsOpen.files && (
+                                        <div className="space-y-1.5 px-1.5 pb-1.5">
+                                            {generatedFileHistory.map((entry) => (
+                                              <div
+                                                key={`${entry.messageId}-${entry.id}-${entry.fileIndex}`}
+                                                className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
                                               >
-                                                <Download className="h-3.5 w-3.5" />
-                                              </button>
-                                              <button
-                                                type="button"
-                                                title={t('delete')}
-                                                onClick={() => removeGeneratedFile(entry)}
-                                                className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                              >
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                              </button>
-                                            </div>
-                                          </div>
-                                        ))}
+                                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
+                                                  <FileText className="h-4 w-4 text-stone-500" />
+                                                </div>
+                                                <div className="min-w-0 flex-1 py-0.5">
+                                                  <div className="truncate font-mono text-[10px] leading-4 text-stone-400">
+                                                    {formatGeneratedAt(entry.createdAt)}
+                                                    {entry.size > 0 && (
+                                                      <>
+                                                        <span className="mx-1 text-stone-600">·</span>
+                                                        {formatFileSize(entry.size)}
+                                                      </>
+                                                    )}
+                                                  </div>
+                                                  <div className="mt-0.5 truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
+                                                    {entry.name}
+                                                  </div>
+                                                </div>
+                                                <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                                  <button
+                                                    type="button"
+                                                    title={t('download')}
+                                                    onClick={() => void downloadGeneratedFile(entry)}
+                                                    className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                                  >
+                                                    <Download className="h-3.5 w-3.5" />
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    title={t('delete')}
+                                                    onClick={() => removeGeneratedFile(entry)}
+                                                    className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
+                                                  >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ))}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </>

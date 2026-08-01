@@ -12,14 +12,12 @@ import {
 import type { SearchOutcome } from '@/lib/tools/search/engine';
 import {
   createStampLeakStripper,
-  stampMessageText,
-  stripMessageStamp,
   timeContextSystemPrompt,
   freshnessForQuery,
   enrichSearchQuery,
   englishRecencyQuery,
   getClockContext,
-} from '@/lib/chat/time-context';
+} from '@/lib/chat/context/time-context';
 import {
   executeRegisteredTool,
   formatWebSearchToolContent,
@@ -29,8 +27,8 @@ import {
   toolSystemPrompt,
   type ToolRuntimeContext,
 } from '@/lib/tools';
-import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand/persist';
-import { streamCompletionPayload } from '@/lib/chat/truncation';
+import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand';
+import { streamCompletionPayload } from '@/lib/chat/stream/truncation';
 import {
   getNotionMcpAccessToken,
   getGitHubAccessToken,
@@ -75,6 +73,35 @@ import {
   type MidTurnCorrection,
 } from '@/lib/tools/review/claim-reviewer';
 import { isSkillCreatorId } from '@/lib/skills/creator';
+import { jsonError } from '@/lib/chat/server/errors';
+import {
+  parseChatRequestBody,
+  validateChatMessages,
+} from '@/lib/chat/server/request';
+import {
+  streamTimeoutError,
+  streamWaitBudget,
+} from '@/lib/chat/server/stream-budget';
+import {
+  modelDumpsAnswerInReasoning,
+  modelNeedsThinkingForTools,
+  wantsThinking,
+} from '@/lib/chat/server/thinking';
+import {
+  completeOnce,
+  splitCompletionDelta,
+  streamChatCompletionsRaw,
+  withTimeout,
+} from '@/lib/chat/server/upstream';
+import {
+  extractToolCalls,
+  lastUserMessageHasImageParts,
+  lastUserText,
+  looksLikeSearchRequest,
+  narratesSearchInsteadOfCalling,
+  sanitizeChatMessages,
+  withMessageTimestamps,
+} from '@/lib/chat/server/messages';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -88,423 +115,23 @@ const STREAM_MAX_TOTAL_MS = 240_000;
 const TOOLS_ROUND_TIMEOUT_MS = STREAM_IDLE_TIMEOUT_MS;
 const VERIFIER_TIMEOUT_MS = 25_000;
 
-function streamWaitBudget(opts: {
-  startedAt: number;
-  lastChunkAt: number;
-  idleMs: number;
-  maxTotalMs: number;
-}): number {
-  const idleRemaining = opts.idleMs - (Date.now() - opts.lastChunkAt);
-  const totalRemaining = opts.maxTotalMs - (Date.now() - opts.startedAt);
-  return Math.min(idleRemaining, totalRemaining);
-}
-
-function streamTimeoutError(label: string, idleMs: number, maxTotalMs: number, startedAt: number, lastChunkAt: number): Error {
-  const stalledFor = Date.now() - lastChunkAt;
-  const totalFor = Date.now() - startedAt;
-  if (totalFor >= maxTotalMs) {
-    return new Error(`${label} exceeded ${Math.round(maxTotalMs / 1000)}s total budget`);
-  }
-  return new Error(`${label} stalled for ${Math.round(stalledFor / 1000)}s (no upstream chunks)`);
-}
-
-function jsonError(message: string, status: number = 500) {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
-/**
- * Whether to send `enable_thinking: true` proactively.
- *
- * Keep this narrow: llm.christmas validates the parameter per model and returns
- * 400 Unsupported for variants that do not allow it (seen on deepseek-v4-flash).
- * Name tokens like r1 / reason / thinking / qwq are the safe opt-in signal.
- * Do NOT blanket whole families (deepseek-v4*, glm-5*, kimi-k2*, minimax-m3*) —
- * streamChatCompletionsRaw also retries once without the flag if rejected.
- *
- * Separately, modelNeedsThinkingForTools() may still force thinking for GLM
- * when tools are present (empty-stream workaround).
- */
-function wantsThinking(model: string) {
-  return /(^|[-_])(r1|reason|thinking|qwq)([-_]|$)/i.test(String(model || ''));
-}
-
-/** GLM-4.7 tool-calling expects thinking; without it the stream often ends empty. */
-function modelNeedsThinkingForTools(model: string) {
-  return /glm-4\.7|glm-4\.6(?!v)|glm-5/i.test(String(model || ''));
-}
-
-/**
- * These models often put the full answer in reasoning_* even when the user-
- * visible reply should be normal chat text. The server still sends reasoning
- * and content separately; the **client** promotes orphan reasoning → content
- * at settle time if the stream produced no visible content.
- */
-function modelDumpsAnswerInReasoning(model: string) {
-  return /glm-4\.7|glm-4\.6(?!v)/i.test(String(model || ''));
-}
-
-/**
- * Raw SSE chat.completions — preserves gateway-only fields like reasoning_content
- * that the OpenAI SDK types omit (runtime usually keeps them, but this is explicit).
- * If the gateway rejects enable_thinking, retry once without it.
- */
-async function* streamChatCompletionsRaw(opts: {
-  apiKey: string;
-  baseURL: string;
-  body: Record<string, unknown>;
-  signal?: AbortSignal;
-}): AsyncGenerator<any> {
-  const post = async (body: Record<string, unknown>) =>
-    fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${opts.apiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-      },
-      body: JSON.stringify({ ...body, stream: true }),
-      signal: opts.signal,
-    });
-
-  let body: Record<string, unknown> = { ...opts.body };
-  let res = await post(body);
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    const unsupportedThinking =
-      Boolean(body.enable_thinking) &&
-      res.status === 400 &&
-      /enable_thinking/i.test(errText);
-    if (unsupportedThinking) {
-      const { enable_thinking: _drop, ...rest } = body;
-      body = rest;
-      console.warn(
-        'upstream rejected enable_thinking; retrying without it',
-        body.model,
-      );
-      res = await post(body);
-    }
-    if (!res.ok) {
-      const retryText = unsupportedThinking
-        ? await res.text().catch(() => errText)
-        : errText;
-      throw new Error(
-        `Upstream chat error: ${res.status} ${
-          (retryText || res.statusText).slice(0, 300)
-        }`,
-      );
-    }
-  }
-  if (!res.body) throw new Error('Upstream chat returned an empty body');
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    if (opts.signal?.aborted) {
-      try {
-        await reader.cancel();
-      } catch {
-        /* ignore */
-      }
-      const err = new Error('Aborted');
-      err.name = 'AbortError';
-      throw err;
-    }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('data:')) continue;
-      const data = trimmed.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
-      try {
-        yield JSON.parse(data);
-      } catch {
-        // ignore malformed SSE lines
-      }
-    }
-  }
-}
-
-/**
- * Split a chat-completions delta into visible answer vs chain-of-thought.
- * Some gateways (notably GLM-4.7) put the whole reply in reasoning_* even when
- * we did not request thinking — treat those as content in that case.
- */
-function splitCompletionDelta(
-  delta: any,
-  opts: { reasoningAsContent: boolean },
-): { content: string; reasoning: string } {
-  let content = '';
-  let reasoning = '';
-
-  const rawContent = delta?.content;
-  if (typeof rawContent === 'string') {
-    content += rawContent;
-  } else if (Array.isArray(rawContent)) {
-    for (const part of rawContent) {
-      const type = String(part?.type || '');
-      const text = String(
-        part?.text || part?.content || part?.thinking || part?.reasoning || '',
-      );
-      if (!text) continue;
-      if (type === 'thinking' || type === 'reasoning') reasoning += text;
-      else content += text;
-    }
-  }
-
-  reasoning +=
-    String(delta?.reasoning_content || '') +
-    String(delta?.reasoning || '') +
-    String(delta?.thinking || '') +
-    String(delta?.thinking_content || '');
-
-  if (opts.reasoningAsContent && reasoning) {
-    content += reasoning;
-    reasoning = '';
-  }
-  return { content, reasoning };
-}
-
-/** Heuristic: user clearly wants a live lookup (used for cursor-* proactive search). */
-function looksLikeSearchRequest(text: string): boolean {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  return /查一下|帮我查|搜一下|搜索|查找|找一下|最近.*项目|最新|新闻|行情|融资|目前|现在怎么样|现在怎样|如何了|价格|价位|走势|涨跌|多少钱|price|search|look\s*up|find\s+(me\s+)?(the\s+)?(latest|recent)|what.*(happening|new)|how\s+is\s+|google/i.test(
-    t,
-  );
-}
-
-/** Cursor often narrates “I'll search…” instead of emitting tool_calls. */
-function narratesSearchInsteadOfCalling(text: string): boolean {
-  const t = String(text || '');
-  // Meta / retract talk is not a pending search.
-  if (
-    /(不(用|需要|该|必|再)(去)?(搜索|联网|搜)|基础知识|知识库|为什么(还)?要(搜索|搜)|认知校准)/i.test(
-      t,
-    )
-  ) {
-    return false;
-  }
-  // Bare「查」is ambiguous — require clear web-search wording.
-  return /先.{0,8}(联网|上网)?(搜索|搜一下)|正在(联网|上网)?搜索|让我(去)?(联网|上网)?(搜索|搜一下)|我来(联网|上网)?(搜索|搜一下)|联网查一下|上网查一下|I'll (go )?(and )?search|let me search|searching (the )?(web|internet)|look\s*up (online|on the web)/i.test(
-    t,
-  );
-}
-
-function extractToolCalls(message: any): Array<{
-  id: string;
-  name: string;
-  arguments: string;
-}> {
-  const raw = message?.tool_calls;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((tc: any, i: number) => ({
-      id: String(tc?.id || `call_${i}`),
-      name: String(tc?.function?.name || tc?.name || ''),
-      arguments: String(tc?.function?.arguments || tc?.arguments || '{}'),
-    }))
-    .filter((tc) => tc.name);
-}
-
-function lastUserText(messages: any[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.role !== 'user') continue;
-    if (typeof m.content === 'string') return stripMessageStamp(m.content);
-    if (Array.isArray(m.content)) {
-      return stripMessageStamp(
-        m.content
-          .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
-          .filter(Boolean)
-          .join('\n'),
-      );
-    }
-  }
-  return '';
-}
-
-function parseTimestampMs(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
-/** Stamp user turns only; scrub any leaked stamps from assistant history. */
-function withMessageTimestamps(messages: any[]): any[] {
-  return messages.map((m) => {
-    const ts = parseTimestampMs(m.timestamp);
-
-    const mapText = (text: string) => {
-      // Never stamp assistant/tool turns — that teaches the model to echo `[2026-…]`.
-      if (m?.role === 'user') return stampMessageText(text, ts);
-      if (m?.role === 'assistant') return stripMessageStamp(text);
-      return text;
-    };
-
-    if (typeof m.content === 'string') {
-      return { ...m, content: mapText(m.content) };
-    }
-    if (Array.isArray(m.content)) {
-      let touched = false;
-      const content = m.content.map((part: any) => {
-        if (touched || part?.type !== 'text' || typeof part.text !== 'string') return part;
-        touched = true;
-        return { ...part, text: mapText(part.text) };
-      });
-      return { ...m, content };
-    }
-    return m;
-  });
-}
-
-/**
- * OpenAI-compatible gateways (incl. some GLM routes) reject unknown message
- * fields like `timestamp` / `images`. Keep only chat-completion schema keys.
- */
-function lastUserMessageHasImageParts(messages: any[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.role !== 'user') continue;
-    if (!Array.isArray(m?.content)) return false;
-    return m.content.some((p: any) => p?.type === 'image_url');
-  }
-  return false;
-}
-
-function sanitizeChatMessages(messages: any[]): any[] {
-  return messages.map((m) => {
-    const role = m?.role;
-    const out: Record<string, unknown> = { role };
-    if (m?.content !== undefined) out.content = m.content;
-    if (Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
-      out.tool_calls = m.tool_calls;
-    }
-    if (m?.tool_call_id != null) out.tool_call_id = m.tool_call_id;
-    if (typeof m?.name === 'string' && m.name) out.name = m.name;
-    return out;
-  });
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/** Non-streaming completion for the isolated claim verifier. */
-async function completeOnce(opts: {
-  apiKey: string;
-  baseURL: string;
-  model: string;
-  messages: Array<{ role: string; content: string }>;
-  temperature?: number;
-  signal?: AbortSignal;
-}): Promise<string> {
-  const res = await fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: opts.model,
-      temperature: opts.temperature ?? 0,
-      stream: false,
-      messages: opts.messages,
-    }),
-    signal: opts.signal,
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(
-      `Verifier upstream error: ${res.status} ${(errText || res.statusText).slice(0, 200)}`,
-    );
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-  };
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.map((p) => String(p?.text || '')).join('');
-  }
-  return '';
-}
-
 export async function POST(req: NextRequest) {
   try {
     const clientSignal = req.signal;
     const {
       messages,
-      model = 'deepseek-v4-flash-200k',
-      temperature = 0.7,
-      systemPrompt = '',
-      referenceText = '',
-      skills = [],
-      conversationId = '',
-      enableSearch = true,
-      integrations = [],
-      /** Tool layer: claim reviewer. */
-      autoReview = true,
-      requestReview = false,
-      /** Prior assistant turn(s) to audit (request review). */
-      reviewContext = null as null | {
-        targetMessageId?: string;
-        assistantText?: string;
-        toolRuns?: Array<{
-          name: string;
-          status: string;
-          query?: string;
-          error?: string;
-          provider?: string;
-          results?: Array<{
-            url?: string;
-            title?: string;
-            snippet?: string;
-            body?: string;
-          }>;
-        }>;
-        /** Full-thread Request Review: each assistant turn + its own receipts. */
-        turns?: Array<{
-          messageId: string;
-          assistantText: string;
-          toolRuns?: Array<{
-            name: string;
-            status: string;
-            query?: string;
-            error?: string;
-            provider?: string;
-            results?: Array<{
-              url?: string;
-              title?: string;
-              snippet?: string;
-              body?: string;
-            }>;
-          }>;
-        }>;
-      },
-    } = await req.json();
+      model,
+      temperature,
+      systemPrompt,
+      referenceText,
+      skills,
+      conversationId,
+      enableSearch,
+      integrations,
+      autoReview,
+      requestReview,
+      reviewContext,
+    } = parseChatRequestBody(await req.json());
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
     const isBoundAccount = Boolean(boundUserKey);
     const requestedModel = String(model || '').trim();
@@ -535,19 +162,15 @@ export async function POST(req: NextRequest) {
     if (!apiKey) {
       return jsonError('Missing LLM_CHRISTMAS_API_KEY in Vercel environment variables.', 500);
     }
-    if (!Array.isArray(messages)) {
-      return jsonError('Invalid request: messages must be an array.', 400);
+    const messagesError = validateChatMessages(messages);
+    if (messagesError) {
+      return jsonError(messagesError, 400);
     }
+    const chatMessages = messages as any[];
 
     const openai = new OpenAI({ apiKey, baseURL });
-    const requestedIntegrations = normalizeGoogleIntegrations(
-      Array.isArray(integrations)
-        ? integrations.map((x: unknown) => String(x || '').trim().toLowerCase()).filter(Boolean)
-        : [],
-    );
-    const skillCreatorOn = Array.isArray(skills)
-      ? skills.some((s: any) => isSkillCreatorId(String(s?.id || '')))
-      : false;
+    const requestedIntegrations = normalizeGoogleIntegrations(integrations);
+    const skillCreatorOn = skills.some((s) => isSkillCreatorId(String(s?.id || '')));
     // Intersect client toggles with vault OAuth — never trust integrations alone.
     const authorizedIntegrations: string[] = [];
     let notionAccessToken: string | undefined;
@@ -641,13 +264,11 @@ export async function POST(req: NextRequest) {
     if (toolsGuidance) {
       systemParts.push(toolsGuidance);
     }
-    if (Array.isArray(skills)) {
-      for (const skill of skills) {
-        const title = String(skill?.title || 'Skill').trim();
-        const content = String(skill?.content || '').trim();
-        if (!content) continue;
-        systemParts.push(`Active Skill — ${title}:\n${content}`);
-      }
+    for (const skill of skills) {
+      const title = String(skill?.title || 'Skill').trim();
+      const content = String(skill?.content || '').trim();
+      if (!content) continue;
+      systemParts.push(`Active Skill — ${title}:\n${content}`);
     }
     if (requestReview) {
       systemParts.push(
@@ -663,10 +284,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const hasGeneratedImages = (messages as any[]).some(
+    const hasGeneratedImages = chatMessages.some(
       (m) => m?.role === 'assistant' && Array.isArray(m.images) && m.images.length > 0,
     );
-    const hasGeneratedFiles = (messages as any[]).some(
+    const hasGeneratedFiles = chatMessages.some(
       (m) => m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0,
     );
     if (hasGeneratedImages) {
@@ -745,8 +366,8 @@ export async function POST(req: NextRequest) {
     const carryAssistantImages = modelIsVision;
 
     let lastUserMsgIdx = -1;
-    for (let i = (messages as any[]).length - 1; i >= 0; i--) {
-      if ((messages as any[])[i]?.role === 'user') {
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      if (chatMessages[i]?.role === 'user') {
         lastUserMsgIdx = i;
         break;
       }
@@ -762,8 +383,8 @@ export async function POST(req: NextRequest) {
       return url && !url.startsWith('data:') ? url : '';
     };
 
-    for (let mi = 0; mi < (messages as any[]).length; mi++) {
-      const m = (messages as any[])[mi];
+    for (let mi = 0; mi < chatMessages.length; mi++) {
+      const m = chatMessages[mi];
       const role = m.role;
       const timestamp = m.timestamp;
 
@@ -1020,7 +641,7 @@ export async function POST(req: NextRequest) {
             ...(googleAccessToken ? { googleAccessToken } : {}),
             ...(boundUserKey ? { skillsApiKey: boundUserKey } : {}),
           },
-          requestSkills: Array.isArray(skills) ? skills : [],
+          requestSkills: skills,
           gateway: { apiKey, baseURL },
         };
 

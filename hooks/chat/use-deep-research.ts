@@ -24,6 +24,15 @@ export type ResearchJob = {
   phaseDetail?: string | null;
   reportMarkdown?: string | null;
   summaryMarkdown?: string | null;
+  reportFile?: {
+    id: string;
+    name?: string;
+    mimeType?: string;
+    size?: number;
+    url?: string;
+    content?: string;
+    createdAt?: number;
+  } | null;
   error?: string | null;
   model?: string | null;
 };
@@ -175,7 +184,7 @@ export function useDeepResearch(opts: {
         const finalJob = await refreshJob(jobId).catch(() => null);
         if (finalJob?.status === 'done' && finalJob.reportMarkdown) {
           patchAssistant(setSessions, sessionId, assistantId, (m) =>
-            withResearchReport(m, finalJob.reportMarkdown || ''),
+            withResearchReport(m, finalJob.reportMarkdown || '', finalJob.reportFile),
           );
         } else if (finalJob?.status === 'failed') {
           const msg = finalJob.error || 'Research failed';
@@ -269,9 +278,10 @@ export function useDeepResearch(opts: {
         ]);
         if (remote?.status === 'done') {
           const report = remote.reportMarkdown || '';
+          const file = remote.reportFile;
           if (report) {
             patchAssistant(setSessions, sessionId, assistantId, (m) =>
-              withResearchReport(m, report),
+              withResearchReport(m, report, file),
             );
           }
           return remote;

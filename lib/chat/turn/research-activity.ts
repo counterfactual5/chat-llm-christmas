@@ -561,20 +561,36 @@ export function createResearchAssistantMessage(opts: {
   };
 }
 
-/** Attach final report markdown as the answer content. */
-export function withResearchReport(message: Message, reportMarkdown: string): Message {
+/** Attach final report markdown as the answer content (and optional Output file). */
+export function withResearchReport(
+  message: Message,
+  reportMarkdown: string,
+  reportFile?: {
+    id: string;
+    name?: string;
+    mimeType?: string;
+    size?: number;
+    url?: string;
+    content?: string;
+    createdAt?: number;
+  } | null,
+): Message {
   const content = String(reportMarkdown || '').trim();
   if (!content) return message;
-  const activity = ensureActivity(message);
-  activity.push({ id: newId('c'), kind: 'content', text: content });
-  return {
+  let m: Message = {
     ...settleOpenTools(message),
     content,
-    activity,
     incomplete: false,
     truncationReason: undefined,
     research: message.research
       ? { ...message.research, status: 'done' }
       : message.research,
   };
+  const activity = ensureActivity(m);
+  activity.push({ id: newId('c'), kind: 'content', text: content });
+  m = { ...m, activity };
+  if (reportFile?.id) {
+    m = applyResearchEvent(m, { kind: 'file', payload: reportFile as Record<string, unknown> });
+  }
+  return m;
 }

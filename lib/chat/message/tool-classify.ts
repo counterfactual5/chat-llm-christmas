@@ -22,6 +22,7 @@ export type ToolRunClassification = {
   isResearchPlan: boolean;
   isResearchVerify: boolean;
   isResearchWrite: boolean;
+  isResearchSources: boolean;
 };
 
 /** Classify a tool run by provider/name so the timeline can pick an icon + label. */
@@ -58,6 +59,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const isResearchPlan = run.name === 'research_plan';
   const isResearchVerify = run.name === 'research_verify';
   const isResearchWrite = run.name === 'research_write';
+  const isResearchSources = run.name === 'research_sources';
 
   return {
     isNotion,
@@ -77,6 +79,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isResearchPlan,
     isResearchVerify,
     isResearchWrite,
+    isResearchSources,
   };
 }
 
@@ -106,6 +109,7 @@ export function getToolRunLabelKey(
     isResearchPlan,
     isResearchVerify,
     isResearchWrite,
+    isResearchSources,
   } = classification;
   const { searching, failed } = state;
 
@@ -120,6 +124,9 @@ export function getToolRunLabelKey(
   if (isResearchWrite) {
     if (failed) return 'toolFailed';
     return searching ? 'researchWriting' : 'researchWrote';
+  }
+  if (isResearchSources) {
+    return searching ? 'searchingWeb' : 'searchedSources';
   }
   if (isClaimReviewer) {
     return searching ? 'reviewingClaims' : 'reviewedClaims';

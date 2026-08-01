@@ -458,6 +458,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isResearchPlan,
                     isResearchVerify,
                     isResearchWrite,
+                    isResearchSources,
                   } = classification;
                   if (isClaimReviewer) return null;
                   const failed = run.status === 'done' && Boolean(run.error);
@@ -523,6 +524,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isResearchWrite ? (
                           <PenLine className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isResearchSources ? (
+                          <Globe className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isClaimReviewer ? (
                           <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isNotion ? (

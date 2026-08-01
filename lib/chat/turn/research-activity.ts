@@ -294,22 +294,19 @@ export function applyResearchEvent(
                   snippet: String(row.snippet || ''),
                 };
               })
-              .filter((h) => h.url || h.title)
-          : count > 0
-            ? [
-                {
-                  title: `${count} hit(s)`,
-                  url: '',
-                  snippet: `via ${provider}`,
-                },
-              ]
-            : undefined;
+              .filter((h) => /^https?:\/\//i.test(h.url))
+          : undefined;
       return finishTool(m, {
         name: 'web_search',
         query,
         provider,
         error,
-        results,
+        results:
+          results && results.length
+            ? results
+            : count > 0
+              ? undefined // counts-only — no browseable URL for Reference Material
+              : undefined,
       });
     }
     return m;
@@ -322,7 +319,7 @@ export function applyResearchEvent(
       name: 'web_read',
       query: url,
       provider: 'research',
-      results: url
+      results: /^https?:\/\//i.test(url)
         ? [{ title: url, url, snippet: chars ? `${chars} chars` : 'ok' }]
         : undefined,
     });
@@ -331,10 +328,51 @@ export function applyResearchEvent(
   if (kind === 'sources') {
     const count = Number(payload.count || 0);
     const tier1 = payload.tier1Count != null ? Number(payload.tier1Count) : null;
-    return appendReasoning(
+    m = appendReasoning(
       m,
       `Collected ${count} sources${tier1 != null ? ` (${tier1} Tier 1)` : ''}.`,
     );
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const results = items
+      .map((row) => {
+        const r = row as {
+          title?: unknown;
+          url?: unknown;
+          snippet?: unknown;
+          query?: unknown;
+        };
+        return {
+          title: String(r.title || r.url || ''),
+          url: String(r.url || ''),
+          snippet: String(r.snippet || ''),
+          query: r.query != null ? String(r.query) : undefined,
+        };
+      })
+      .filter((h) => /^https?:\/\//i.test(h.url));
+    if (results.length) {
+      const toolRuns = ensureTools(m);
+      const existingIdx = toolRuns.findIndex((r) => r.name === 'research_sources');
+      const toolRunId =
+        existingIdx >= 0 ? toolRuns[existingIdx].id : newId('tr');
+      const run: MessageToolRun = {
+        id: toolRunId,
+        name: 'research_sources',
+        status: 'done',
+        provider: 'research',
+        query: 'collected sources',
+        results: results.map(({ title, url, snippet }) => ({ title, url, snippet })),
+      };
+      if (existingIdx >= 0) {
+        toolRuns[existingIdx] = run;
+      } else {
+        toolRuns.push(run);
+        const activity = ensureActivity(m);
+        activity.push({ id: newId('act'), kind: 'tool', toolRunId });
+        m = { ...m, activity };
+      }
+      m = { ...m, toolRuns, incomplete: true };
+    }
+    return m;
   }
 
   if (kind === 'verified') {

@@ -29,8 +29,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Eye,
+  Layers,
   Menu,
-  PanelRightOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
@@ -2078,7 +2078,7 @@ export default function ChatContainer() {
                     aria-label={t('context')}
                     className="h-8 w-8 text-stone-500"
                   >
-                    <PanelRightOpen className="h-4 w-4" />
+                    <Layers className="h-4 w-4" />
                   </Button>
                 )}
               </div>

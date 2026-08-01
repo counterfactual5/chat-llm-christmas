@@ -63,8 +63,20 @@ describe('buildChatSystemParts', () => {
   it('includes account skill catalog when Skill Creator needs replace targets', () => {
     const parts = buildChatSystemParts({
       ...base,
+      skillCreatorOn: true,
       accountSkillCatalog: 'Account Skills catalog:\n- id=sk_1 · Demo',
     });
     expect(parts.join('\n')).toContain('id=sk_1 · Demo');
+    expect(parts.join('\n')).toContain('Skill Creator is ON');
+  });
+
+  it('steers the model to ask for /skill when Skill Creator is off', () => {
+    const parts = buildChatSystemParts({
+      ...base,
+      skillCreatorOn: false,
+    }).join('\n');
+    expect(parts).toContain('save_skill is NOT available');
+    expect(parts).toContain('type /skill');
+    expect(parts).toContain('do NOT dump the Skill as a downloadable file');
   });
 });

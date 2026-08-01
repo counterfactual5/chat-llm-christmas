@@ -221,6 +221,7 @@ export async function POST(req: NextRequest) {
       referenceText,
       hasGeneratedImages,
       hasGeneratedFiles,
+      skillCreatorOn,
       accountSkillCatalog,
     });
 

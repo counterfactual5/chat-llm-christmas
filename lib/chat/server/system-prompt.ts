@@ -15,6 +15,7 @@ import { timeContextSystemPrompt } from '@/lib/chat/context/time-context';
 import { REVIEWER_SYSTEM_PROMPT } from '@/lib/tools/review/claim-reviewer';
 import type { ChatSkillInput } from '@/lib/chat/server/request';
 import { formatMemoriesForSystemPrompt } from '@/lib/memories/prompt';
+import { skillPersistenceGatePrompt } from '@/lib/skills/creator';
 
 export type BuildChatSystemPartsOpts = {
   model: string;
@@ -31,6 +32,8 @@ export type BuildChatSystemPartsOpts = {
   referenceText: string;
   hasGeneratedImages: boolean;
   hasGeneratedFiles: boolean;
+  /** Whether builtin Skill Creator is active (gates save_skill). */
+  skillCreatorOn?: boolean;
   /** When Skill Creator is on — id/title list so save_skill can replace. */
   accountSkillCatalog?: string;
 };
@@ -43,6 +46,7 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   systemParts.push(timeContextSystemPrompt());
   systemParts.push(String(opts.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT);
   systemParts.push(CHAT_OUTPUT_CAPABILITIES_PROMPT);
+  systemParts.push(skillPersistenceGatePrompt(Boolean(opts.skillCreatorOn)));
   if (opts.threadId) {
     systemParts.push(conversationIsolationPrompt(opts.threadId));
   }

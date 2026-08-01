@@ -1,13 +1,14 @@
 /**
  * Continue / claim-review turn planning — pure decisions + prompts.
  * The chat hook still owns streaming / loading; this module answers
- * “may we resume?” and “which resume branch?”.
+ * “may we resume?”, “which resume branch?”, and “what API payload?”.
  */
 
 import type { Message } from '@/lib/chat/types';
 import {
   analyzeTruncation,
   assistantMismatchesUserTopic,
+  buildContinuationPrompt,
   looksAbruptlyCutOff,
 } from '@/lib/chat/stream/reply-truncation';
 
@@ -110,4 +111,98 @@ export function pollutedContinueUserContent(previousAssistant: string, continuat
     'Do not mention filesystems, shell, or scanning a workspace unless the user asked for that.',
     continuationPrompt,
   ].join('\n\n');
+}
+
+export type ResumeStreamPlan =
+  | {
+      kind: 'reanswer_empty';
+      /** Wipe Thought/tools on the empty bubble before streaming. */
+      clearProcess: true;
+      /** API thread excludes the empty assistant message. */
+      excludeLastAssistant: true;
+      initialContent: '';
+      seamPrefix: '';
+      passWebSources: true;
+    }
+  | {
+      kind: 'answer_after_process';
+      extraUserContent: string;
+      initialContent: '';
+      seamPrefix: '';
+      passWebSources: false;
+    }
+  | {
+      kind: 'continue';
+      polluted: boolean;
+      extraUserContent: string;
+      initialContent: string;
+      seamPrefix: string;
+      passWebSources: false;
+    };
+
+/** Plan the Continue stream payload after gate + branch selection. */
+export function buildResumeStreamPlan(opts: {
+  last: Message;
+  lastUser: Message | undefined;
+  emptyInterrupted: boolean;
+}): ResumeStreamPlan {
+  const { last, lastUser, emptyInterrupted } = opts;
+  const branch = pickResumeBranch(last, lastUser, emptyInterrupted);
+
+  if (branch === 'reanswer_empty') {
+    return {
+      kind: 'reanswer_empty',
+      clearProcess: true,
+      excludeLastAssistant: true,
+      initialContent: '',
+      seamPrefix: '',
+      passWebSources: true,
+    };
+  }
+
+  if (branch === 'answer_after_process') {
+    return {
+      kind: 'answer_after_process',
+      extraUserContent: EMPTY_AFTER_PROCESS_PROMPT,
+      initialContent: '',
+      seamPrefix: '',
+      passWebSources: false,
+    };
+  }
+
+  const polluted = resumeIsPolluted(lastUser, last);
+  const continuation = buildContinuationPrompt(last.content);
+  const seamPrefix = markdownTableSeamPrefix(last.content);
+  if (polluted && lastUser) {
+    return {
+      kind: 'continue',
+      polluted: true,
+      extraUserContent: pollutedContinueUserContent(last.content, continuation),
+      initialContent: last.content,
+      seamPrefix,
+      passWebSources: false,
+    };
+  }
+  return {
+    kind: 'continue',
+    polluted: false,
+    extraUserContent: continuation,
+    initialContent: last.content,
+    seamPrefix,
+    passWebSources: false,
+  };
+}
+
+/** Cleared empty-assistant patch for reanswer_empty before streaming. */
+export function clearedEmptyAssistant(message: Message): Message {
+  return {
+    ...message,
+    content: '',
+    reasoning: undefined,
+    activity: undefined,
+    toolRuns: undefined,
+    incomplete: true,
+    truncationReason: undefined,
+    finishReason: undefined,
+  };
 }

@@ -3,6 +3,9 @@
  *
  *  Queue helpers:   lib/chat/turn/task-queue.ts
  *  Continue/review: lib/chat/turn/continuation.ts
+ *  Attachments:     lib/chat/turn/attachments.ts
+ *  Send estimate:   lib/chat/turn/send-estimate.ts
+ *  Stream errors:   lib/chat/turn/stream-error.ts
  *  Account:         hooks/chat/use-account.ts
  *  Integrations:    hooks/chat/use-integrations.ts
  *  Persist:         hooks/chat/use-session-persist.ts
@@ -17,10 +20,7 @@ import { formatQuotedMessage } from '@/lib/chat/message/quotes';
 import { toApiMessages, ingestedToMessageImages } from '@/lib/chat/message/api-messages';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
-import { isAssistantError, messagePlainText } from '@/lib/chat/message/display';
-import { estimateTokensFromText } from '@/lib/models/specs';
-import { formatWebSourcesForReference } from '@/lib/chat/context/references';
-import { buildContinuationPrompt } from '@/lib/chat/stream/reply-truncation';
+import { isAssistantError } from '@/lib/chat/message/display';
 import { compactConversationHistory } from '@/lib/chat/turn/compact';
 import {
   afterRemoveTask,
@@ -36,16 +36,30 @@ import {
 } from '@/lib/chat/turn/task-queue';
 import {
   CLAIM_REVIEW_USER_PROMPT,
-  EMPTY_AFTER_PROCESS_PROMPT,
+  buildResumeStreamPlan,
+  clearedEmptyAssistant,
   gateResumeIncompleteReply,
-  markdownTableSeamPrefix,
-  pickResumeBranch,
-  pollutedContinueUserContent,
-  resumeIsPolluted,
 } from '@/lib/chat/turn/continuation';
+import {
+  cleanBaseMessagesForSend,
+  messageImagesFromAttachments,
+  resolvePendingAttachments,
+  titleForNewConversation,
+} from '@/lib/chat/turn/attachments';
+import {
+  estimateTokensForSend,
+  exceedsUsableWindow,
+  shouldCompactBeforeSend,
+} from '@/lib/chat/turn/send-estimate';
+import {
+  applyAssistantStreamFailure,
+  applyGeneratedImageToAssistant,
+  applyImageGenerationError,
+  isAbortError,
+  mapAssistantById,
+} from '@/lib/chat/turn/stream-error';
 
 export type { QueuedTask };
-
 export type UseChatLogicProps = {
   activeSessionId: string;
   sessionsRef: React.MutableRefObject<ChatSession[]>;
@@ -135,6 +149,34 @@ export function useChatLogic(props: UseChatLogicProps) {
     if (abortControllersRef.current.get(sessionId) !== controller) return;
     endLoading(sessionId);
   };
+  
+  const failAssistantStream = (
+    sessionId: string,
+    assistantId: string,
+    error: unknown,
+    abortReason: string,
+    opts?: { keep?: 'content' | 'content_or_reasoning' },
+  ) => {
+    if (isAbortError(error)) {
+      markAssistantIncomplete(sessionId, assistantId, true, {
+        truncationReason: abortReason,
+      });
+      return;
+    }
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
+          messages: applyAssistantStreamFailure(s.messages, assistantId, error, {
+            keep: opts?.keep,
+          }),
+          updatedAt: Date.now(),
+        };
+      }),
+    );
+  };
+
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
   const activeQueue = useMemo(
@@ -283,12 +325,10 @@ export function useChatLogic(props: UseChatLogicProps) {
       opts?.baseMessages ??
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
-    const cleanedBase = sessionMessages.filter(
-      (m, idx, arr) => !(idx === arr.length - 1 && m.role === 'assistant' && m.incomplete && !m.content),
-    );
+    const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
     let newTitle = sessionsRef.current.find((s) => s.id === sessionId)?.title;
     if (cleanedBase.length === 0 || (cleanedBase.length === 1 && opts?.skipDuplicateUser)) {
-      newTitle = trimmed.slice(0, 30) + (trimmed.length > 30 ? '...' : '');
+      newTitle = titleForNewConversation(trimmed);
     }
 
     const assistantId = crypto.randomUUID();
@@ -347,24 +387,12 @@ export function useChatLogic(props: UseChatLogicProps) {
           if (s.id !== sessionId) return s;
           return {
             ...s,
-            messages: s.messages.map((m) =>
-              m.id === assistantId
-                ? {
-                    ...m,
-                    // Image alone is enough — don't echo the prompt under the picture.
-                    content: '',
-                    images: [
-                      {
-                        url: data.image as string,
-                        name: 'generated.png',
-                        prompt: trimmed,
-                        model: 'GPT Image 1.5',
-                        fileId: data.fileId ? String(data.fileId) : undefined,
-                      },
-                    ],
-                    incomplete: false,
-                  }
-                : m,
+            messages: mapAssistantById(s.messages, assistantId, (m) =>
+              applyGeneratedImageToAssistant(m, {
+                imageUrl: data.image as string,
+                prompt: trimmed,
+                fileId: data.fileId ? String(data.fileId) : undefined,
+              }),
             ),
             updatedAt: Date.now(),
           };
@@ -381,15 +409,8 @@ export function useChatLogic(props: UseChatLogicProps) {
           if (s.id !== sessionId) return s;
           return {
             ...s,
-            messages: s.messages.map((m) =>
-              m.id === assistantId
-                ? {
-                    ...m,
-                    content: `Error: ${error?.message || 'Image generation failed'}`,
-                    incomplete: false,
-                    images: undefined,
-                  }
-                : m,
+            messages: mapAssistantById(s.messages, assistantId, (m) =>
+              applyImageGenerationError(m, error?.message || 'Image generation failed'),
             ),
             updatedAt: Date.now(),
           };
@@ -416,9 +437,6 @@ export function useChatLogic(props: UseChatLogicProps) {
     const imagePrompt = parseImageCommand(textToSend);
     if (imagePrompt) {
       if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
-      // Edit/resend passes priorMessages (thread truncated before the edited user
-      // turn). Without that, generateImage reads the full session and appends a
-      // second `/image` user bubble next to the old one.
       return generateImage(imagePrompt, {
         sessionId,
         alreadyLoading: opts?.alreadyLoading,
@@ -426,65 +444,43 @@ export function useChatLogic(props: UseChatLogicProps) {
       });
     }
 
-    const pendingImages = opts?.resendAttachments
-      ? opts.resendAttachments.filter(
-          (a) => isImageAttachment(a) && (a.dataUrl || a.fileId),
-        )
-      : sessionId === activeSessionId
-        ? attachments.filter((a) => a.dataUrl || a.fileId)
-        : [];
-    const pendingTexts = opts?.resendAttachments
-      ? opts.resendAttachments.filter((a) => a.text)
-      : baseMessagesOverride
-        ? []
-        : sessionId === activeSessionId
-          ? attachments.filter((a) => a.text)
-          : [];
-    if (
-      (!textToSend.trim() && pendingImages.length === 0 && pendingTexts.length === 0) ||
-      (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading)
-    ) {
+    const resolved = resolvePendingAttachments({
+      textToSend,
+      attachments,
+      resendAttachments: opts?.resendAttachments,
+      baseMessagesOverride,
+      isActiveSession: sessionId === activeSessionId,
+      vision: selectedSpec.vision,
+      zhipuVisionOn,
+      isLoading: isSessionLoading(sessionId),
+      force,
+      alreadyLoading: opts?.alreadyLoading,
+    });
+    if (!resolved.ok) {
+      if (resolved.error === 'images_need_vision' && sessionId === activeSessionId) {
+        setAttachError(t('imagesNeedVision'));
+      } else if (resolved.error === 'upload_in_progress') {
+        setAttachError('Wait for image upload to finish');
+      } else if (resolved.error === 'upload_failed') {
+        setAttachError('Remove or re-add images that failed to upload');
+      }
       return false;
     }
-    if (pendingImages.length > 0 && !selectedSpec.vision && !zhipuVisionOn) {
-      if (sessionId === activeSessionId) setAttachError(t('imagesNeedVision'));
-      return false;
-    }
-    const uploadChecks = opts?.resendAttachments ?? (sessionId === activeSessionId ? attachments : []);
-    if (uploadChecks.some((a) => a.uploading)) {
-      setAttachError('Wait for image upload to finish');
-      return false;
-    }
-    if (uploadChecks.some((a) => a.uploadError)) {
-      setAttachError('Remove or re-add images that failed to upload');
-      return false;
-    }
+    const { pendingImages, fullContent } = resolved;
+
     if (sessionId === activeSessionId) {
       stickToBottomRef.current = true;
       scrollToBottom(true);
-    }
-
-    let fullContent = textToSend.trim();
-    if (pendingTexts.length > 0) {
-      const contextParts = pendingTexts.map(
-        (a) => `[Attached File: ${a.name}]\n${a.text!.trim()}`,
-      );
-      fullContent = contextParts.join('\n\n') + (fullContent ? `\n\n---\n\n${fullContent}` : '');
     }
 
     const sessionMessages =
       baseMessagesOverride ??
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
-    const cleanedBase = sessionMessages.filter(
-      (m, idx, arr) => !(idx === arr.length - 1 && m.role === 'assistant' && m.incomplete && !m.content),
-    );
-
-    let baseMessages = cleanedBase;
+    let baseMessages = cleanBaseMessagesForSend(sessionMessages);
     let newTitle = sessionsRef.current.find((s) => s.id === sessionId)?.title;
     if (baseMessages.length === 0) {
-      newTitle = (textToSend || pendingImages[0]?.name || 'New Conversation').slice(0, 30)
-        + ((textToSend.length > 30) ? '...' : '');
+      newTitle = titleForNewConversation(textToSend, pendingImages);
     }
 
     const userMessage: Message = {
@@ -492,19 +488,11 @@ export function useChatLogic(props: UseChatLogicProps) {
       role: 'user',
       content: fullContent || (pendingImages.length ? '(image)' : ''),
       timestamp: Date.now(),
-      images: pendingImages.map((a) => ({
-        url: a.fileId
-          ? `/api/files/${encodeURIComponent(a.fileId)}`
-          : a.dataUrl!,
-        name: a.name,
-        fileId: a.fileId,
-      })),
+      images: messageImagesFromAttachments(pendingImages),
     };
 
     const historySnapshot = sessionsRef.current.find((s) => s.id === sessionId);
 
-    // Truncate the thread in the UI immediately (edit/resend), so Messages /
-    // Context used / Material update before any await (compact / network).
     let newMessages = [...baseMessages, userMessage];
     updateSession(sessionId, newMessages, newTitle);
     if (sessionId === activeSessionId) {
@@ -515,37 +503,16 @@ export function useChatLogic(props: UseChatLogicProps) {
       setAttachments([]);
     }
 
-    // Lock the session before await compact so the queue cannot start a second stream.
     if (!opts?.alreadyLoading) beginLoading(sessionId);
 
-    // Compact before sending when the thread is near the selected model's window.
-    // usableLimit already follows selectedModel (context − output reserve).
-    const estimateForSend = (history: Message[], nextUserText: string) => {
-      // fullContent already embeds pending text files — do not also add files.
-      // Reference must follow the truncated thread, not the pre-edit sidebar snapshot.
-      const threadReference = estimateTokensFromText(
-        formatWebSourcesForReference(
-          sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
-        ),
-      );
-      const historyText = history.reduce(
-        (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
-        0,
-      );
-      const historyImages = history.reduce(
-        (sum, m) => sum + (m.images?.length || 0) * 1000,
-        0,
-      );
-      return (
-        contextBreakdown.system +
-        contextBreakdown.skills +
-        threadReference +
-        historyText +
-        historyImages +
-        pendingImages.length * 1000 +
-        estimateTokensFromText(nextUserText)
-      );
-    };
+    const projectTokens = (history: Message[]) =>
+      estimateTokensForSend({
+        history,
+        nextUserText: fullContent,
+        pendingImageCount: pendingImages.length,
+        webSources: sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
+        contextBreakdown,
+      });
 
     const restoreHistoryIfNeeded = () => {
       if (!historySnapshot || !baseMessagesOverride) return;
@@ -553,8 +520,8 @@ export function useChatLogic(props: UseChatLogicProps) {
     };
 
     if (usableLimit != null) {
-      let projected = estimateForSend(baseMessages, fullContent);
-      if (projected > usableLimit * 0.9) {
+      let projected = projectTokens(baseMessages);
+      if (shouldCompactBeforeSend(projected, usableLimit)) {
         const compacted = await runCompact(baseMessages);
         if (!compacted) {
           restoreHistoryIfNeeded();
@@ -565,9 +532,8 @@ export function useChatLogic(props: UseChatLogicProps) {
         baseMessages = compacted;
         newMessages = [...baseMessages, userMessage];
         updateSession(sessionId, newMessages, newTitle);
-        projected = estimateForSend(baseMessages, fullContent);
-        // Still over after compact (huge attachments / short thread): refuse rather than 413 upstream.
-        if (projected > usableLimit) {
+        projected = projectTokens(baseMessages);
+        if (exceedsUsableWindow(projected, usableLimit)) {
           restoreHistoryIfNeeded();
           setAttachError(
             `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
@@ -602,35 +568,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         threadSources,
       );
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        // Keep any partial reply so the user can Continue; only use Error: when empty.
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== sessionId) return s;
-            const msgs = s.messages.map((m) => {
-              if (m.id !== assistantMessage.id) return m;
-              if (m.content.trim() || m.reasoning?.trim()) {
-                return {
-                  ...m,
-                  incomplete: true,
-                  truncationReason: error.message || 'Request failed',
-                };
-              }
-              return {
-                ...m,
-                content: `Error: ${error.message || 'Request failed'}`,
-                incomplete: false,
-                truncationReason: undefined,
-              };
-            });
-            return { ...s, messages: msgs, updatedAt: Date.now() };
-          }),
-        );
-      } else {
-        markAssistantIncomplete(sessionId, assistantMessage.id, true, {
-          truncationReason: 'Reply was interrupted',
-        });
-      }
+      failAssistantStream(sessionId, assistantMessage.id, error, 'Reply was interrupted');
     } finally {
       endLoadingIfController(sessionId, controller);
     }
@@ -656,12 +594,9 @@ export function useChatLogic(props: UseChatLogicProps) {
     abortControllersRef.current.set(sessionId, controller);
 
     const lastUser = [...sessionMessages].reverse().find((m) => m.role === 'user');
-    const branch = pickResumeBranch(last, lastUser, emptyInterrupted);
+    const plan = buildResumeStreamPlan({ last, lastUser, emptyInterrupted });
 
-    // Truly empty bubble (refresh mid-Process, no tokens at all): re-answer.
-    // If Thought / tools already ran, keep them — wiping felt like “Continue deleted
-    // my half reply” when GLM parked text in reasoning with empty content.
-    if (branch === 'reanswer_empty') {
+    if (plan.kind === 'reanswer_empty') {
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
@@ -669,18 +604,7 @@ export function useChatLogic(props: UseChatLogicProps) {
             ...s,
             updatedAt: Date.now(),
             messages: s.messages.map((m) =>
-              m.id === last.id
-                ? {
-                    ...m,
-                    content: '',
-                    reasoning: undefined,
-                    activity: undefined,
-                    toolRuns: undefined,
-                    incomplete: true,
-                    truncationReason: undefined,
-                    finishReason: undefined,
-                  }
-                : m,
+              m.id === last.id ? clearedEmptyAssistant(m) : m,
             ),
           };
         }),
@@ -694,140 +618,27 @@ export function useChatLogic(props: UseChatLogicProps) {
           ),
           last.id,
           controller.signal,
-          '',
-          '',
+          plan.initialContent,
+          plan.seamPrefix,
           sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
         );
       } catch (error: any) {
-        if (error.name !== 'AbortError') {
-          setSessions((prev) =>
-            prev.map((s) => {
-              if (s.id !== sessionId) return s;
-              const msgs = s.messages.map((m) => {
-                if (m.id !== last.id) return m;
-                if (m.content.trim() || m.reasoning?.trim()) {
-                  return {
-                    ...m,
-                    incomplete: true,
-                    truncationReason: error.message || 'Request failed',
-                  };
-                }
-                return {
-                  ...m,
-                  content: `Error: ${error.message || 'Request failed'}`,
-                  incomplete: false,
-                  truncationReason: undefined,
-                };
-              });
-              return { ...s, messages: msgs, updatedAt: Date.now() };
-            }),
-          );
-        } else {
-          markAssistantIncomplete(sessionId, last.id, true, {
-            truncationReason: 'Reply was interrupted',
-          });
-        }
+        failAssistantStream(sessionId, last.id, error, 'Reply was interrupted');
       } finally {
         endLoadingIfController(sessionId, controller);
       }
       return;
     }
 
-    // Empty content but Thought/tools already present: ask the model for the
-    // visible answer without wiping Process history.
-    if (branch === 'answer_after_process') {
-      const apiMessages: ReturnType<typeof toApiMessages> = [
-        ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
-        {
-          role: 'user' as const,
-          content: EMPTY_AFTER_PROCESS_PROMPT,
-          images: [],
-          timestamp: Date.now(),
-        },
-      ];
-      try {
-        await streamChatResponse(
-          sessionId,
-          apiMessages,
-          last.id,
-          controller.signal,
-          '',
-          '',
-        );
-      } catch (error: any) {
-        if (error.name !== 'AbortError') {
-          setSessions((prev) =>
-            prev.map((s) => {
-              if (s.id !== sessionId) return s;
-              const msgs = s.messages.map((m) => {
-                if (m.id !== last.id) return m;
-                if (m.content.trim() || m.reasoning?.trim()) {
-                  return {
-                    ...m,
-                    incomplete: true,
-                    truncationReason: error.message || 'Request failed',
-                  };
-                }
-                return {
-                  ...m,
-                  content: `Error: ${error.message || 'Request failed'}`,
-                  incomplete: false,
-                  truncationReason: undefined,
-                };
-              });
-              return { ...s, messages: msgs, updatedAt: Date.now() };
-            }),
-          );
-        } else {
-          markAssistantIncomplete(sessionId, last.id, true, {
-            truncationReason: 'Reply was interrupted',
-          });
-        }
-      } finally {
-        endLoadingIfController(sessionId, controller);
-      }
-      return;
-    }
-
-    const polluted = resumeIsPolluted(lastUser, last);
-
-    // Cross-chat bleed (e.g. formula chat Continue resumes a Python agent task):
-    // steer with a corrective prompt, but never wipe the partial bubble.
-    let apiMessages: ReturnType<typeof toApiMessages>;
-    let initialContent = last.content;
-    let seamPrefix = '';
-
-    if (polluted && lastUser) {
-      // Keep the partial bubble — wiping mid-reply felt like Continue "deleted"
-      // half the answer. Only steer the model with a corrective user turn.
-      apiMessages = [
-        ...toApiMessages(sessionMessages, {
-          vision: selectedSpec.vision,
-        }),
-        {
-          role: 'user' as const,
-          content: pollutedContinueUserContent(
-            last.content,
-            buildContinuationPrompt(last.content),
-          ),
-          images: [],
-          timestamp: Date.now(),
-        },
-      ];
-      initialContent = last.content;
-      seamPrefix = markdownTableSeamPrefix(last.content);
-    } else {
-      apiMessages = [
-        ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
-        {
-          role: 'user' as const,
-          content: buildContinuationPrompt(last.content),
-          images: [],
-          timestamp: Date.now(),
-        },
-      ];
-      seamPrefix = markdownTableSeamPrefix(last.content);
-    }
+    const apiMessages: ReturnType<typeof toApiMessages> = [
+      ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
+      {
+        role: 'user' as const,
+        content: plan.extraUserContent,
+        images: [],
+        timestamp: Date.now(),
+      },
+    ];
 
     try {
       await streamChatResponse(
@@ -835,38 +646,17 @@ export function useChatLogic(props: UseChatLogicProps) {
         apiMessages,
         last.id,
         controller.signal,
-        initialContent,
-        seamPrefix,
+        plan.initialContent,
+        plan.seamPrefix,
       );
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        // Keep partial resumed text; fall back to Error only if somehow empty.
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== sessionId) return s;
-            const msgs = s.messages.map((m) => {
-              if (m.id !== last.id) return m;
-              if (m.content.trim()) {
-                return {
-                  ...m,
-                  incomplete: true,
-                  truncationReason: error.message || 'Request failed',
-                };
-              }
-              return {
-                ...m,
-                content: `Error: ${error.message || 'Request failed'}`,
-                incomplete: false,
-              };
-            });
-            return { ...s, messages: msgs, updatedAt: Date.now() };
-          }),
-        );
-      } else {
-        markAssistantIncomplete(sessionId, last.id, true, {
-          truncationReason: 'Stopped by you',
-        });
-      }
+      failAssistantStream(
+        sessionId,
+        last.id,
+        error,
+        plan.kind === 'continue' ? 'Stopped by you' : 'Reply was interrupted',
+        plan.kind === 'continue' ? { keep: 'content' } : undefined,
+      );
     } finally {
       endLoadingIfController(sessionId, controller);
     }
@@ -921,30 +711,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         true,
       );
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== sessionId) return s;
-            return {
-              ...s,
-              messages: s.messages.map((m) =>
-                m.id === assistantMessage.id
-                  ? {
-                      ...m,
-                      content: `Error: ${error.message || 'Request failed'}`,
-                      incomplete: false,
-                    }
-                  : m,
-              ),
-              updatedAt: Date.now(),
-            };
-          }),
-        );
-      } else {
-        markAssistantIncomplete(sessionId, assistantMessage.id, true, {
-          truncationReason: 'Stopped by you',
-        });
-      }
+      failAssistantStream(sessionId, assistantMessage.id, error, 'Stopped by you');
     } finally {
       endLoadingIfController(sessionId, controller);
     }
@@ -993,22 +760,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         controller.signal,
       );
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        updateSession(sessionId, [
-          ...prior,
-          {
-            id: assistantMessage.id,
-            role: 'assistant',
-            content: `Error: ${error.message || 'Request failed'}`,
-            timestamp: Date.now(),
-            incomplete: false,
-          },
-        ]);
-      } else {
-        markAssistantIncomplete(sessionId, assistantMessage.id, true, {
-          truncationReason: 'Reply was interrupted',
-        });
-      }
+      failAssistantStream(sessionId, assistantMessage.id, error, 'Reply was interrupted');
     } finally {
       endLoadingIfController(sessionId, controller);
     }

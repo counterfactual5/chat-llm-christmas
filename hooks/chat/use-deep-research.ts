@@ -188,12 +188,23 @@ export function useDeepResearch(opts: {
           );
         }
       } catch (err: unknown) {
-        if ((err as { name?: string })?.name === 'AbortError') return;
+        if ((err as { name?: string })?.name === 'AbortError') {
+          patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+            ...m,
+            incomplete: true,
+            truncationReason: m.truncationReason || 'Research interrupted',
+          }));
+          return;
+        }
+        // Stream drop ≠ job failure — server may still be running. Keep last
+        // research.status so Continue can reattach instead of starting over.
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg);
-        patchAssistant(setSessions, sessionId, assistantId, (m) =>
-          applyResearchEvent(m, { kind: 'error', payload: { message: msg } }),
-        );
+        patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+          ...m,
+          incomplete: true,
+          truncationReason: msg || 'Research stream interrupted',
+        }));
       } finally {
         setBusy(false);
         endLoading(sessionId);
@@ -201,6 +212,95 @@ export function useDeepResearch(opts: {
       }
     },
     [endLoading, refreshJob, setSessions, stopStream],
+  );
+
+  /** Reconnect to an existing job and rebuild the bubble from SSE replay. */
+  const reattach = useCallback(
+    async (opts: {
+      jobId: string;
+      sessionId: string;
+      assistantId: string;
+      query: string;
+      mode: ResearchMode;
+    }) => {
+      const { jobId, sessionId, assistantId, query, mode } = opts;
+      setError(null);
+      setBusy(true);
+      beginLoading(sessionId);
+      setJob({
+        jobId,
+        sessionId,
+        query,
+        mode,
+        status: 'queued',
+      });
+      // Reset timeline then replay all events for a consistent Process panel.
+      patchAssistant(setSessions, sessionId, assistantId, () =>
+        createResearchAssistantMessage({ id: assistantId, jobId, query, mode }),
+      );
+      await listen(jobId, sessionId, assistantId);
+    },
+    [beginLoading, listen, setSessions],
+  );
+
+  /**
+   * Continue an interrupted research turn: reattach if still running, otherwise
+   * ask the backend to resume the same job from checkpoints (do not create a new job).
+   */
+  const resume = useCallback(
+    async (opts: {
+      jobId: string;
+      sessionId: string;
+      assistantId: string;
+      query: string;
+      mode: ResearchMode;
+    }) => {
+      const { jobId, sessionId, assistantId, query, mode } = opts;
+      setError(null);
+      try {
+        let remote = await refreshJob(jobId).catch(() => null);
+        const running = new Set([
+          'queued',
+          'planning',
+          'searching',
+          'synthesizing',
+          'verifying',
+          'writing',
+        ]);
+        if (remote?.status === 'done') {
+          const report = remote.reportMarkdown || '';
+          if (report) {
+            patchAssistant(setSessions, sessionId, assistantId, (m) =>
+              withResearchReport(m, report),
+            );
+          }
+          return remote;
+        }
+        if (remote && running.has(String(remote.status))) {
+          await reattach({ jobId, sessionId, assistantId, query, mode });
+          return remote;
+        }
+
+        const res = await fetch(`/api/research/${encodeURIComponent(jobId)}/resume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+        }
+        remote = (data.data as ResearchJob) || remote;
+        await reattach({ jobId, sessionId, assistantId, query, mode });
+        return remote;
+      } catch (err: unknown) {
+        setBusy(false);
+        endLoading(sessionId);
+        setError(err instanceof Error ? err.message : String(err));
+        return null;
+      }
+    },
+    [endLoading, reattach, refreshJob, setSessions],
   );
 
   const start = useCallback(
@@ -314,6 +414,8 @@ export function useDeepResearch(opts: {
     error,
     start,
     cancel,
+    resume,
+    reattach,
     active: activeRef,
   };
 }

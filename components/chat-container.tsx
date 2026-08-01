@@ -1507,31 +1507,22 @@ export default function ChatContainer() {
           [...sessionMessages].reverse().find((m) => m.role === 'user')?.content || '';
         const q = last.research.query || parseResearchCommand(lastUserContent)?.query || '';
         if (!q) return;
-        const mode = (last.research.mode as ResearchModeHint | undefined) || undefined;
-        // Reuse the same assistant bubble; drop trailing user duplicate by
-        // truncating before this assistant and re-adding user + same assistant id.
-        const idx = sessionMessages.findIndex((m) => m.id === last.id);
-        let cut = idx;
-        if (cut > 0 && sessionMessages[cut - 1]?.role === 'user') cut -= 1;
-        const priorMessages = sessionMessages.slice(0, cut);
-        await startResearchTurn({
-          query: q,
-          mode,
+        const mode =
+          (last.research.mode as ResearchModeHint | undefined) || deepResearch.mode;
+        // Same jobId — reattach or server-side checkpoint resume. Never POST a
+        // brand-new research job (that wiped Plan/Search and looked like a restart).
+        await deepResearch.resume({
+          jobId: last.research.jobId,
           sessionId,
           assistantId: last.id,
-          priorMessages,
-          userContent: formatResearchCommand(q, mode),
+          query: q,
+          mode,
         });
         return;
       }
       await resumeIncompleteReply(opts);
     },
-    [
-      activeSessionId,
-      deepResearch.busy,
-      resumeIncompleteReply,
-      startResearchTurn,
-    ],
+    [activeSessionId, deepResearch, resumeIncompleteReply],
   );
 
   const saveEditedMessageOrResearch = useCallback(

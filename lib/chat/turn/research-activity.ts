@@ -216,6 +216,8 @@ export function applyResearchEvent(
       m = openStage(m, STAGE_TITLE[status] || status);
       m = {
         ...m,
+        incomplete: true,
+        truncationReason: undefined,
         research: m.research
           ? { ...m.research, status }
           : undefined,

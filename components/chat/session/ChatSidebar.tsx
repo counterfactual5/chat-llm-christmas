@@ -199,9 +199,9 @@ export function ChatSidebar({
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 280, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
-          className="h-full shrink-0 border-r border-stone-200 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/60 flex flex-col"
+          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-stone-200 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/60"
         >
-          <div className="p-4 flex flex-col gap-3 border-b border-stone-200/50 dark:border-stone-800/50">
+          <div className="flex max-h-[45%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-stone-200/50 p-4 dark:border-stone-800/50">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-stone-900 dark:text-stone-100">
                 <BrandMark className="h-7 w-7 shadow-sm" />
@@ -581,7 +581,7 @@ export function ChatSidebar({
             </div>
           </div>
 
-          <ScrollArea className="flex-1 px-3 py-2">
+          <ScrollArea className="min-h-0 flex-1 px-3 py-2">
             <div className="space-y-3">
               {dayGroups.map((group) => {
                 const open = group.isToday || Boolean(pastDayOpen[group.key]);
@@ -717,8 +717,8 @@ export function ChatSidebar({
             </div>
           </ScrollArea>
             
-            {/* Sidebar Footer: Account / Language / Theme */}
-            <div className="relative p-3 border-t border-stone-200/60 dark:border-stone-800/60 bg-stone-100/80 dark:bg-stone-900/80" ref={accountMenuRef}>
+            {/* Sidebar Footer: Account / Language / Theme — always pinned to bottom */}
+            <div className="relative shrink-0 border-t border-stone-200/60 bg-stone-100/80 p-3 dark:border-stone-800/60 dark:bg-stone-900/80" ref={accountMenuRef}>
               <AnimatePresence>
                 {isAccountMenuOpen && (
                   <motion.div

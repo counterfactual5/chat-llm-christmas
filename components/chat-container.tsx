@@ -1,6 +1,17 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+/**
+ * Chat shell — wires UI panels to hooks. Prefer jumping to the owning module:
+ *
+ *  Account / hydrate / persist     hooks/use-chat-account-hydrate.ts
+ *  Send / queue / resume / review   hooks/use-chat-logic.ts
+ *  Client SSE consumer             lib/chat/stream-response.ts
+ *  Session normalize / cloud sync  lib/chat/sessions.ts
+ *  Message list / composer / …     components/chat/*
+ *  /api/chat server                app/api/chat/route.ts (+ lib/chat/server/)
+ */
+
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Menu,
   PanelRightOpen,
@@ -28,7 +39,7 @@ import {
 } from '@/lib/chat/reply-truncation';
 import { isAssistantError, messagePlainText } from '@/lib/chat/message-display';
 import { useChatLogic } from '@/hooks/use-chat-logic';
-import { useChatSessionBoot } from '@/hooks/use-chat-session-boot';
+import { useChatAccountHydrate } from '@/hooks/use-chat-account-hydrate';
 import { parseImageCommand } from '@/lib/chat/image-command';
 import { CHATS_OWNER_KEY } from '@/lib/chat/sessions';
 import {
@@ -173,12 +184,6 @@ export default function ChatContainer() {
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
   const skillsRef = useRef(skills);
-  const createNewSessionRef = useRef<() => void>(() => {});
-  const fetchModelsRef = useRef<() => Promise<void>>(async () => {});
-  const fetchSkillsRef = useRef<() => Promise<void>>(async () => {});
-  const setActiveMcpIdsRef = useRef<(updater: string[] | ((prev: string[]) => string[])) => void>(
-    () => {},
-  );
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
@@ -186,6 +191,99 @@ export default function ChatContainer() {
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
   skillsRef.current = skills;
+
+  const createNewSession = useCallback(() => {
+    // Switch to a blank composer. The draft is kept in memory only and is
+    // omitted from the sidebar until the first message lands.
+    setQuotedSelections([]);
+    setSessions((prev) => {
+      const emptyDraft = prev.find((session) => session.messages.length === 0);
+
+      if (emptyDraft) {
+        setActiveSessionId(emptyDraft.id);
+        return prev
+          .filter(
+            (session) => session.messages.length > 0 || session.id === emptyDraft.id,
+          )
+          .map((session) =>
+            session.id === emptyDraft.id
+              ? { ...session, updatedAt: Date.now() }
+              : session,
+          );
+      }
+
+      const newSession: ChatSession = {
+        id: crypto.randomUUID(),
+        title: 'New Conversation',
+        messages: [],
+        updatedAt: Date.now(),
+      };
+      setActiveSessionId(newSession.id);
+      // Drop any stray empty drafts while creating a fresh one.
+      return [newSession, ...prev.filter((session) => session.messages.length > 0)];
+    });
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+    }
+  }, []);
+
+  const setActiveMcpIds = useCallback(
+    (updater: string[] | ((prev: string[]) => string[])) => {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          const next = typeof updater === 'function' ? updater(s.mcpIds || []) : updater;
+          return { ...s, mcpIds: next, updatedAt: Date.now() };
+        }),
+      );
+    },
+    [activeSessionId],
+  );
+
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
+    try {
+      const res = await fetch('/api/models', {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(20_000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.success && Array.isArray(data.models)) {
+        setAvailableModels(data.models);
+        if (data.models.length > 0) {
+          setSelectedModel((prev) => {
+            if (prev && data.models.some((m: ModelOption) => m.id === prev)) return prev;
+            let saved = '';
+            try {
+              saved = localStorage.getItem('llm_christmas_selected_model') || '';
+            } catch {}
+            if (saved && data.models.some((m: ModelOption) => m.id === saved)) return saved;
+            return data.models[0].id;
+          });
+        } else {
+          setSelectedModel('');
+        }
+      } else {
+        console.error('Failed to fetch models', data?.error || res.status);
+      }
+    } catch (e) {
+      console.error('Failed to fetch models', e);
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+
+  const fetchSkills = useCallback(async () => {
+    try {
+      const res = await fetch('/api/skills', { cache: 'no-store' });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setSkills(json.data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch skills', e);
+    }
+  }, []);
 
   const {
     isAccountBound,
@@ -207,14 +305,14 @@ export default function ChatContainer() {
     disconnectNotion,
     disconnectGitHub,
     disconnectGoogle,
-  } = useChatSessionBoot({
+  } = useChatAccountHydrate({
     sessions,
     setSessions,
     setActiveSessionId,
-    createNewSessionRef,
-    fetchModelsRef,
-    fetchSkillsRef,
-    setActiveMcpIdsRef,
+    createNewSession,
+    fetchModels,
+    fetchSkills,
+    setActiveMcpIds,
     showAuthModal,
     authModalMode,
     setShowAuthModal,
@@ -575,17 +673,6 @@ export default function ChatContainer() {
     );
   };
 
-  const setActiveMcpIds = (updater: string[] | ((prev: string[]) => string[])) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== activeSessionId) return s;
-        const next = typeof updater === 'function' ? updater(s.mcpIds || []) : updater;
-        return { ...s, mcpIds: next, updatedAt: Date.now() };
-      }),
-    );
-  };
-  setActiveMcpIdsRef.current = setActiveMcpIds;
-
   const openLoginModal = () => {
     if (isAccountBound) return;
     setAuthModalMode('login');
@@ -824,42 +911,6 @@ export default function ChatContainer() {
 
 
   // --- Actions ---
-  const createNewSession = () => {
-    // Switch to a blank composer. The draft is kept in memory only and is
-    // omitted from the sidebar until the first message lands.
-    setQuotedSelections([]);
-    setSessions((prev) => {
-      const emptyDraft = prev.find((session) => session.messages.length === 0);
-
-      if (emptyDraft) {
-        setActiveSessionId(emptyDraft.id);
-        return prev
-          .filter(
-            (session) => session.messages.length > 0 || session.id === emptyDraft.id,
-          )
-          .map((session) =>
-            session.id === emptyDraft.id
-              ? { ...session, updatedAt: Date.now() }
-              : session,
-          );
-      }
-
-      const newSession: ChatSession = {
-        id: crypto.randomUUID(),
-        title: 'New Conversation',
-        messages: [],
-        updatedAt: Date.now(),
-      };
-      setActiveSessionId(newSession.id);
-      // Drop any stray empty drafts while creating a fresh one.
-      return [newSession, ...prev.filter((session) => session.messages.length > 0)];
-    });
-    if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      setIsSidebarOpen(false);
-    }
-  };
-  createNewSessionRef.current = createNewSession;
-
   const updateSession = (sessionId: string, newMessages: Message[], title?: string) => {
     setSessions((prev) => {
       const exists = prev.some((s) => s.id === sessionId);
@@ -1496,54 +1547,6 @@ export default function ChatContainer() {
       ).filter(([, tokens]) => tokens > 0),
     [contextBreakdown],
   );
-
-  // Fetch dynamic models from backend. The server decides free/full access from its HttpOnly cookie.
-  const fetchModels = async () => {
-    setModelsLoading(true);
-    try {
-      const res = await fetch('/api/models', {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(20_000),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data?.success && Array.isArray(data.models)) {
-        setAvailableModels(data.models);
-        if (data.models.length > 0) {
-          setSelectedModel((prev) => {
-            if (prev && data.models.some((m: ModelOption) => m.id === prev)) return prev;
-            let saved = '';
-            try {
-              saved = localStorage.getItem('llm_christmas_selected_model') || '';
-            } catch {}
-            if (saved && data.models.some((m: ModelOption) => m.id === saved)) return saved;
-            return data.models[0].id;
-          });
-        } else {
-          setSelectedModel('');
-        }
-      } else {
-        console.error('Failed to fetch models', data?.error || res.status);
-      }
-    } catch (e) {
-      console.error('Failed to fetch models', e);
-    } finally {
-      setModelsLoading(false);
-    }
-  };
-  fetchModelsRef.current = fetchModels;
-
-  const fetchSkills = async () => {
-    try {
-      const res = await fetch('/api/skills', { cache: 'no-store' });
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setSkills(json.data);
-      }
-    } catch (e) {
-      console.error('Failed to fetch skills', e);
-    }
-  };
-  fetchSkillsRef.current = fetchSkills;
 
   const openNewSkillModal = () => {
     setSkillDraftTitle('');

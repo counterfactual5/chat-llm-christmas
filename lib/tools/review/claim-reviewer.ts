@@ -1,11 +1,21 @@
 /**
- * Claim Reviewer — single layer that catches narrated tool successes without
- * real tool_calls (mid-turn correction + post-audit). Product capability, not
- * MCP, not a model-callable tool.
+ * Claim Reviewer — public entry (barrel). Prefer importing from here so callers
+ * stay stable; open the module that owns the behavior you are changing:
  *
- * Reviewer v2 borrows from foundry-research (evidence units + claim verdicts)
- * and OpenScience (strength-graded findings, L0/L1 gate). Citation checks go
- * through `lib/review/evidence.ts` — blurbs cannot prove a figure wrong.
+ *  tool-claims.ts     narrated tool success / pending intent / mid-turn / receipts
+ *  citation.ts        URL anchors vs retrieval evidence
+ *  recalculation.ts   inline equations + table totals
+ *  vulnerability.ts   secret / injection pattern scan
+ *  code-quality.ts    correctness smells in fenced code
+ *  completeness.ts    cutoff / unclosed fence / degenerate output
+ *  staleness.ts       time-bound claims vs web_search/read freshness
+ *  consistency.ts     same metric, conflicting values
+ *  report.ts          plan/run local checks, merge, emit panel events
+ *  verifier.ts        LLM second opinion + correction verify prompts
+ *  types.ts / shared.ts   shared shapes and text helpers
+ *  evidence.ts        evidence units / strength / claim verdicts
+ *
+ * Product capability (not MCP, not a model-callable tool).
  */
 
 export { getReviewGateLevel } from '@/lib/tools/review/evidence';

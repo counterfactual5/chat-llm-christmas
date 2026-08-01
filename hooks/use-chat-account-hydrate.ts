@@ -1,6 +1,26 @@
 'use client';
 
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+/**
+ * Account bind + chat hydrate/persist + Notion/GitHub/Google status.
+ *
+ * Look here when debugging:
+ *  - login / account cookie state
+ *  - OAuth return query (?notion_connected, …)
+ *  - localStorage `llm_christmas_chats` restore/save
+ *  - `/api/sync/sessions` cloud merge
+ *  - integration connected/available flags
+ *
+ * Not here: send/stream (`use-chat-logic`), SSE parse (`lib/chat/stream-response`),
+ * or `/api/chat` server route.
+ */
+
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import type { ChatSession } from '@/lib/chat/types';
 import {
   CHATS_OWNER_KEY,
@@ -19,17 +39,15 @@ export type IntegrationStatus = {
 
 export type AuthModalMode = 'login' | 'notion' | 'github' | 'google';
 
-export type UseChatSessionBootArgs = {
+export type UseChatAccountHydrateArgs = {
   sessions: ChatSession[];
   setSessions: Dispatch<SetStateAction<ChatSession[]>>;
   setActiveSessionId: Dispatch<SetStateAction<string>>;
-  /** Assigned by the container after session CRUD helpers are defined. */
-  createNewSessionRef: MutableRefObject<() => void>;
-  fetchModelsRef: MutableRefObject<() => Promise<void>>;
-  fetchSkillsRef: MutableRefObject<() => Promise<void>>;
-  setActiveMcpIdsRef: MutableRefObject<
-    (updater: string[] | ((prev: string[]) => string[])) => void
-  >;
+  /** New blank draft — same helper the sidebar "New chat" button uses. */
+  createNewSession: () => void;
+  fetchModels: () => Promise<void>;
+  fetchSkills: () => Promise<void>;
+  setActiveMcpIds: (updater: string[] | ((prev: string[]) => string[])) => void;
   showAuthModal: boolean;
   authModalMode: AuthModalMode;
   setShowAuthModal: Dispatch<SetStateAction<boolean>>;
@@ -37,24 +55,20 @@ export type UseChatSessionBootArgs = {
   setAccountError: Dispatch<SetStateAction<string>>;
 };
 
-/**
- * Account binding, integrations status, chat hydrate/boot, and local+cloud persist.
- * Pure client — does not touch /api/chat or SSE.
- */
-export function useChatSessionBoot({
+export function useChatAccountHydrate({
   sessions,
   setSessions,
   setActiveSessionId,
-  createNewSessionRef,
-  fetchModelsRef,
-  fetchSkillsRef,
-  setActiveMcpIdsRef,
+  createNewSession,
+  fetchModels,
+  fetchSkills,
+  setActiveMcpIds,
   showAuthModal,
   authModalMode,
   setShowAuthModal,
   setAuthModalMode,
   setAccountError,
-}: UseChatSessionBootArgs) {
+}: UseChatAccountHydrateArgs) {
   const [isAccountBound, setIsAccountBound] = useState(false);
   const [accountUsername, setAccountUsername] = useState<string | null>(null);
   const [notionStatus, setNotionStatus] = useState<IntegrationStatus>(null);
@@ -66,6 +80,16 @@ export function useChatSessionBoot({
   /** Gate localStorage writes until boot has restored (or decided there is nothing). */
   const [chatsHydrated, setChatsHydrated] = useState(false);
   const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Mount-only boot reads latest helpers without re-running hydrate.
+  const createNewSessionRef = useRef(createNewSession);
+  const fetchModelsRef = useRef(fetchModels);
+  const fetchSkillsRef = useRef(fetchSkills);
+  const setActiveMcpIdsRef = useRef(setActiveMcpIds);
+  createNewSessionRef.current = createNewSession;
+  fetchModelsRef.current = fetchModels;
+  fetchSkillsRef.current = fetchSkills;
+  setActiveMcpIdsRef.current = setActiveMcpIds;
 
   const scrubNotionMcpFromSessions = () => {
     setSessions((prev) =>
@@ -222,13 +246,14 @@ export function useChatSessionBoot({
 
   useEffect(() => {
     if (!showAuthModal || !isAccountBound) return;
-    if (authModalMode !== 'notion' && authModalMode !== 'github' && authModalMode !== 'google') return;
+    if (authModalMode !== 'notion' && authModalMode !== 'github' && authModalMode !== 'google') {
+      return;
+    }
     void fetchIntegrations();
   }, [showAuthModal, authModalMode, isAccountBound]);
 
-  // Load Saved State
+  // Load Saved State (once on mount)
   useEffect(() => {
-    // Migrate away from the old insecure client-side key storage.
     localStorage.removeItem('llm_christmas_user_key');
 
     try {
@@ -259,11 +284,7 @@ export function useChatSessionBoot({
 
       void refreshAccountStatus()
         .then(async ({ bound, username }) => {
-          // Restore chats BEFORE waiting on models — and before any persist effect
-          // runs with an empty sessions array (that used to wipe localStorage).
           if (bound) {
-            // Account switch on the same browser: drop the previous account's
-            // cached chats so histories never bleed across users.
             const ownerKey = username || 'account';
             try {
               const storedOwner = localStorage.getItem(CHATS_OWNER_KEY);
@@ -288,8 +309,6 @@ export function useChatSessionBoot({
                   )
                   .map(normalizeRestoredSession);
                 if (nonEmpty.length > 0) {
-                  // Land on a blank New Chat draft (ChatGPT-style), not the
-                  // most recent thread — history stays in the sidebar.
                   const draft: ChatSession = {
                     id: crypto.randomUUID(),
                     title: 'New Conversation',
@@ -308,9 +327,6 @@ export function useChatSessionBoot({
               createNewSessionRef.current();
             }
 
-            // Cloud merge (cross-device sync). Must finish before chatsHydrated
-            // flips on the persist/upload effects, or a stale local copy could
-            // overwrite newer cloud state.
             try {
               const syncRes = await fetch('/api/sync/sessions', { cache: 'no-store' });
               if (syncRes.ok) {
@@ -373,10 +389,7 @@ export function useChatSessionBoot({
             if (bound) {
               setAccountError('');
               setShowAuthModal(false);
-              // Cookie was just set by the OAuth callback — refresh status.
               await fetchIntegrations();
-              // First-time connect: enable all three surfaces on the newest chat
-              // (index 0 after restore). Mount effect may have a stale activeSessionId.
               setSessions((prev) => {
                 if (!prev.length) return prev;
                 const target = prev[0];
@@ -435,17 +448,11 @@ export function useChatSessionBoot({
     } catch {
       // ignore
     }
-    // Mount-only boot — callbacks are read from refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only hydrate
   }, []);
 
-  // Save Sessions ONLY if account is bound — never persist empty drafts.
-  // Wait until boot hydration finishes; otherwise isAccountBound flips true while
-  // sessions is still [] and we wipe llm_christmas_chats from localStorage.
   useEffect(() => {
     if (!isAccountBound || !chatsHydrated) return;
-    // Persist chats with messages, or drafts that already have per-chat MCP/Skills
-    // enabled — otherwise toggling GitHub/Notion before the first send is lost on refresh.
     const persisted = sessionsWorthPersisting(sessions);
     if (persisted.length > 0) {
       localStorage.setItem('llm_christmas_chats', JSON.stringify(persisted));
@@ -454,8 +461,6 @@ export function useChatSessionBoot({
     }
   }, [sessions, isAccountBound, chatsHydrated]);
 
-  // Debounced cloud sync so sessions survive device/browser switches. The portal
-  // applies LWW per session id, so replaying equal timestamps is harmless.
   useEffect(() => {
     if (!isAccountBound || !chatsHydrated) return;
     if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
@@ -495,8 +500,5 @@ export function useChatSessionBoot({
     disconnectNotion,
     disconnectGitHub,
     disconnectGoogle,
-    scrubNotionMcpFromSessions,
-    scrubGitHubMcpFromSessions,
-    scrubGoogleMcpFromSessions,
   };
 }

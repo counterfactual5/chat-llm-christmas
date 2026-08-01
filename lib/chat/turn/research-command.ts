@@ -20,6 +20,13 @@ const MODE_ALIASES: Record<string, ResearchModeHint> = {
 
 export type ParsedResearchCommand = { query: string; mode?: ResearchModeHint };
 
+/** Canonical slash text shown in the user bubble (keeps the chosen depth visible). */
+export function formatResearchCommand(query: string, mode?: ResearchModeHint): string {
+  const q = String(query || '').trim();
+  if (!q) return '/research ';
+  return mode ? `/research ${mode} ${q}` : `/research ${q}`;
+}
+
 /** Returns the research query (and optional mode hint) if the text is a research command; else null. */
 export function parseResearchCommand(text: string): ParsedResearchCommand | null {
   const m = String(text || '').trim().match(RESEARCH_CMD_RE);

@@ -63,7 +63,7 @@ import { useChatSkills } from '@/hooks/chat/use-skills';
 import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
-import { parseResearchCommand, type ResearchModeHint } from '@/lib/chat/turn/research-command';
+import { formatResearchCommand, parseResearchCommand, type ResearchModeHint } from '@/lib/chat/turn/research-command';
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
@@ -1402,7 +1402,9 @@ export default function ChatContainer() {
       const q = opts.query.trim();
       if (!q) return;
       const now = Date.now();
-      const userContent = opts.userContent || `/research ${q}`;
+      const mode = opts.mode || deepResearch.mode;
+      // Only echo the depth token when the user explicitly chose one.
+      const userContent = opts.userContent || formatResearchCommand(q, opts.mode);
       const userMsg: Message = {
         id: `research_user_${now}`,
         role: 'user',
@@ -1433,7 +1435,7 @@ export default function ChatContainer() {
 
       await deepResearch.start({
         query: q,
-        mode: opts.mode || deepResearch.mode,
+        mode,
         sessionId: sid,
         model: selectedModel || undefined,
         assistantId: opts.assistantId,
@@ -1518,7 +1520,7 @@ export default function ChatContainer() {
           sessionId,
           assistantId: last.id,
           priorMessages,
-          userContent: `/research ${q}`,
+          userContent: formatResearchCommand(q, mode),
         });
         return;
       }

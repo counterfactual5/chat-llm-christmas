@@ -550,7 +550,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         ) : (
                           <Globe className="h-3 w-3 shrink-0 opacity-60" />
                         )}
-                        <span>{label}</span>
+                        <span className="shrink-0 whitespace-nowrap">{label}</span>
                         {run.status === 'done' &&
                           run.provider &&
                           run.provider !== 'none' &&
@@ -567,7 +567,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isResearchVerify &&
                           !isResearchWrite &&
                           !isResearchSources && (
-                            <span className="opacity-50">
+                            <span className="shrink-0 whitespace-nowrap opacity-50">
                               {t('searchedVia').replace(
                                 '{provider}',
                                 run.provider,
@@ -575,7 +575,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                             </span>
                           )}
                         {showQueryInline && (
-                          <span className="min-w-0 truncate opacity-50">
+                          <span className="min-w-0 flex-1 truncate opacity-50">
                             ·{' '}
                             {isNotionFetch && run.results?.[0]?.title
                               ? run.results[0].title

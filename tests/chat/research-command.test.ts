@@ -5,9 +5,22 @@ import {
 } from '@/lib/chat/turn/research-command';
 
 describe('parseResearchCommand', () => {
-  it('parses /research and /研究', () => {
-    expect(parseResearchCommand('/research 特斯拉 2025 Q2')).toBe('特斯拉 2025 Q2');
-    expect(parseResearchCommand('/研究 AI 监管')).toBe('AI 监管');
+  it('parses /research and /研究 into a query object', () => {
+    expect(parseResearchCommand('/research 特斯拉 2025 Q2')).toEqual({
+      query: '特斯拉 2025 Q2',
+    });
+    expect(parseResearchCommand('/研究 AI 监管')).toEqual({ query: 'AI 监管' });
+  });
+
+  it('parses English and Chinese research-depth aliases', () => {
+    expect(parseResearchCommand('/research quick AI regulation')).toEqual({
+      query: 'AI regulation',
+      mode: 'quick',
+    });
+    expect(parseResearchCommand('/研究 严谨 AI 监管')).toEqual({
+      query: 'AI 监管',
+      mode: 'rigorous',
+    });
   });
 
   it('returns null for unrelated text', () => {

@@ -280,17 +280,13 @@ export function ChatComposer(props: ChatComposerProps) {
       cancelQueuedMessage={cancelQueuedMessage}
     />
 
-    {/* Skip the amber banner when it's the same error the Continue pill
-        below already summarizes — otherwise long research quality-gate
-        errors get printed out twice in a row. */}
+    {/* Error / interrupt reason sits above Continue — never inside the button. */}
     {(() => {
-      const suppressResearchError =
-        canResumeIncomplete && Boolean(researchError) && researchError === truncationInfo.reason;
-      const bannerText = researchError && !suppressResearchError
-        ? researchError
-        : attachError || compactNotice;
+      const interruptReason =
+        canResumeIncomplete && truncationInfo.reason ? truncationInfo.reason : '';
+      const bannerText = researchError || interruptReason || attachError || compactNotice;
       return bannerText ? (
-        <div className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
+        <div className="mb-2 px-2 text-center text-xs leading-relaxed text-amber-700 dark:text-amber-300">
           {bannerText}
         </div>
       ) : null;
@@ -315,11 +311,6 @@ export function ChatComposer(props: ChatComposerProps) {
           >
             <Play className="h-3 w-3 fill-current" />
             Continue
-            {(truncationInfo.shortReason || truncationInfo.reason) && (
-              <span className="hidden sm:inline max-w-[280px] truncate font-normal text-stone-500 dark:text-stone-400">
-                · {truncationInfo.shortReason || truncationInfo.reason}
-              </span>
-            )}
           </button>
         </motion.div>
       )}

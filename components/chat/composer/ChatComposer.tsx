@@ -125,7 +125,10 @@ export type ChatComposerProps = {
   fetchSkills: () => void;
   fetchIntegrations: () => void | Promise<void>;
   openLoginModal: () => void;
-  requestClaimReview: () => void | Promise<void>;
+  requestClaimReview: (opts?: {
+    focus?: string;
+    userContent?: string;
+  }) => void | Promise<void>;
   lastMessage: Message | undefined;
   isAssistantError: (m?: Message) => boolean;
   activeAutoReview: boolean;
@@ -728,14 +731,24 @@ export function ChatComposer(props: ChatComposerProps) {
                           <button
                             type="button"
                             onClick={() => {
+                              if (!isAccountBound) {
+                                setIsSkillPickerOpen(false);
+                                setPlusFlyout(null);
+                                openLoginModal();
+                                return;
+                              }
                               setIsSkillPickerOpen(false);
                               setPlusFlyout(null);
-                              void requestClaimReview();
+                              setInput('/review ');
+                              textareaRef.current?.focus();
                             }}
                             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
                           >
                             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                             <span className="min-w-0 flex-1">{t('requestReview')}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                              /review
+                            </span>
                           </button>
                           <button
                             type="button"

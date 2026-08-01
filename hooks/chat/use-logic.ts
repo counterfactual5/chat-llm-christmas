@@ -38,7 +38,7 @@ import {
 } from '@/lib/chat/turn/task-queue';
 import { useChatQueue } from '@/hooks/chat/use-chat-queue';
 import {
-  CLAIM_REVIEW_USER_PROMPT,
+  buildClaimReviewUserPrompt,
   buildResumeStreamPlan,
   clearedEmptyAssistant,
   gateResumeIncompleteReply,
@@ -642,7 +642,11 @@ export function useChatLogic(props: UseChatLogicProps) {
 
   /** Request review — built-in action like Continue: audits the last assistant
    *  reply against tool receipts, no visible user command. */
-  const requestClaimReview = async () => {
+  const requestClaimReview = async (opts?: {
+    focus?: string;
+    /** Visible user bubble text (defaults to `/review` + focus). */
+    userContent?: string;
+  }) => {
     const sessionId = activeSessionIdRef.current;
     if (!isAccountBound) {
       openLoginModal();
@@ -652,10 +656,21 @@ export function useChatLogic(props: UseChatLogicProps) {
     const lastAssistant = [...sessionMessages].reverse().find((m) => m.role === 'assistant');
     if (!lastAssistant || isSessionLoading(sessionId)) return;
 
+    const focus = String(opts?.focus || '').trim();
+    const userContent =
+      String(opts?.userContent || '').trim() ||
+      (focus ? `/review ${focus}` : '/review');
+
     stickToBottomRef.current = true;
     scrollToBottom(true);
     beginLoading(sessionId);
 
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: userContent,
+      timestamp: Date.now(),
+    };
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -663,13 +678,16 @@ export function useChatLogic(props: UseChatLogicProps) {
       timestamp: Date.now(),
       incomplete: true,
     };
-    updateSession(sessionId, [...sessionMessages, assistantMessage]);
+    updateSession(sessionId, [...sessionMessages, userMessage, assistantMessage]);
+    if (sessionId === activeSessionId) {
+      setInput('');
+    }
 
     const apiMessages: ReturnType<typeof toApiMessages> = [
       ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
       {
         role: 'user' as const,
-        content: CLAIM_REVIEW_USER_PROMPT,
+        content: buildClaimReviewUserPrompt(focus),
         images: [],
         timestamp: Date.now(),
       },

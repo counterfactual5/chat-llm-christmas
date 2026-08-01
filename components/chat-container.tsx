@@ -64,6 +64,7 @@ import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
 import { parseResearchCommand } from '@/lib/chat/turn/research-command';
+import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   clearOAuthReturnQuery,
@@ -1444,8 +1445,31 @@ export default function ChatContainer() {
       });
       return;
     }
+    const reviewCmd = parseReviewCommand(input);
+    if (reviewCmd) {
+      if (!isAccountBound) {
+        openLoginModal();
+        return;
+      }
+      const userContent = input.trim();
+      setInput('');
+      void requestClaimReview({
+        focus: reviewCmd.focus,
+        userContent,
+      });
+      return;
+    }
     enqueueOrSubmit();
-  }, [input, setInput, startResearchTurn, activeSessionId, enqueueOrSubmit]);
+  }, [
+    input,
+    setInput,
+    startResearchTurn,
+    activeSessionId,
+    enqueueOrSubmit,
+    isAccountBound,
+    openLoginModal,
+    requestClaimReview,
+  ]);
 
   const stopOrCancel = useCallback(() => {
     if (deepResearch.busy) {
@@ -1523,6 +1547,37 @@ export default function ChatContainer() {
         });
         return;
       }
+      const reviewCmd = parseReviewCommand(content);
+      if (reviewCmd) {
+        if (isActiveLoading || deepResearch.busy) {
+          stopOrCancel();
+        }
+        const sessionMsgs =
+          sessionsRef.current.find((s) => s.id === activeSessionId)?.messages ||
+          messages;
+        const index = sessionMsgs.findIndex((m) => m.id === messageId);
+        if (index < 0) return;
+        // Truncate to before this message so review targets the prior assistant.
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === activeSessionId
+              ? {
+                  ...s,
+                  updatedAt: Date.now(),
+                  messages: sessionMsgs.slice(0, index),
+                }
+              : s,
+          ),
+        );
+        setEditingMessageId(null);
+        setEditingMessageContent('');
+        setEditingMessageAttachments([]);
+        await requestClaimReview({
+          focus: reviewCmd.focus,
+          userContent: content,
+        });
+        return;
+      }
       await saveEditedMessage(messageId);
     },
     [
@@ -1534,6 +1589,8 @@ export default function ChatContainer() {
       messages,
       startResearchTurn,
       saveEditedMessage,
+      requestClaimReview,
+      setSessions,
       setEditingMessageId,
       setEditingMessageContent,
       setEditingMessageAttachments,
@@ -1554,7 +1611,6 @@ export default function ChatContainer() {
     setIsSkillPickerOpen,
     openLoginModal,
     attachSkill,
-    requestClaimReview,
     t,
   });
 

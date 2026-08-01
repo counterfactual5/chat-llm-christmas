@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Composer slash-menu: `/image`, `/research`, `/skill`, `/review`, and skill name matching.
+ * Composer slash-menu: `/image`, `/research`, `/review`, `/skill`, and skill name matching.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -18,7 +18,6 @@ export function useChatSlash(opts: {
   setIsSkillPickerOpen: (open: boolean) => void;
   openLoginModal: () => void;
   attachSkill: (skill: SkillItem) => void;
-  requestClaimReview: () => void | Promise<void>;
   t: (key: any, vars?: any) => string;
 }) {
   const {
@@ -30,7 +29,6 @@ export function useChatSlash(opts: {
     setIsSkillPickerOpen,
     openLoginModal,
     attachSkill,
-    requestClaimReview,
     t,
   } = opts;
 
@@ -86,18 +84,18 @@ export function useChatSlash(opts: {
         hint: '/skill',
       });
     }
-    // Keep exact `/review` visible — this is an action, not a prompt with args.
+    // `/review` takes optional focus args — same prefix pattern as `/image`.
     const reviewPrefix =
       slashQuery === '' ||
-      'review'.startsWith(slashQuery) ||
-      '审查'.startsWith(slashQuery);
+      ('review'.startsWith(slashQuery) && slashQuery !== 'review') ||
+      ('审查'.startsWith(slashQuery) && slashQuery !== '审查');
     if (reviewPrefix) {
       items.push({
         kind: 'command',
         id: 'review',
         title: t('requestReview'),
-        insert: '',
-        hint: '/review',
+        insert: '/review ',
+        hint: t('requestReviewHint'),
       });
     }
     if (isAccountBound) {
@@ -125,19 +123,6 @@ export function useChatSlash(opts: {
         setActiveSkillIds((prev) =>
           prev.includes(SKILL_CREATOR_ID) ? prev : [...prev, SKILL_CREATOR_ID],
         );
-      }
-      if (item.id === 'review') {
-        if (!isAccountBound) {
-          openLoginModal();
-          return;
-        }
-        setInput((prev) =>
-          prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? '\n' : '')),
-        );
-        setIsSkillPickerOpen(false);
-        setSlashHighlight(0);
-        void requestClaimReview();
-        return;
       }
       setInput((prev) =>
         prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) =>

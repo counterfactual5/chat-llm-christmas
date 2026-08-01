@@ -18,6 +18,19 @@ export const CLAIM_REVIEW_USER_PROMPT = [
   'Retract any claim that lacks a real tool receipt; otherwise confirm it is verified. Be brief.',
 ].join(' ');
 
+/** Manual `/review` prompt — optional user focus is appended when present. */
+export function buildClaimReviewUserPrompt(focus?: string): string {
+  const base = CLAIM_REVIEW_USER_PROMPT;
+  const extra = String(focus || '').trim();
+  if (!extra) return base;
+  return [
+    base,
+    '',
+    'Additional review focus from the user (prioritize these concerns):',
+    extra,
+  ].join('\n');
+}
+
 export const EMPTY_AFTER_PROCESS_PROMPT = [
   'Your previous turn was interrupted before any user-visible answer text.',
   'Write the final answer now. Do not restart unrelated tasks.',

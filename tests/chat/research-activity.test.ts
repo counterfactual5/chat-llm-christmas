@@ -19,6 +19,12 @@ describe('research activity → timeline stages', () => {
       payload: { status: 'planning', detail: 'claimed' },
     });
     m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'planning', detail: 'planning research outline' },
+    });
+    expect(m.activity?.filter((s) => s.kind === 'stage')).toHaveLength(1);
+    expect(m.toolRuns?.filter((r) => r.name === 'research_plan')).toHaveLength(1);
+    m = applyResearchEvent(m, {
       kind: 'plan',
       payload: { subQuestions: ['q1'], searchQueries: ['btc price'] },
     });

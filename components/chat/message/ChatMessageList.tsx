@@ -451,6 +451,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isCreateFile,
                     isSaveSkill,
                     isClaimReviewer,
+                    isWebRead,
+                    isResearchPlan,
+                    isResearchVerify,
+                    isResearchWrite,
                   } = classification;
                   if (isClaimReviewer) return null;
                   const failed = run.status === 'done' && Boolean(run.error);
@@ -469,6 +473,23 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   // so Process doesn't bury the answer. Explicit toggles win.
                   const expanded = toolRunOpen[run.id] ?? searching;
                   const label = t(getToolRunLabelKey(classification, { searching, failed }));
+                  const showQueryInline =
+                    Boolean(run.query) &&
+                    (isNotion ||
+                      isGoogle ||
+                      isCreateFile ||
+                      isSaveSkill ||
+                      isWebRead ||
+                      isResearchPlan ||
+                      isResearchVerify ||
+                      isResearchWrite ||
+                      (!isNotion &&
+                        !isGitHub &&
+                        !isGoogle &&
+                        !isImageUnderstand &&
+                        !isCreateFile &&
+                        !isSaveSkill &&
+                        !isClaimReviewer));
                   return (
                     <div key={step.id} className="overflow-hidden">
                       <button
@@ -520,7 +541,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isImageUnderstand &&
                           !isCreateFile &&
                           !isSaveSkill &&
-                          !isClaimReviewer && (
+                          !isClaimReviewer &&
+                          !isResearchPlan &&
+                          !isResearchVerify &&
+                          !isResearchWrite && (
                             <span className="opacity-50">
                               {t('searchedVia').replace(
                                 '{provider}',
@@ -528,7 +552,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               )}
                             </span>
                           )}
-                        {run.query && (isNotion || isGoogle || isCreateFile || isSaveSkill) && !searching && (
+                        {showQueryInline && (
                           <span className="min-w-0 truncate opacity-50">
                             ·{' '}
                             {isNotionFetch && run.results?.[0]?.title
@@ -539,6 +563,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       </button>
                       {expanded && (
                         <div className="space-y-1 pb-1 pl-5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                          {searching && run.query ? (
+                            <div className="truncate font-mono text-[11px] opacity-80">
+                              {run.query}
+                            </div>
+                          ) : null}
                           {searching && <div>{t('fetchingResults')}</div>}
                           {run.error && (
                             <div className="text-red-600 dark:text-red-400">

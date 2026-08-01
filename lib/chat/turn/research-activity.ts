@@ -31,10 +31,20 @@ function ensureTools(m: Message): MessageToolRun[] {
 
 function openStage(m: Message, title: string): Message {
   const activity = ensureActivity(m);
-  const last = activity[activity.length - 1];
-  if (last?.kind === 'stage' && last.title === title) return m;
+  // Already inside this stage (tools may follow the stage marker).
+  for (let i = activity.length - 1; i >= 0; i--) {
+    const step = activity[i];
+    if (step.kind === 'stage') {
+      if (step.title === title) return m;
+      break;
+    }
+  }
   activity.push({ id: newId('stage'), kind: 'stage', title });
   return { ...m, activity, incomplete: true };
+}
+
+function hasPendingTool(m: Message, name: string): boolean {
+  return ensureTools(m).some((r) => r.name === name && r.status === 'start');
 }
 
 function startTool(
@@ -43,6 +53,11 @@ function startTool(
   query?: string,
   provider?: string,
 ): { message: Message; toolRunId: string } {
+  // Idempotent: repeated phase events must not spawn duplicate pending runs.
+  const existing = ensureTools(m).find((r) => r.name === name && r.status === 'start');
+  if (existing) {
+    return { message: m, toolRunId: existing.id };
+  }
   const toolRunId = newId('tr');
   const toolRuns = [
     ...ensureTools(m),
@@ -194,15 +209,18 @@ export function applyResearchEvent(
           : undefined,
       };
       if (status === 'planning') {
-        const started = startTool(m, 'research_plan', detail || 'planning research outline');
-        m = started.message;
+        if (!hasPendingTool(m, 'research_plan')) {
+          m = startTool(m, 'research_plan', detail || 'planning research outline').message;
+        }
       } else if (status === 'verifying') {
-        const started = startTool(m, 'research_verify', detail || 'fact-checking sources');
-        m = started.message;
+        if (!hasPendingTool(m, 'research_verify')) {
+          m = startTool(m, 'research_verify', detail || 'fact-checking sources').message;
+        }
       } else if (status === 'writing') {
         m = settleOpenTools(m);
-        const started = startTool(m, 'research_write', detail || 'drafting report');
-        m = started.message;
+        if (!hasPendingTool(m, 'research_write')) {
+          m = startTool(m, 'research_write', detail || 'drafting report').message;
+        }
       }
     } else if (status === 'failed' || status === 'cancelled') {
       const err =
@@ -259,13 +277,20 @@ export function applyResearchEvent(
         status === 'empty'
           ? String(payload.error || 'No results')
           : undefined;
-      return finishTool(m, {
-        name: 'web_search',
-        query,
-        provider,
-        error,
-        results:
-          count > 0
+      const hits = Array.isArray(payload.hits) ? payload.hits : [];
+      const results =
+        hits.length > 0
+          ? hits
+              .map((h) => {
+                const row = h as { title?: unknown; url?: unknown; snippet?: unknown };
+                return {
+                  title: String(row.title || row.url || ''),
+                  url: String(row.url || ''),
+                  snippet: String(row.snippet || ''),
+                };
+              })
+              .filter((h) => h.url || h.title)
+          : count > 0
             ? [
                 {
                   title: `${count} hit(s)`,
@@ -273,7 +298,13 @@ export function applyResearchEvent(
                   snippet: `via ${provider}`,
                 },
               ]
-            : undefined,
+            : undefined;
+      return finishTool(m, {
+        name: 'web_search',
+        query,
+        provider,
+        error,
+        results,
       });
     }
     return m;

@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   ShieldCheck,
   Play,
+  Sparkles,
   ScrollText,
   Check,
   X,
@@ -276,8 +277,8 @@ export function ChatSidebar({
                           }}
                           className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
                         >
-                          <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">创建 Skill</span>
+                          <Sparkles className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <span className="min-w-0 flex-1 truncate">{t('createSkillCommand')}</span>
                           <span className="shrink-0 font-mono text-[10px] text-stone-400">/skill</span>
                         </button>
                         <button

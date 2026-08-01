@@ -1985,6 +1985,11 @@ export default function ChatContainer() {
         onSaveSkill={() => {
           void createSkill(skillDraftTitle, skillDraftContent);
         }}
+        onSwitchToAiSkillCreate={() => {
+          setShowSkillModal(false);
+          setInput('/skill ');
+          textareaRef.current?.focus();
+        }}
         showAuthModal={showAuthModal}
         authModalMode={authModalMode}
         closeAuthModal={closeAuthModal}

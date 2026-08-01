@@ -66,9 +66,9 @@ export function useChatSlash(opts: {
       items.push({
         kind: 'command',
         id: 'skill-create',
-        title: 'Create Skill',
+        title: t('createSkillCommand'),
         insert: '/skill ',
-        hint: '描述用途与要求',
+        hint: '/skill',
       });
     }
     if (isAccountBound) {

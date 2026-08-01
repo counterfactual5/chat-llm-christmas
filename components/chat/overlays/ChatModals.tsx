@@ -47,6 +47,7 @@ export type ChatModalsProps = {
   skillModalError: string;
   isSavingSkill: boolean;
   onSaveSkill: () => void | Promise<void>;
+  onSwitchToAiSkillCreate: () => void;
 
   showAuthModal: boolean;
   authModalMode: 'login' | 'notion' | 'github' | 'google';
@@ -98,6 +99,7 @@ export function ChatModals(props: ChatModalsProps) {
     skillModalError,
     isSavingSkill,
     onSaveSkill,
+    onSwitchToAiSkillCreate,
     showAuthModal,
     authModalMode,
     closeAuthModal,
@@ -289,9 +291,14 @@ export function ChatModals(props: ChatModalsProps) {
         className="w-full max-w-lg rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900"
       >
         <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-base font-semibold">
-            <ScrollText className="h-5 w-5 text-orange-500" />
-            {t('newSkill')}
+          <div>
+            <div className="flex items-center gap-2 text-base font-semibold">
+              <ScrollText className="h-5 w-5 text-orange-500" />
+              {t('newSkill')}
+            </div>
+            <p className="mt-1 pl-7 text-xs text-stone-500 dark:text-stone-400">
+              {t('newSkillHint')}
+            </p>
           </div>
           <button
             type="button"
@@ -331,23 +338,32 @@ export function ChatModals(props: ChatModalsProps) {
             <p className="text-xs text-red-600 dark:text-red-400">{skillModalError}</p>
           )}
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <button
               type="button"
-              variant="ghost"
-              onClick={() => setShowSkillModal(false)}
-              className="rounded-xl"
+              onClick={onSwitchToAiSkillCreate}
+              className="text-xs font-medium text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
             >
-              取消
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void onSaveSkill()}
-              disabled={isSavingSkill || !skillDraftTitle.trim() || !skillDraftContent.trim()}
-              className="rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-            >
-              {isSavingSkill ? '保存中…' : '保存到账号'}
-            </Button>
+              {t('switchToAiSkillCreate')}
+            </button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowSkillModal(false)}
+                className="rounded-xl"
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void onSaveSkill()}
+                disabled={isSavingSkill || !skillDraftTitle.trim() || !skillDraftContent.trim()}
+                className="rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+              >
+                {isSavingSkill ? '保存中…' : '保存到账号'}
+              </Button>
+            </div>
           </div>
         </div>
       </motion.div>

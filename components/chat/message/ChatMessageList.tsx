@@ -50,8 +50,8 @@ import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understan
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
 import {
-  looksLikeAsciiTree,
-  reflowCollapsedAsciiTree,
+  looksLikeAsciiArt,
+  reflowCollapsedAsciiArt,
 } from '@/lib/markdown/core/ascii-art';
 import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
 import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
@@ -737,12 +737,12 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           // breaks → spaces) — reflow and promote those to <pre>.
                           const match = /language-(\w+)/.exec(className || '');
                           let value = String(children).replace(/\n$/, '');
-                          const treeish = looksLikeAsciiTree(value);
-                          if (treeish) value = reflowCollapsedAsciiTree(value);
+                          const asciiArt = looksLikeAsciiArt(value);
+                          if (asciiArt) value = reflowCollapsedAsciiArt(value);
                           const isBlock =
                             Boolean(match) ||
                             value.includes('\n') ||
-                            (treeish && (value.match(/[├└]/g) || []).length >= 2);
+                            (asciiArt && value.length >= 12);
                           if (isBlock && match) {
                             return <CodeBlock language={match[1]} value={value} />;
                           }

@@ -1,41 +1,83 @@
 /**
- * ASCII / Unicode tree diagrams (├ └ │) are often wrapped in single backticks.
- * CommonMark turns soft line breaks inside code spans into spaces, so the tree
- * collapses into one gray inline pill. Promote those spans to fenced blocks and
- * re-insert newlines before branch markers when needed.
+ * Recover ASCII / Unicode diagrams that models emit as ordinary prose or wrap
+ * in single backticks. CommonMark collapses code-span newlines into spaces, so
+ * these structures must be promoted before ReactMarkdown parses them.
  */
 
-const BRANCH_MARK = /[├└]/;
-const TREE_LINE_MARK = /[├└│┃]/;
+const UNICODE_BRANCH_RE = /(?:^|\s)[├└](?:[─━-]{1,3})/g;
+const ASCII_BRANCH_RE = /(?:^|\s)(?:\+--+|\|--+|\\--+|`--+)\s*/g;
+const BRANCH_LINE_RE = /^\s*(?:(?:[|│┃]\s*)*)(?:[├└](?:[─━-]{1,3})|\+--+|\|--+|\\--+|`--+)\s*/;
+const BOX_CHAR_RE = /[┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═]/g;
+const BOX_TOP_RE = /[┌╔╭].*[┐╗╮]/;
+const BOX_BOTTOM_RE = /[└╚╰].*[┘╝╯]/;
+
+function countMatches(text: string, re: RegExp): number {
+  re.lastIndex = 0;
+  const count = (String(text || '').match(re) || []).length;
+  re.lastIndex = 0;
+  return count;
+}
+
+export function looksLikeUnicodeBox(text: string): boolean {
+  const t = String(text || '');
+  const chars = t.match(BOX_CHAR_RE) || [];
+  if (chars.length < 6) return false;
+  return (
+    (BOX_TOP_RE.test(t) && BOX_BOTTOM_RE.test(t)) ||
+    /[╔╗╚╝]/.test(t) ||
+    /[╭╮╰╯]/.test(t)
+  );
+}
 
 export function looksLikeAsciiTree(text: string): boolean {
   const t = String(text || '');
-  // Require a real branch marker — a lone box corner is not enough.
-  return BRANCH_MARK.test(t);
+  if (!t.trim()) return false;
+  if (looksLikeUnicodeBox(t)) return false;
+  const unicodeBranches = countMatches(t, UNICODE_BRANCH_RE);
+  const asciiBranches = countMatches(t, ASCII_BRANCH_RE);
+  return unicodeBranches + asciiBranches > 0;
 }
 
-/**
- * Recover line breaks when CommonMark (or the model) flattened a tree into one
- * line: "Root ├─ a ├─ b └─ c NextRoot ├─ d"
- */
-export function reflowCollapsedAsciiTree(text: string): string {
+export function looksLikeAsciiArt(text: string): boolean {
+  return looksLikeAsciiTree(text) || looksLikeUnicodeBox(text);
+}
+
+function reflowUnicodeBox(text: string): string {
+  return String(text || '')
+    // Top border → first body row.
+    .replace(/([┐╗╮])\s+(?=[│║┃])/g, '$1\n')
+    // One body row → the next, or body → bottom border.
+    .replace(/([│║┃])\s+(?=[│║┃└╚╰])/g, '$1\n')
+    // A flattened second box starts after the previous bottom border.
+    .replace(/([┘╝╯])\s+(?=[┌╔╭])/g, '$1\n')
+    .trim();
+}
+
+/** Recover branch/row line breaks after model or CommonMark flattening. */
+export function reflowCollapsedAsciiArt(text: string): string {
   const raw = String(text || '');
   if (!raw.trim()) return raw;
-  if (raw.includes('\n') && BRANCH_MARK.test(raw)) {
+  if (raw.includes('\n')) {
     return raw.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
+  if (looksLikeUnicodeBox(raw)) return reflowUnicodeBox(raw);
 
   let out = raw;
-  // Break before branch / vertical continuation markers.
-  out = out.replace(/[ \t]+([├└│┃])/g, '\n$1');
-  // After a leaf with real content, break before the next titled section
-  // (often "Name（role）" / "Name (role)").
+  // Unicode branches.
+  out = out.replace(/[ \t]+([├└](?:[─━-]{1,3}))/g, '\n$1');
+  // Portable ASCII branches (+--, |--, \--, `--).
+  out = out.replace(/[ \t]+(\+--+|\|--+|\\--+|`--+)/g, '\n$1');
+  // After a leaf with real content, break before the next titled root.
   out = out.replace(
-    /(└─\s+\S[^\n]*?)\s+(?=[\u4e00-\u9fffA-Za-z][^\n]{0,60}[（(])/g,
+    /((?:└[─━-]{1,3}|\\--+|`--+)\s+\S[^\n]*?)\s+(?=[\u4e00-\u9fffA-Za-z][^\n]{0,60}[（(])/g,
     '$1\n',
   );
-
   return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Backward-compatible tree-specific name used by the renderer. */
+export function reflowCollapsedAsciiTree(text: string): string {
+  return reflowCollapsedAsciiArt(text);
 }
 
 function mapOutsideFences(text: string, fn: (segment: string) => string): string {
@@ -45,23 +87,61 @@ function mapOutsideFences(text: string, fn: (segment: string) => string): string
     .join('');
 }
 
-function branchCount(text: string): number {
-  return (String(text || '').match(/[├└]/g) || []).length;
+function structuralMarkCount(text: string): number {
+  return (
+    countMatches(text, UNICODE_BRANCH_RE) +
+    countMatches(text, ASCII_BRANCH_RE) +
+    (text.match(/[┌┐└┘╔╗╚╝╭╮╰╯]/g) || []).length
+  );
+}
+
+function fenceText(content: string): string {
+  return `\n\n\`\`\`text\n${content.trim()}\n\`\`\`\n\n`;
 }
 
 /**
- * Rewrite inline `tree…` / ``tree…`` spans that contain ASCII tree art into
- * fenced ```text blocks, before remark collapses their newlines to spaces.
+ * Promote inline `diagram…` / ``diagram…`` spans to fenced text blocks.
+ * Tiny one-branch mentions stay inline.
  */
 export function promoteInlineAsciiArtToFences(markdown: string): string {
   return mapOutsideFences(String(markdown || ''), (segment) =>
-    segment.replace(/(`+)((?:(?!\1)[\s\S])*?)\1/g, (full, ticks: string, body: string) => {
-      if (!looksLikeAsciiTree(body)) return full;
-      const content = reflowCollapsedAsciiTree(body);
-      if (branchCount(content) < 1) return full;
-      // Keep tiny one-branch snippets inline (e.g. `├─ foo` as a short mention).
-      if (branchCount(content) < 2 && !content.includes('\n')) return full;
-      return `\n\n\`\`\`text\n${content}\n\`\`\`\n\n`;
+    segment.replace(/(`+)((?:(?!\1)[\s\S])*?)\1/g, (full, _ticks: string, body: string) => {
+      if (!looksLikeAsciiArt(body)) return full;
+      const content = reflowCollapsedAsciiArt(body);
+      const marks = structuralMarkCount(content);
+      if (marks < 2 && !content.includes('\n')) return full;
+      return fenceText(content);
     }),
   );
+}
+
+function paragraphLooksLikeAsciiArt(paragraph: string): boolean {
+  const p = String(paragraph || '');
+  if (looksLikeUnicodeBox(p)) return true;
+  const branchLines = p.split('\n').filter((line) => BRANCH_LINE_RE.test(line)).length;
+  if (branchLines >= 2) return true;
+  // Historical/model-flattened paragraph with several branch tokens.
+  return looksLikeAsciiTree(p) && structuralMarkCount(p) >= 3;
+}
+
+/**
+ * Promote unfenced ASCII-art paragraphs too. This catches portable trees that
+ * contain literal backticks (`-- child), which would otherwise corrupt Markdown
+ * code-span parsing before the renderer gets a chance to inspect them.
+ */
+export function promotePlainAsciiArtBlocks(markdown: string): string {
+  return mapOutsideFences(String(markdown || ''), (segment) =>
+    segment
+      .split(/(\n{2,})/)
+      .map((part) => {
+        if (/^\n{2,}$/.test(part) || !paragraphLooksLikeAsciiArt(part)) return part;
+        return fenceText(reflowCollapsedAsciiArt(part));
+      })
+      .join(''),
+  );
+}
+
+/** Apply plain-block recovery first, then inline-code recovery. */
+export function normalizeAsciiArtMarkdown(markdown: string): string {
+  return promoteInlineAsciiArtToFences(promotePlainAsciiArtBlocks(markdown));
 }

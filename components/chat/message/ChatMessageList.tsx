@@ -790,8 +790,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   }
 
                   // A single step is self-describing (Thought / Searched the web …),
-                  // so the outer "Process" header would only add noise.
-                  if (rendered.length === 1) {
+                  // so the outer "Process" header would only add noise — unless this
+                  // segment has an explicit stage title (Plan / Search / …).
+                  if (rendered.length === 1 && !seg.title) {
                     return <div key={seg.id}>{rendered}</div>;
                   }
 
@@ -832,7 +833,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         {segLive ? (
                           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
                         ) : null}
-                        <span>{t('process')}</span>
+                        <span>{seg.title || t('process')}</span>
                         <span className="opacity-50">· {segStepCount}</span>
                       </button>
                       {open && (

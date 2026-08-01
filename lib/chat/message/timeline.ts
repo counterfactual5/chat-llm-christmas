@@ -5,7 +5,7 @@ export type ToolStep = Extract<ActivityStep, { kind: 'tool' }>;
 export type ProcessStep = Extract<ActivityStep, { kind: 'reasoning' } | { kind: 'tool' }>;
 
 export type TimelineSegment =
-  | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean }
+  | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean; title?: string }
   | { type: 'content'; id: string; text: string }
   | { type: 'file'; id: string; fileId: string };
 
@@ -105,6 +105,8 @@ export function buildActivitySteps(
 
 /**
  * Group consecutive reasoning/tool steps into Process panels.
+ * A `stage` step closes the current panel and opens a new one with that title
+ * (Deep Research: Plan / Search / Verify / Write).
  * Content breaks the group. Generated files are deferred so a
  * batch of create_file tools stays in one Process, then all
  * file cards render together underneath.
@@ -130,8 +132,10 @@ export function buildTimelineSegments(opts: {
 
   const hasContentSteps = activitySteps.some((s) => s.kind === 'content');
   const hasFileSteps = activitySteps.some((s) => s.kind === 'file');
+  const hasStageSteps = activitySteps.some((s) => s.kind === 'stage');
 
-  if (!hasContentSteps && !hasFileSteps) {
+  // Legacy path: no content/file/stage — single Process panel.
+  if (!hasContentSteps && !hasFileSteps && !hasStageSteps) {
     const processSteps = activitySteps.filter(
       (s): s is ProcessStep => s.kind === 'reasoning' || s.kind === 'tool',
     );
@@ -158,6 +162,7 @@ export function buildTimelineSegments(opts: {
   let buf: ProcessStep[] = [];
   let fileBuf: Array<{ id: string; fileId: string }> = [];
   let processIdx = 0;
+  let currentTitle: string | undefined;
   const flushFiles = () => {
     for (const f of fileBuf) {
       segs.push({ type: 'file', id: f.id, fileId: f.fileId });
@@ -171,26 +176,28 @@ export function buildTimelineSegments(opts: {
       id: `${messageId}-process-${processIdx++}`,
       steps: buf,
       live,
+      title: currentTitle,
     });
     buf = [];
-    // File cards follow the Process block they were interleaved with.
     flushFiles();
   };
 
   for (const step of activitySteps) {
+    if (step.kind === 'stage') {
+      flushProcess(false);
+      flushFiles();
+      currentTitle = step.title;
+      continue;
+    }
     if (step.kind === 'content') {
       flushProcess(false);
-      // Orphan files with no surrounding process still need to emit.
       flushFiles();
       if (step.text.trim()) {
         segs.push({ type: 'content', id: step.id, text: step.text });
       }
     } else if (step.kind === 'file') {
-      // Don't break Process — keep create_file rows in one panel.
       fileBuf.push({ id: step.id, fileId: step.fileId });
     } else {
-      // Thought / other tools after a file batch: close the create_file
-      // Process + file cards first, then start a fresh Process.
       if (fileBuf.length > 0) {
         const isCreateFileTool =
           step.kind === 'tool' && isCreateFileRun(toolById.get(step.toolRunId));
@@ -203,20 +210,18 @@ export function buildTimelineSegments(opts: {
     }
   }
 
-  // Trailing Process: in-flight tools/thought, or idle gap waiting
-  // for the next token after narration ("正在写入……" → tool).
   flushProcess(
     Boolean(messageIsStreaming && (buf.length > 0 || !visibleContent || replyWait)),
   );
   flushFiles();
 
-  // Live empty Process while waiting before any activity.
   if (messageIsStreaming && segs.length === 0) {
     segs.push({
       type: 'process',
       id: `${messageId}-process-live`,
       steps: [],
       live: true,
+      title: currentTitle,
     });
   }
   return segs;

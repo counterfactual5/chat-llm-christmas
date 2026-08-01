@@ -1,6 +1,17 @@
 'use client';
 
+/**
+ * Deep Research client: create job, stream SSE, patch the assistant
+ * message in the main chat timeline (Plan / Search / Verify / Write).
+ */
+
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChatSession, Message } from '@/lib/chat/types';
+import {
+  applyResearchEvent,
+  createResearchAssistantMessage,
+  withResearchReport,
+} from '@/lib/chat/turn/research-activity';
 
 export type ResearchMode = 'quick' | 'standard' | 'rigorous';
 
@@ -11,43 +22,64 @@ export type ResearchJob = {
   mode: ResearchMode;
   status: string;
   phaseDetail?: string | null;
-  plan?: unknown;
   reportMarkdown?: string | null;
   summaryMarkdown?: string | null;
-  sources?: unknown[];
-  sourcesCount?: number;
-  tier1Count?: number | null;
-  quality?: {
-    ok?: boolean;
-    errors?: string[];
-    warnings?: string[];
-    tier1Count?: number;
-  } | null;
   error?: string | null;
   model?: string | null;
-};
-
-export type ResearchEvent = {
-  seq?: number;
-  kind: string;
-  payload: Record<string, unknown>;
 };
 
 type StartOpts = {
   query: string;
   mode: ResearchMode;
-  sessionId?: string;
+  sessionId: string;
   model?: string;
+  /** Existing assistant bubble to reuse (Continue / retry). */
+  assistantId?: string;
 };
 
-export function useDeepResearch() {
-  const [enabled, setEnabled] = useState(false);
+type PatchSessions = (
+  updater: (prev: ChatSession[]) => ChatSession[],
+) => void;
+
+function patchAssistant(
+  setSessions: PatchSessions,
+  sessionId: string,
+  assistantId: string,
+  fn: (m: Message) => Message,
+) {
+  setSessions((prev) =>
+    prev.map((s) => {
+      if (s.id !== sessionId) return s;
+      return {
+        ...s,
+        updatedAt: Date.now(),
+        messages: s.messages.map((m) => (m.id === assistantId ? fn(m) : m)),
+      };
+    }),
+  );
+}
+
+export function useDeepResearch(opts: {
+  setSessions: PatchSessions;
+  beginLoading: (sessionId: string) => void;
+  endLoading: (sessionId: string) => void;
+}) {
+  const { setSessions, beginLoading, endLoading } = opts;
   const [mode, setMode] = useState<ResearchMode>('standard');
   const [job, setJob] = useState<ResearchJob | null>(null);
-  const [events, setEvents] = useState<ResearchEvent[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const activeRef = useRef<{
+    jobId: string;
+    sessionId: string;
+    assistantId: string;
+  } | null>(null);
+
+  const stopStream = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
 
   const refreshJob = useCallback(async (jobId: string) => {
     const res = await fetch(`/api/research/${encodeURIComponent(jobId)}`, {
@@ -57,20 +89,17 @@ export function useDeepResearch() {
     if (!res.ok || data?.success === false) {
       throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
     }
-    setJob(data.data as ResearchJob);
-    return data.data as ResearchJob;
-  }, []);
-
-  const stopStream = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
+    const j = data.data as ResearchJob;
+    setJob(j);
+    return j;
   }, []);
 
   const listen = useCallback(
-    async (jobId: string) => {
+    async (jobId: string, sessionId: string, assistantId: string) => {
       stopStream();
       const ac = new AbortController();
       abortRef.current = ac;
+      activeRef.current = { jobId, sessionId, assistantId };
       try {
         const res = await fetch(
           `/api/research/${encodeURIComponent(jobId)}/stream?last_event_id=0`,
@@ -101,7 +130,11 @@ export function useDeepResearch() {
           }
           const kind = eventKind || 'message';
           eventKind = 'message';
-          setEvents((prev) => [...prev, { kind, payload }]);
+
+          patchAssistant(setSessions, sessionId, assistantId, (m) =>
+            applyResearchEvent(m, { kind, payload }),
+          );
+
           if (kind === 'phase' && typeof payload.status === 'string') {
             setJob((prev) =>
               prev
@@ -115,12 +148,6 @@ export function useDeepResearch() {
                   }
                 : prev,
             );
-          }
-          if (kind === 'done' || kind === 'phase') {
-            const st = String(payload.status || '');
-            if (['done', 'failed', 'cancelled'].includes(st)) {
-              void refreshJob(jobId).catch(() => undefined);
-            }
           }
           if (kind === 'error' && payload.message) {
             setError(String(payload.message));
@@ -144,37 +171,59 @@ export function useDeepResearch() {
           }
         }
         flush();
-        await refreshJob(jobId);
+
+        const finalJob = await refreshJob(jobId).catch(() => null);
+        if (finalJob?.status === 'done' && finalJob.reportMarkdown) {
+          patchAssistant(setSessions, sessionId, assistantId, (m) =>
+            withResearchReport(m, finalJob.reportMarkdown || ''),
+          );
+        } else if (finalJob?.status === 'failed') {
+          const msg = finalJob.error || 'Research failed';
+          setError(msg);
+          patchAssistant(setSessions, sessionId, assistantId, (m) =>
+            applyResearchEvent(m, {
+              kind: 'error',
+              payload: { message: msg },
+            }),
+          );
+        }
       } catch (err: unknown) {
         if ((err as { name?: string })?.name === 'AbortError') return;
-        setError(err instanceof Error ? err.message : String(err));
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        patchAssistant(setSessions, sessionId, assistantId, (m) =>
+          applyResearchEvent(m, { kind: 'error', payload: { message: msg } }),
+        );
       } finally {
         setBusy(false);
+        endLoading(sessionId);
+        if (activeRef.current?.jobId === jobId) activeRef.current = null;
       }
     },
-    [refreshJob, stopStream],
+    [endLoading, refreshJob, setSessions, stopStream],
   );
 
   const start = useCallback(
-    async (opts: StartOpts) => {
-      const query = String(opts.query || '').trim();
+    async (startOpts: StartOpts) => {
+      const query = String(startOpts.query || '').trim();
       if (!query) {
         setError('请输入研究问题');
         return null;
       }
+      const sessionId = startOpts.sessionId;
       setError(null);
-      setEvents([]);
       setBusy(true);
-      setJob(null);
+      beginLoading(sessionId);
+
       try {
         const res = await fetch('/api/research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query,
-            mode: opts.mode,
-            sessionId: opts.sessionId,
-            model: opts.model,
+            mode: startOpts.mode,
+            sessionId,
+            model: startOpts.model,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -183,54 +232,88 @@ export function useDeepResearch() {
         }
         const jobId = String(data?.data?.jobId || '');
         if (!jobId) throw new Error('未返回 jobId');
+
+        const assistantId =
+          startOpts.assistantId || `research_${jobId}_${Date.now()}`;
+
+        const seeded = createResearchAssistantMessage({
+          id: assistantId,
+          jobId,
+          query,
+          mode: startOpts.mode,
+        });
+
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            const msgs = [...s.messages];
+            const idx = msgs.findIndex((m) => m.id === assistantId);
+            if (idx >= 0) {
+              msgs[idx] = seeded;
+            } else {
+              msgs.push(seeded);
+            }
+            return { ...s, updatedAt: Date.now(), messages: msgs };
+          }),
+        );
+
         const created: ResearchJob = {
           jobId,
           query,
-          mode: opts.mode,
+          mode: startOpts.mode,
           status: 'queued',
-          sessionId: opts.sessionId,
-          model: opts.model,
+          sessionId,
+          model: startOpts.model,
         };
         setJob(created);
-        void listen(jobId);
-        return created;
+        void listen(jobId, sessionId, assistantId);
+        return { ...created, assistantId };
       } catch (err: unknown) {
         setBusy(false);
+        endLoading(sessionId);
         setError(err instanceof Error ? err.message : String(err));
         return null;
       }
     },
-    [listen],
+    [beginLoading, endLoading, listen, setSessions],
   );
 
   const cancel = useCallback(async () => {
-    if (!job?.jobId) return;
+    const active = activeRef.current;
+    const jobId = active?.jobId || job?.jobId;
+    if (!jobId) return;
     try {
-      await fetch(`/api/research/${encodeURIComponent(job.jobId)}/cancel`, {
+      await fetch(`/api/research/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
       });
       stopStream();
-      await refreshJob(job.jobId);
+      if (active) {
+        patchAssistant(setSessions, active.sessionId, active.assistantId, (m) =>
+          applyResearchEvent(m, {
+            kind: 'phase',
+            payload: { status: 'cancelled' },
+          }),
+        );
+        endLoading(active.sessionId);
+      }
+      await refreshJob(jobId).catch(() => null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [job?.jobId, refreshJob, stopStream]);
+  }, [endLoading, job?.jobId, refreshJob, setSessions, stopStream]);
 
   useEffect(() => () => stopStream(), [stopStream]);
 
   return {
-    enabled,
-    setEnabled,
     mode,
     setMode,
     job,
-    events,
     busy,
     error,
     start,
     cancel,
-    refreshJob,
+    active: activeRef,
   };
 }

@@ -4,7 +4,9 @@ export type MessageActivityStep =
   | { id: string; kind: 'reasoning'; text: string }
   | { id: string; kind: 'tool'; toolRunId: string }
   | { id: string; kind: 'content'; text: string }
-  | { id: string; kind: 'file'; fileId: string };
+  | { id: string; kind: 'file'; fileId: string }
+  /** Opens a new Process panel with a custom title (e.g. Plan / Search / Verify). */
+  | { id: string; kind: 'stage'; title: string };
 
 export type MessageToolRun = {
   id: string;
@@ -14,6 +16,14 @@ export type MessageToolRun = {
   provider?: string;
   results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
   error?: string;
+};
+
+/** Deep Research job linkage on an assistant turn (Continue / cancel). */
+export type MessageResearchState = {
+  jobId: string;
+  query: string;
+  mode?: string;
+  status?: string;
 };
 
 export type Message = {
@@ -89,6 +99,8 @@ export type Message = {
   reviewFix?: string;
   /** True while the post-review correction stream is in flight. */
   reviewFixStreaming?: boolean;
+  /** Present when this assistant turn is driven by Deep Research (not /api/chat). */
+  research?: MessageResearchState;
 };
 
 export type ExternalReferenceSourceKind =

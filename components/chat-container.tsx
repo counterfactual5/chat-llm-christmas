@@ -15,7 +15,8 @@
  *    queue state                   hooks/chat/use-chat-queue.ts
  *    queue helpers                 lib/chat/turn/task-queue.ts
  *    continue / claim-review plan  lib/chat/turn/continuation.ts
- *  Deep research                   hooks/chat/use-deep-research.ts + components/chat/research/*
+ *  /image, /research, skill slash     lib/chat/turn/image-command.ts, research-command.ts, research-activity.ts, skill-command.ts
+ *  Deep research (main-chat timeline) hooks/chat/use-deep-research.ts
  *  Client SSE consumer             lib/chat/stream/client.ts
  *  Session normalize / LWW merge   lib/chat/session/store.ts
  *  Message list / composer / …     components/chat/*
@@ -169,7 +170,6 @@ export default function ChatContainer() {
   const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [picturesExpanded, setPicturesExpanded] = useState(false);
-  const [researchExpanded, setResearchExpanded] = useState(true);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   /** Per-source groups within Reference Material; all start collapsed. */
   const [referenceGroupsOpen, setReferenceGroupsOpen] = useState<Record<string, boolean>>({});
@@ -1326,6 +1326,8 @@ export default function ChatContainer() {
     loadingBySession,
     isSessionLoading,
     isActiveLoading,
+    beginLoading,
+    endLoading,
     activeQueue,
     queuePaused,
     isCompacting,
@@ -1369,90 +1371,174 @@ export default function ChatContainer() {
     messageImagesToIngested,
   });
 
-  const deepResearch = useDeepResearch();
+  const deepResearch = useDeepResearch({
+    setSessions,
+    beginLoading,
+    endLoading,
+  });
 
-  // When a research job finishes with a report, mirror it into the local session
-  // (server also writebacks; this keeps the current tab snappy).
-  useEffect(() => {
-    const j = deepResearch.job;
-    if (!j || j.status !== 'done' || !j.reportMarkdown) return;
-    const sid = j.sessionId || activeSessionId;
-    if (!sid) return;
-    const marker = `research_${j.jobId}_`;
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== sid) return s;
-        if ((s.messages || []).some((m) => String(m.id || '').startsWith(marker))) {
-          return s;
-        }
-        const now = Date.now();
-        const msg: Message = {
-          id: `${marker}${now}`,
-          role: 'assistant',
-          content: j.reportMarkdown!,
-          timestamp: now,
-        };
-        return {
-          ...s,
-          updatedAt: now,
-          messages: [...(s.messages || []), msg],
-        };
-      }),
-    );
-  }, [deepResearch.job, activeSessionId]);
-
-  const submitComposer = useCallback(() => {
-    const researchQuery = parseResearchCommand(input);
-    if (researchQuery) {
+  const startResearchTurn = useCallback(
+    async (opts: {
+      query: string;
+      sessionId: string;
+      assistantId?: string;
+      /** When set, truncate session messages to this prefix before appending user+assistant. */
+      priorMessages?: Message[];
+      userContent?: string;
+    }) => {
       if (!isAccountBound) {
         openLoginModal();
         return;
       }
-      const sid = activeSessionId;
+      const sid = opts.sessionId;
+      const q = opts.query.trim();
+      if (!q) return;
       const now = Date.now();
+      const userContent = opts.userContent || `/research ${q}`;
+      const userMsg: Message = {
+        id: `research_user_${now}`,
+        role: 'user',
+        content: userContent,
+        timestamp: now,
+      };
+
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sid) return s;
-          const userMsg: Message = {
-            id: `research_user_${now}`,
-            role: 'user',
-            content: `/research ${researchQuery}`,
-            timestamp: now,
-          };
+          const base =
+            opts.priorMessages != null
+              ? opts.priorMessages
+              : opts.assistantId
+                ? s.messages.filter((m) => m.id !== opts.assistantId)
+                : s.messages;
           return {
             ...s,
             updatedAt: now,
             title:
               !s.title || s.title === 'New Chat'
-                ? `研究: ${researchQuery.slice(0, 40)}`
+                ? `研究: ${q.slice(0, 40)}`
                 : s.title,
-            messages: [...(s.messages || []), userMsg],
+            messages: [...base, userMsg],
           };
         }),
       );
-      setInput('');
-      deepResearch.setEnabled(true);
-      setIsContextPanelOpen(true);
-      setResearchExpanded(true);
-      void deepResearch.start({
-        query: researchQuery,
+
+      await deepResearch.start({
+        query: q,
         mode: deepResearch.mode,
         sessionId: sid,
         model: selectedModel || undefined,
+        assistantId: opts.assistantId,
+      });
+    },
+    [deepResearch, isAccountBound, openLoginModal, selectedModel, setSessions],
+  );
+
+  const submitComposer = useCallback(() => {
+    const researchQuery = parseResearchCommand(input);
+    if (researchQuery) {
+      setInput('');
+      void startResearchTurn({
+        query: researchQuery,
+        sessionId: activeSessionId,
       });
       return;
     }
     enqueueOrSubmit();
-  }, [
-    deepResearch,
-    isAccountBound,
-    openLoginModal,
-    input,
-    setInput,
-    activeSessionId,
-    selectedModel,
-    enqueueOrSubmit,
-  ]);
+  }, [input, setInput, startResearchTurn, activeSessionId, enqueueOrSubmit]);
+
+  const stopOrCancel = useCallback(() => {
+    if (deepResearch.busy) {
+      void deepResearch.cancel();
+      return;
+    }
+    stopGenerating();
+  }, [deepResearch, stopGenerating]);
+
+  const resumeIncompleteOrResearch = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const sessionId = activeSessionId;
+      const sessionMessages =
+        sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+      const last = sessionMessages[sessionMessages.length - 1];
+      if (
+        last?.role === 'assistant' &&
+        last.research?.jobId &&
+        (last.incomplete ||
+          last.research.status === 'failed' ||
+          last.research.status === 'cancelled')
+      ) {
+        if (deepResearch.busy) return;
+        const q = last.research.query || parseResearchCommand(
+          [...sessionMessages].reverse().find((m) => m.role === 'user')?.content || '',
+        ) || '';
+        if (!q) return;
+        // Reuse the same assistant bubble; drop trailing user duplicate by
+        // truncating before this assistant and re-adding user + same assistant id.
+        const idx = sessionMessages.findIndex((m) => m.id === last.id);
+        let cut = idx;
+        if (cut > 0 && sessionMessages[cut - 1]?.role === 'user') cut -= 1;
+        const priorMessages = sessionMessages.slice(0, cut);
+        await startResearchTurn({
+          query: q,
+          sessionId,
+          assistantId: last.id,
+          priorMessages,
+          userContent: `/research ${q}`,
+        });
+        return;
+      }
+      await resumeIncompleteReply(opts);
+    },
+    [
+      activeSessionId,
+      deepResearch.busy,
+      resumeIncompleteReply,
+      startResearchTurn,
+    ],
+  );
+
+  const saveEditedMessageOrResearch = useCallback(
+    async (messageId: string) => {
+      const content = editingMessageContent.trim();
+      const researchQuery = parseResearchCommand(content);
+      if (researchQuery) {
+        if (isActiveLoading || deepResearch.busy) {
+          stopOrCancel();
+        }
+        const sessionMsgs =
+          sessionsRef.current.find((s) => s.id === activeSessionId)?.messages ||
+          messages;
+        const index = sessionMsgs.findIndex((m) => m.id === messageId);
+        if (index < 0) return;
+        const priorMessages = sessionMsgs.slice(0, index);
+        setEditingMessageId(null);
+        setEditingMessageContent('');
+        setEditingMessageAttachments([]);
+        await startResearchTurn({
+          query: researchQuery,
+          sessionId: activeSessionId,
+          priorMessages,
+          userContent: content,
+        });
+        return;
+      }
+      await saveEditedMessage(messageId);
+    },
+    [
+      editingMessageContent,
+      isActiveLoading,
+      deepResearch.busy,
+      stopOrCancel,
+      activeSessionId,
+      messages,
+      startResearchTurn,
+      saveEditedMessage,
+      setEditingMessageId,
+      setEditingMessageContent,
+      setEditingMessageAttachments,
+    ],
+  );
 
   const {
     slashMenuItems,
@@ -1473,10 +1559,12 @@ export default function ChatContainer() {
   });
 
   // Only offer Continue when we have a clear interruption signal — not for every
-  // finished assistant turn.
-  const canResumeIncomplete = !isActiveLoading && truncationInfo.truncated;
+  // finished assistant turn. Deep Research failures also set incomplete + truncationReason.
+  const canResumeIncomplete =
+    !isActiveLoading && !deepResearch.busy && truncationInfo.truncated;
   // Timeout / upstream failures leave an Error: bubble — offer Retry for that turn.
-  const canRetryFailed = !isActiveLoading && isAssistantError(lastMessage);
+  const canRetryFailed =
+    !isActiveLoading && !deepResearch.busy && isAssistantError(lastMessage);
 
   // After refresh / remount / lost tool-done events, orphan tool runs can stay at
   // status:"start" and spin forever. Close them whenever the session is idle.
@@ -1727,7 +1815,7 @@ export default function ChatContainer() {
       }
       e.preventDefault();
       if (e.repeat) return;
-      void saveEditedMessage(messageId);
+      void saveEditedMessageOrResearch(messageId);
       return;
     }
     if (e.key === 'Escape') {
@@ -1851,7 +1939,7 @@ export default function ChatContainer() {
           void requestClaimReview();
         }}
         onContinueReply={() => {
-          void resumeIncompleteReply({ force: true });
+          void resumeIncompleteOrResearch({ force: true });
         }}
         onOpenNewSkillModal={openNewSkillModal}
         onPreviewSkill={openSkillPreview}
@@ -1905,7 +1993,7 @@ export default function ChatContainer() {
             <ChatMessageList
               messages={messages}
               selectedModel={selectedModel}
-              isActiveLoading={isActiveLoading}
+              isActiveLoading={isActiveLoading || deepResearch.busy}
               lastMessage={lastMessage}
               replyWaitByMessage={replyWaitByMessage}
               scrollRef={scrollRef}
@@ -1925,7 +2013,7 @@ export default function ChatContainer() {
               removeEditingMessageAttachment={removeEditingMessageAttachment}
               setImagePreviewSrc={setImagePreviewSrc}
               cancelEditMessage={cancelEditMessage}
-              saveEditedMessage={saveEditedMessage}
+              saveEditedMessage={saveEditedMessageOrResearch}
               editUserMessage={editUserMessage}
               parseQuotedUserMessage={parseQuotedUserMessage}
               reasoningOpen={reasoningOpen}
@@ -1961,7 +2049,7 @@ export default function ChatContainer() {
           compactNotice={compactNotice}
           canResumeIncomplete={canResumeIncomplete}
           truncationInfo={truncationInfo}
-          resumeIncompleteReply={resumeIncompleteReply}
+          resumeIncompleteReply={resumeIncompleteOrResearch}
           attachments={attachments}
           setImagePreviewSrc={setImagePreviewSrc}
           removeAttachment={removeAttachment}
@@ -2032,9 +2120,9 @@ export default function ChatContainer() {
           zhipuVisionOn={zhipuVisionOn}
           setActiveMcpIds={setActiveMcpIds}
           setSelectedModel={setSelectedModel}
-          isActiveLoading={isActiveLoading}
+          isActiveLoading={isActiveLoading || deepResearch.busy}
           isCompacting={isCompacting}
-          stopGenerating={stopGenerating}
+          stopGenerating={stopOrCancel}
           enqueueOrSubmit={submitComposer}
           researchBusy={deepResearch.busy}
           cancelResearch={() => void deepResearch.cancel()}
@@ -2085,16 +2173,6 @@ export default function ChatContainer() {
           const next = await runCompact(messages);
           if (next) updateActiveSession(next);
         }}
-        researchExpanded={researchExpanded}
-        onToggleResearchExpanded={() => setResearchExpanded((v) => !v)}
-        deepResearchEnabled={deepResearch.enabled}
-        researchMode={deepResearch.mode}
-        onResearchModeChange={deepResearch.setMode}
-        researchJob={deepResearch.job}
-        researchEvents={deepResearch.events}
-        researchBusy={deepResearch.busy}
-        researchError={deepResearch.error}
-        onCancelResearch={() => void deepResearch.cancel()}
       />
         </div>
       </div>

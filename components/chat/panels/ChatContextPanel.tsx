@@ -16,12 +16,6 @@ import {
   type GeneratedImageEntry,
 } from './OutputPanel';
 import { ReferencePanel } from './ReferencePanel';
-import { ResearchPanel } from '@/components/chat/research/ResearchPanel';
-import type {
-  ResearchEvent,
-  ResearchJob,
-  ResearchMode,
-} from '@/hooks/chat/use-deep-research';
 
 const SYSTEM_PRESETS = [
   { label: 'Concise', value: 'Answer concisely. Prefer short, direct sentences and skip preamble.' },
@@ -76,17 +70,6 @@ export type ChatContextPanelProps = {
   isCompacting: boolean;
   canCompact: boolean;
   onCompact: () => void;
-
-  researchExpanded: boolean;
-  onToggleResearchExpanded: () => void;
-  deepResearchEnabled: boolean;
-  researchMode: ResearchMode;
-  onResearchModeChange: (m: ResearchMode) => void;
-  researchJob: ResearchJob | null;
-  researchEvents: ResearchEvent[];
-  researchBusy: boolean;
-  researchError: string | null;
-  onCancelResearch: () => void;
 };
 
 export function ChatContextPanel({
@@ -126,16 +109,6 @@ export function ChatContextPanel({
   isCompacting,
   canCompact,
   onCompact,
-  researchExpanded,
-  onToggleResearchExpanded,
-  deepResearchEnabled,
-  researchMode,
-  onResearchModeChange,
-  researchJob,
-  researchEvents,
-  researchBusy,
-  researchError,
-  onCancelResearch,
 }: ChatContextPanelProps) {
   return (
     <AnimatePresence>
@@ -155,19 +128,6 @@ export function ChatContextPanel({
 
           <ScrollArea className="flex-1 px-4 py-4">
             <div className="space-y-2">
-              <ResearchPanel
-                expanded={researchExpanded}
-                onToggleExpanded={onToggleResearchExpanded}
-                enabled={deepResearchEnabled || Boolean(researchJob) || researchBusy}
-                mode={researchMode}
-                onModeChange={onResearchModeChange}
-                job={researchJob}
-                events={researchEvents}
-                busy={researchBusy}
-                error={researchError}
-                onCancel={onCancelResearch}
-              />
-
               <OutputPanel
                 expanded={picturesExpanded}
                 onToggleExpanded={onTogglePicturesExpanded}

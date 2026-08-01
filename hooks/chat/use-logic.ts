@@ -860,6 +860,8 @@ export function useChatLogic(props: UseChatLogicProps) {
     messageQueue,
     isSessionLoading,
     isActiveLoading,
+    beginLoading,
+    endLoading,
     activeQueue,
     queuePaused,
     isCompacting,

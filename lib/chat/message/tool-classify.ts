@@ -19,6 +19,9 @@ export type ToolRunClassification = {
   isSaveSkill: boolean;
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
+  isResearchPlan: boolean;
+  isResearchVerify: boolean;
+  isResearchWrite: boolean;
 };
 
 /** Classify a tool run by provider/name so the timeline can pick an icon + label. */
@@ -52,6 +55,9 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     run.provider === 'glm-ocr' ||
     run.provider === 'nemotron-omni';
   const isClaimReviewer = run.provider === 'claim-reviewer';
+  const isResearchPlan = run.name === 'research_plan';
+  const isResearchVerify = run.name === 'research_verify';
+  const isResearchWrite = run.name === 'research_write';
 
   return {
     isNotion,
@@ -68,6 +74,9 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
+    isResearchPlan,
+    isResearchVerify,
+    isResearchWrite,
   };
 }
 
@@ -94,9 +103,21 @@ export function getToolRunLabelKey(
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
+    isResearchPlan,
+    isResearchVerify,
+    isResearchWrite,
   } = classification;
   const { searching, failed } = state;
 
+  if (isResearchPlan) {
+    return searching ? 'researchPlanning' : 'researchPlanned';
+  }
+  if (isResearchVerify) {
+    return searching ? 'researchVerifying' : 'researchVerified';
+  }
+  if (isResearchWrite) {
+    return searching ? 'researchWriting' : 'researchWrote';
+  }
   if (isClaimReviewer) {
     return searching ? 'reviewingClaims' : 'reviewedClaims';
   }

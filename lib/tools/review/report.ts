@@ -1,17 +1,17 @@
-import { buildCitationCheck } from '@/lib/tools/review/citation';
-import { buildCodeQualityCheck } from '@/lib/tools/review/code-quality';
-import { buildCompletenessCheck } from '@/lib/tools/review/completeness';
-import { buildConsistencyCheck } from '@/lib/tools/review/consistency';
-import { buildRecalculationCheck } from '@/lib/tools/review/recalculation';
-import { buildStalenessCheck } from '@/lib/tools/review/staleness';
+import { buildCitationCheck } from '@/lib/tools/review/checks/citation';
+import { buildCodeQualityCheck } from '@/lib/tools/review/checks/code-quality';
+import { buildCompletenessCheck } from '@/lib/tools/review/checks/completeness';
+import { buildConsistencyCheck } from '@/lib/tools/review/checks/consistency';
+import { buildRecalculationCheck } from '@/lib/tools/review/checks/recalculation';
+import { buildStalenessCheck } from '@/lib/tools/review/checks/staleness';
 import {
   buildMidTurnCheck,
   buildToolReceiptCheck,
   INTENT_LABELS,
   SURFACE_LABELS,
   synthesizeFindings,
-} from '@/lib/tools/review/tool-claims';
-import { buildVulnerabilityCheck } from '@/lib/tools/review/vulnerability';
+} from '@/lib/tools/review/checks/tool-claims';
+import { buildVulnerabilityCheck } from '@/lib/tools/review/checks/vulnerability';
 import type {
   ExecutionRecordEntry,
   FakedToolSurface,

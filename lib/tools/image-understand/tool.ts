@@ -10,7 +10,7 @@
  *    is only ever transcribed once.
  */
 
-import { understandImage } from '@/lib/tools/image-understand/persist';
+import { understandImage } from '@/lib/tools/image-understand';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 /** `/api/files/<id>` → bare gateway file id; other inputs unchanged. */

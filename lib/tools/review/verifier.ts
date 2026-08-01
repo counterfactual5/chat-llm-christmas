@@ -1,14 +1,14 @@
 import { getReviewGateLevel } from '@/lib/tools/review/evidence';
-import { buildConsistencyCheck } from '@/lib/tools/review/consistency';
-import { detectDegenerateOutput } from '@/lib/tools/review/completeness';
-import { buildRecalculationCheck } from '@/lib/tools/review/recalculation';
+import { buildConsistencyCheck } from '@/lib/tools/review/checks/consistency';
+import { detectDegenerateOutput } from '@/lib/tools/review/checks/completeness';
+import { buildRecalculationCheck } from '@/lib/tools/review/checks/recalculation';
 import {
   buildReviewReport,
   emitReviewReport,
   emitReviewerFindings,
   planReviewChecks,
 } from '@/lib/tools/review/report';
-import { findingId, synthesizeFindings } from '@/lib/tools/review/tool-claims';
+import { findingId, synthesizeFindings } from '@/lib/tools/review/checks/tool-claims';
 import type {
   ClaimAuditResult,
   CorrectionVerifyResult,

@@ -9,10 +9,11 @@ import {
   ShieldCheck,
   Play,
   ScrollText,
-  Sparkles,
   Check,
   X,
   Blocks,
+  FolderOpen,
+  FileText,
   SlidersHorizontal,
   ChevronDown,
   Loader2,
@@ -44,7 +45,7 @@ import {
   formatDayGroupLabel,
   sessionsForSidebar,
 } from '@/lib/chat/context/sidebar';
-import { BUILTIN_SKILLS, skillSlashName } from '@/lib/skills/creator';
+import { skillSlashName } from '@/lib/skills/creator';
 
 export type ChatSidebarProps = {
   open: boolean;
@@ -63,6 +64,7 @@ export type ChatSidebarProps = {
   onRequestDeleteSession: (sessionId: string, title: string) => void;
   onExportSession: (sessionId: string, e: React.MouseEvent) => void;
   onInsertImageCommand: () => void;
+  onInsertSkillCommand: () => void;
   onRequestClaimReview: () => void;
   onContinueReply: () => void;
   onOpenNewSkillModal: () => void;
@@ -73,6 +75,7 @@ export type ChatSidebarProps = {
   onOpenNotionModal: () => void;
   onOpenGitHubModal: () => void;
   onOpenGoogleModal: () => void;
+  onOpenFilesModal: () => void;
   onOpenLoginModal: () => void;
   onSetAutoReview: (enabled: boolean) => void;
   onDisconnectAccount: () => void | Promise<void>;
@@ -95,6 +98,7 @@ export function ChatSidebar({
   onRequestDeleteSession,
   onExportSession,
   onInsertImageCommand,
+  onInsertSkillCommand,
   onRequestClaimReview,
   onContinueReply,
   onOpenNewSkillModal,
@@ -105,6 +109,7 @@ export function ChatSidebar({
   onOpenNotionModal,
   onOpenGitHubModal,
   onOpenGoogleModal,
+  onOpenFilesModal,
   onOpenLoginModal,
   onSetAutoReview,
   onDisconnectAccount,
@@ -116,6 +121,7 @@ export function ChatSidebar({
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
@@ -220,6 +226,7 @@ export function ChatSidebar({
                     setSkillsExpanded(false);
                     setMcpExpanded(false);
                     setToolsExpanded(false);
+                    setFilesExpanded(false);
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
                 >
@@ -268,6 +275,21 @@ export function ChatSidebar({
                               onOpenLoginModal();
                               return;
                             }
+                            onInsertSkillCommand();
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <span className="min-w-0 flex-1 truncate">创建 Skill</span>
+                          <span className="shrink-0 font-mono text-[10px] text-stone-400">/skill</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isAccountBound) {
+                              onOpenLoginModal();
+                              return;
+                            }
                             onRequestClaimReview();
                           }}
                           className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
@@ -307,6 +329,7 @@ export function ChatSidebar({
                     setMcpExpanded(false);
                     setToolsExpanded(false);
                     setCommandsExpanded(false);
+                    setFilesExpanded(false);
                     if (skills.length === 0) onFetchSkills();
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -335,31 +358,7 @@ export function ChatSidebar({
                           <Plus className="h-3.5 w-3.5" />
                           {t('newSkill')}
                         </button>
-                        {BUILTIN_SKILLS.map((skill) => {
-                          const on = activeSkillIds.includes(skill.id);
-                          return (
-                            <div
-                              key={skill.id}
-                              className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => onToggleSkill(skill.id)}
-                                className={cn(
-                                  'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
-                                  on
-                                    ? 'text-stone-900 dark:text-stone-100'
-                                    : 'text-stone-600 dark:text-stone-300',
-                                )}
-                                title={on ? t('skillCreatorOnHint') : t('skillCreatorOffHint')}
-                              >
-                                <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
-                                <span className="truncate">{skill.title}</span>
-                                {on && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />}
-                              </button>
-                            </div>
-                          );
-                        })}
+
                         {skills.map((skill) => (
                             <div
                               key={skill.id}
@@ -404,6 +403,58 @@ export function ChatSidebar({
                 </AnimatePresence>
               </div>
 
+              {/* Files — account-scoped file storage */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAccountBound) {
+                      onOpenLoginModal();
+                      return;
+                    }
+                    setFilesExpanded((v) => !v);
+                    setMcpExpanded(false);
+                    setSkillsExpanded(false);
+                    setToolsExpanded(false);
+                    setCommandsExpanded(false);
+                  }}
+                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <FileText className="h-4 w-4 text-stone-500" />
+                    Files
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      'h-3.5 w-3.5 text-stone-400 transition-transform',
+                      filesExpanded && isAccountBound ? 'rotate-180' : '',
+                    )}
+                  />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {isAccountBound && filesExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="space-y-0.5 pb-1">
+                        <button
+                          type="button"
+                          onClick={() => onOpenFilesModal()}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Manage files</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
               {/* MCP — same collapsible pattern as Skills; click Notion for connect/disconnect card */}
               <div>
               <button
@@ -417,6 +468,7 @@ export function ChatSidebar({
                   setSkillsExpanded(false);
                   setToolsExpanded(false);
                   setCommandsExpanded(false);
+                  setFilesExpanded(false);
                   onFetchIntegrations();
                 }}
                 className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -481,6 +533,7 @@ export function ChatSidebar({
                   setMcpExpanded(false);
                   setSkillsExpanded(false);
                   setCommandsExpanded(false);
+                  setFilesExpanded(false);
                 }}
                 className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
               >

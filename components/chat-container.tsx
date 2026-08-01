@@ -94,6 +94,7 @@ import { cn } from '@/lib/utils';
 import { BUILTIN_SKILLS, SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
+import { FileManagerModal } from '@/components/files/FileManagerModal';
 import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
@@ -171,6 +172,7 @@ export default function ChatContainer() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
+  const [filesManagerOpen, setFilesManagerOpen] = useState(false);
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
@@ -1726,6 +1728,10 @@ export default function ChatContainer() {
           setInput('/image ');
           textareaRef.current?.focus();
         }}
+        onInsertSkillCommand={() => {
+          setInput('/skill ');
+          textareaRef.current?.focus();
+        }}
         onRequestClaimReview={() => {
           void requestClaimReview();
         }}
@@ -1742,6 +1748,7 @@ export default function ChatContainer() {
         onOpenNotionModal={openNotionModal}
         onOpenGitHubModal={openGitHubModal}
         onOpenGoogleModal={openGoogleModal}
+        onOpenFilesModal={() => setFilesManagerOpen(true)}
         onOpenLoginModal={openLoginModal}
         onSetAutoReview={setActiveAutoReview}
         onDisconnectAccount={disconnectAccount}
@@ -1953,6 +1960,8 @@ export default function ChatContainer() {
         scrollRef={scrollRef}
         onQuote={quoteSelectedText}
       />
+
+      <FileManagerModal open={filesManagerOpen} onClose={() => setFilesManagerOpen(false)} />
 
       <ChatModals
         confirmClearSourcesOpen={confirmClearSourcesOpen}

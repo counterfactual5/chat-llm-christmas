@@ -69,12 +69,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** List is unused by the UI; keep a light health-style probe. */
+/** List account-scoped files for the File Manager. */
 export async function GET(req: NextRequest) {
   const apiKey = req.cookies.get('llm_chat_api_key')?.value || '';
   if (!apiKey) return json({ error: 'Unauthorized' }, 401);
+  const limit = Math.min(100, Math.max(1, Number(new URL(req.url).searchParams.get('limit')) || 100));
   const baseURL = gatewayBaseURL();
-  const res = await fetch(`${baseURL}/files?limit=1`, {
+  const res = await fetch(`${baseURL}/files?limit=${limit}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   const data = await res.json().catch(() => ({}));

@@ -32,11 +32,15 @@ describe('buildChatSystemParts', () => {
     expect(joinChatSystemParts(['one', 'two'])).toBe('one\n\n---\n\ntwo');
   });
 
-  it('advertises native Mermaid rendering in the default product prompt', () => {
-    const parts = buildChatSystemParts({ ...base, systemPrompt: '' }).join('\n');
+  it('always advertises native rich-output support without inventing tools', () => {
+    const parts = buildChatSystemParts(base).join('\n');
 
-    expect(parts).toContain('This chat UI natively supports Mermaid diagrams');
-    expect(parts).toContain('Do NOT claim you cannot render diagrams');
+    expect(parts).toContain('renders standard Markdown');
+    expect(parts).toContain('KaTeX math');
+    expect(parts).toContain('Mermaid diagrams');
+    expect(parts).toContain('Do NOT claim diagrams cannot be rendered');
+    expect(parts).toContain('Only use tools present in the API tool list');
+    expect(parts).toContain('Active Skills are user-selected per conversation');
   });
 
   it('adds review and generated-output safeguards when requested', () => {

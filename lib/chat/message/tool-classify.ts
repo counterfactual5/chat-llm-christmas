@@ -16,6 +16,7 @@ export type ToolRunClassification = {
   isGoogleWrite: boolean;
   isWebRead: boolean;
   isCreateFile: boolean;
+  isSaveSkill: boolean;
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
 };
@@ -43,6 +44,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     );
   const isWebRead = run.name === 'web_read' || run.name === 'web-read';
   const isCreateFile = run.name === 'create_file';
+  const isSaveSkill = run.name === 'save_skill' || run.provider === 'skills';
   const isImageUnderstand =
     run.name === 'image_understand' ||
     run.provider === 'zhipu-vision' ||
@@ -63,6 +65,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isGoogleWrite,
     isWebRead,
     isCreateFile,
+    isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
   };
@@ -88,6 +91,7 @@ export function getToolRunLabelKey(
     isGoogleWrite,
     isWebRead,
     isCreateFile,
+    isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
   } = classification;
@@ -111,6 +115,7 @@ export function getToolRunLabelKey(
     if (isGitHub) return 'searchingGitHub';
     if (isImageUnderstand) return 'understandingImage';
     if (isCreateFile) return 'creatingFile';
+    if (isSaveSkill) return 'savingSkill';
     if (isWebRead) return 'readingWeb';
     return 'searchingWeb';
   }
@@ -121,6 +126,7 @@ export function getToolRunLabelKey(
   if (isGitHub) return 'searchedGitHub';
   if (isImageUnderstand) return 'understoodImage';
   if (isCreateFile) return 'createdFile';
+  if (isSaveSkill) return 'savedSkill';
   if (isWebRead) return 'readWeb';
   return 'searchedWeb';
 }

@@ -13,7 +13,6 @@ import {
   ShieldCheck,
   Play,
   ScrollText,
-  Sparkles,
   Check,
   X,
   Blocks,
@@ -440,7 +439,15 @@ export function ChatComposer(props: ChatComposerProps) {
                 )}
               >
                 {item.kind === 'command' ? (
-                  <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                  item.id === 'skill-create' ? (
+                    <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                  ) : item.id === 'review' ? (
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                  ) : item.id === 'continue' ? (
+                    <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                  ) : (
+                    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                  )
                 ) : (
                   <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                 )}
@@ -653,7 +660,7 @@ export function ChatComposer(props: ChatComposerProps) {
                             }}
                             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
                           >
-                            <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                            <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                             <span className="min-w-0 flex-1">创建 Skill</span>
                             <span className="shrink-0 font-mono text-[10px] text-stone-400">
                               /skill

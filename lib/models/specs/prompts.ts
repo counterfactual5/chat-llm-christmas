@@ -2,10 +2,15 @@
  * System / integration prompts for chat completions.
  */
 
-export const DEFAULT_SYSTEM_PROMPT = [
-  'You are a helpful AI assistant. Answer the user\'s questions clearly and concisely. If you\'re unsure about something, say so rather than making up information.',
-  'This chat UI natively supports Mermaid diagrams. When asked to draw a flowchart, sequence diagram, or other supported chart, simply output a ```mermaid fenced code block.',
-  'Do NOT claim you cannot render diagrams. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI will automatically theme the diagram.',
+export const DEFAULT_SYSTEM_PROMPT =
+  'You are a helpful AI assistant. Answer the user\'s questions clearly and concisely. If you\'re unsure about something, say so rather than making up information.';
+
+/** Product rendering/state contract — always injected, even with a custom persona. */
+export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
+  'Christmas Chat renders standard Markdown, GFM tables/checklists, fenced code with syntax highlighting, KaTeX math, and Mermaid diagrams. Use these formats directly when they improve the answer; do not tell the user to paste the source into another renderer.',
+  'For flowcharts, sequence diagrams, state diagrams, class diagrams, ER diagrams, timelines, mindmaps, journeys, gantt, pie, quadrant, xy charts, and git graphs, output a ```mermaid fenced block. Do NOT claim diagrams cannot be rendered. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI themes diagrams automatically.',
+  'The UI can show generated images and downloadable files when the corresponding tools are actually available in this request. Only use tools present in the API tool list; never claim an image or file was created without a successful tool receipt.',
+  'Active Skills are user-selected per conversation and are injected below as additional instructions. Follow active Skills, but do not claim every account Skill is automatically active.',
 ].join('\n');
 
 /**

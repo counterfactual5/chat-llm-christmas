@@ -11,6 +11,7 @@ import {
   Sparkles,
   ChevronDown,
   FileText,
+  ScrollText,
   Image as ImageIcon,
   Globe,
   ShieldCheck,
@@ -439,6 +440,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isGoogle,
                     isImageUnderstand,
                     isCreateFile,
+                    isSaveSkill,
                     isClaimReviewer,
                   } = classification;
                   if (isClaimReviewer) return null;
@@ -494,6 +496,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <ImageIcon className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isCreateFile ? (
                           <FileText className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isSaveSkill ? (
+                          <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : (
                           <Globe className="h-3 w-3 shrink-0 opacity-60" />
                         )}
@@ -506,6 +510,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isGoogle &&
                           !isImageUnderstand &&
                           !isCreateFile &&
+                          !isSaveSkill &&
                           !isClaimReviewer && (
                             <span className="opacity-50">
                               {t('searchedVia').replace(
@@ -514,7 +519,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               )}
                             </span>
                           )}
-                        {run.query && (isNotion || isGoogle || isCreateFile) && !searching && (
+                        {run.query && (isNotion || isGoogle || isCreateFile || isSaveSkill) && !searching && (
                           <span className="min-w-0 truncate opacity-50">
                             ·{' '}
                             {isNotionFetch && run.results?.[0]?.title

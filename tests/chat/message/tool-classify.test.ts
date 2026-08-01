@@ -39,10 +39,11 @@ describe('classifyToolRun', () => {
     expect(drive.isGoogleWrite).toBe(true);
   });
 
-  it('detects web read, create-file, image-understand, and claim-reviewer runs', () => {
+  it('detects web read, file/skill writes, image-understand, and claim-reviewer runs', () => {
     expect(classifyToolRun({ name: 'web_read' }).isWebRead).toBe(true);
     expect(classifyToolRun({ name: 'web-read' }).isWebRead).toBe(true);
     expect(classifyToolRun({ name: 'create_file' }).isCreateFile).toBe(true);
+    expect(classifyToolRun({ name: 'save_skill', provider: 'skills' }).isSaveSkill).toBe(true);
     expect(classifyToolRun({ name: 'image_understand' }).isImageUnderstand).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'glm-ocr' }).isImageUnderstand).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'claim-reviewer' }).isClaimReviewer).toBe(true);
@@ -102,6 +103,8 @@ describe('getToolRunLabelKey', () => {
       [{ name: 'image_understand' }, false, 'understoodImage'],
       [{ name: 'create_file' }, true, 'creatingFile'],
       [{ name: 'create_file' }, false, 'createdFile'],
+      [{ name: 'save_skill', provider: 'skills' }, true, 'savingSkill'],
+      [{ name: 'save_skill', provider: 'skills' }, false, 'savedSkill'],
       [{ name: 'web_read' }, true, 'readingWeb'],
       [{ name: 'web_read' }, false, 'readWeb'],
       [{ name: 'web_search' }, true, 'searchingWeb'],

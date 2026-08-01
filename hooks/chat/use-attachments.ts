@@ -101,12 +101,21 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
     [applyIngestedFiles],
   );
 
+  const deleteUploadedFile = useCallback((fileId?: string) => {
+    if (!fileId) return;
+    void fetch(`/api/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }).catch(
+      (error) => console.warn('[files] delete removed attachment failed:', error),
+    );
+  }, []);
+
   const removeEditingMessageAttachment = useCallback((id: string) => {
     setEditingMessageAttachments((prev) => {
       const target = prev.find((a) => a.id === id);
       if (target?.previewUrl?.startsWith('blob:')) {
         URL.revokeObjectURL(target.previewUrl);
       }
+      // Do not delete the remote file here: the user may cancel the edit and
+      // the original saved message would still reference it.
       return prev.filter((a) => a.id !== id);
     });
   }, []);
@@ -114,10 +123,11 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
   const removeAttachment = useCallback(
     (id: string) => {
       const toRemove = attachments.find((a) => a.id === id);
-      if (toRemove?.previewUrl) URL.revokeObjectURL(toRemove.previewUrl);
+      if (toRemove?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(toRemove.previewUrl);
+      deleteUploadedFile(toRemove?.fileId);
       setAttachments((prev) => prev.filter((a) => a.id !== id));
     },
-    [attachments],
+    [attachments, deleteUploadedFile],
   );
 
   return {

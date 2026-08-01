@@ -53,3 +53,36 @@ export async function GET(req: NextRequest, { params }: Params) {
     },
   });
 }
+
+/** Delete an account-scoped gateway file, then callers remove its chat reference. */
+export async function DELETE(req: NextRequest, { params }: Params) {
+  const apiKey = req.cookies.get('llm_chat_api_key')?.value || '';
+  if (!apiKey) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const fileId = decodeURIComponent(id || '').trim();
+  if (!fileId) {
+    return Response.json({ error: 'Missing file id' }, { status: 400 });
+  }
+
+  const res = await fetch(
+    `${gatewayBaseURL()}/files/${encodeURIComponent(fileId)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    },
+  );
+  const detail = await res.text().catch(() => '');
+  if (!res.ok) {
+    return Response.json(
+      { error: detail || `Gateway file HTTP ${res.status}` },
+      { status: res.status >= 400 && res.status < 600 ? res.status : 502 },
+    );
+  }
+  return new Response(detail || JSON.stringify({ deleted: true }), {
+    status: 200,
+    headers: { 'Content-Type': res.headers.get('content-type') || 'application/json' },
+  });
+}

@@ -4,6 +4,7 @@
  */
 
 import {
+  CHAT_OUTPUT_CAPABILITIES_PROMPT,
   CURSOR_WEB_CHAT_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
   activeIntegrationsPrompt,
@@ -37,6 +38,7 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   }
   systemParts.push(timeContextSystemPrompt());
   systemParts.push(String(opts.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT);
+  systemParts.push(CHAT_OUTPUT_CAPABILITIES_PROMPT);
   if (opts.threadId) {
     systemParts.push(conversationIsolationPrompt(opts.threadId));
   }

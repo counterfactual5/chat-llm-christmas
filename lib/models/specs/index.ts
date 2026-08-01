@@ -17,6 +17,7 @@ export {
 } from '@/lib/models/specs/filters';
 export {
   DEFAULT_SYSTEM_PROMPT,
+  CHAT_OUTPUT_CAPABILITIES_PROMPT,
   CURSOR_WEB_CHAT_PROMPT,
   activeIntegrationsPrompt,
   conversationIsolationPrompt,

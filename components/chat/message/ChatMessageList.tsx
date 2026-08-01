@@ -44,6 +44,7 @@ import {
 import { classifyToolRun, getToolRunLabelKey } from '@/lib/chat/message/tool-classify';
 import { getReviewCheckTitleKey } from '@/lib/chat/message/review-labels';
 import { getReviewCheckIcon } from './helpers/review-check-icon';
+import { ReasoningBodyScroll } from '@/components/chat/message/ReasoningBodyScroll';
 import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
@@ -775,7 +776,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         <span>{live ? t('thinking') : t('thought')}</span>
                       </button>
                       {open && body && (
-                        <div className="chat-markdown mt-0.5 max-h-72 overflow-y-auto pl-[18px] text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                        <ReasoningBodyScroll body={body} live={live}>
                           <ReactMarkdown
                             remarkPlugins={[remarkMath, remarkGfm]}
                             rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
@@ -838,7 +839,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                 message.role === 'assistant',
                             })}
                           </ReactMarkdown>
-                        </div>
+                        </ReasoningBodyScroll>
                       )}
                     </div>
                   );

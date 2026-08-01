@@ -6,6 +6,7 @@
  *  Attachments:     lib/chat/turn/attachments.ts
  *  Send estimate:   lib/chat/turn/send-estimate.ts
  *  Stream errors:   lib/chat/turn/stream-error.ts
+ *  Image gen:       lib/chat/turn/image-generation.ts
  *  Account:         hooks/chat/use-account.ts
  *  Integrations:    hooks/chat/use-integrations.ts
  *  Persist:         hooks/chat/use-session-persist.ts
@@ -58,6 +59,10 @@ import {
   isAbortError,
   mapAssistantById,
 } from '@/lib/chat/turn/stream-error';
+import {
+  buildImageGenerationThread,
+  requestImageGeneration,
+} from '@/lib/chat/turn/image-generation';
 
 export type { QueuedTask };
 export type UseChatLogicProps = {
@@ -326,61 +331,17 @@ export function useChatLogic(props: UseChatLogicProps) {
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
     const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
-    let newTitle = sessionsRef.current.find((s) => s.id === sessionId)?.title;
-    if (cleanedBase.length === 0 || (cleanedBase.length === 1 && opts?.skipDuplicateUser)) {
-      newTitle = titleForNewConversation(trimmed);
-    }
-
-    const assistantId = crypto.randomUUID();
-    const assistantMessage: Message = {
-      id: assistantId,
-      role: 'assistant',
-      content: 'Generating image…',
-      timestamp: Date.now(),
-      incomplete: true,
-    };
-
-    const thread = opts?.skipDuplicateUser
-      ? [...cleanedBase, assistantMessage]
-      : [
-          ...cleanedBase,
-          {
-            id: crypto.randomUUID(),
-            role: 'user' as const,
-            content: `/image ${trimmed}`,
-            timestamp: Date.now(),
-          },
-          assistantMessage,
-        ];
+    const { thread, assistantId, newTitle } = buildImageGenerationThread({
+      prompt: trimmed,
+      cleanedBase,
+      skipDuplicateUser: opts?.skipDuplicateUser,
+      currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
+    });
     updateSession(sessionId, thread, newTitle);
 
     try {
-      const res = await fetch('/api/images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: trimmed,
-          model: 'gpt-image-1.5',
-          size: '1024x1024',
-          quality: 'medium',
-        }),
-      });
-      const raw = await res.text();
-      let data: {
-        error?: string;
-        image?: string;
-        fileId?: string;
-      } = {};
-      try {
-        data = raw ? (JSON.parse(raw) as typeof data) : {};
-      } catch {
-        throw new Error(
-          raw.trim().slice(0, 400) ||
-            `Image API returned non-JSON (HTTP ${res.status})`,
-        );
-      }
-      if (!res.ok) throw new Error(data?.error || `Image generation failed (HTTP ${res.status})`);
-      if (!data?.image) throw new Error('No image returned');
+      const result = await requestImageGeneration({ prompt: trimmed });
+      if (!result.ok) throw new Error(result.error);
 
       setSessions((prev) =>
         prev.map((s) => {
@@ -389,9 +350,9 @@ export function useChatLogic(props: UseChatLogicProps) {
             ...s,
             messages: mapAssistantById(s.messages, assistantId, (m) =>
               applyGeneratedImageToAssistant(m, {
-                imageUrl: data.image as string,
+                imageUrl: result.image,
                 prompt: trimmed,
-                fileId: data.fileId ? String(data.fileId) : undefined,
+                fileId: result.fileId,
               }),
             ),
             updatedAt: Date.now(),

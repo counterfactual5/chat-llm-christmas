@@ -9,5 +9,6 @@ Client turn planning helpers. Hooks still own React state + streaming.
 | `attachments.ts` | Attachment gates + user content assembly |
 | `send-estimate.ts` | Pre-send token projection / compact thresholds |
 | `stream-error.ts` | Stream/image failure message patches |
+| `image-generation.ts` | `/image` turn build + `/api/images` call |
 | `compact.ts` | History compact API helper |
 | `image-command.ts` | `/image` prompt parse |

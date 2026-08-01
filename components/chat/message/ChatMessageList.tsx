@@ -44,6 +44,7 @@ import {
 import { classifyToolRun, getToolRunLabelKey } from '@/lib/chat/message/tool-classify';
 import { getReviewCheckTitleKey } from '@/lib/chat/message/review-labels';
 import { getReviewCheckIcon } from './helpers/review-check-icon';
+import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
@@ -116,6 +117,10 @@ export type ChatMessageListProps = {
   canRetryFailed: boolean;
   retryFailedReply: () => void;
   isAssistantError: (m?: Message) => boolean;
+  /** Account-memory toast after auto-extract — shown under Review on the latest assistant turn. */
+  memorySavedNotice?: { count: number } | null;
+  onViewMemorySaved?: () => void;
+  onDismissMemorySaved?: () => void;
 };
 
 export function ChatMessageList(props: ChatMessageListProps) {
@@ -155,6 +160,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
     canRetryFailed,
     retryFailedReply,
     isAssistantError,
+    memorySavedNotice,
+    onViewMemorySaved,
+    onDismissMemorySaved,
   } = props;
 
   return (
@@ -1277,6 +1285,22 @@ export function ChatMessageList(props: ChatMessageListProps) {
                             ) : null}
                           </div>
                         )}
+                        {memorySavedNotice &&
+                          memorySavedNotice.count > 0 &&
+                          message.id === lastMessage?.id &&
+                          lastMessage?.role === 'assistant' &&
+                          onViewMemorySaved &&
+                          onDismissMemorySaved && (
+                            <MemorySavedNotice
+                              count={memorySavedNotice.count}
+                              label={t('memorySavedToast', {
+                                count: memorySavedNotice.count,
+                              })}
+                              viewLabel={t('memorySavedView')}
+                              onView={onViewMemorySaved}
+                              onDismiss={onDismissMemorySaved}
+                            />
+                          )}
                         {streamGapSpinner}
                       </>
                     )}

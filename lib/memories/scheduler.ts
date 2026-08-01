@@ -21,7 +21,10 @@ type SchedulerDeps = {
   getExistingMemories: () => Array<Pick<MemoryItem, 'id' | 'kind' | 'content'>>;
   isAccountBound: () => boolean;
   setMemoryExtractCursor: (sessionId: string, messageId: string) => void;
-  onMemoriesSaved: (saved: MemoryItem[]) => void;
+  onMemoriesSaved: (
+    saved: MemoryItem[],
+    meta: { sessionId: string },
+  ) => void;
 };
 
 type SessionState = {
@@ -81,7 +84,7 @@ async function runExtract(
     const lastId = pending[pending.length - 1]?.id;
     if (lastId) deps.setMemoryExtractCursor(sessionId, lastId);
     if (response.ok && Array.isArray(json?.data?.saved) && json.data.saved.length) {
-      deps.onMemoriesSaved(json.data.saved as MemoryItem[]);
+      deps.onMemoriesSaved(json.data.saved as MemoryItem[], { sessionId });
     }
   } catch (error) {
     console.warn('[memories] extract failed:', error);

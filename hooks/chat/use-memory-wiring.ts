@@ -5,12 +5,19 @@
  * CRUD lives in use-memories.ts; triggers/scheduler live in lib/memories/.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatSession } from '@/lib/chat/types';
 import { scheduleMemoryExtraction } from '@/lib/memories/scheduler';
 import { useChatMemories } from '@/hooks/chat/use-memories';
 
 type SessionUpdater = (updater: (prev: ChatSession[]) => ChatSession[]) => void;
+
+export type MemorySavedNotice = {
+  sessionId: string;
+  count: number;
+};
+
+const MEMORY_SAVED_NOTICE_MS = 8_000;
 
 export function useMemoryWiring(opts: {
   setSessions: SessionUpdater;
@@ -28,6 +35,9 @@ export function useMemoryWiring(opts: {
   getSessionRef.current = getSession;
 
   const [memoriesManagerOpen, setMemoriesManagerOpen] = useState(false);
+  const [memorySavedNotice, setMemorySavedNotice] =
+    useState<MemorySavedNotice | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     memories,
@@ -46,6 +56,34 @@ export function useMemoryWiring(opts: {
 
   const openMemoriesModal = useCallback(() => setMemoriesManagerOpen(true), []);
   const closeMemoriesModal = useCallback(() => setMemoriesManagerOpen(false), []);
+
+  const dismissMemorySavedNotice = useCallback(() => {
+    if (noticeTimerRef.current) {
+      clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    setMemorySavedNotice(null);
+  }, []);
+
+  const showMemorySavedNotice = useCallback(
+    (sessionId: string, count: number) => {
+      if (count <= 0) return;
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      setMemorySavedNotice({ sessionId, count });
+      noticeTimerRef.current = setTimeout(() => {
+        setMemorySavedNotice(null);
+        noticeTimerRef.current = null;
+      }, MEMORY_SAVED_NOTICE_MS);
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
 
   const setMemoryExtractCursor = useCallback(
     (sessionId: string, messageId: string) => {
@@ -82,13 +120,21 @@ export function useMemoryWiring(opts: {
           getExistingMemories: () => enabledMemoriesPayload(),
           isAccountBound: () => Boolean(isAccountBoundRef.current),
           setMemoryExtractCursor,
-          onMemoriesSaved: mergeSavedMemories,
+          onMemoriesSaved: (saved, meta) => {
+            mergeSavedMemories(saved);
+            showMemorySavedNotice(meta.sessionId, saved.length);
+          },
         },
         sessionId,
         { requestReview, incomplete },
       );
     },
-    [enabledMemoriesPayload, mergeSavedMemories, setMemoryExtractCursor],
+    [
+      enabledMemoriesPayload,
+      mergeSavedMemories,
+      setMemoryExtractCursor,
+      showMemorySavedNotice,
+    ],
   );
 
   return {
@@ -106,6 +152,8 @@ export function useMemoryWiring(opts: {
     memoriesManagerOpen,
     openMemoriesModal,
     closeMemoriesModal,
+    memorySavedNotice,
+    dismissMemorySavedNotice,
     onReplySettled,
   };
 }

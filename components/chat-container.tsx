@@ -362,6 +362,8 @@ export default function ChatContainer() {
     memoriesManagerOpen,
     openMemoriesModal,
     closeMemoriesModal,
+    memorySavedNotice,
+    dismissMemorySavedNotice,
     onReplySettled: onMemoryReplySettled,
   } = useMemoryWiring({
     setSessions,
@@ -1852,6 +1854,16 @@ export default function ChatContainer() {
               canRetryFailed={canRetryFailed}
               retryFailedReply={retryFailedReply}
               isAssistantError={isAssistantError}
+              memorySavedNotice={
+                memorySavedNotice?.sessionId === activeSessionId
+                  ? { count: memorySavedNotice.count }
+                  : null
+              }
+              onViewMemorySaved={() => {
+                dismissMemorySavedNotice();
+                openMemoriesModal();
+              }}
+              onDismissMemorySaved={dismissMemorySavedNotice}
             />
         <ChatComposer
           activeQueue={activeQueue}

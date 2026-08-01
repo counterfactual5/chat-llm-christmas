@@ -71,7 +71,9 @@ describe('research activity → timeline stages', () => {
     m = withResearchReport(m, '## 用户问题直答\nhello');
     expect(m.incomplete).toBe(false);
     expect(m.content).toContain('用户问题直答');
-    expect(m.activity?.some((s) => s.kind === 'content')).toBe(true);
+    // Report body stays on message.content (timeline appends it after Process).
+    expect(m.activity?.some((s) => s.kind === 'content')).toBe(false);
+    expect(m.research?.status).toBe('done');
   });
 
   it('opens Synthesize panel from synthesizing phase', () => {
@@ -183,5 +185,43 @@ describe('research activity → timeline stages', () => {
     expect(m.incomplete).toBe(true);
     expect(m.truncationReason).toContain('524');
     expect(m.research?.status).toBe('failed');
+  });
+
+  it('withResearchReport clears Continue state and does not append orphan Write', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a6',
+      jobId: 'rs_6',
+      query: '腿抽筋',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'drafting report' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report_delta',
+      payload: { text: '## 用户问题直答\n答案' },
+    });
+    // Simulate settle before file (as withResearchReport does).
+    m = withResearchReport(m, '## 用户问题直答\n完整报告', {
+      id: 'f1',
+      name: 'research_report.md',
+      mimeType: 'text/markdown',
+      size: 12,
+      url: 'local://f1',
+      content: '## 用户问题直答\n完整报告',
+    });
+    expect(m.incomplete).toBe(false);
+    expect(m.truncationReason).toBeUndefined();
+    expect(m.research?.status).toBe('done');
+    expect(m.content).toContain('完整报告');
+    // Only one research_write tool — no orphan after the answer.
+    expect(m.toolRuns?.filter((r) => r.name === 'research_write')).toHaveLength(1);
+    const writeIdx = (m.activity || []).findIndex(
+      (s) => s.kind === 'tool' && m.toolRuns?.find((r) => r.id === (s as { toolRunId: string }).toolRunId)?.name === 'research_write',
+    );
+    const contentIdx = (m.activity || []).findIndex((s) => s.kind === 'content');
+    // No content activity step after Write (content lives on message.content).
+    expect(contentIdx).toBe(-1);
+    expect(writeIdx).toBeGreaterThanOrEqual(0);
   });
 });

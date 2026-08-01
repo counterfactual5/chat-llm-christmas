@@ -88,6 +88,8 @@ function finishTool(
     error?: string;
     /** Prefer matching this pending id when known. */
     toolRunId?: string;
+    /** When true, do not mark the message incomplete (final research settle). */
+    keepComplete?: boolean;
   },
 ): Message {
   const toolRuns = ensureTools(m);
@@ -115,9 +117,27 @@ function finishTool(
       error: opts.error,
       query: opts.query ?? toolRuns[idx].query,
     };
-    return { ...m, toolRuns, incomplete: true };
+    return {
+      ...m,
+      toolRuns,
+      incomplete: opts.keepComplete ? m.incomplete : true,
+    };
   }
-  // No pending start — append a completed run.
+  // Already finished earlier (e.g. settleOpenTools before attaching the file).
+  // Update that run in place — never append an orphan tool after the answer,
+  // or Write reappears below the report in the timeline.
+  const doneIdx = toolRuns.findIndex((r) => r.name === opts.name && r.status === 'done');
+  if (doneIdx >= 0) {
+    toolRuns[doneIdx] = {
+      ...toolRuns[doneIdx],
+      provider: opts.provider ?? toolRuns[doneIdx].provider,
+      results: opts.results ?? toolRuns[doneIdx].results,
+      error: opts.error ?? toolRuns[doneIdx].error,
+      query: opts.query ?? toolRuns[doneIdx].query,
+    };
+    return { ...m, toolRuns };
+  }
+  // No prior run — append a completed one.
   const toolRunId = newId('tr');
   toolRuns.push({
     id: toolRunId,
@@ -130,7 +150,12 @@ function finishTool(
   });
   const activity = ensureActivity(m);
   activity.push({ id: newId('act'), kind: 'tool', toolRunId });
-  return { ...m, toolRuns, activity, incomplete: true };
+  return {
+    ...m,
+    toolRuns,
+    activity,
+    incomplete: opts.keepComplete ? m.incomplete : true,
+  };
 }
 
 function settleOpenTools(m: Message, error?: string): Message {
@@ -483,11 +508,13 @@ export function applyResearchEvent(
     if (!activity.some((s) => s.kind === 'file' && s.fileId === id)) {
       activity.push({ id: newId('file'), kind: 'file', fileId: id });
     }
+    const researchDone = m.research?.status === 'done';
     return finishTool(
       { ...m, files, activity },
       {
         name: 'research_write',
         provider: 'research',
+        keepComplete: researchDone,
         results: [
           {
             title: file.name,
@@ -577,6 +604,9 @@ export function withResearchReport(
 ): Message {
   const content = String(reportMarkdown || '').trim();
   if (!content) return message;
+
+  // Mark done first so the file attach path does not re-open Write or flip
+  // incomplete back to true (that left Continue showing after a finished report).
   let m: Message = {
     ...settleOpenTools(message),
     content,
@@ -586,11 +616,22 @@ export function withResearchReport(
       ? { ...message.research, status: 'done' }
       : message.research,
   };
-  const activity = ensureActivity(m);
-  activity.push({ id: newId('c'), kind: 'content', text: content });
-  m = { ...m, activity };
+
+  // Do not append a duplicate `content` activity step at the end — streamed
+  // report body already lives on message.content, and buildTimelineSegments
+  // places it after Process panels. Pushing content here put the answer in the
+  // middle of the timeline and let an orphan Write tool land below it.
+
   if (reportFile?.id) {
     m = applyResearchEvent(m, { kind: 'file', payload: reportFile as Record<string, unknown> });
   }
-  return m;
+
+  // Final authority: completed research is never "interrupted".
+  return {
+    ...m,
+    content,
+    incomplete: false,
+    truncationReason: undefined,
+    research: m.research ? { ...m.research, status: 'done' } : m.research,
+  };
 }

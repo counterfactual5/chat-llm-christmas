@@ -910,6 +910,20 @@ export default function ChatContainer() {
     if (!lastMessage || lastMessage.role !== 'assistant') {
       return withShort({ truncated: false, reason: '' });
     }
+    // Finished Deep Research reports are complete — never offer Continue.
+    if (lastMessage.research?.jobId && String(lastMessage.content || '').trim()) {
+      const researchDone = lastMessage.research.status === 'done';
+      const hasResearchFile = (lastMessage.files || []).some(
+        (f) =>
+          String(f.name || '').startsWith('research_') ||
+          String(f.url || '').includes('/api/files/') ||
+          String(f.url || '').startsWith('local://local_research_') ||
+          String(f.url || '').startsWith('local://research'),
+      );
+      if (researchDone || hasResearchFile) {
+        return withShort({ truncated: false, reason: '' });
+      }
+    }
     // Failed requests need Retry, not Continue-from-partial.
     if (isAssistantError(lastMessage)) {
       return withShort({ truncated: false, reason: '' });

@@ -16,6 +16,7 @@ import { REVIEWER_SYSTEM_PROMPT } from '@/lib/tools/review/claim-reviewer';
 import type { ChatSkillInput } from '@/lib/chat/server/request';
 import { formatMemoriesForSystemPrompt } from '@/lib/memories/prompt';
 import { skillPersistenceGatePrompt } from '@/lib/skills/creator';
+import { domainPolicyPrompt } from '@/lib/chat/server/domain-policy';
 import {
   autoReviewStatusPrompt,
   memoryBehaviorPrompt,
@@ -44,6 +45,8 @@ export type BuildChatSystemPartsOpts = {
   accountSkillCatalog?: string;
   /** Inject the longer product guide (user asked how to use / what commands). */
   expandProductGuide?: boolean;
+  /** Latest user text used for domain/risk policy selection. */
+  userAsk?: string;
 };
 
 export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
@@ -61,6 +64,8 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   }
   systemParts.push(skillPersistenceGatePrompt(skillCreatorOn));
   systemParts.push(memoryBehaviorPrompt());
+  const domainPolicy = domainPolicyPrompt(opts.userAsk || '');
+  if (domainPolicy) systemParts.push(domainPolicy);
   systemParts.push(
     autoReviewStatusPrompt({
       autoReview: Boolean(opts.autoReview),

@@ -14,6 +14,7 @@ Request pipeline: `chat-request.ts` (`handleChatRequest`).
 | `credentials.ts` | Resolve requested integrations against authorized OAuth vault tokens |
 | `system-prompt.ts` | Assemble the chat system-prompt parts (pure string assembly) |
 | `product-guide.ts` | Detect product-usage questions that expand the in-app guide prompt |
+| `domain-policy.ts` | Shared domain/risk classifier + chat/Research policy (SSOT for product; Research snapshot is injected at `/api/research`) |
 | `tool-execution.ts` | Fallback query + failure-detection helpers around a single tool call |
 | `upstream.ts` | OpenAI-compatible completions transport (stream + one-shot) |
 | `stream-budget.ts` | Idle / total stream timeout math, plus `boundedAsyncIterator` that applies it to any upstream stream |

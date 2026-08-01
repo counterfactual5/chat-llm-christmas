@@ -227,6 +227,7 @@ export async function handleChatRequest(req: NextRequest) {
       hasGeneratedFiles,
       skillCreatorOn,
       accountSkillCatalog,
+      userAsk: lastUserText(chatMessages),
       expandProductGuide: wantsProductUsageHelp(lastUserText(chatMessages)),
     });
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { chatBackendResearchURL } from '@/lib/chat-backend';
+import { researchDomainPayload } from '@/lib/chat/server/domain-policy';
 
 export const runtime = 'edge';
 
@@ -19,11 +20,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '请先连接主站账号' }, { status: 401 });
   }
   try {
-    const body = await req.text();
+    const incoming = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const query = String(incoming?.query || '').trim();
+    const { domainContext, domainPolicy } = researchDomainPayload(query);
+    const priorContext =
+      incoming?.context && typeof incoming.context === 'object' && !Array.isArray(incoming.context)
+        ? (incoming.context as Record<string, unknown>)
+        : {};
+
+    // Domain classification lives only in this frontend server module.
+    // Persist a snapshot so the chat-api worker never re-classifies the query.
+    const body = {
+      ...incoming,
+      query,
+      domainContext,
+      context: {
+        ...priorContext,
+        domainContext,
+        domainPolicy,
+      },
+    };
+
     const upstream = await fetch(chatBackendResearchURL(), {
       method: 'POST',
       headers,
-      body,
+      body: JSON.stringify(body),
       cache: 'no-store',
     });
     const data = await upstream.json().catch(() => ({}));

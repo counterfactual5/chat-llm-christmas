@@ -9,7 +9,6 @@ import {
   PanelRightClose,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { FilePreviewContent } from '@/components/files/FilePreviewOverlay';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -52,9 +51,9 @@ export function ChatPreviewPanel({
           animate={{ width: 460, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
-          className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col overflow-hidden"
+          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
         >
-          <div className="relative flex h-14 items-center justify-center gap-2 px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
+          <div className="relative flex h-14 shrink-0 items-center justify-center gap-2 border-b border-stone-200/50 px-4 dark:border-stone-800/50">
             <span
               className={cn(
                 'pointer-events-none absolute truncate text-center text-sm font-semibold text-stone-700 dark:text-stone-300',
@@ -109,7 +108,7 @@ export function ChatPreviewPanel({
             </div>
           </div>
 
-          <ScrollArea className="flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {!file ? (
               <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                 <FileText className="h-8 w-8 opacity-40" />
@@ -132,7 +131,7 @@ export function ChatPreviewPanel({
                 </button>
               </div>
             )}
-          </ScrollArea>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

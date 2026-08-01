@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, PanelRightClose, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import type {
   ExternalReferenceSourceKind,
   WebSearchSource,
@@ -123,9 +122,9 @@ export function ChatContextPanel({
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 280, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
-          className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col"
+          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
         >
-          <div className="relative flex h-14 items-center justify-center px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
+          <div className="relative flex h-14 shrink-0 items-center justify-center border-b border-stone-200/50 px-4 dark:border-stone-800/50">
             <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">
               {t('context')}
             </span>
@@ -139,7 +138,7 @@ export function ChatContextPanel({
             </Button>
           </div>
 
-          <ScrollArea className="flex-1 px-4 py-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
             <div className="space-y-2">
               <OutputPanel
                 expanded={picturesExpanded}
@@ -245,7 +244,7 @@ export function ChatContextPanel({
                 </AnimatePresence>
               </div>
             </div>
-          </ScrollArea>
+          </div>
 
           <div className="p-4 border-t border-stone-200/50 dark:border-stone-800/50 shrink-0 bg-stone-50 dark:bg-stone-900/50 text-xs text-stone-500 space-y-1.5">
             <div className="flex justify-between">

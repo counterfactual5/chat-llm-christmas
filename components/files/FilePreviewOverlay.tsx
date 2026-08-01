@@ -168,7 +168,7 @@ export function FilePreviewOverlay({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[min(92vh,1100px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-950"
+        className="flex max-h-[min(92vh,1100px)] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800">

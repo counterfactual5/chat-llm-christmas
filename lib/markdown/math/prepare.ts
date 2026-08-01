@@ -1,0 +1,41 @@
+/**
+ * Top-level orchestration: the single entry point chat rendering calls to
+ * turn raw model markdown into something remark-math/KaTeX can render safely.
+ */
+import { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
+import { hasUnclosedDisplayMath } from './detect';
+import { escapeCurrencyDollars, fixFlankingEmphasis } from './emphasis';
+import { liftQuotedMathBlocks, normalizeMathDelimiters } from './normalize';
+
+export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
+  let out = normalizeMathDelimiters(String(content || ''));
+  out = liftQuotedMathBlocks(out);
+  // Flanking first (while `$` is still raw), then escape currency for remark-math.
+  out = fixFlankingEmphasis(out);
+  out = escapeCurrencyDollars(out);
+
+  // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
+  // rest of the message into one giant math/“quote-looking” block (even after
+  // the stream has ended and Continue is showing “Unclosed math block”).
+  const oddBlockMath = hasUnclosedDisplayMath(out);
+  if (opts?.streaming || oddBlockMath) {
+    out = escapeIncompleteBlockMath(out);
+  }
+  if (opts?.streaming) {
+    out = escapeIncompleteInlineMath(out);
+  }
+  return out;
+}
+
+/**
+ * Shrink quote previews: turn lone $$…$$ formulas into inline $…$
+ * (keeps \begin{…} display blocks). Cuts KaTeX display margins in quote chips.
+ */
+export function compactQuoteMath(content: string): string {
+  return String(content || '').replace(/\$\$([\s\S]*?)\$\$/g, (full, expr) => {
+    const inner = String(expr).trim();
+    if (!inner) return full;
+    if (/\\begin\{/.test(inner)) return `\n$$\n${inner}\n$$\n`;
+    return `$${inner.replace(/\s*\n\s*/g, ' ')}$`;
+  });
+}

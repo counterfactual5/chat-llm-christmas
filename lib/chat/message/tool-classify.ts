@@ -110,12 +110,15 @@ export function getToolRunLabelKey(
   const { searching, failed } = state;
 
   if (isResearchPlan) {
+    if (failed) return 'toolFailed';
     return searching ? 'researchPlanning' : 'researchPlanned';
   }
   if (isResearchVerify) {
+    if (failed) return 'toolFailed';
     return searching ? 'researchVerifying' : 'researchVerified';
   }
   if (isResearchWrite) {
+    if (failed) return 'toolFailed';
     return searching ? 'researchWriting' : 'researchWrote';
   }
   if (isClaimReviewer) {

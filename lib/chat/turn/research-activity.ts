@@ -135,7 +135,12 @@ function finishTool(
 function settleOpenTools(m: Message, error?: string): Message {
   const toolRuns = ensureTools(m).map((r) =>
     r.status === 'start'
-      ? { ...r, status: 'done' as const, error: r.error || error || 'Interrupted' }
+      ? {
+          ...r,
+          status: 'done' as const,
+          // Soft-close without a scary error when the pipeline moves on.
+          ...(error ? { error: r.error || error } : r.error ? {} : {}),
+        }
       : r,
   );
   return { ...m, toolRuns };

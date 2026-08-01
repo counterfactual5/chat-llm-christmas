@@ -15,6 +15,9 @@ import {
   Image as ImageIcon,
   Globe,
   ShieldCheck,
+  ListTree,
+  PenLine,
+  BookOpen,
   X,
   Download,
 } from 'lucide-react';
@@ -514,6 +517,12 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         />
                         {searching ? (
                           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+                        ) : isResearchPlan ? (
+                          <ListTree className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isResearchVerify ? (
+                          <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isResearchWrite ? (
+                          <PenLine className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isClaimReviewer ? (
                           <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isNotion ? (
@@ -528,6 +537,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <FileText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isSaveSkill ? (
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isWebRead ? (
+                          <BookOpen className="h-3 w-3 shrink-0 opacity-60" />
                         ) : (
                           <Globe className="h-3 w-3 shrink-0 opacity-60" />
                         )}

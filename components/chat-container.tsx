@@ -1624,8 +1624,10 @@ export default function ChatContainer() {
 
   // After refresh / remount / lost tool-done events, orphan tool runs can stay at
   // status:"start" and spin forever. Close them whenever the session is idle.
+  // Skip while Deep Research is in flight — its tools stay "start" across long LLM calls.
   useEffect(() => {
     if (!chatsHydrated) return;
+    if (deepResearch.busy) return;
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {
@@ -1633,6 +1635,11 @@ export default function ChatContainer() {
         let sessionChanged = false;
         const messages = s.messages.map((m) => {
           if (m.role !== 'assistant') return m;
+          const researchActive =
+            Boolean(m.research?.jobId) &&
+            m.incomplete &&
+            !['done', 'failed', 'cancelled'].includes(String(m.research?.status || ''));
+          if (researchActive) return m;
           const toolsNeedClose = (m.toolRuns || []).some((r) => r.status === 'start');
           const needsInterruptStamp = m.incomplete && !m.truncationReason;
           if (!toolsNeedClose && !needsInterruptStamp) return m;
@@ -1658,7 +1665,7 @@ export default function ChatContainer() {
       });
       return changed ? next : prev;
     });
-  }, [chatsHydrated, loadingBySession]);
+  }, [chatsHydrated, loadingBySession, deepResearch.busy]);
 
   useEffect(() => {
     scrollToBottom();

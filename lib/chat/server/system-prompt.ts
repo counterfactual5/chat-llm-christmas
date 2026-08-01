@@ -31,6 +31,8 @@ export type BuildChatSystemPartsOpts = {
   referenceText: string;
   hasGeneratedImages: boolean;
   hasGeneratedFiles: boolean;
+  /** When Skill Creator is on — id/title list so save_skill can replace. */
+  accountSkillCatalog?: string;
 };
 
 export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
@@ -59,6 +61,9 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
     const content = String(skill?.content || '').trim();
     if (!content) continue;
     systemParts.push(`Active Skill — ${title}:\n${content}`);
+  }
+  if (String(opts.accountSkillCatalog || '').trim()) {
+    systemParts.push(String(opts.accountSkillCatalog).trim());
   }
   const memoryBlock = formatMemoriesForSystemPrompt(
     (opts.memories || [])

@@ -59,4 +59,12 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('This chat already contains image(s) generated');
     expect(parts).toContain('This chat already contains downloadable file(s) created via create_file.');
   });
+
+  it('includes account skill catalog when Skill Creator needs replace targets', () => {
+    const parts = buildChatSystemParts({
+      ...base,
+      accountSkillCatalog: 'Account Skills catalog:\n- id=sk_1 · Demo',
+    });
+    expect(parts.join('\n')).toContain('id=sk_1 · Demo');
+  });
 });

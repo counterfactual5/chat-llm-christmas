@@ -44,7 +44,8 @@ import {
   type ClaimAuditResult,
   type MidTurnCorrection,
 } from '@/lib/tools/review/claim-reviewer';
-import { isSkillCreatorId } from '@/lib/skills/creator';
+import { formatAccountSkillCatalog, isSkillCreatorId } from '@/lib/skills/creator';
+import { SKILLS_API_URL } from '@/lib/tools/save-skill/tool';
 import { jsonError } from '@/lib/chat/server/errors';
 import {
   parseChatRequestBody,
@@ -186,6 +187,25 @@ export async function POST(req: NextRequest) {
     const hasGeneratedFiles = chatMessages.some(
       (m) => m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0,
     );
+    let accountSkillCatalog = '';
+    if (skillCreatorOn && boundUserKey) {
+      try {
+        const catalogRes = await fetch(SKILLS_API_URL, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${boundUserKey}`,
+          },
+          cache: 'no-store',
+        });
+        const catalogJson: any = await catalogRes.json().catch(() => ({}));
+        if (catalogRes.ok && Array.isArray(catalogJson?.data)) {
+          accountSkillCatalog = formatAccountSkillCatalog(catalogJson.data);
+        }
+      } catch {
+        // Catalog is advisory — Skill Creator still works for create-only.
+      }
+    }
     const systemParts = buildChatSystemParts({
       model: requestedModel,
       systemPrompt,
@@ -201,6 +221,7 @@ export async function POST(req: NextRequest) {
       referenceText,
       hasGeneratedImages,
       hasGeneratedFiles,
+      accountSkillCatalog,
     });
 
     type ImageRef = { url?: string; fileId?: string; prompt?: string };

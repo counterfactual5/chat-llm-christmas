@@ -8,7 +8,7 @@ export const SKILL_CREATOR_ID = 'builtin:skill-creator';
 export const SKILL_CREATOR_CONTENT = [
   'You are the one-shot /skill command workflow for this chat product.',
   'Goal: turn the user\'s rough idea into ONE complete, reusable Skill (a system prompt) they can save to their account.',
-  'Stay focused on creating this single Skill. After save_skill succeeds, the command automatically exits.',
+  'Stay focused on creating or replacing this single Skill. After save_skill succeeds, the command automatically exits.',
   '',
   'Interview checklist (ask briefly, batch questions):',
   '1) Purpose & scope — what task/workflow should it handle?',
@@ -17,6 +17,7 @@ export const SKILL_CREATOR_CONTENT = [
   '4) Constraints — what it must/never do, tone, language',
   '5) Output format — templates, structure, length',
   '6) 1–2 anti-examples — what bad output looks like',
+  '7) Create vs replace — if the user wants to overwrite an existing Skill, confirm which one (use the account skill catalog id/title).',
   '',
   'Drafting rules:',
   '- Write a FULL reusable system prompt (role, behavior, constraints, output contract). Never a 3-line sample.',
@@ -27,8 +28,11 @@ export const SKILL_CREATOR_CONTENT = [
   'Saving:',
   '- Before saving, show the draft and ask for explicit confirmation.',
   '- After confirmation, call save_skill exactly once with the final title and content.',
+  '- Create new: pass title + content only.',
+  '- Replace/overwrite an existing Skill: also pass id (preferred) or replace_title from the account skill catalog. Do not create a duplicate when the user asked to replace.',
   '- NEVER claim the Skill is saved unless save_skill returned success with an id — narrating "已保存" without that tool call is a failure.',
-  '- If save_skill fails, preserve the draft and report the exact error. Do not automatically retry; retry only after the user explicitly asks.',
+  '- If save_skill is unavailable or fails, preserve the draft, report the exact error, and tell the user to keep Skill Creator on (/skill) or use sidebar manual add. Do NOT dump the Skill as a downloadable file as a substitute.',
+  '- If save_skill fails, do not automatically retry; retry only after the user explicitly asks.',
 ].join('\n');
 
 export type BuiltinSkill = { id: string; title: string; content: string };
@@ -50,3 +54,22 @@ export function skillSlashName(title: string): string {
   return slug.slice(0, 48) || 'skill';
 }
 
+/** Compact catalog line for /skill replace guidance. */
+export function formatAccountSkillCatalog(
+  skills: Array<{ id?: string; title?: string }>,
+): string {
+  const lines = skills
+    .map((s) => {
+      const id = String(s?.id || '').trim();
+      const title = String(s?.title || '').trim();
+      if (!id || !title) return '';
+      return `- id=${id} · ${title}`;
+    })
+    .filter(Boolean)
+    .slice(0, 80);
+  if (!lines.length) return '';
+  return [
+    'Account Skills catalog (for save_skill replace/overwrite). Prefer id; replace_title only when unique:',
+    ...lines,
+  ].join('\n');
+}

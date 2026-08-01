@@ -1,44 +1,78 @@
 /**
- * Always-on product usage guide for Christmas Chat.
- * Helps the model explain Commands / Skills / tools when users ask how to use the product.
+ * Product usage guide for Christmas Chat.
+ * Short always-on summary + optional detailed block when the user asks how to use the product.
  */
 
-/** High-level map of UI commands and features — not a substitute for the live tool list. */
+/** Detect “how do I use this / what commands exist” style asks. */
+export function wantsProductUsageHelp(text: string): boolean {
+  const t = String(text || '').trim().toLowerCase();
+  if (!t) return false;
+  if (t.length > 400) return false;
+  return (
+    /怎么用|如何使用|使用说明|功能介绍|有什么(命令|功能|能力)|有哪些(命令|功能)|内置命令|产品(怎么|功能)|怎么操作/.test(
+      t,
+    ) ||
+    /what can you do|how (do i|to) use|what (commands|features)|slash commands?|product (help|guide)|help me use/.test(
+      t,
+    )
+  );
+}
+
+/**
+ * Compact always-on map. Live THIS-turn toggles live in activeIntegrationsPrompt /
+ * skillPersistenceGatePrompt — do not duplicate those here.
+ */
 export function productUsageGuidePrompt(): string {
   return [
-    'Christmas Chat — product usage guide (explain this when the user asks how to use the product, what commands exist, or what you can do):',
-    '',
-    'Built-in Commands (composer “/” menu, sidebar Commands, or type the slash yourself):',
-    '- /image <prompt> — Generate an image. CLIENT command (not a chat tool). You cannot call an image-generation tool. Tell the user to type `/image …` or use Commands → Generate image / 生成图片.',
-    '- /skill [brief] — Turn on Skill Creator: interview → draft → save/replace an account Skill with save_skill. Also: Commands → Create with AI / AI 创建 Skill.',
-    '- Request review / 请求审查 (/review in the slash menu) — Run a one-off claim review of the latest assistant answer. Sidebar Commands or “/” menu; do not invent a review tool.',
-    '- Continue reply / 继续回复 — Resume an interrupted assistant reply (sidebar / composer). Not a tool you call.',
-    '',
-    'Skills:',
-    '- Toggle existing Skills in the sidebar Skills list (or attach via “/” skill names). Only ACTIVE Skills are injected as instructions below.',
-    '- Create with AI: `/skill`. Add manually: sidebar Skills → Add manually / 手动添加 (paste a system prompt).',
-    '- AI cannot save/replace Skills unless Skill Creator is on (see the skill persistence gate).',
-    '',
-    'Chat tools (ONLY those present in THIS request’s API tool list — never invent others):',
-    '- create_file — usually available; writes a downloadable text/code file into this chat’s Output panel (not the user’s local disk).',
-    '- web_search / web_read — when web search is enabled for this chat.',
-    '- Notion / GitHub / Gmail / Calendar / Drive — when the user connected OAuth and toggled them on for this chat (sidebar MCP).',
-    '- image_understand — only when the vision pipeline is enabled for text-only models; vision chat models see images natively. Never name internal tool/MCP/backend model ids to the user.',
-    '- save_skill — only while Skill Creator (/skill) is on.',
-    '',
-    'Other UI (point the user; you cannot operate these yourself):',
-    '- Files — account file manager in the sidebar.',
-    '- Memories — durable preferences may be auto-extracted; user manages them in the Memories UI.',
-    '- Attachments — drop/upload into the composer; generated images/files appear in the Output / context panel.',
-    '',
-    'When asked “what can you do?” or “怎么用?”, answer briefly in the user’s language, list the Commands above, and say they can open sidebar Commands or type `/` in the composer.',
+    'Christmas Chat — quick product map (follow the user’s language when explaining):',
+    'Commands (composer “/”, sidebar Commands): /image <prompt> (client image gen — not a chat tool); /skill [brief] (Skill Creator → save_skill); Request review / 请求审查; Continue reply / 继续回复.',
+    'Skills: toggle in sidebar or “/” skill names (only ACTIVE ones apply). Create with AI via /skill; Add manually / 手动添加 to paste a system prompt.',
+    'Tools: only API tool-list entries — typically create_file (Output panel download); web_search/web_read if Tools search is on; MCP if connected+toggled; save_skill only while Skill Creator is on.',
+    'UI (point user; you cannot operate): Files manager, Memories, composer attachments, Output/context panel.',
+    'If the user asks how to use the product or what commands exist, answer from this map (and any detailed guide below) and point them to sidebar Commands or typing `/`.',
+  ].join('\n');
+}
+
+/** Longer reference — inject only when wantsProductUsageHelp(userAsk). */
+export function productUsageGuideDetailPrompt(): string {
+  return [
+    'Christmas Chat — detailed product guide:',
+    '- /image <prompt>: CLIENT command (Commands → Generate image / 生成图片). Never invent an image-generation chat tool.',
+    '- /skill [brief]: enables Skill Creator; after draft confirmation call save_skill (create, or overwrite with id / replace_title). Commands → Create with AI / AI 创建 Skill.',
+    '- Request review (/review in “/” menu): one-off claim review of the latest assistant answer — not a tool you invent.',
+    '- Continue reply: resume an interrupted assistant reply from the UI.',
+    '- Sidebar Tools can disable web search; sidebar MCP enables Notion/GitHub/Google after OAuth. Trust THIS-turn capability list over guesses.',
+    '- create_file writes downloadable text/code into the chat Output panel (not the user’s local disk).',
+    '- Files / Memories / attachments are UI surfaces — guide the user there; do not claim you clicked them.',
   ].join('\n');
 }
 
 /** Always-on memory behavior contract (separate from the optional facts block). */
 export function memoryBehaviorPrompt(): string {
   return [
-    'Account memory behavior: durable preferences/facts may be auto-extracted after turns and edited in the Memories UI.',
-    'You have no memory-write tool. If the user asks you to “remember” something, acknowledge it and note the product may capture it when appropriate — do NOT claim a memory entry was already saved unless it already appears in the Known facts block below.',
+    'Memory: facts may be auto-extracted into the Memories UI. No memory-write tool.',
+    'If asked to “remember” something, acknowledge it — do NOT claim it was saved unless it already appears in Known facts below.',
+  ].join(' ');
+}
+
+/** Short auto-review product status (not the full reviewer rubric). */
+export function autoReviewStatusPrompt(opts: {
+  autoReview: boolean;
+  requestReview: boolean;
+}): string {
+  if (opts.requestReview) {
+    return [
+      'Claim review: the user manually requested a review this turn (Request review / /review).',
+      'Auto-review in the background is separate; do not invent a review tool — the product runs the audit.',
+    ].join(' ');
+  }
+  if (opts.autoReview) {
+    return [
+      'Auto-review is ON for this chat: after replies the product may audit this turn’s claims vs its tool receipts.',
+      'That is product background behavior, not a tool you call. Manual Request review / /review reviews more broadly on demand.',
+    ].join(' ');
+  }
+  return [
+    'Auto-review is OFF for this chat. The user can still run Request review / /review from Commands when they want a claim check.',
   ].join(' ');
 }

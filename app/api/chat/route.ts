@@ -78,6 +78,7 @@ import {
   buildChatSystemParts,
   joinChatSystemParts,
 } from '@/lib/chat/server/system-prompt';
+import { wantsProductUsageHelp } from '@/lib/chat/server/product-guide';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -223,6 +224,7 @@ export async function POST(req: NextRequest) {
       hasGeneratedFiles,
       skillCreatorOn,
       accountSkillCatalog,
+      expandProductGuide: wantsProductUsageHelp(lastUserText(chatMessages)),
     });
 
     type ImageRef = { url?: string; fileId?: string; prompt?: string };

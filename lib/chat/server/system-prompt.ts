@@ -17,7 +17,9 @@ import type { ChatSkillInput } from '@/lib/chat/server/request';
 import { formatMemoriesForSystemPrompt } from '@/lib/memories/prompt';
 import { skillPersistenceGatePrompt } from '@/lib/skills/creator';
 import {
+  autoReviewStatusPrompt,
   memoryBehaviorPrompt,
+  productUsageGuideDetailPrompt,
   productUsageGuidePrompt,
 } from '@/lib/chat/server/product-guide';
 
@@ -40,6 +42,8 @@ export type BuildChatSystemPartsOpts = {
   skillCreatorOn?: boolean;
   /** When Skill Creator is on — id/title list so save_skill can replace. */
   accountSkillCatalog?: string;
+  /** Inject the longer product guide (user asked how to use / what commands). */
+  expandProductGuide?: boolean;
 };
 
 export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
@@ -52,8 +56,17 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   systemParts.push(String(opts.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT);
   systemParts.push(CHAT_OUTPUT_CAPABILITIES_PROMPT);
   systemParts.push(productUsageGuidePrompt());
+  if (opts.expandProductGuide) {
+    systemParts.push(productUsageGuideDetailPrompt());
+  }
   systemParts.push(skillPersistenceGatePrompt(skillCreatorOn));
   systemParts.push(memoryBehaviorPrompt());
+  systemParts.push(
+    autoReviewStatusPrompt({
+      autoReview: Boolean(opts.autoReview),
+      requestReview: Boolean(opts.requestReview),
+    }),
+  );
   if (opts.threadId) {
     systemParts.push(conversationIsolationPrompt(opts.threadId));
   }

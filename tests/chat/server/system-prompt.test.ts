@@ -43,28 +43,33 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('KaTeX math');
     expect(parts).toContain('Mermaid diagrams');
     expect(parts).toContain('Do NOT claim diagrams cannot be rendered');
-    expect(parts).toContain('Only use tools present in the API tool list');
+    expect(parts).toContain('Only use tools present in THIS request');
     expect(parts).toContain('Active Skills are user-selected per conversation');
-    expect(parts).toContain('/image client command');
   });
 
-  it('includes a product usage guide for Commands and features', () => {
+  it('keeps a compact product map always on', () => {
     const parts = buildChatSystemParts(base).join('\n');
 
-    expect(parts).toContain('product usage guide');
-    expect(parts).toContain('/image <prompt>');
+    expect(parts).toContain('quick product map');
+    expect(parts).toContain('/image');
     expect(parts).toContain('/skill');
     expect(parts).toContain('Request review');
     expect(parts).toContain('Continue reply');
-    expect(parts).toContain('Add manually');
     expect(parts).toContain('create_file');
-    expect(parts).toContain('Files — account file manager');
-    expect(parts).toContain('Memories');
-    expect(parts).toContain('Account memory behavior');
-    expect(parts).toContain('no memory-write tool');
+    expect(parts).toContain('No memory-write tool');
+    expect(parts).not.toContain('detailed product guide');
   });
 
-  it('lists create_file and command inventory in active capabilities', () => {
+  it('expands the detailed product guide on demand', () => {
+    const parts = buildChatSystemParts({
+      ...base,
+      expandProductGuide: true,
+    }).join('\n');
+    expect(parts).toContain('detailed product guide');
+    expect(parts).toContain('CLIENT command');
+  });
+
+  it('lists THIS-turn capability flags compactly', () => {
     const parts = buildChatSystemParts({
       ...base,
       skillCreatorOn: false,
@@ -72,10 +77,19 @@ describe('buildChatSystemParts', () => {
       authorizedIntegrations: [],
     }).join('\n');
 
-    expect(parts).toContain('create_file: save downloadable');
+    expect(parts).toContain('THIS-turn capability flags');
     expect(parts).toContain('save_skill: OFF');
-    expect(parts).toContain('web_search / web_read: not enabled');
-    expect(parts).toContain('/image (generate image)');
+    expect(parts).toContain('web_search/web_read: OFF');
+    expect(parts).toContain('create_file: usually ON');
+  });
+
+  it('states auto-review product status', () => {
+    const off = buildChatSystemParts(base).join('\n');
+    expect(off).toContain('Auto-review is OFF');
+
+    const on = buildChatSystemParts({ ...base, autoReview: true }).join('\n');
+    expect(on).toContain('Auto-review is ON');
+    expect(on).toContain('not a tool you call');
   });
 
   it('adds review and generated-output safeguards when requested', () => {
@@ -88,6 +102,7 @@ describe('buildChatSystemParts', () => {
     }).join('\n');
 
     expect(parts).toContain('The user explicitly requested a claim review');
+    expect(parts).toContain('manually requested a review');
     expect(parts).toContain('This chat already contains image(s) generated');
     expect(parts).toContain('This chat already contains downloadable file(s) created via create_file.');
   });
@@ -99,7 +114,7 @@ describe('buildChatSystemParts', () => {
       accountSkillCatalog: 'Account Skills catalog:\n- id=sk_1 · Demo',
     });
     expect(parts.join('\n')).toContain('id=sk_1 · Demo');
-    expect(parts.join('\n')).toContain('Skill Creator is ON');
+    expect(parts.join('\n')).toContain('Skill Creator ON');
     expect(parts.join('\n')).toContain('save_skill: ON');
   });
 
@@ -108,9 +123,9 @@ describe('buildChatSystemParts', () => {
       ...base,
       skillCreatorOn: false,
     }).join('\n');
-    expect(parts).toContain('save_skill is NOT available');
-    expect(parts).toContain('type /skill');
-    expect(parts).toContain('do NOT dump the Skill as a downloadable file');
+    expect(parts).toContain('Skill Creator OFF');
+    expect(parts).toContain('/skill');
+    expect(parts).toContain('dump a file as a substitute');
   });
 });
 
@@ -120,7 +135,6 @@ describe('cursorWebChatPrompt', () => {
     expect(off).toContain('本轮未启用网页搜索');
     expect(off).not.toContain('公开网页资料请用 web_search');
     expect(off).toContain('create_file');
-    expect(off).toContain('/image');
   });
 
   it('mentions web_search when search is on', () => {

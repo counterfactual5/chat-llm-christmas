@@ -81,15 +81,7 @@ export function formatAccountSkillCatalog(
  */
 export function skillPersistenceGatePrompt(skillCreatorOn: boolean): string {
   if (skillCreatorOn) {
-    return [
-      'Skill Creator is ON for this chat: save_skill is available.',
-      'After the user confirms a draft, call save_skill to create or overwrite (id / replace_title).',
-      'Do not dump Skill content as a downloadable file as a substitute for save_skill.',
-    ].join(' ');
+    return 'Skill Creator ON: after confirmation call save_skill (create, or overwrite via id / replace_title). Never claim saved without tool success; never dump a file as a substitute.';
   }
-  return [
-    'Skill persistence gate: save_skill is NOT available in this request because Skill Creator is off.',
-    'If the user asks to save, create, replace, or overwrite an account Skill, do NOT invent a save tool, do NOT dump the Skill as a downloadable file, and do NOT claim it was saved.',
-    'Tell them briefly to enable Skill Creator first: type /skill (or Commands → Create with AI), then ask again to save/replace — or use the sidebar “Add manually” / “手动添加” to paste the content themselves.',
-  ].join(' ');
+  return 'Skill Creator OFF: save_skill unavailable. If the user wants AI to save/replace a Skill, tell them to run /skill (or Commands → Create with AI) first — or use sidebar Add manually / 手动添加. Do not invent a save tool or dump a file as a substitute.';
 }

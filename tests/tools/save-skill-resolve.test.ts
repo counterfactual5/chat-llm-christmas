@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { formatAccountSkillCatalog, skillPersistenceGatePrompt } from '@/lib/skills/creator';
+import {
+  formatAccountSkillCatalog,
+  skillPersistenceGatePrompt,
+} from '@/lib/skills/creator';
 import { resolveSaveSkillTarget } from '@/lib/tools/save-skill/resolve-target';
 
 describe('resolveSaveSkillTarget', () => {
@@ -96,11 +99,11 @@ describe('formatAccountSkillCatalog', () => {
 describe('skillPersistenceGatePrompt', () => {
   it('asks the user to enable /skill when creator is off', () => {
     const off = skillPersistenceGatePrompt(false);
-    expect(off).toContain('save_skill is NOT available');
+    expect(off).toContain('Skill Creator OFF');
     expect(off).toContain('/skill');
     expect(off).toContain('手动添加');
     const on = skillPersistenceGatePrompt(true);
-    expect(on).toContain('Skill Creator is ON');
-    expect(on).toContain('save_skill is available');
+    expect(on).toContain('Skill Creator ON');
+    expect(on).toContain('save_skill');
   });
 });

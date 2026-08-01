@@ -12,7 +12,6 @@ import {
   Check,
   X,
   Blocks,
-  FolderOpen,
   FileText,
   SlidersHorizontal,
   ChevronDown,
@@ -121,7 +120,6 @@ export function ChatSidebar({
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
-  const [filesExpanded, setFilesExpanded] = useState(false);
   const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
@@ -226,7 +224,6 @@ export function ChatSidebar({
                     setSkillsExpanded(false);
                     setMcpExpanded(false);
                     setToolsExpanded(false);
-                    setFilesExpanded(false);
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
                 >
@@ -329,7 +326,6 @@ export function ChatSidebar({
                     setMcpExpanded(false);
                     setToolsExpanded(false);
                     setCommandsExpanded(false);
-                    setFilesExpanded(false);
                     if (skills.length === 0) onFetchSkills();
                   }}
                   className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -417,7 +413,6 @@ export function ChatSidebar({
                   setSkillsExpanded(false);
                   setToolsExpanded(false);
                   setCommandsExpanded(false);
-                  setFilesExpanded(false);
                   onFetchIntegrations();
                 }}
                 className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
@@ -482,7 +477,6 @@ export function ChatSidebar({
                   setMcpExpanded(false);
                   setSkillsExpanded(false);
                   setCommandsExpanded(false);
-                  setFilesExpanded(false);
                 }}
                 className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
               >
@@ -549,56 +543,21 @@ export function ChatSidebar({
               </AnimatePresence>
               </div>
 
-              {/* Files — account-scoped file storage */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isAccountBound) {
-                      onOpenLoginModal();
-                      return;
-                    }
-                    setFilesExpanded((v) => !v);
-                    setMcpExpanded(false);
-                    setSkillsExpanded(false);
-                    setToolsExpanded(false);
-                    setCommandsExpanded(false);
-                  }}
-                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2 font-medium">
-                    <FileText className="h-4 w-4 text-stone-500" />
-                    Files
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      'h-3.5 w-3.5 text-stone-400 transition-transform',
-                      filesExpanded && isAccountBound ? 'rotate-180' : '',
-                    )}
-                  />
-                </button>
-                <AnimatePresence initial={false}>
-                  {isAccountBound && filesExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden pl-2"
-                    >
-                      <div className="space-y-0.5 pb-1">
-                        <button
-                          type="button"
-                          onClick={onOpenFilesModal}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">Manage files</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {/* Files — account-wide asset management. Workspace uploads/knowledge live elsewhere. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isAccountBound) {
+                    onOpenLoginModal();
+                    return;
+                  }
+                  onOpenFilesModal();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+              >
+                <FileText className="h-4 w-4 text-stone-500" />
+                <span className="font-medium">Files</span>
+              </button>
             </div>
           </div>
 

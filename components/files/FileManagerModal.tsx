@@ -1,15 +1,21 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Download, FileText, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
+import { Download, FileText, Image as ImageIcon, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatFileSize } from '@/components/chat/panels/OutputPanel';
+import { ImagePreviewOverlay } from '@/components/files/AttachmentImageThumb';
+import {
+  FilePreviewOverlay,
+  type FilePreviewPayload,
+} from '@/components/files/FilePreviewOverlay';
 
 export type AccountFile = {
   id: string;
   filename?: string;
   bytes?: number;
   purpose?: string;
+  mime?: string;
   created_at?: number;
   createdAt?: number;
 };
@@ -20,7 +26,26 @@ type FileManagerModalProps = {
 };
 
 function fileCreatedAt(file: AccountFile): number {
-  return Number(file.created_at || file.createdAt || 0);
+  const raw = Number(file.created_at || file.createdAt || 0);
+  // The portal returns Unix seconds; accept milliseconds too for compatibility.
+  return raw > 0 && raw < 10_000_000_000 ? raw * 1_000 : raw;
+}
+
+function shortFileId(file: AccountFile): string {
+  return String(file.id || '').replace(/^file_/, '').slice(0, 8);
+}
+
+function isImageFile(file: AccountFile): boolean {
+  return String(file.mime || '').startsWith('image/') || /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.filename || '');
+}
+
+function isTextFile(file: AccountFile): boolean {
+  return (
+    String(file.mime || '').startsWith('text/') ||
+    /\.(?:md|markdown|txt|json|csv|tsv|ya?ml|js|jsx|ts|tsx|py|html?|css|sql|xml|toml|ini|sh)$/i.test(
+      file.filename || '',
+    )
+  );
 }
 
 function formatDate(timestamp: number): string {
@@ -37,6 +62,8 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
   const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState<AccountFile | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [textPreview, setTextPreview] = useState<FilePreviewPayload | null>(null);
 
   const loadFiles = async () => {
     setLoading(true);
@@ -80,6 +107,33 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
       setError(cause instanceof Error ? cause.message : 'Failed to delete file');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const previewFile = async (file: AccountFile) => {
+    const url = `/api/files/${encodeURIComponent(file.id)}`;
+    if (isImageFile(file)) {
+      setImagePreview(url);
+      return;
+    }
+    if (!isTextFile(file)) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setError('');
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to load preview (${response.status})`);
+      const content = await response.text();
+      setTextPreview({
+        id: file.id,
+        name: file.filename || file.id,
+        mimeType: file.mime || 'text/plain',
+        content,
+        size: Number(file.bytes || 0),
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to load preview');
     }
   };
 
@@ -132,16 +186,25 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
             <ul className="space-y-1">
               {files.map((file) => (
                 <li key={file.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-stone-50 dark:hover:bg-stone-800/60">
-                  <FileText className="h-5 w-5 shrink-0 text-stone-400" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-stone-800 dark:text-stone-200">
+                  {isImageFile(file) ? (
+                    <ImageIcon className="h-5 w-5 shrink-0 text-stone-400" />
+                  ) : (
+                    <FileText className="h-5 w-5 shrink-0 text-stone-400" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void previewFile(file)}
+                    className="min-w-0 flex-1 text-left"
+                    title="Preview"
+                  >
+                    <p className="truncate text-sm font-medium text-stone-800 hover:underline dark:text-stone-200">
                       {file.filename || file.id}
                     </p>
                     <p className="truncate text-xs text-stone-500 dark:text-stone-400">
                       {formatFileSize(Number(file.bytes || 0)) || 'Unknown size'} · {formatDate(fileCreatedAt(file))}
-                      {file.purpose ? ` · ${file.purpose}` : ''}
+                      {file.purpose ? ` · ${file.purpose}` : ''} · ID {shortFileId(file)}
                     </p>
-                  </div>
+                  </button>
                   <a
                     href={`/api/files/${encodeURIComponent(file.id)}`}
                     download={file.filename || undefined}
@@ -164,6 +227,13 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
           )}
         </div>
       </section>
+
+      <ImagePreviewOverlay src={imagePreview} onClose={() => setImagePreview(null)} />
+      <FilePreviewOverlay
+        file={textPreview}
+        onClose={() => setTextPreview(null)}
+        onDownload={(file) => window.open(`/api/files/${encodeURIComponent(file.id)}`, '_blank', 'noopener,noreferrer')}
+      />
 
       {pendingDelete && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">

@@ -403,57 +403,6 @@ export function ChatSidebar({
                 </AnimatePresence>
               </div>
 
-              {/* Files — account-scoped file storage */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isAccountBound) {
-                      onOpenLoginModal();
-                      return;
-                    }
-                    setFilesExpanded((v) => !v);
-                    setMcpExpanded(false);
-                    setSkillsExpanded(false);
-                    setToolsExpanded(false);
-                    setCommandsExpanded(false);
-                  }}
-                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2 font-medium">
-                    <FileText className="h-4 w-4 text-stone-500" />
-                    Files
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      'h-3.5 w-3.5 text-stone-400 transition-transform',
-                      filesExpanded && isAccountBound ? 'rotate-180' : '',
-                    )}
-                  />
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {isAccountBound && filesExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden pl-2"
-                    >
-                      <div className="space-y-0.5 pb-1">
-                        <button
-                          type="button"
-                          onClick={() => onOpenFilesModal()}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">Manage files</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
 
               {/* MCP — same collapsible pattern as Skills; click Notion for connect/disconnect card */}
               <div>
@@ -598,6 +547,57 @@ export function ChatSidebar({
                   </motion.div>
                 )}
               </AnimatePresence>
+              </div>
+
+              {/* Files — account-scoped file storage */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAccountBound) {
+                      onOpenLoginModal();
+                      return;
+                    }
+                    setFilesExpanded((v) => !v);
+                    setMcpExpanded(false);
+                    setSkillsExpanded(false);
+                    setToolsExpanded(false);
+                    setCommandsExpanded(false);
+                  }}
+                  className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+                >
+                  <span className="flex items-center gap-2 font-medium">
+                    <FileText className="h-4 w-4 text-stone-500" />
+                    Files
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      'h-3.5 w-3.5 text-stone-400 transition-transform',
+                      filesExpanded && isAccountBound ? 'rotate-180' : '',
+                    )}
+                  />
+                </button>
+                <AnimatePresence initial={false}>
+                  {isAccountBound && filesExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden pl-2"
+                    >
+                      <div className="space-y-0.5 pb-1">
+                        <button
+                          type="button"
+                          onClick={onOpenFilesModal}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">Manage files</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>

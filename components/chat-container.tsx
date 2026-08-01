@@ -13,6 +13,7 @@
  *  Client SSE consumer             lib/chat/stream/client.ts
  *  Session normalize / LWW merge   lib/chat/session/store.ts
  *  Message list / composer / …     components/chat/*
+ *  IME guards / file download      lib/chat/composer/*
  *  /api/chat server                app/api/chat/route.ts (+ lib/chat/server/)
  */
 
@@ -57,6 +58,11 @@ import {
   type AuthModalMode,
 } from '@/lib/chat/account/oauth-return';
 import { enableGoogleSurfacesOnNewestSession } from '@/lib/chat/integrations/client';
+import { bindImeGuards, isEnterSubmitBlockedByIme } from '@/lib/chat/composer/ime';
+import {
+  downloadGeneratedFile,
+  downloadGeneratedImage,
+} from '@/lib/chat/composer/download';
 import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
@@ -631,49 +637,6 @@ export default function ChatContainer() {
     }
     return out.slice().reverse();
   }, [messages]);
-
-
-
-  const downloadGeneratedImage = async (entry: GeneratedImageEntry) => {
-    try {
-      const res = await fetch(entry.url);
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = `image-${entry.timestamp}.png`;
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      window.open(entry.url, '_blank', 'noopener,noreferrer');
-    }
-  };
-
-  const downloadGeneratedFile = async (entry: GeneratedFileEntry) => {
-    try {
-      let blob: Blob;
-      if (typeof entry.content === 'string') {
-        blob = new Blob([entry.content], {
-          type: entry.mimeType || 'text/plain;charset=utf-8',
-        });
-      } else if (entry.url && !entry.url.startsWith('local://')) {
-        const res = await fetch(entry.url);
-        blob = await res.blob();
-      } else {
-        throw new Error('No file content available');
-      }
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = entry.name || `file-${entry.createdAt}`;
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      if (entry.url && !entry.url.startsWith('local://')) {
-        window.open(entry.url, '_blank', 'noopener,noreferrer');
-      }
-    }
-  };
 
   const isEmptyAssistantShell = (m: Message) =>
     m.role === 'assistant' &&
@@ -1722,32 +1685,6 @@ export default function ChatContainer() {
     a.click();
     URL.revokeObjectURL(url);
   };
-
-  const isEnterSubmitBlockedByIme = (
-    e: React.KeyboardEvent,
-    composingRef: React.MutableRefObject<boolean>,
-    enterLockRef: React.MutableRefObject<boolean>,
-  ) =>
-    e.nativeEvent.isComposing ||
-    composingRef.current ||
-    enterLockRef.current ||
-    e.keyCode === 229;
-
-  const bindImeGuards = (
-    composingRef: React.MutableRefObject<boolean>,
-    enterLockRef: React.MutableRefObject<boolean>,
-  ) => ({
-    onCompositionStart: () => {
-      composingRef.current = true;
-    },
-    onCompositionEnd: () => {
-      composingRef.current = false;
-      enterLockRef.current = true;
-      window.setTimeout(() => {
-        enterLockRef.current = false;
-      }, 30);
-    },
-  });
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (slashMenuItems.length > 0) {

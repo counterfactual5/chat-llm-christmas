@@ -56,6 +56,7 @@ describe('tool claim detection', () => {
       '模型不得声称已经保存 Skill。',
       '说明：文件卡片用于展示 create_file 的成功结果。',
       '例如，已创建 report.pdf 可以作为成功提示。',
+      '我可以先用 create_file 把 Skill 内容导出为 .md 文件保存到本地。',
     ];
 
     for (const text of cases) {

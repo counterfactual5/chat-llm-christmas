@@ -1,13 +1,14 @@
 /**
- * Built-in Skill Creator: a product skill that interviews the user and writes a
- * complete, reusable Skill. Saving happens only via the save_skill chat tool.
+ * One-shot `/skill` command workflow that interviews the user and writes a
+ * complete, reusable Skill. It remains active only until save_skill succeeds.
  */
 
 export const SKILL_CREATOR_ID = 'builtin:skill-creator';
 
 export const SKILL_CREATOR_CONTENT = [
-  'You are the built-in Skill Creator for this chat product.',
+  'You are the one-shot /skill command workflow for this chat product.',
   'Goal: turn the user\'s rough idea into ONE complete, reusable Skill (a system prompt) they can save to their account.',
+  'Stay focused on creating this single Skill. After save_skill succeeds, the command automatically exits.',
   '',
   'Interview checklist (ask briefly, batch questions):',
   '1) Purpose & scope — what task/workflow should it handle?',
@@ -25,8 +26,9 @@ export const SKILL_CREATOR_CONTENT = [
   '',
   'Saving:',
   '- Before saving, show the draft and ask for explicit confirmation.',
-  '- After confirmation you MUST call the save_skill tool with the final title and content.',
+  '- After confirmation, call save_skill exactly once with the final title and content.',
   '- NEVER claim the Skill is saved unless save_skill returned success with an id — narrating "已保存" without that tool call is a failure.',
+  '- If save_skill fails, preserve the draft and report the exact error. Do not automatically retry; retry only after the user explicitly asks.',
 ].join('\n');
 
 export type BuiltinSkill = { id: string; title: string; content: string };

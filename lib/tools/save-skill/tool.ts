@@ -1,7 +1,7 @@
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 
-const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/skills';
+export const SKILLS_API_URL = 'https://llm.christmas/portal/chat/skills';
 
 function skillCreatorActive(ctx: ToolRuntimeContext): boolean {
   const skills = ctx.requestSkills || [];
@@ -33,7 +33,7 @@ export function createSaveSkillTool(): ChatTool {
       },
     },
     systemPrompt:
-      'When the Skill Creator draft is confirmed by the user, call save_skill with the final title and full content. Saving without tool success is a failure.',
+      'When the /skill draft is confirmed, call save_skill exactly once with the final title and full content. Saving without tool success is a failure. If it fails, report the exact error and wait for the user before retrying.',
     enabled: (flags) => flags.integrations.includes('skill-creator'),
     async execute({ rawArguments }, ctx) {
       if (!skillCreatorActive(ctx)) {
@@ -60,7 +60,7 @@ export function createSaveSkillTool(): ChatTool {
         if (!title || !content) {
           throw new Error('save_skill requires non-empty title and content');
         }
-        const res = await fetch(MAIN_SITE_BASE, {
+        const res = await fetch(SKILLS_API_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

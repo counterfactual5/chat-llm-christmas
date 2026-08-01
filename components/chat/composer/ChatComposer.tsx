@@ -38,7 +38,7 @@ import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message, ModelOption, SkillItem } from '@/lib/chat/types';
-import { BUILTIN_SKILLS, skillSlashName } from '@/lib/skills/creator';
+import { skillSlashName } from '@/lib/skills/creator';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
 import {
   ComposerQueuePanel,
@@ -640,6 +640,28 @@ export function ChatComposer(props: ChatComposerProps) {
                           <button
                             type="button"
                             onClick={() => {
+                              if (!isAccountBound) {
+                                setIsSkillPickerOpen(false);
+                                setPlusFlyout(null);
+                                openLoginModal();
+                                return;
+                              }
+                              setIsSkillPickerOpen(false);
+                              setPlusFlyout(null);
+                              setInput('/skill ');
+                              textareaRef.current?.focus();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                          >
+                            <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+                            <span className="min-w-0 flex-1">创建 Skill</span>
+                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                              /skill
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
                               setIsSkillPickerOpen(false);
                               setPlusFlyout(null);
                               void requestClaimReview();
@@ -698,26 +720,6 @@ export function ChatComposer(props: ChatComposerProps) {
                           </button>
                         ) : (
                           <>
-                            {BUILTIN_SKILLS.map((skill) => {
-                              const on = activeSkillIds.includes(skill.id);
-                              return (
-                                <button
-                                  key={skill.id}
-                                  type="button"
-                                  onClick={() => toggleSkill(skill.id)}
-                                  className={cn(
-                                    'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm',
-                                    on
-                                      ? 'bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100'
-                                      : 'text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800',
-                                  )}
-                                >
-                                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-500" />
-                                  <span className="min-w-0 flex-1 truncate">{skill.title}</span>
-                                  {on && <Check className="h-3.5 w-3.5 shrink-0 text-stone-500" />}
-                                </button>
-                              );
-                            })}
                             {skills.length === 0 ? null : (
                               skills.map((skill) => {
                                 const on = activeSkillIds.includes(skill.id);

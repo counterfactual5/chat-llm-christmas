@@ -49,6 +49,8 @@ export type StreamChatDeps = {
   getActiveSessionId: () => string;
   scrollToBottom: () => void;
   fetchSkills: () => void | Promise<void>;
+  /** One-shot Skill Creator command ends after save_skill succeeds. */
+  onSkillSaved: (sessionId: string) => void;
   onGeneratedFileForActiveSession: () => void;
   onWebSourcesUpdated: (opts: {
     openContextPanel: boolean;
@@ -384,6 +386,7 @@ export async function streamChatResponse(
             !parsed.tool.error
           ) {
             void deps.fetchSkills();
+            deps.onSkillSaved(sessionId);
           }
         }
         if (parsed.file_created && typeof parsed.file_created === 'object') {

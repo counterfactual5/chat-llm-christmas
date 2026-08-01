@@ -86,7 +86,11 @@ import { withMarkedAssistantIncomplete } from '@/lib/chat/session/assistant-muta
 import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream/client';
 import { cn } from '@/lib/utils';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
-import { BUILTIN_SKILLS, isSkillCreatorId, skillSlashName } from '@/lib/skills/creator';
+import {
+  BUILTIN_SKILLS,
+  SKILL_CREATOR_ID,
+  skillSlashName,
+} from '@/lib/skills/creator';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import {
@@ -416,7 +420,6 @@ export default function ChatContainer() {
   const activeSkillIds = activeSession?.skillIds || [];
   const activeMcpIds = activeSession?.mcpIds || [];
   const activeAutoReview = activeSession?.autoReview ?? true;
-  const skillCreatorActive = activeSkillIds.some(isSkillCreatorId);
   const setActiveAutoReview = (v: boolean) => {
     setSessions((prev) =>
       prev.map((s) => (s.id === activeSessionId ? { ...s, autoReview: v } : s)),
@@ -588,8 +591,11 @@ export default function ChatContainer() {
   const activeSkills = useMemo(
     () =>
       activeSkillIds
-        .map((id) => skills.find((s) => s.id === id))
-        .filter((s): s is SkillItem => Boolean(s)),
+        .map((id) =>
+          BUILTIN_SKILLS.find((skill) => skill.id === id) ||
+          skills.find((skill) => skill.id === id),
+        )
+        .filter((skill): skill is SkillItem => Boolean(skill)),
     [activeSkillIds, skills],
   );
 
@@ -827,6 +833,19 @@ export default function ChatContainer() {
         hint: t('imageHint'),
       });
     }
+    const skillPrefix =
+      slashQuery === '' ||
+      ('skill'.startsWith(slashQuery) && slashQuery !== 'skill') ||
+      ('skill-create'.startsWith(slashQuery) && slashQuery !== 'skill-create');
+    if (skillPrefix) {
+      items.push({
+        kind: 'command',
+        id: 'skill-create',
+        title: '创建 Skill',
+        insert: '/skill ',
+        hint: '描述用途与要求',
+      });
+    }
     if (isAccountBound) {
       for (const s of skills) {
         const name = skillSlashName(s.title);
@@ -844,6 +863,15 @@ export default function ChatContainer() {
 
   const consumeSlashItem = (item: SlashMenuItem) => {
     if (item.kind === 'command') {
+      if (item.id === 'skill-create') {
+        if (!isAccountBound) {
+          openLoginModal();
+          return;
+        }
+        setActiveSkillIds((prev) =>
+          prev.includes(SKILL_CREATOR_ID) ? prev : [...prev, SKILL_CREATOR_ID],
+        );
+      }
       setInput((prev) =>
         prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? `\n${item.insert}` : item.insert)),
       );
@@ -1027,6 +1055,21 @@ export default function ChatContainer() {
         getActiveSessionId: () => activeSessionIdRef.current,
         scrollToBottom,
         fetchSkills,
+        onSkillSaved: (savedSessionId) => {
+          setSessions((prev) =>
+            prev.map((session) =>
+              session.id === savedSessionId
+                ? {
+                    ...session,
+                    skillIds: (session.skillIds || []).filter(
+                      (id) => id !== SKILL_CREATOR_ID,
+                    ),
+                    updatedAt: Date.now(),
+                  }
+                : session,
+            ),
+          );
+        },
         onGeneratedFileForActiveSession: () => {
           setPicturesExpanded(true);
           setOutputGroupsOpen((prev) => ({ ...prev, files: true }));

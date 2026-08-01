@@ -34,7 +34,7 @@ function proseOutsideCodeExamples(text: string): string {
 }
 
 const NON_OPERATIONAL_PREFIX_RE =
-  /^\s*(?:#{1,6}\s*)?(?:示例|例如|比如|举例|反例|错误(?:示例)?|正确(?:示例)?|注意|说明|规则|要求|约束|流程|步骤|模板|格式|伪代码|教程|用法|建议|如果|若|假如|假设|当.+时|可(?:以|用于)|应(?:当|该)|需要|必须|不得|不要|禁止|避免|推荐|用户可以|模型可以|the example|example|anti-example|if\b|when\b|should\b|must\b|never\b|do not\b)/i;
+  /^\s*(?:#{1,6}\s*)?(?:示例|例如|比如|举例|反例|错误(?:示例)?|正确(?:示例)?|注意|说明|规则|要求|约束|流程|步骤|模板|格式|伪代码|教程|用法|建议|如果|若|假如|假设|当.+时|可(?:以|用于)|应(?:当|该)|需要|必须|不得|不要|禁止|避免|推荐|我(?:可以|能够|能)(?:先|再|帮你)?|用户可以|模型可以|the example|example|anti-example|if\b|when\b|should\b|must\b|never\b|do not\b|I can\b|we can\b)/i;
 
 function operationalSegments(text: string): string[] {
   return proseOutsideCodeExamples(text)

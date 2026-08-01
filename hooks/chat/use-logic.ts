@@ -16,6 +16,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Message, ChatSession } from '@/lib/chat/types';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
+import { parseSkillCommand } from '@/lib/chat/turn/skill-command';
+import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { useLocale } from '@/lib/i18n';
 import { formatQuotedMessage } from '@/lib/chat/message/quotes';
 import { toApiMessages, ingestedToMessageImages } from '@/lib/chat/message/api-messages';
@@ -215,8 +217,35 @@ export function useChatLogic(props: UseChatLogicProps) {
   const enqueueOrSubmit = (overrideInput?: string, baseMessagesOverride?: Message[]) => {
     const fromComposer = overrideInput == null;
     const raw = overrideInput ?? input;
+    const skillRequest = parseSkillCommand(raw);
+    if (skillRequest !== null) {
+      if (!isAccountBound) {
+        openLoginModal();
+        return;
+      }
+      setSessions((prev) => {
+        const next = prev.map((session) =>
+          session.id === activeSessionId
+            ? {
+                ...session,
+                skillIds: (session.skillIds || []).includes(SKILL_CREATOR_ID)
+                  ? session.skillIds
+                  : [...(session.skillIds || []), SKILL_CREATOR_ID],
+                updatedAt: Date.now(),
+              }
+            : session,
+        );
+        // handleSubmit reads this ref immediately after command parsing.
+        sessionsRef.current = next;
+        return next;
+      });
+    }
+    const commandText =
+      skillRequest !== null
+        ? skillRequest || '请开始创建一个新的 Skill。先简洁询问我用途、触发场景、约束和期望输出格式。'
+        : raw;
     const quotes = fromComposer ? quotedSelections : [];
-    const textToSend = formatQuotedMessage(raw, quotes);
+    const textToSend = formatQuotedMessage(commandText, quotes);
     const hasPending = fromComposer && attachments.length > 0;
     if (!textToSend.trim() && !hasPending) return;
     const sessionId = activeSessionId;

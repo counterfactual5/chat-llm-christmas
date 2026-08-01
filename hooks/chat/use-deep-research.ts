@@ -10,6 +10,7 @@ import type { ChatSession, Message } from '@/lib/chat/types';
 import {
   applyResearchEvent,
   createResearchAssistantMessage,
+  humanizeResearchError,
   withResearchReport,
 } from '@/lib/chat/turn/research-activity';
 
@@ -131,6 +132,7 @@ export function useDeepResearch(opts: {
       let uiLive = !deferUi;
       let sawEvent = false;
       let catchUpTimer: ReturnType<typeof setTimeout> | null = null;
+      let reattachAfterDrop = false;
 
       const commitCatchUp = () => {
         if (uiLive) return;
@@ -272,12 +274,12 @@ export function useDeepResearch(opts: {
             withResearchReport(m, finalJob.reportMarkdown || '', finalJob.reportFile),
           );
         } else if (finalJob?.status === 'failed') {
-          const msg = finalJob.error || 'Research failed';
+          const msg = humanizeResearchError(finalJob.error || 'Research failed');
           setError(msg);
           patchAssistant(setSessions, sessionId, assistantId, (m) =>
             applyResearchEvent(m, {
               kind: 'error',
-              payload: { message: msg },
+              payload: { message: finalJob.error || msg },
             }),
           );
         }
@@ -294,17 +296,61 @@ export function useDeepResearch(opts: {
           }));
           return;
         }
-        // Stream drop ≠ job failure — server may still be running. Keep last
-        // research.status so Continue can reattach instead of starting over.
+        // Stream drop ≠ job failure — server may still be running. Re-check
+        // and reattach instead of falsely showing "Reply was interrupted".
+        const remote = await refreshJob(jobId).catch(() => null);
+        const running = new Set([
+          'queued',
+          'planning',
+          'searching',
+          'synthesizing',
+          'verifying',
+          'writing',
+        ]);
+        if (remote && running.has(String(remote.status))) {
+          setError(null);
+          patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+            ...m,
+            incomplete: false,
+            truncationReason: undefined,
+            research: m.research
+              ? { ...m.research, status: String(remote.status) }
+              : m.research,
+          }));
+          reattachAfterDrop = true;
+          return;
+        }
+        if (remote?.status === 'done' && remote.reportMarkdown) {
+          patchAssistant(setSessions, sessionId, assistantId, (m) =>
+            withResearchReport(m, remote.reportMarkdown || '', remote.reportFile),
+          );
+          return;
+        }
+        if (remote?.status === 'failed') {
+          const msg = humanizeResearchError(remote.error || 'Research failed');
+          setError(msg);
+          patchAssistant(setSessions, sessionId, assistantId, (m) =>
+            applyResearchEvent(m, {
+              kind: 'error',
+              payload: { message: remote.error || msg },
+            }),
+          );
+          return;
+        }
         const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
+        setError(humanizeResearchError(msg));
         patchAssistant(setSessions, sessionId, assistantId, (m) => ({
           ...m,
           incomplete: true,
-          truncationReason: msg || 'Research stream interrupted',
+          truncationReason: humanizeResearchError(msg) || 'Research stream interrupted',
         }));
       } finally {
         if (catchUpTimer) clearTimeout(catchUpTimer);
+        if (reattachAfterDrop) {
+          // Job still running — reconnect SSE without clearing the busy state.
+          void listen(jobId, sessionId, assistantId);
+          return;
+        }
         setBusy(false);
         endLoading(sessionId);
         if (activeRef.current?.jobId === jobId) activeRef.current = null;

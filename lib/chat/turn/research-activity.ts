@@ -556,12 +556,32 @@ export function applyResearchEvent(
     return {
       ...m,
       incomplete: true,
-      truncationReason: msg,
+      truncationReason: humanizeResearchError(msg),
       research: m.research ? { ...m.research, status: 'failed' } : m.research,
     };
   }
 
+  if (kind === 'heartbeat') {
+    // Keep-alive only — do not mutate timeline.
+    return m;
+  }
+
   return m;
+}
+
+/** Turn gateway HTML / 524 noise into a short user-facing reason. */
+export function humanizeResearchError(raw: string): string {
+  const msg = String(raw || '').trim();
+  if (!msg) return 'Research failed';
+  if (/LLM HTTP 524|524 non-JSON|Cloudflare|A timeout occurred/i.test(msg)) {
+    return '模型网关超时（524）。点 Continue 可从已保存进度继续。';
+  }
+  if (/LLM HTTP 502|LLM HTTP 503|LLM HTTP 504/i.test(msg)) {
+    return '模型网关暂时不可用。点 Continue 可重试。';
+  }
+  // Strip HTML dumped after "non-JSON:"
+  const cut = msg.split(/non-JSON:/i)[0].trim();
+  return (cut || msg).slice(0, 240);
 }
 
 /** Seed an empty assistant bubble that will receive research events. */

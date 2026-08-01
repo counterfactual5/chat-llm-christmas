@@ -42,8 +42,11 @@ export function linkifyResearchCitations(
     },
   );
 
-  // Inline [S1] not already a markdown link, and not `[S1] [title](url)`.
-  text = text.replace(/\[S(\d+)\](?!\(|\s*\[)/g, (full, num) => {
+  // Inline [Sn]: link each citation, including adjacent [S8][S10].
+  // Skip source-list form "[Sn] [title](url)".
+  text = text.replace(/\[S(\d+)\](?!\()/g, (full, num, offset, whole) => {
+    const rest = whole.slice(offset + full.length);
+    if (/^ \[[^\]]+\]\(/.test(rest)) return full;
     const url = sourceUrls.get(Number(num));
     if (!url) return full;
     return `[S${num}](${url})`;

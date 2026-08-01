@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FilePreviewContent } from '@/components/files/FilePreviewOverlay';
 import { useLocale } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import type { GeneratedFileEntry } from './OutputPanel';
 
 export type ChatPreviewPanelProps = {
@@ -53,11 +54,16 @@ export function ChatPreviewPanel({
           transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
           className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col overflow-hidden"
         >
-          <div className="flex h-14 items-center justify-between gap-2 px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
-            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-700 dark:text-stone-300">
+          <div className="relative flex h-14 items-center justify-center gap-2 px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
+            <span
+              className={cn(
+                'pointer-events-none absolute truncate text-center text-sm font-semibold text-stone-700 dark:text-stone-300',
+                file ? 'inset-x-36' : 'inset-x-12',
+              )}
+            >
               {file?.name || t('previewPanel')}
             </span>
-            <div className="flex shrink-0 items-center gap-0.5">
+            <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
               {file && (
                 <>
                   <Button

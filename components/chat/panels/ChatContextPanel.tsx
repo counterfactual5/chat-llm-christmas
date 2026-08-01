@@ -123,9 +123,14 @@ export function ChatContextPanel({
           exit={{ width: 0, opacity: 0 }}
           className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col"
         >
-          <div className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
+          <div className="relative flex h-14 items-center justify-center px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
             <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">Context</span>
-            <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-stone-500">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="absolute right-3 top-1/2 h-8 w-8 -translate-y-1/2 text-stone-500"
+            >
               <PanelRightClose className="h-4 w-4" />
             </Button>
           </div>

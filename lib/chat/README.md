@@ -6,7 +6,7 @@ Feature folders:
 |--------|----------------|
 | `account/` | Account bind API, OAuth return query |
 | `integrations/` | Notion/GitHub/Google client status helpers |
-| `session/` | Normalize/merge, local+cloud persist, session mutations |
+| `session/` | Normalize/merge, persist, mutations (`session/mutations/*`) |
 | `stream/` | Client SSE consumer, reply truncation |
 | `message/` | API message shaping, display, quotes, tags, timeline |
 | `turn/` | Task queue, continue/claim-review plan, compact, /image, attachments, send estimate, stream errors |

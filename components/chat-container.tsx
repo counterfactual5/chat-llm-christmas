@@ -82,7 +82,7 @@ import {
   sessionHasImages,
   toApiMessages,
 } from '@/lib/chat/message/api-messages';
-import { withMarkedAssistantIncomplete } from '@/lib/chat/session/assistant-mutations';
+import { withMarkedAssistantIncomplete } from '@/lib/chat/session/mutations';
 import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream/client';
 import { cn } from '@/lib/utils';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';

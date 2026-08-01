@@ -1,6 +1,6 @@
 /**
  * Client-side reply truncation / Continue helpers.
- * Builds on provider finish_reason signals in `@/lib/chat/truncation`.
+ * Builds on provider finish_reason signals in `@/lib/chat/stream/truncation`.
  */
 
 import {

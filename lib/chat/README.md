@@ -1,6 +1,6 @@
 # lib/chat
 
-Feature folders (prefer these paths):
+Feature folders:
 
 | Folder | Responsibility |
 |--------|----------------|
@@ -13,5 +13,3 @@ Feature folders (prefer these paths):
 | `context/` | References, time context, sidebar helpers |
 | `server/` | `/api/chat` request helpers (server-only) |
 | `types.ts` | Shared chat types |
-
-Root `*.ts` files are compatibility re-exports — do not add new logic there.

@@ -163,8 +163,6 @@ export type ChatComposerProps = {
   stopGenerating: () => void;
   enqueueOrSubmit: () => void;
 
-  deepResearchEnabled: boolean;
-  setDeepResearchEnabled: (v: boolean) => void;
   researchBusy: boolean;
   cancelResearch: () => void;
 };
@@ -257,8 +255,6 @@ export function ChatComposer(props: ChatComposerProps) {
     isCompacting,
     stopGenerating,
     enqueueOrSubmit,
-    deepResearchEnabled,
-    setDeepResearchEnabled,
     researchBusy,
     cancelResearch,
   } = props;
@@ -696,6 +692,28 @@ export function ChatComposer(props: ChatComposerProps) {
                               }
                               setIsSkillPickerOpen(false);
                               setPlusFlyout(null);
+                              setInput('/research ');
+                              textareaRef.current?.focus();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+                          >
+                            <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                            <span className="min-w-0 flex-1">{t('deepResearchCommand')}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                              /research
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isAccountBound) {
+                                setIsSkillPickerOpen(false);
+                                setPlusFlyout(null);
+                                openLoginModal();
+                                return;
+                              }
+                              setIsSkillPickerOpen(false);
+                              setPlusFlyout(null);
                               setInput('/skill ');
                               textareaRef.current?.focus();
                             }}
@@ -1064,20 +1082,6 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            title={deepResearchEnabled ? '深度研究已开' : '深度研究'}
-            onClick={() => setDeepResearchEnabled(!deepResearchEnabled)}
-            className={cn(
-              'inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors',
-              deepResearchEnabled
-                ? 'border-amber-700/40 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100'
-                : 'border-stone-200 text-stone-500 hover:bg-stone-50 dark:border-stone-700 dark:hover:bg-stone-800',
-            )}
-          >
-            <FlaskConical className="h-3.5 w-3.5" />
-            研究
-          </button>
           {isActiveLoading || researchBusy ? (
             <Button 
               onClick={() => (researchBusy ? cancelResearch() : stopGenerating())}
@@ -1092,7 +1096,7 @@ export function ChatComposer(props: ChatComposerProps) {
               onClick={() => enqueueOrSubmit()}
               disabled={(!input.trim() && quotedSelections.length === 0 && attachments.length === 0) || isCompacting}
               size="icon" 
-              title={deepResearchEnabled ? '开始深度研究' : 'Send'}
+              title="Send"
               className={cn(
                 "h-8 w-8 rounded-full transition-all active:scale-95",
                 (input.trim() || attachments.length > 0)

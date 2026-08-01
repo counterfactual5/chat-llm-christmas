@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Composer slash-menu: `/image`, `/skill`, `/review`, and skill name matching.
+ * Composer slash-menu: `/image`, `/research`, `/skill`, `/review`, and skill name matching.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -58,6 +58,19 @@ export function useChatSlash(opts: {
         title: t('generateImage'),
         insert: '/image ',
         hint: t('imageHint'),
+      });
+    }
+    const researchPrefix =
+      slashQuery === '' ||
+      ('research'.startsWith(slashQuery) && slashQuery !== 'research') ||
+      ('研究'.startsWith(slashQuery) && slashQuery !== '研究');
+    if (researchPrefix) {
+      items.push({
+        kind: 'command',
+        id: 'research',
+        title: t('deepResearchCommand'),
+        insert: '/research ',
+        hint: '/research',
       });
     }
     const skillPrefix =

@@ -158,7 +158,7 @@ export function ChatContextPanel({
               <ResearchPanel
                 expanded={researchExpanded}
                 onToggleExpanded={onToggleResearchExpanded}
-                enabled={deepResearchEnabled}
+                enabled={deepResearchEnabled || Boolean(researchJob) || researchBusy}
                 mode={researchMode}
                 onModeChange={onResearchModeChange}
                 job={researchJob}

@@ -100,9 +100,10 @@ export function ResearchPanel({
             ) : null}
           </div>
 
-          {!enabled ? (
+          {!enabled && !job ? (
             <p className="text-xs text-stone-500">
-              在输入框旁打开「深度研究」后发送，将走独立研究管线（规划→检索→核查→报告）。
+              在 + → Commands 选择「深度研究」，或输入{' '}
+              <code className="font-mono">/research</code> 后发送。
             </p>
           ) : null}
 

@@ -59,6 +59,7 @@ import { useChatSkills } from '@/hooks/chat/use-skills';
 import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
+import { parseResearchCommand } from '@/lib/chat/turn/research-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   clearOAuthReturnQuery,
@@ -1398,13 +1399,12 @@ export default function ChatContainer() {
   }, [deepResearch.job, activeSessionId]);
 
   const submitComposer = useCallback(() => {
-    if (deepResearch.enabled) {
+    const researchQuery = parseResearchCommand(input);
+    if (researchQuery) {
       if (!isAccountBound) {
         openLoginModal();
         return;
       }
-      const q = input.trim();
-      if (!q) return;
       const sid = activeSessionId;
       const now = Date.now();
       setSessions((prev) =>
@@ -1413,7 +1413,7 @@ export default function ChatContainer() {
           const userMsg: Message = {
             id: `research_user_${now}`,
             role: 'user',
-            content: q,
+            content: `/research ${researchQuery}`,
             timestamp: now,
           };
           return {
@@ -1421,17 +1421,18 @@ export default function ChatContainer() {
             updatedAt: now,
             title:
               !s.title || s.title === 'New Chat'
-                ? `研究: ${q.slice(0, 40)}`
+                ? `研究: ${researchQuery.slice(0, 40)}`
                 : s.title,
             messages: [...(s.messages || []), userMsg],
           };
         }),
       );
       setInput('');
+      deepResearch.setEnabled(true);
       setIsContextPanelOpen(true);
       setResearchExpanded(true);
       void deepResearch.start({
-        query: q,
+        query: researchQuery,
         mode: deepResearch.mode,
         sessionId: sid,
         model: selectedModel || undefined,
@@ -2032,8 +2033,6 @@ export default function ChatContainer() {
           isCompacting={isCompacting}
           stopGenerating={stopGenerating}
           enqueueOrSubmit={submitComposer}
-          deepResearchEnabled={deepResearch.enabled}
-          setDeepResearchEnabled={deepResearch.setEnabled}
           researchBusy={deepResearch.busy}
           cancelResearch={() => void deepResearch.cancel()}
         />

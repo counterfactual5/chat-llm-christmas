@@ -93,6 +93,26 @@ describe('formatAccountSkillCatalog', () => {
     expect(text).toContain('id=1 · Alpha');
     expect(text).toContain('id=2 · Beta');
     expect(text).not.toContain('Nope');
+    expect(text).toContain('Account Skills library');
+  });
+
+  it('prefers description and marks active skills', () => {
+    const text = formatAccountSkillCatalog(
+      [
+        {
+          id: '1',
+          title: 'Alpha',
+          description: 'Short blurb',
+          content: 'long body ignored when description exists',
+        },
+        { id: '2', title: 'Beta', content: 'First line of prompt that becomes excerpt' },
+      ],
+      { activeIds: ['1'], skillCreatorOn: true },
+    );
+    expect(text).toContain('[ACTIVE]');
+    expect(text).toContain('Short blurb');
+    expect(text).toContain('First line of prompt');
+    expect(text).toContain('save_skill');
   });
 });
 
@@ -103,9 +123,12 @@ describe('skillPersistenceGatePrompt', () => {
     expect(off).toContain('/skill');
     expect(off).toContain('手动添加');
     expect(off).toContain('Do not paste the full Skill body');
+    expect(off).toContain('ok:true');
+    expect(off).toContain('never retract');
     const on = skillPersistenceGatePrompt(true);
     expect(on).toContain('Skill Creator ON');
     expect(on).toContain('save_skill');
     expect(on).toContain('Iterate/replace');
+    expect(on).toContain('ok:true');
   });
 });

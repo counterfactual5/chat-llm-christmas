@@ -16,6 +16,7 @@ import {
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { SkillItem } from '@/lib/chat/types';
+import type { SkillModalMode } from '@/hooks/chat/use-skills';
 import type { GeneratedFileEntry } from '../panels/OutputPanel';
 
 export type IntegrationStatus = {
@@ -40,8 +41,11 @@ export type ChatModalsProps = {
 
   showSkillModal: boolean;
   setShowSkillModal: (v: boolean) => void;
+  skillModalMode: SkillModalMode;
   skillDraftTitle: string;
   setSkillDraftTitle: (v: string) => void;
+  skillDraftDescription: string;
+  setSkillDraftDescription: (v: string) => void;
   skillDraftContent: string;
   setSkillDraftContent: (v: string) => void;
   skillModalError: string;
@@ -92,8 +96,11 @@ export function ChatModals(props: ChatModalsProps) {
     confirmDeleteSkill,
     showSkillModal,
     setShowSkillModal,
+    skillModalMode,
     skillDraftTitle,
     setSkillDraftTitle,
+    skillDraftDescription,
+    setSkillDraftDescription,
     skillDraftContent,
     setSkillDraftContent,
     skillModalError,
@@ -280,7 +287,7 @@ export function ChatModals(props: ChatModalsProps) {
   )}
 </AnimatePresence>
 
-{/* --- New Skill Modal --- */}
+{/* --- New / Preview Skill Modal --- */}
 <AnimatePresence>
   {showSkillModal && (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -294,10 +301,10 @@ export function ChatModals(props: ChatModalsProps) {
           <div>
             <div className="flex items-center gap-2 text-base font-semibold">
               <ScrollText className="h-5 w-5 text-orange-500" />
-              {t('newSkill')}
+              {skillModalMode === 'preview' ? t('previewSkill') : t('newSkill')}
             </div>
             <p className="mt-1 pl-7 text-xs text-stone-500 dark:text-stone-400">
-              {t('newSkillHint')}
+              {skillModalMode === 'preview' ? t('previewSkillHint') : t('newSkillHint')}
             </p>
           </div>
           <button
@@ -312,25 +319,49 @@ export function ChatModals(props: ChatModalsProps) {
         <div className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
-              名称
+              {t('skillName')}
             </label>
             <input
               value={skillDraftTitle}
               onChange={(e) => setSkillDraftTitle(e.target.value)}
-              placeholder="Skill 名称"
-              className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-stone-700 dark:bg-stone-900/60"
+              readOnly={skillModalMode === 'preview'}
+              placeholder={t('skillNamePlaceholder')}
+              className={cn(
+                'w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-stone-700 dark:bg-stone-900/60',
+                skillModalMode === 'preview' && 'cursor-default opacity-90',
+              )}
             />
           </div>
 
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
-              系统提示词
+              {t('skillDescription')}
+            </label>
+            <input
+              value={skillDraftDescription}
+              onChange={(e) => setSkillDraftDescription(e.target.value)}
+              readOnly={skillModalMode === 'preview'}
+              placeholder={t('skillDescriptionPlaceholder')}
+              className={cn(
+                'w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-stone-700 dark:bg-stone-900/60',
+                skillModalMode === 'preview' && 'cursor-default opacity-90',
+              )}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+              {t('skillSystemPrompt')}
             </label>
             <Textarea
               value={skillDraftContent}
               onChange={(e) => setSkillDraftContent(e.target.value)}
-              placeholder="模型每轮都会遵守的角色、语气、约束…"
-              className="min-h-36 text-sm bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-700"
+              readOnly={skillModalMode === 'preview'}
+              placeholder={t('skillSystemPromptPlaceholder')}
+              className={cn(
+                'min-h-36 text-sm bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-700',
+                skillModalMode === 'preview' && 'cursor-default opacity-90',
+              )}
             />
           </div>
 
@@ -339,13 +370,17 @@ export function ChatModals(props: ChatModalsProps) {
           )}
 
           <div className="flex items-center justify-between gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onSwitchToAiSkillCreate}
-              className="text-xs font-medium text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
-            >
-              {t('switchToAiSkillCreate')}
-            </button>
+            {skillModalMode === 'create' ? (
+              <button
+                type="button"
+                onClick={onSwitchToAiSkillCreate}
+                className="text-xs font-medium text-orange-600 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
+              >
+                {t('switchToAiSkillCreate')}
+              </button>
+            ) : (
+              <span className="text-xs text-stone-400">{t('previewSkillEnableHint')}</span>
+            )}
             <div className="flex gap-2">
               <Button
                 type="button"
@@ -353,16 +388,18 @@ export function ChatModals(props: ChatModalsProps) {
                 onClick={() => setShowSkillModal(false)}
                 className="rounded-xl"
               >
-                取消
+                {skillModalMode === 'preview' ? t('close') : t('cancel')}
               </Button>
-              <Button
-                type="button"
-                onClick={() => void onSaveSkill()}
-                disabled={isSavingSkill || !skillDraftTitle.trim() || !skillDraftContent.trim()}
-                className="rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-              >
-                {isSavingSkill ? '保存中…' : '保存到账号'}
-              </Button>
+              {skillModalMode === 'create' && (
+                <Button
+                  type="button"
+                  onClick={() => void onSaveSkill()}
+                  disabled={isSavingSkill || !skillDraftTitle.trim() || !skillDraftContent.trim()}
+                  className="rounded-xl bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                >
+                  {isSavingSkill ? t('saving') : t('saveToAccount')}
+                </Button>
+              )}
             </div>
           </div>
         </div>

@@ -330,8 +330,12 @@ export default function ChatContainer() {
     isSavingSkill,
     showSkillModal,
     setShowSkillModal,
+    skillModalMode,
+    previewSkillId,
     skillDraftTitle,
     setSkillDraftTitle,
+    skillDraftDescription,
+    setSkillDraftDescription,
     skillDraftContent,
     setSkillDraftContent,
     skillModalError,
@@ -342,6 +346,7 @@ export default function ChatContainer() {
     toggleSkill,
     attachSkill,
     openNewSkillModal,
+    openSkillPreview,
     createSkill,
     requestDeleteSkill,
     confirmDeleteSkill,
@@ -1757,6 +1762,7 @@ export default function ChatContainer() {
           void resumeIncompleteReply({ force: true });
         }}
         onOpenNewSkillModal={openNewSkillModal}
+        onPreviewSkill={openSkillPreview}
         onToggleSkill={toggleSkill}
         onRequestDeleteSkill={requestDeleteSkill}
         onFetchSkills={fetchSkills}
@@ -1868,7 +1874,12 @@ export default function ChatContainer() {
           setImagePreviewSrc={setImagePreviewSrc}
           removeAttachment={removeAttachment}
           activeSkills={activeSkills}
+          skillCreatorActive={activeSkillIds.includes(SKILL_CREATOR_ID)}
+          dismissSkillCreator={() =>
+            setActiveSkillIds((prev) => prev.filter((id) => id !== SKILL_CREATOR_ID))
+          }
           toggleSkill={toggleSkill}
+          onPreviewSkill={openSkillPreview}
           quotedSelections={quotedSelections}
           setQuotedSelections={setQuotedSelections}
           removeQuotedSelection={removeQuotedSelection}
@@ -2019,14 +2030,17 @@ export default function ChatContainer() {
         confirmDeleteSkill={confirmDeleteSkill}
         showSkillModal={showSkillModal}
         setShowSkillModal={setShowSkillModal}
+        skillModalMode={skillModalMode}
         skillDraftTitle={skillDraftTitle}
         setSkillDraftTitle={setSkillDraftTitle}
+        skillDraftDescription={skillDraftDescription}
+        setSkillDraftDescription={setSkillDraftDescription}
         skillDraftContent={skillDraftContent}
         setSkillDraftContent={setSkillDraftContent}
         skillModalError={skillModalError}
         isSavingSkill={isSavingSkill}
         onSaveSkill={() => {
-          void createSkill(skillDraftTitle, skillDraftContent);
+          void createSkill(skillDraftTitle, skillDraftContent, skillDraftDescription);
         }}
         onSwitchToAiSkillCreate={() => {
           setShowSkillModal(false);

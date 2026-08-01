@@ -87,7 +87,10 @@ export type ChatComposerProps = {
   removeAttachment: (id: string) => void;
 
   activeSkills: SkillItem[];
+  skillCreatorActive: boolean;
+  dismissSkillCreator: () => void;
   toggleSkill: (skillId: string) => void;
+  onPreviewSkill: (skill: SkillItem) => void;
 
   quotedSelections: string[];
   setQuotedSelections: (v: string[] | ((prev: string[]) => string[])) => void;
@@ -180,7 +183,10 @@ export function ChatComposer(props: ChatComposerProps) {
     setImagePreviewSrc,
     removeAttachment,
     activeSkills,
+    skillCreatorActive,
+    dismissSkillCreator,
     toggleSkill,
+    onPreviewSkill,
     quotedSelections,
     setQuotedSelections,
     removeQuotedSelection,
@@ -328,21 +334,45 @@ export function ChatComposer(props: ChatComposerProps) {
           )}
         </div>
       )}
-      {activeSkills.length > 0 && (
+      {(skillCreatorActive || activeSkills.length > 0) && (
         <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+          {skillCreatorActive && (
+            <span
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-orange-300 bg-orange-50 pl-2 pr-1 py-0.5 text-[11px] font-medium text-orange-800 dark:border-orange-700/60 dark:bg-orange-950/40 dark:text-orange-200"
+              title={t('skillCreatorChipHint')}
+            >
+              <Sparkles className="h-3 w-3 shrink-0" />
+              <span className="truncate">{t('skillCreatorChip')}</span>
+              <button
+                type="button"
+                onClick={dismissSkillCreator}
+                className="rounded-full p-0.5 hover:bg-orange-100 dark:hover:bg-orange-900/50"
+                title={t('skillCreatorChipHint')}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          )}
           {activeSkills.map((skill) => (
             <span
               key={skill.id}
               className="inline-flex max-w-full items-center gap-1 rounded-full border border-stone-300 bg-stone-100 pl-2 pr-1 py-0.5 text-[11px] font-medium text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
               title={`/${skillSlashName(skill.title)}`}
             >
-              <ScrollText className="h-3 w-3 shrink-0" />
-              <span className="truncate">{skill.title}</span>
+              <button
+                type="button"
+                onClick={() => onPreviewSkill(skill)}
+                className="inline-flex min-w-0 items-center gap-1 hover:opacity-80"
+                title={t('previewSkill')}
+              >
+                <ScrollText className="h-3 w-3 shrink-0" />
+                <span className="truncate">{skill.title}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => toggleSkill(skill.id)}
                 className="rounded-full p-0.5 hover:bg-stone-200 dark:hover:bg-stone-700"
-                title="移除 Skill"
+                title={t('removeSkillFromChat')}
               >
                 <X className="h-3 w-3" />
               </button>

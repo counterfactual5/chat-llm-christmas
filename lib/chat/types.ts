@@ -133,7 +133,13 @@ export type ChatSession = {
   memoryExtractCursor?: string;
 };
 
-export type SkillItem = { id: string; title: string; content: string };
+export type SkillItem = {
+  id: string;
+  title: string;
+  content: string;
+  /** Optional short library blurb; UI/catalog fall back to a content excerpt. */
+  description?: string;
+};
 
 export type ModelOption = {
   id: string;

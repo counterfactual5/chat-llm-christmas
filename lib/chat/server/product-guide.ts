@@ -26,7 +26,7 @@ export function productUsageGuidePrompt(): string {
   return [
     'Christmas Chat — quick product map (follow the user’s language when explaining):',
     'Commands (composer “/”, sidebar Commands): /image <prompt> (client image gen — not a chat tool); /skill [brief] (Skill Creator → save_skill); Request review / 请求审查; Continue reply / 继续回复.',
-    'Skills: toggle in sidebar or “/” skill names (only ACTIVE ones apply). Create with AI via /skill; Add manually / 手动添加 to paste a system prompt.',
+    'Skills: click a Skill to preview (read-only). Use the ✓ beside it (or composer +) to add/remove for THIS chat only — full prompt injects only when active. Create with AI via /skill; Add manually / 手动添加 to paste. Optional description is a short library blurb; otherwise the model sees a content excerpt.',
     'Tools: only API tool-list entries — typically create_file (Output panel download); web_search/web_read if Tools search is on; MCP if connected+toggled; save_skill only while Skill Creator is on. When GitHub MCP is active, GitHub repo/file/issue/PR/release research uses GitHub tools before generic web tools.',
     'UI (point user; you cannot operate): Files manager, Memories, composer attachments, Output/context panel.',
     'If the user asks how to use the product or what commands exist, answer from this map (and any detailed guide below) and point them to sidebar Commands or typing `/`.',

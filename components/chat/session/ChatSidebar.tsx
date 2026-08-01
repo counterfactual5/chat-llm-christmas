@@ -46,7 +46,6 @@ import {
   formatDayGroupLabel,
   sessionsForSidebar,
 } from '@/lib/chat/context/sidebar';
-import { skillSlashName } from '@/lib/skills/creator';
 
 export type ChatSidebarProps = {
   open: boolean;
@@ -69,6 +68,7 @@ export type ChatSidebarProps = {
   onRequestClaimReview: () => void;
   onContinueReply: () => void;
   onOpenNewSkillModal: () => void;
+  onPreviewSkill: (skill: SkillItem) => void;
   onToggleSkill: (skillId: string) => void;
   onRequestDeleteSkill: (skillId: string, e: React.MouseEvent) => void;
   onFetchSkills: () => void;
@@ -104,6 +104,7 @@ export function ChatSidebar({
   onRequestClaimReview,
   onContinueReply,
   onOpenNewSkillModal,
+  onPreviewSkill,
   onToggleSkill,
   onRequestDeleteSkill,
   onFetchSkills,
@@ -359,44 +360,55 @@ export function ChatSidebar({
                           {t('newSkill')}
                         </button>
 
-                        {skills.map((skill) => (
+                        {skills.map((skill) => {
+                          const on = activeSkillIds.includes(skill.id);
+                          return (
                             <div
                               key={skill.id}
                               className="group flex items-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-stone-800/60"
                             >
                               <button
                                 type="button"
-                                onClick={() => {
-                                  onToggleSkill(skill.id);
-                                }}
+                                onClick={() => onPreviewSkill(skill)}
                                 className={cn(
                                   'flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors',
-                                  activeSkillIds.includes(skill.id)
+                                  on
                                     ? 'text-stone-900 dark:text-stone-100'
                                     : 'text-stone-600 dark:text-stone-300',
                                 )}
-                                title={
-                                  activeSkillIds.includes(skill.id)
-                                    ? `已启用 /${skillSlashName(skill.title)} — 再点取消`
-                                    : `启用 Skill · /${skillSlashName(skill.title)}`
-                                }
+                                title={t('previewSkill')}
                               >
                                 <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                                 <span className="truncate">{skill.title}</span>
-                                {activeSkillIds.includes(skill.id) && (
-                                  <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onToggleSkill(skill.id)}
+                                className={cn(
+                                  'rounded p-1 transition-colors',
+                                  on
+                                    ? 'text-stone-700 hover:bg-stone-200 dark:text-stone-200 dark:hover:bg-stone-700'
+                                    : 'text-stone-400 hover:bg-stone-200 hover:text-stone-600 dark:hover:bg-stone-700 dark:hover:text-stone-200',
                                 )}
+                                title={
+                                  on
+                                    ? t('removeSkillFromChat')
+                                    : t('addSkillToChat')
+                                }
+                              >
+                                <Check className={cn('h-3.5 w-3.5', on ? 'opacity-100' : 'opacity-40')} />
                               </button>
                               <button
                                 type="button"
                                 onClick={(e) => onRequestDeleteSkill(skill.id, e)}
                                 className="mr-1 rounded p-1 text-stone-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 dark:hover:bg-red-900/20"
-                                title="Delete skill"
+                                title={t('deleteSkill')}
                               >
                                 <X className="h-3 w-3" />
                               </button>
                             </div>
-                          ))}
+                          );
+                        })}
                       </div>
                     </motion.div>
                   )}

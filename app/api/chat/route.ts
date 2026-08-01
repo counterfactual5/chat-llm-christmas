@@ -189,7 +189,7 @@ export async function POST(req: NextRequest) {
       (m) => m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0,
     );
     let accountSkillCatalog = '';
-    if (skillCreatorOn && boundUserKey) {
+    if (boundUserKey) {
       try {
         const catalogRes = await fetch(SKILLS_API_URL, {
           method: 'GET',
@@ -201,10 +201,16 @@ export async function POST(req: NextRequest) {
         });
         const catalogJson: any = await catalogRes.json().catch(() => ({}));
         if (catalogRes.ok && Array.isArray(catalogJson?.data)) {
-          accountSkillCatalog = formatAccountSkillCatalog(catalogJson.data);
+          const activeIds = skills
+            .map((s) => String(s?.id || '').trim())
+            .filter((id) => id && !isSkillCreatorId(id));
+          accountSkillCatalog = formatAccountSkillCatalog(catalogJson.data, {
+            activeIds,
+            skillCreatorOn,
+          });
         }
       } catch {
-        // Catalog is advisory — Skill Creator still works for create-only.
+        // Catalog is advisory — chat still works without it.
       }
     }
     const systemParts = buildChatSystemParts({

@@ -1,6 +1,7 @@
 /**
  * Send / queue / image-gen / resume / claim-review / edit-retry for the active chat.
  *
+ *  Queue state:     hooks/chat/use-chat-queue.ts
  *  Queue helpers:   lib/chat/turn/task-queue.ts
  *  Continue/review: lib/chat/turn/continuation.ts
  *  Attachments:     lib/chat/turn/attachments.ts
@@ -12,7 +13,7 @@
  *  Persist:         hooks/chat/use-session-persist.ts
  *  SSE parse:       lib/chat/stream/client.ts
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Message, ChatSession } from '@/lib/chat/types';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
@@ -26,7 +27,6 @@ import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understan
 import { isAssistantError } from '@/lib/chat/message/display';
 import { compactConversationHistory } from '@/lib/chat/turn/compact';
 import {
-  afterRemoveTask,
   clearPauseForSession,
   pauseSession,
   removeTaskById,
@@ -34,9 +34,9 @@ import {
   removeTasksForSession,
   requeueFailedTask,
   selectTasksToDrain,
-  tasksForSession,
   type QueuedTask,
 } from '@/lib/chat/turn/task-queue';
+import { useChatQueue } from '@/hooks/chat/use-chat-queue';
 import {
   CLAIM_REVIEW_USER_PROMPT,
   buildResumeStreamPlan,
@@ -135,8 +135,17 @@ export function useChatLogic(props: UseChatLogicProps) {
   } = props;
 
   const [loadingBySession, setLoadingBySession] = useState<Record<string, boolean>>({});
-  const [messageQueue, setMessageQueue] = useState<QueuedTask[]>([]);
-  const [queuePausedBySession, setQueuePausedBySession] = useState<Record<string, boolean>>({});
+  const {
+    messageQueue,
+    setMessageQueue,
+    queuePausedBySession,
+    setQueuePausedBySession,
+    activeQueue,
+    queuePaused,
+    cancelQueuedMessage,
+    clearQueue,
+    resumeQueue,
+  } = useChatQueue(activeSessionId);
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactNotice, setCompactNotice] = useState('');
 
@@ -186,11 +195,7 @@ export function useChatLogic(props: UseChatLogicProps) {
 
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
-  const activeQueue = useMemo(
-    () => tasksForSession(messageQueue, activeSessionId),
-    [messageQueue, activeSessionId],
-  );
-  const queuePaused = Boolean(queuePausedBySession[activeSessionId]);
+
 
   // Drain each session's queue only when that session is idle and not paused.
   useEffect(() => {
@@ -280,24 +285,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     });
   };
 
-  const cancelQueuedMessage = (id: string) => {
-    setMessageQueue((prev) => {
-      const removed = prev.find((task) => task.id === id);
-      const next = removeTaskById(prev, id);
-      setQueuePausedBySession((p) => afterRemoveTask(next, removed, p));
-      return next;
-    });
-  };
 
-  const clearQueue = () => {
-    const sessionId = activeSessionId;
-    setMessageQueue((prev) => removeTasksForSession(prev, sessionId));
-    setQueuePausedBySession((prev) => clearPauseForSession(prev, sessionId));
-  };
-
-  const resumeQueue = () => {
-    setQueuePausedBySession((prev) => clearPauseForSession(prev, activeSessionId));
-  };
 
   const jumpQueueAndSubmit = (id: string) => {
     const task = messageQueue.find((item) => item.id === id);

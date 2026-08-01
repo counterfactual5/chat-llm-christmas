@@ -1,14 +1,19 @@
 # lib/chat/server
 
-Server-only helpers for `app/api/chat/route.ts`. Prefer importing these
+Server-only helpers for the chat API. Prefer importing these
 directly from here; do not re-export through client chat barrels.
+
+HTTP entry: `app/api/chat/route.ts` (runtime / `maxDuration` / `POST` only).
+Request pipeline: `chat-request.ts` (`handleChatRequest`).
 
 | Module | Responsibility |
 |--------|----------------|
+| `chat-request.ts` | Full `/api/chat` POST pipeline (auth, system prompt, tools, review, stream) |
 | `request.ts` | Body parse + light message validation |
 | `messages.ts` | Sanitize, timestamps, tool-call extract, search heuristics |
 | `credentials.ts` | Resolve requested integrations against authorized OAuth vault tokens |
 | `system-prompt.ts` | Assemble the chat system-prompt parts (pure string assembly) |
+| `product-guide.ts` | Detect product-usage questions that expand the in-app guide prompt |
 | `tool-execution.ts` | Fallback query + failure-detection helpers around a single tool call |
 | `upstream.ts` | OpenAI-compatible completions transport (stream + one-shot) |
 | `stream-budget.ts` | Idle / total stream timeout math, plus `boundedAsyncIterator` that applies it to any upstream stream |
@@ -23,4 +28,4 @@ directly from here; do not re-export through client chat barrels.
 Claim Reviewer's own audit/verifier logic (local checks, LLM verifier,
 mid-turn correction prompts) lives in `lib/tools/review/claim-reviewer`
 (barrel) — the modules above only orchestrate *when* to call it from the
-chat route.
+chat request pipeline.

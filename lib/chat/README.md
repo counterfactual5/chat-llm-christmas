@@ -9,12 +9,13 @@ Map of record for chat feature code. Split modules by **reusable function**, not
 | `components/chat-container.tsx` | Wiring only — UI panels ↔ hooks; no new business logic |
 | `hooks/chat/*` | React state, effects, and orchestration that needs the component tree |
 | `lib/chat/*` | Pure / reusable logic (safe to call from hooks or server where not server-only) |
-| `app/api/chat/route.ts` | Thin HTTP orchestration |
-| `lib/chat/server/*` | Server-only helpers for the chat API |
+| `app/api/chat/route.ts` | Thin HTTP entry (`runtime` / `maxDuration` / `POST`) |
+| `lib/chat/server/chat-request.ts` | Full `/api/chat` request pipeline |
+| `lib/chat/server/*` | Server-only helpers used by that pipeline |
 
 For the detailed ownership map (which hook/lib owns what), see the header comment in `components/chat-container.tsx`. Prefer extending the owning module over growing the container.
 
-Public session-mutation path: `session/mutations/`. Deprecated re-export shim: `session/assistant-mutations.ts` (prefer importing from `mutations`).
+Public session-mutation path: `session/mutations/`. Always import from `@/lib/chat/session/mutations` (no other entry point).
 
 | Folder | Responsibility |
 |--------|----------------|
@@ -26,5 +27,5 @@ Public session-mutation path: `session/mutations/`. Deprecated re-export shim: `
 | `message/` | API message shaping, display, quotes, tags, timeline |
 | `turn/` | Client turn planning (hooks own React state + streaming): task queue, continue/claim-review, compact, `/image` (`image-command.ts`, `image-generation.ts`), skill slash (`skill-command.ts`), attachments, send estimate, stream errors |
 | `context/` | References, time context, sidebar helpers |
-| `server/` | `/api/chat` request helpers (server-only) |
+| `server/` | `/api/chat` pipeline (`chat-request.ts`) + request helpers (server-only) |
 | `types.ts` | Shared chat types |

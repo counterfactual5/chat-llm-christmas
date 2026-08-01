@@ -12,14 +12,17 @@
  *  Slash menu                      hooks/chat/use-slash.ts
  *  OAuth return query              lib/chat/account/oauth-return.ts
  *  Send / queue / resume / review   hooks/chat/use-logic.ts
+ *    queue state                   hooks/chat/use-chat-queue.ts
  *    queue helpers                 lib/chat/turn/task-queue.ts
  *    continue / claim-review plan  lib/chat/turn/continuation.ts
  *  Deep research                   hooks/chat/use-deep-research.ts + components/chat/research/*
  *  Client SSE consumer             lib/chat/stream/client.ts
  *  Session normalize / LWW merge   lib/chat/session/store.ts
  *  Message list / composer / …     components/chat/*
+ *    answer markdown               components/chat/message/AnswerMarkdown.tsx
  *  IME guards / file download      lib/chat/composer/*
- *  /api/chat server                app/api/chat/route.ts (+ lib/chat/server/)
+ *  /api/chat HTTP entry            app/api/chat/route.ts
+ *  /api/chat pipeline              lib/chat/server/chat-request.ts (+ lib/chat/server/)
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';

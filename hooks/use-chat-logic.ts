@@ -1,6 +1,10 @@
 /**
  * Send / queue / image-gen / resume / claim-review / edit-retry for the active chat.
- * Account hydrate lives in `use-chat-account-hydrate.ts`; SSE parse in `lib/chat/stream-response.ts`.
+ *
+ *  Account:     hooks/use-chat-account.ts
+ *  Integrations: hooks/use-chat-integrations.ts
+ *  Persist:     hooks/use-chat-session-persist.ts
+ *  SSE parse:   lib/chat/stream-response.ts
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Message, ChatSession } from '@/lib/chat/types';

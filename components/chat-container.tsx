@@ -3,10 +3,13 @@
 /**
  * Chat shell — wires UI panels to hooks. Prefer jumping to the owning module:
  *
- *  Account / hydrate / persist     hooks/use-chat-account-hydrate.ts
+ *  Account status                  hooks/use-chat-account.ts + lib/chat/account-client.ts
+ *  Notion/GitHub/Google status     hooks/use-chat-integrations.ts + lib/chat/integrations-client.ts
+ *  Session hydrate / persist       hooks/use-chat-session-persist.ts + lib/chat/session-persist.ts
+ *  OAuth return query              lib/chat/oauth-return.ts
  *  Send / queue / resume / review   hooks/use-chat-logic.ts
  *  Client SSE consumer             lib/chat/stream-response.ts
- *  Session normalize / cloud sync  lib/chat/sessions.ts
+ *  Session normalize / LWW merge   lib/chat/sessions.ts
  *  Message list / composer / …     components/chat/*
  *  /api/chat server                app/api/chat/route.ts (+ lib/chat/server/)
  */
@@ -39,9 +42,19 @@ import {
 } from '@/lib/chat/reply-truncation';
 import { isAssistantError, messagePlainText } from '@/lib/chat/message-display';
 import { useChatLogic } from '@/hooks/use-chat-logic';
-import { useChatAccountHydrate } from '@/hooks/use-chat-account-hydrate';
+import { useChatAccount } from '@/hooks/use-chat-account';
+import { useChatIntegrations } from '@/hooks/use-chat-integrations';
+import { useChatSessionPersist } from '@/hooks/use-chat-session-persist';
 import { parseImageCommand } from '@/lib/chat/image-command';
-import { CHATS_OWNER_KEY } from '@/lib/chat/sessions';
+import { clearLocalSessions } from '@/lib/chat/session-persist';
+import {
+  clearOAuthReturnQuery,
+  oauthReturnNeedsUrlClean,
+  parseOAuthReturnParams,
+  planOAuthReturnUi,
+  type AuthModalMode,
+} from '@/lib/chat/oauth-return';
+import { enableGoogleSurfacesOnNewestSession } from '@/lib/chat/integrations-client';
 import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
@@ -109,7 +122,7 @@ export default function ChatContainer() {
   const [tempKeyInput, setTempKeyInput] = useState<string>('');
   const [showAuthModal, setShowAuthModal] = useState(false);
   /** `notion` | `github` = MCP connect sheet; `login` = first-time sign-in only. */
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'notion' | 'github' | 'google'>('login');
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode>('login');
   const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
@@ -287,10 +300,25 @@ export default function ChatContainer() {
 
   const {
     isAccountBound,
-    setIsAccountBound,
     accountUsername,
-    setAccountUsername,
+    refreshAccountStatus,
+    bindWithApiKey,
+    disconnectAccountCore,
+  } = useChatAccount();
+
+  const {
     chatsHydrated,
+    hydrateBoundAccount,
+    hydrateGuest,
+  } = useChatSessionPersist({
+    sessions,
+    setSessions,
+    setActiveSessionId,
+    createNewSession,
+    isAccountBound,
+  });
+
+  const {
     notionStatus,
     setNotionStatus,
     notionBusy,
@@ -300,25 +328,54 @@ export default function ChatContainer() {
     googleStatus,
     setGoogleStatus,
     googleBusy,
-    refreshAccountStatus,
     fetchIntegrations,
     disconnectNotion,
     disconnectGitHub,
     disconnectGoogle,
-  } = useChatAccountHydrate({
-    sessions,
+  } = useChatIntegrations({
     setSessions,
-    setActiveSessionId,
-    createNewSession,
-    fetchModels,
-    fetchSkills,
     setActiveMcpIds,
+    isAccountBound,
     showAuthModal,
     authModalMode,
-    setShowAuthModal,
-    setAuthModalMode,
-    setAccountError,
   });
+
+  // One-time startup: account → hydrate sessions → models/skills/integrations → OAuth return UI.
+  useEffect(() => {
+    localStorage.removeItem('llm_christmas_user_key');
+    const oauth = parseOAuthReturnParams(window.location.search);
+    if (oauthReturnNeedsUrlClean(oauth)) clearOAuthReturnQuery();
+
+    void refreshAccountStatus()
+      .then(async ({ bound, username }) => {
+        if (bound) await hydrateBoundAccount(username);
+        else hydrateGuest();
+
+        const boot: Array<Promise<unknown>> = [fetchModels()];
+        if (bound) boot.push(fetchSkills(), fetchIntegrations());
+        await Promise.all(boot);
+
+        for (const action of planOAuthReturnUi(oauth, bound)) {
+          if (action.type === 'close_modal') {
+            setAccountError('');
+            setShowAuthModal(false);
+          } else if (action.type === 'open_modal') {
+            setAuthModalMode(action.mode);
+            if (action.error) setAccountError(action.error);
+            else setAccountError('');
+            setShowAuthModal(true);
+          } else if (action.type === 'google_connected') {
+            await fetchIntegrations();
+            setSessions((prev) => enableGoogleSurfacesOnNewestSession(prev));
+          }
+        }
+      })
+      .catch(() => {
+        void fetchModels();
+        hydrateGuest();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only startup
+  }, []);
 
   const notionStatusRef = useRef(notionStatus);
   const githubStatusRef = useRef(githubStatus);
@@ -1074,17 +1131,9 @@ export default function ChatContainer() {
     setAccountError('');
     setAccountSaving(true);
     try {
-      const response = await fetch('/api/account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: trimmed }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || '绑定失败');
+      await bindWithApiKey(trimmed);
       setTempKeyInput('');
       closeAuthModal();
-      if (data?.username) setAccountUsername(String(data.username));
-      await refreshAccountStatus();
       await fetchModels();
       await fetchSkills();
       await fetchIntegrations();
@@ -1096,9 +1145,7 @@ export default function ChatContainer() {
   };
 
   const disconnectAccount = async () => {
-    await fetch('/api/account', { method: 'DELETE' });
-    setIsAccountBound(false);
-    setAccountUsername(null);
+    await disconnectAccountCore();
     setTempKeyInput('');
     setActiveMcpIds((prev) => prev.filter((id) => id !== 'zhipu-vision'));
     closeAuthModal();
@@ -1107,12 +1154,7 @@ export default function ChatContainer() {
     setGoogleStatus(null);
     setSessions([]);
     setSkills([]);
-    try {
-      localStorage.removeItem('llm_christmas_chats');
-      localStorage.removeItem(CHATS_OWNER_KEY);
-    } catch {
-      // ignore
-    }
+    clearLocalSessions();
     createNewSession();
     await fetchModels();
   };

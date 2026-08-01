@@ -147,6 +147,20 @@ export function useDeepResearch(opts: {
           id: m.id,
           timestamp: m.timestamp || rebuilt.timestamp,
         }));
+        const st = String(rebuilt.research?.status || '');
+        if (
+          st === 'queued' ||
+          st === 'planning' ||
+          st === 'searching' ||
+          st === 'synthesizing' ||
+          st === 'verifying' ||
+          st === 'writing' ||
+          st === 'done'
+        ) {
+          setError(null);
+        } else if (st === 'failed' || st === 'cancelled') {
+          setError(rebuilt.truncationReason || 'Research failed');
+        }
       };
 
       const scheduleCatchUpCommit = () => {
@@ -199,11 +213,12 @@ export function useDeepResearch(opts: {
           }
 
           if (kind === 'phase' && typeof payload.status === 'string') {
+            const status = String(payload.status);
             setJob((prev) =>
               prev
                 ? {
                     ...prev,
-                    status: String(payload.status),
+                    status,
                     phaseDetail:
                       typeof payload.detail === 'string'
                         ? payload.detail
@@ -211,9 +226,24 @@ export function useDeepResearch(opts: {
                   }
                 : prev,
             );
+            // A later running/queued phase supersedes any historical timeout error
+            // replayed from SSE catch-up (Continue after "job timed out").
+            if (
+              status === 'queued' ||
+              status === 'planning' ||
+              status === 'searching' ||
+              status === 'synthesizing' ||
+              status === 'verifying' ||
+              status === 'writing' ||
+              status === 'done'
+            ) {
+              setError(null);
+            }
           }
           if (kind === 'error' && payload.message) {
-            setError(String(payload.message));
+            // During catch-up, ignore stale errors — the latest phase wins above.
+            // Only surface errors that arrive while the UI is live.
+            if (uiLive) setError(String(payload.message));
           }
         };
 

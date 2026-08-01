@@ -91,6 +91,57 @@ type FilePreviewOverlayProps = {
   };
 };
 
+/** Pure content renderer (markdown / code) — reused by the fullscreen overlay and the side-panel preview. */
+export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
+  const markdown = useMemo(() => isMarkdownPreview(file), [file]);
+  const language = useMemo(() => languageFromFilename(file.name), [file]);
+
+  return markdown ? (
+    <div
+      className={cn(
+        'chat-markdown mx-auto max-w-3xl text-[15px] leading-relaxed text-stone-800 dark:text-stone-200',
+        '[&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-bold',
+        '[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold',
+        '[&_p]:mb-4 [&_p]:leading-7 [&_p:last-child]:mb-0',
+        '[&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-6',
+        '[&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-6',
+        '[&_blockquote]:border-l-2 [&_blockquote]:border-stone-300 [&_blockquote]:pl-3 [&_blockquote]:text-stone-500',
+        '[&_a]:text-sky-700 [&_a]:underline dark:[&_a]:text-sky-400',
+        '[&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-stone-200 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-stone-200 [&_td]:px-2 [&_td]:py-1',
+      )}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+        components={{
+          code({ className, children, ...props }: any) {
+            const match = /language-(\w+)/.exec(className || '');
+            const value = String(children ?? '').replace(/\n$/, '');
+            const inline = !match && !String(children ?? '').includes('\n');
+            if (!inline && match) {
+              return <CodeBlock language={match[1]} value={value} />;
+            }
+            return (
+              <code
+                className="rounded bg-stone-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-stone-800"
+                {...props}
+              >
+                {children}
+              </code>
+            );
+          },
+        }}
+      >
+        {prepareChatMarkdown(file.content)}
+      </ReactMarkdown>
+    </div>
+  ) : (
+    <div className="-mx-1">
+      <CodeBlock language={language} value={file.content} />
+    </div>
+  );
+}
+
 export function FilePreviewOverlay({
   file,
   onClose,
@@ -105,12 +156,6 @@ export function FilePreviewOverlay({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [file, onClose]);
-
-  const markdown = useMemo(() => (file ? isMarkdownPreview(file) : false), [file]);
-  const language = useMemo(
-    () => (file ? languageFromFilename(file.name) : 'plaintext'),
-    [file],
-  );
 
   if (!file) return null;
 
@@ -162,50 +207,7 @@ export function FilePreviewOverlay({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-          {markdown ? (
-            <div
-              className={cn(
-                'chat-markdown mx-auto max-w-3xl text-[15px] leading-relaxed text-stone-800 dark:text-stone-200',
-                '[&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-bold',
-                '[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold',
-                '[&_p]:mb-4 [&_p]:leading-7 [&_p:last-child]:mb-0',
-                '[&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-6',
-                '[&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-6',
-                '[&_blockquote]:border-l-2 [&_blockquote]:border-stone-300 [&_blockquote]:pl-3 [&_blockquote]:text-stone-500',
-                '[&_a]:text-sky-700 [&_a]:underline dark:[&_a]:text-sky-400',
-                '[&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-stone-200 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-stone-200 [&_td]:px-2 [&_td]:py-1',
-              )}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkMath, remarkGfm]}
-                rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                components={{
-                  code({ className, children, ...props }: any) {
-                    const match = /language-(\w+)/.exec(className || '');
-                    const value = String(children ?? '').replace(/\n$/, '');
-                    const inline = !match && !String(children ?? '').includes('\n');
-                    if (!inline && match) {
-                      return <CodeBlock language={match[1]} value={value} />;
-                    }
-                    return (
-                      <code
-                        className="rounded bg-stone-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-stone-800"
-                        {...props}
-                      >
-                        {children}
-                      </code>
-                    );
-                  },
-                }}
-              >
-                {prepareChatMarkdown(file.content)}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <div className="-mx-1">
-              <CodeBlock language={language} value={file.content} />
-            </div>
-          )}
+          <FilePreviewContent file={file} />
         </div>
       </div>
     </div>

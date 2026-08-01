@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronDown, Download, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Download, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -46,6 +46,8 @@ type OutputPanelProps = {
   onToggleGroup: (key: 'images' | 'files') => void;
   images: GeneratedImageEntry[];
   files: GeneratedFileEntry[];
+  onPreviewImage: (entry: GeneratedImageEntry) => void;
+  onPreviewFile: (entry: GeneratedFileEntry) => void;
   onScrollToMessage: (messageId: string) => void;
   onDownloadImage: (entry: GeneratedImageEntry) => void;
   onRemoveImage: (entry: GeneratedImageEntry) => void;
@@ -60,6 +62,8 @@ export function OutputPanel({
   onToggleGroup,
   images,
   files,
+  onPreviewImage,
+  onPreviewFile,
   onScrollToMessage,
   onDownloadImage,
   onRemoveImage,
@@ -132,8 +136,8 @@ export function OutputPanel({
                             >
                               <button
                                 type="button"
-                                title={t('viewInChat')}
-                                onClick={() => onScrollToMessage(entry.messageId)}
+                                title={t('previewFile')}
+                                onClick={() => onPreviewImage(entry)}
                                 className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
                               >
                                 <span className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-stone-200 dark:bg-stone-800">
@@ -151,6 +155,14 @@ export function OutputPanel({
                                 </span>
                               </button>
                               <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                <button
+                                  type="button"
+                                  title={t('viewInChat')}
+                                  onClick={() => onScrollToMessage(entry.messageId)}
+                                  className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                >
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </button>
                                 <button
                                   type="button"
                                   title={t('download')}
@@ -201,8 +213,8 @@ export function OutputPanel({
                             >
                               <button
                                 type="button"
-                                title={t('viewInChat')}
-                                onClick={() => onScrollToMessage(entry.messageId)}
+                                title={t('previewFile')}
+                                onClick={() => onPreviewFile(entry)}
                                 className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
                               >
                                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
@@ -224,6 +236,14 @@ export function OutputPanel({
                                 </span>
                               </button>
                               <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                <button
+                                  type="button"
+                                  title={t('viewInChat')}
+                                  onClick={() => onScrollToMessage(entry.messageId)}
+                                  className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                >
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </button>
                                 <button
                                   type="button"
                                   title={t('download')}

@@ -51,7 +51,11 @@ import { ReasoningBodyScroll } from '@/components/chat/message/ReasoningBodyScro
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
-import { formatFileSize } from '../panels/OutputPanel';
+import {
+  formatFileSize,
+  type GeneratedFileEntry,
+  type GeneratedImageEntry,
+} from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
 
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
@@ -87,6 +91,8 @@ export type ChatMessageListProps = {
   addEditIngestedFiles: (files: FileList | File[]) => void;
   removeEditingMessageAttachment: (id: string) => void;
   setImagePreviewSrc: (src: string | null) => void;
+  onPreviewImage: (entry: GeneratedImageEntry) => void;
+  onPreviewFile: (entry: GeneratedFileEntry) => void;
   cancelEditMessage: () => void;
   saveEditedMessage: (messageId: string) => void;
   editUserMessage: (messageId: string) => void;
@@ -100,13 +106,6 @@ export type ChatMessageListProps = {
   setToolRunOpen: (
     v: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>),
   ) => void;
-  setFilePreview: (file: {
-    id: string;
-    name: string;
-    mimeType: string;
-    content: string;
-    size?: number;
-  } | null) => void;
   downloadGeneratedFile: (entry: {
     messageId: string;
     fileIndex: number;
@@ -151,6 +150,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
     addEditIngestedFiles,
     removeEditingMessageAttachment,
     setImagePreviewSrc,
+    onPreviewImage,
+    onPreviewFile,
     cancelEditMessage,
     saveEditedMessage,
     editUserMessage,
@@ -159,7 +160,6 @@ export function ChatMessageList(props: ChatMessageListProps) {
     setReasoningOpen,
     toolRunOpen,
     setToolRunOpen,
-    setFilePreview,
     downloadGeneratedFile,
     canRetryFailed,
     retryFailedReply,
@@ -1099,7 +1099,16 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <button
                             key={idx}
                             type="button"
-                            onClick={() => setImagePreviewSrc(img.url)}
+                            onClick={() =>
+                              onPreviewImage({
+                                messageId: message.id,
+                                imageIndex: idx,
+                                url: img.url,
+                                prompt: img.prompt || img.name || 'Image',
+                                model: img.model || '',
+                                timestamp: message.timestamp,
+                              })
+                            }
                             className="block cursor-zoom-in overflow-hidden rounded-xl border border-stone-200 bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60 dark:border-stone-800 dark:bg-stone-900"
                           >
                             <img
@@ -1137,9 +1146,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
                             renderProcessPanel(seg)
                           ) : seg.type === 'file' ? (
                             (() => {
-                              const file = (message.files || []).find(
+                              const fileIndex = (message.files || []).findIndex(
                                 (f) => f.id === seg.fileId,
                               );
+                              const file =
+                                fileIndex >= 0 ? message.files?.[fileIndex] : undefined;
                               if (!file) return null;
                               const canPreview = typeof file.content === 'string';
                               return (
@@ -1153,12 +1164,16 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                     title={canPreview ? t('previewFile') : file.name}
                                     onClick={() => {
                                       if (!canPreview) return;
-                                      setFilePreview({
+                                      onPreviewFile({
+                                        messageId: message.id,
+                                        fileIndex,
                                         id: file.id,
                                         name: file.name,
                                         mimeType: file.mimeType,
-                                        content: file.content || '',
                                         size: file.size,
+                                        url: file.url,
+                                        content: file.content,
+                                        createdAt: file.createdAt || message.timestamp,
                                       });
                                     }}
                                     className={cn(

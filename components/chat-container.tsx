@@ -63,7 +63,7 @@ import { useChatSkills } from '@/hooks/chat/use-skills';
 import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
-import { parseResearchCommand } from '@/lib/chat/turn/research-command';
+import { parseResearchCommand, type ResearchModeHint } from '@/lib/chat/turn/research-command';
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
@@ -86,7 +86,7 @@ import {
 import { ChatSidebar } from '@/components/chat/session/ChatSidebar';
 import { ChatComposer } from '@/components/chat/composer/ChatComposer';
 import { ChatMessageList } from '@/components/chat/message/ChatMessageList';
-import { ChatContextPanel } from '@/components/chat/panels/ChatContextPanel';
+import { ChatContextPanel, type PanelPreview } from '@/components/chat/panels/ChatContextPanel';
 import { ChatModals } from '@/components/chat/overlays/ChatModals';
 import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import {
@@ -184,6 +184,12 @@ export default function ChatContainer() {
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
   const [filesManagerOpen, setFilesManagerOpen] = useState(false);
+  /** Master-detail preview shown inline in the Context panel (Output → file/image). */
+  const [panelPreview, setPanelPreview] = useState<PanelPreview | null>(null);
+  const openPanelPreview = (preview: PanelPreview) => {
+    setPanelPreview(preview);
+    setIsContextPanelOpen(true);
+  };
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
@@ -1386,6 +1392,7 @@ export default function ChatContainer() {
       /** When set, truncate session messages to this prefix before appending user+assistant. */
       priorMessages?: Message[];
       userContent?: string;
+      mode?: ResearchModeHint;
     }) => {
       if (!isAccountBound) {
         openLoginModal();
@@ -1426,7 +1433,7 @@ export default function ChatContainer() {
 
       await deepResearch.start({
         query: q,
-        mode: deepResearch.mode,
+        mode: opts.mode || deepResearch.mode,
         sessionId: sid,
         model: selectedModel || undefined,
         assistantId: opts.assistantId,
@@ -1436,11 +1443,12 @@ export default function ChatContainer() {
   );
 
   const submitComposer = useCallback(() => {
-    const researchQuery = parseResearchCommand(input);
-    if (researchQuery) {
+    const researchCmd = parseResearchCommand(input);
+    if (researchCmd) {
       setInput('');
       void startResearchTurn({
-        query: researchQuery,
+        query: researchCmd.query,
+        mode: researchCmd.mode,
         sessionId: activeSessionId,
       });
       return;
@@ -1493,10 +1501,11 @@ export default function ChatContainer() {
           last.research.status === 'cancelled')
       ) {
         if (deepResearch.busy) return;
-        const q = last.research.query || parseResearchCommand(
-          [...sessionMessages].reverse().find((m) => m.role === 'user')?.content || '',
-        ) || '';
+        const lastUserContent =
+          [...sessionMessages].reverse().find((m) => m.role === 'user')?.content || '';
+        const q = last.research.query || parseResearchCommand(lastUserContent)?.query || '';
         if (!q) return;
+        const mode = (last.research.mode as ResearchModeHint | undefined) || undefined;
         // Reuse the same assistant bubble; drop trailing user duplicate by
         // truncating before this assistant and re-adding user + same assistant id.
         const idx = sessionMessages.findIndex((m) => m.id === last.id);
@@ -1505,6 +1514,7 @@ export default function ChatContainer() {
         const priorMessages = sessionMessages.slice(0, cut);
         await startResearchTurn({
           query: q,
+          mode,
           sessionId,
           assistantId: last.id,
           priorMessages,
@@ -1525,8 +1535,8 @@ export default function ChatContainer() {
   const saveEditedMessageOrResearch = useCallback(
     async (messageId: string) => {
       const content = editingMessageContent.trim();
-      const researchQuery = parseResearchCommand(content);
-      if (researchQuery) {
+      const researchCmd = parseResearchCommand(content);
+      if (researchCmd) {
         if (isActiveLoading || deepResearch.busy) {
           stopOrCancel();
         }
@@ -1540,7 +1550,8 @@ export default function ChatContainer() {
         setEditingMessageContent('');
         setEditingMessageAttachments([]);
         await startResearchTurn({
-          query: researchQuery,
+          query: researchCmd.query,
+          mode: researchCmd.mode,
           sessionId: activeSessionId,
           priorMessages,
           userContent: content,
@@ -1675,6 +1686,7 @@ export default function ChatContainer() {
   useEffect(() => {
     stickToBottomRef.current = true;
     scrollToBottom(true);
+    setPanelPreview(null);
   }, [activeSessionId]);
 
   // While the assistant turn is still open but the stream has gone idle (no new
@@ -2075,6 +2087,8 @@ export default function ChatContainer() {
               addEditIngestedFiles={addEditIngestedFiles}
               removeEditingMessageAttachment={removeEditingMessageAttachment}
               setImagePreviewSrc={setImagePreviewSrc}
+              onPreviewImage={(entry) => openPanelPreview({ kind: 'image', entry })}
+              onPreviewFile={(entry) => openPanelPreview({ kind: 'file', entry })}
               cancelEditMessage={cancelEditMessage}
               saveEditedMessage={saveEditedMessageOrResearch}
               editUserMessage={editUserMessage}
@@ -2083,7 +2097,6 @@ export default function ChatContainer() {
               setReasoningOpen={setReasoningOpen}
               toolRunOpen={toolRunOpen}
               setToolRunOpen={setToolRunOpen}
-              setFilePreview={setFilePreview}
               downloadGeneratedFile={downloadGeneratedFile}
               canRetryFailed={canRetryFailed}
               retryFailedReply={retryFailedReply}
@@ -2194,7 +2207,10 @@ export default function ChatContainer() {
       </div>
       <ChatContextPanel
         open={isContextPanelOpen}
-        onClose={() => setIsContextPanelOpen(false)}
+        onClose={() => {
+          setIsContextPanelOpen(false);
+          setPanelPreview(null);
+        }}
         picturesExpanded={picturesExpanded}
         onTogglePicturesExpanded={() => setPicturesExpanded((v) => !v)}
         outputGroupsOpen={outputGroupsOpen}
@@ -2203,11 +2219,38 @@ export default function ChatContainer() {
         }
         images={generatedImageHistory}
         files={generatedFileHistory}
+        onPreviewImage={(entry) => openPanelPreview({ kind: 'image', entry })}
+        onPreviewFile={(entry) => openPanelPreview({ kind: 'file', entry })}
         onScrollToMessage={scrollToMessage}
         onDownloadImage={(entry) => void downloadGeneratedImage(entry)}
         onRemoveImage={removeGeneratedImage}
         onDownloadFile={(entry) => void downloadGeneratedFile(entry)}
         onRemoveFile={removeGeneratedFile}
+        preview={panelPreview}
+        onClosePreview={() => setPanelPreview(null)}
+        onExpandPreview={() => {
+          if (!panelPreview) return;
+          if (panelPreview.kind === 'image') {
+            setImagePreviewSrc(panelPreview.entry.url);
+          } else if (typeof panelPreview.entry.content === 'string') {
+            setFilePreview({
+              id: panelPreview.entry.id,
+              name: panelPreview.entry.name,
+              mimeType: panelPreview.entry.mimeType,
+              content: panelPreview.entry.content,
+              size: panelPreview.entry.size,
+            });
+          }
+        }}
+        onJumpToPreviewMessage={() => {
+          if (!panelPreview) return;
+          scrollToMessage(panelPreview.entry.messageId);
+        }}
+        onDownloadPreview={() => {
+          if (!panelPreview) return;
+          if (panelPreview.kind === 'image') void downloadGeneratedImage(panelPreview.entry);
+          else void downloadGeneratedFile(panelPreview.entry);
+        }}
         referenceExpanded={referenceExpanded}
         onToggleReferenceExpanded={() => setReferenceExpanded((v) => !v)}
         referenceGroupsOpen={referenceGroupsOpen}

@@ -461,7 +461,12 @@ export function ChatComposer(props: ChatComposerProps) {
             className="absolute left-3 right-3 bottom-full mb-2 z-40 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xl dark:border-stone-700 dark:bg-stone-900"
           >
             <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400 border-b border-stone-100 dark:border-stone-800">
-              Commands
+              {slashMenuItems.every(
+                (item) =>
+                  item.kind === 'command' && item.id.startsWith('research-mode-'),
+              )
+                ? t('researchModePicker')
+                : 'Commands'}
             </div>
             {slashMenuItems.map((item, idx) => (
               <button
@@ -485,6 +490,9 @@ export function ChatComposer(props: ChatComposerProps) {
                     <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                   ) : item.id === 'continue' ? (
                     <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                  ) : item.id === 'research' ||
+                    item.id.startsWith('research-mode-') ? (
+                    <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                   ) : (
                     <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                   )

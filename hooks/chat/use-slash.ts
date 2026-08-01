@@ -42,8 +42,66 @@ export function useChatSlash(opts: {
   const slashHasArgs = slashRaw != null && /\s/.test(slashRaw);
 
   const slashMenuItems = useMemo((): SlashMenuItem[] => {
+    if (slashQuery == null || slashRaw == null) return [];
+
+    // After `/research ` (or `/研究 `), offer clickable depth modes until a
+    // second token (the actual query) starts — no need to memorize keywords.
+    const researchModeMatch = slashRaw.match(/^(?:research|研究)\s+(.*)$/i);
+    if (researchModeMatch) {
+      const modeArg = researchModeMatch[1];
+      // Query already started (`/research quick foo`) — hide the picker.
+      if (/\S\s+\S/.test(modeArg)) return [];
+      const modeQuery = modeArg.trim().toLowerCase();
+      const modes: Array<{
+        id: string;
+        token: string;
+        insert: string;
+        titleKey: string;
+        hintKey: string;
+      }> = [
+        {
+          id: 'research-mode-quick',
+          token: 'quick',
+          insert: '/research quick ',
+          titleKey: 'researchModeQuick',
+          hintKey: 'researchModeQuickHint',
+        },
+        {
+          id: 'research-mode-standard',
+          token: 'standard',
+          insert: '/research standard ',
+          titleKey: 'researchModeStandard',
+          hintKey: 'researchModeStandardHint',
+        },
+        {
+          id: 'research-mode-rigorous',
+          token: 'rigorous',
+          insert: '/research rigorous ',
+          titleKey: 'researchModeRigorous',
+          hintKey: 'researchModeRigorousHint',
+        },
+      ];
+      // Mode fully chosen + trailing space → ready for the question.
+      if (
+        modeQuery &&
+        modes.some((m) => m.token === modeQuery) &&
+        /\s$/.test(modeArg)
+      ) {
+        return [];
+      }
+      return modes
+        .filter((m) => !modeQuery || m.token.startsWith(modeQuery))
+        .map((m) => ({
+          kind: 'command' as const,
+          id: m.id,
+          title: t(m.titleKey),
+          insert: m.insert,
+          hint: t(m.hintKey),
+        }));
+    }
+
     // Hide once a command is complete (`/image`) or args started (`/image …`).
-    if (slashQuery == null || slashHasArgs) return [];
+    if (slashHasArgs) return [];
     const items: SlashMenuItem[] = [];
     const imagePrefix =
       slashQuery === '' ||
@@ -68,7 +126,7 @@ export function useChatSlash(opts: {
         id: 'research',
         title: t('deepResearchCommand'),
         insert: '/research ',
-        hint: '/research',
+        hint: t('deepResearchCommandHint'),
       });
     }
     const skillPrefix =
@@ -111,7 +169,7 @@ export function useChatSlash(opts: {
       }
     }
     return items.slice(0, 8);
-  }, [slashQuery, slashHasArgs, skills, isAccountBound, t]);
+  }, [slashQuery, slashRaw, slashHasArgs, skills, isAccountBound, t]);
 
   const consumeSlashItem = (item: SlashMenuItem) => {
     if (item.kind === 'command') {
@@ -143,7 +201,7 @@ export function useChatSlash(opts: {
   // Keep slash highlight in range when the filtered list shrinks.
   useEffect(() => {
     setSlashHighlight(0);
-  }, [slashQuery]);
+  }, [slashRaw]);
 
   return {
     slashMatch,

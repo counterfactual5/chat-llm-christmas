@@ -3,7 +3,7 @@
  * timestamps, schema sanitize, tool_call extraction, and search-intent heuristics.
  */
 
-import { stampMessageText, stripMessageStamp } from '@/lib/chat/time-context';
+import { stampMessageText, stripMessageStamp } from '@/lib/chat/context/time-context';
 
 /** Heuristic: user clearly wants a live lookup (used for cursor-* proactive search). */
 export function looksLikeSearchRequest(text: string): boolean {

@@ -1,10 +1,12 @@
 /**
  * Send / queue / image-gen / resume / claim-review / edit-retry for the active chat.
  *
- *  Account:     hooks/use-chat-account.ts
- *  Integrations: hooks/use-chat-integrations.ts
- *  Persist:     hooks/use-chat-session-persist.ts
- *  SSE parse:   lib/chat/stream-response.ts
+ *  Queue helpers:   lib/chat/task-queue.ts
+ *  Continue/review: lib/chat/continuation.ts
+ *  Account:         hooks/use-chat-account.ts
+ *  Integrations:    hooks/use-chat-integrations.ts
+ *  Persist:         hooks/use-chat-session-persist.ts
+ *  SSE parse:       lib/chat/stream-response.ts
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { Message, ChatSession } from '@/lib/chat/types';
@@ -18,16 +20,31 @@ import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understan
 import { isAssistantError, messagePlainText } from '@/lib/chat/message-display';
 import { estimateTokensFromText } from '@/lib/models/specs';
 import { formatWebSourcesForReference } from '@/lib/chat/references';
-import { analyzeTruncation, assistantMismatchesUserTopic, buildContinuationPrompt, looksAbruptlyCutOff } from '@/lib/chat/reply-truncation';
+import { buildContinuationPrompt } from '@/lib/chat/reply-truncation';
 import { compactConversationHistory } from '@/lib/chat/compact';
+import {
+  afterRemoveTask,
+  clearPauseForSession,
+  pauseSession,
+  removeTaskById,
+  removeTasksById,
+  removeTasksForSession,
+  requeueFailedTask,
+  selectTasksToDrain,
+  tasksForSession,
+  type QueuedTask,
+} from '@/lib/chat/task-queue';
+import {
+  CLAIM_REVIEW_USER_PROMPT,
+  EMPTY_AFTER_PROCESS_PROMPT,
+  gateResumeIncompleteReply,
+  markdownTableSeamPrefix,
+  pickResumeBranch,
+  pollutedContinueUserContent,
+  resumeIsPolluted,
+} from '@/lib/chat/continuation';
 
-export type QueuedTask = {
-  id: string;
-  sessionId: string;
-  content: string;
-  baseMessages?: Message[];
-  enqueueTime: number;
-};
+export type { QueuedTask };
 
 export type UseChatLogicProps = {
   activeSessionId: string;
@@ -121,25 +138,17 @@ export function useChatLogic(props: UseChatLogicProps) {
   const isSessionLoading = (sessionId: string) => Boolean(loadingBySession[sessionId]);
   const isActiveLoading = isSessionLoading(activeSessionId);
   const activeQueue = useMemo(
-    () => messageQueue.filter((task) => task.sessionId === activeSessionId),
+    () => tasksForSession(messageQueue, activeSessionId),
     [messageQueue, activeSessionId],
   );
   const queuePaused = Boolean(queuePausedBySession[activeSessionId]);
 
-  // --- Chat Logic ---
   // Drain each session's queue only when that session is idle and not paused.
   useEffect(() => {
-    const toStart: QueuedTask[] = [];
-    const seen = new Set<string>();
-    for (const task of messageQueue) {
-      if (seen.has(task.sessionId)) continue;
-      if (loadingBySession[task.sessionId] || queuePausedBySession[task.sessionId]) continue;
-      seen.add(task.sessionId);
-      toStart.push(task);
-    }
+    const toStart = selectTasksToDrain(messageQueue, loadingBySession, queuePausedBySession);
     if (toStart.length === 0) return;
     const ids = new Set(toStart.map((task) => task.id));
-    setMessageQueue((prev) => prev.filter((task) => !ids.has(task.id)));
+    setMessageQueue((prev) => removeTasksById(prev, ids));
     for (const task of toStart) {
       // Reserve the session slot immediately so another drain can't double-start
       // while handleSubmit awaits compact / network.
@@ -150,10 +159,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         });
         if (!ok) {
           endLoading(task.sessionId);
-          setMessageQueue((prev) => [
-            ...prev,
-            { ...task, id: crypto.randomUUID(), enqueueTime: Date.now() },
-          ]);
+          setMessageQueue((prev) => [...prev, requeueFailedTask(task)]);
         }
       })();
     }
@@ -201,53 +207,31 @@ export function useChatLogic(props: UseChatLogicProps) {
   const cancelQueuedMessage = (id: string) => {
     setMessageQueue((prev) => {
       const removed = prev.find((task) => task.id === id);
-      const next = prev.filter((task) => task.id !== id);
-      if (removed && !next.some((task) => task.sessionId === removed.sessionId)) {
-        setQueuePausedBySession((p) => {
-          if (!p[removed.sessionId]) return p;
-          const copy = { ...p };
-          delete copy[removed.sessionId];
-          return copy;
-        });
-      }
+      const next = removeTaskById(prev, id);
+      setQueuePausedBySession((p) => afterRemoveTask(next, removed, p));
       return next;
     });
   };
 
   const clearQueue = () => {
     const sessionId = activeSessionId;
-    setMessageQueue((prev) => prev.filter((task) => task.sessionId !== sessionId));
-    setQueuePausedBySession((prev) => {
-      if (!prev[sessionId]) return prev;
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
-    });
+    setMessageQueue((prev) => removeTasksForSession(prev, sessionId));
+    setQueuePausedBySession((prev) => clearPauseForSession(prev, sessionId));
   };
 
   const resumeQueue = () => {
-    setQueuePausedBySession((prev) => {
-      if (!prev[activeSessionId]) return prev;
-      const next = { ...prev };
-      delete next[activeSessionId];
-      return next;
-    });
+    setQueuePausedBySession((prev) => clearPauseForSession(prev, activeSessionId));
   };
 
   const jumpQueueAndSubmit = (id: string) => {
     const task = messageQueue.find((item) => item.id === id);
     if (!task) return;
-    setMessageQueue((prev) => prev.filter((item) => item.id !== id));
+    setMessageQueue((prev) => removeTaskById(prev, id));
     // Send Now — abort that session's current reply without freezing the rest.
     if (isSessionLoading(task.sessionId)) {
       stopGenerating({ pauseQueue: false, sessionId: task.sessionId });
     }
-    setQueuePausedBySession((prev) => {
-      if (!prev[task.sessionId]) return prev;
-      const next = { ...prev };
-      delete next[task.sessionId];
-      return next;
-    });
+    setQueuePausedBySession((prev) => clearPauseForSession(prev, task.sessionId));
     setTimeout(() => {
       handleSubmit(task.content, task.baseMessages, true, task.sessionId);
     }, 50);
@@ -657,30 +641,12 @@ export function useChatLogic(props: UseChatLogicProps) {
     const sessionId = activeSessionIdRef.current;
     const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
     const last = sessionMessages[sessionMessages.length - 1];
-    if (isSessionLoading(sessionId) || !last || last.role !== 'assistant') return;
-
-    const emptyInterrupted = last.incomplete && !last.content.trim();
-    // Refuse to continue a reply that looks complete — matches the visible gate.
-    // Manual Continue (force) bypasses the soft gate so the user can always resume.
-    if (!opts?.force && !emptyInterrupted) {
-      if (!last.content.trim()) return;
-      const verdict = analyzeTruncation(
-        last.content,
-        last.finishReason,
-        last.incomplete,
-        last.truncationReason,
-      );
-      if (!verdict.truncated) {
-        // Still allow when a tool failed and the body looks unfinished.
-        const failedTools = (last.toolRuns || []).some(
-          (r) => r.status === 'done' && Boolean(r.error),
-        );
-        if (!failedTools || !looksAbruptlyCutOff(last.content).truncated) return;
-      }
-    }
-    if (opts?.force && !last.content.trim() && !last.reasoning?.trim() && !last.toolRuns?.length) {
-      return;
-    }
+    const gate = gateResumeIncompleteReply(last, {
+      force: opts?.force,
+      isLoading: isSessionLoading(sessionId),
+    });
+    if (!gate.ok || !last) return;
+    const { emptyInterrupted } = gate;
 
     stickToBottomRef.current = true;
     scrollToBottom(true);
@@ -690,15 +656,12 @@ export function useChatLogic(props: UseChatLogicProps) {
     abortControllersRef.current.set(sessionId, controller);
 
     const lastUser = [...sessionMessages].reverse().find((m) => m.role === 'user');
+    const branch = pickResumeBranch(last, lastUser, emptyInterrupted);
+
     // Truly empty bubble (refresh mid-Process, no tokens at all): re-answer.
     // If Thought / tools already ran, keep them — wiping felt like “Continue deleted
     // my half reply” when GLM parked text in reasoning with empty content.
-    const hasProcessOrThought = Boolean(
-      last.reasoning?.trim() ||
-        last.activity?.length ||
-        last.toolRuns?.length,
-    );
-    if (emptyInterrupted && lastUser && !hasProcessOrThought) {
+    if (branch === 'reanswer_empty') {
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
@@ -772,16 +735,12 @@ export function useChatLogic(props: UseChatLogicProps) {
 
     // Empty content but Thought/tools already present: ask the model for the
     // visible answer without wiping Process history.
-    if (emptyInterrupted && lastUser && hasProcessOrThought) {
+    if (branch === 'answer_after_process') {
       const apiMessages: ReturnType<typeof toApiMessages> = [
         ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
         {
           role: 'user' as const,
-          content: [
-            'Your previous turn was interrupted before any user-visible answer text.',
-            'Write the final answer now. Do not restart unrelated tasks.',
-            'Do not claim you created/updated Notion pages or invent Notion URLs unless a tool result in this thread already returned that URL.',
-          ].join(' '),
+          content: EMPTY_AFTER_PROCESS_PROMPT,
           images: [],
           timestamp: Date.now(),
         },
@@ -830,9 +789,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       return;
     }
 
-    const polluted =
-      Boolean(lastUser) &&
-      assistantMismatchesUserTopic(lastUser!.content, last.content);
+    const polluted = resumeIsPolluted(lastUser, last);
 
     // Cross-chat bleed (e.g. formula chat Continue resumes a Python agent task):
     // steer with a corrective prompt, but never wipe the partial bubble.
@@ -849,20 +806,16 @@ export function useChatLogic(props: UseChatLogicProps) {
         }),
         {
           role: 'user' as const,
-          content: [
-            'Continue THIS conversation only from where the assistant reply stopped.',
-            'Do not restart the answer, and do not continue any other chat\'s tasks, workspace scans, refactors, or tool plans.',
-            'Do not mention filesystems, shell, or scanning a workspace unless the user asked for that.',
+          content: pollutedContinueUserContent(
+            last.content,
             buildContinuationPrompt(last.content),
-          ].join('\n\n'),
+          ),
           images: [],
           timestamp: Date.now(),
         },
       ];
       initialContent = last.content;
-      const tail = last.content.trimEnd();
-      const lastLine = tail.split('\n').pop() ?? '';
-      seamPrefix = /^\s*\|.*\|\s*$/.test(lastLine) ? '\n' : '';
+      seamPrefix = markdownTableSeamPrefix(last.content);
     } else {
       apiMessages = [
         ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
@@ -873,9 +826,7 @@ export function useChatLogic(props: UseChatLogicProps) {
           timestamp: Date.now(),
         },
       ];
-      const tail = last.content.trimEnd();
-      const lastLine = tail.split('\n').pop() ?? '';
-      seamPrefix = /^\s*\|.*\|\s*$/.test(lastLine) ? '\n' : '';
+      seamPrefix = markdownTableSeamPrefix(last.content);
     }
 
     try {
@@ -950,8 +901,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
       {
         role: 'user' as const,
-        content:
-          'Claim Review: audit your previous assistant answer. For each claim of a tool action, web search, or factual statement, verify it against the tool results in this conversation. Retract any claim that lacks a real tool receipt; otherwise confirm it is verified. Be brief.',
+        content: CLAIM_REVIEW_USER_PROMPT,
         images: [],
         timestamp: Date.now(),
       },
@@ -1156,7 +1106,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     }
     // Stopping mid-reply should freeze remaining queued messages for this session.
     if (pauseQueue) {
-      setQueuePausedBySession((prev) => ({ ...prev, [sessionId]: true }));
+      setQueuePausedBySession((prev) => pauseSession(prev, sessionId));
     }
   };
 
@@ -1186,13 +1136,8 @@ export function useChatLogic(props: UseChatLogicProps) {
     compactNotice,
     clearSessionWork: (sessionId: string) => {
       endLoading(sessionId);
-      setMessageQueue((prev) => prev.filter((task) => task.sessionId !== sessionId));
-      setQueuePausedBySession((prev) => {
-        if (!prev[sessionId]) return prev;
-        const next = { ...prev };
-        delete next[sessionId];
-        return next;
-      });
+      setMessageQueue((prev) => removeTasksForSession(prev, sessionId));
+      setQueuePausedBySession((prev) => clearPauseForSession(prev, sessionId));
     },
   };
 }

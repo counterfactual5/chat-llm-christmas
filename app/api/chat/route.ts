@@ -32,14 +32,8 @@ import {
   uploadGatewayDataUrl,
 } from '@/lib/files/gateway';
 import {
-  detectFakedToolNarration,
-  detectPendingToolIntent,
-  buildCorrectionPrompt,
-  buildPendingIntentPrompt,
   buildExecutionRecordFromMessages,
-  filterSurfacesMissingReceipt,
   runFullClaimAudit,
-  emitMidTurnReview,
   buildReviewIssuesResponsePrompt,
   actionableReviewIssues,
   verifyCorrectionText,
@@ -62,20 +56,19 @@ import {
   wantsThinking,
 } from '@/lib/chat/server/thinking';
 import { runPlainCompletionStream } from '@/lib/chat/server/plain-completion';
-import { runToolCallStreamRound } from '@/lib/chat/server/tool-round';
 import { streamFinalCompletion } from '@/lib/chat/server/final-completion';
 import {
   auditReviewTurns,
   buildReviewAnswerMessages,
   collectReviewTurns,
 } from '@/lib/chat/server/review-turns';
+import { runToolRounds } from '@/lib/chat/server/run-tool-rounds';
 import { completeOnce, withTimeout } from '@/lib/chat/server/upstream';
 import {
   extractToolCalls,
   lastUserMessageHasImageParts,
   lastUserText,
   looksLikeSearchRequest,
-  narratesSearchInsteadOfCalling,
   sanitizeChatMessages,
   withMessageTimestamps,
 } from '@/lib/chat/server/messages';
@@ -84,15 +77,9 @@ import {
   buildChatSystemParts,
   joinChatSystemParts,
 } from '@/lib/chat/server/system-prompt';
-import {
-  buildToolFallbackQuery,
-  toolResultIndicatesFailure,
-} from '@/lib/chat/server/tool-execution';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
-
-const MAX_TOOL_ROUNDS = 3;
 /** Stall budget: no upstream chunk for this long → timeout. */
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
 /** Hard cap for one streaming pass (under maxDuration). */
@@ -859,186 +846,48 @@ export async function POST(req: NextRequest) {
 
           // Generic tool loop — stream each round so content arrives
           // incrementally even when the model decides not to call tools.
-          if (activeToolDefs.length > 0 && !usedTools) {
-            for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-              const roundResult = await runToolCallStreamRound({
-                apiKey,
-                baseURL,
-                signal: clientSignal,
-                model: requestedModel,
-                temperature,
-                messages: sanitizeChatMessages(workingMessages),
-                tools: activeToolDefs,
-                enableThinking: thinking,
-                reasoningAsContent,
-                idleMs: STREAM_IDLE_TIMEOUT_MS,
-                maxTotalMs: STREAM_MAX_TOTAL_MS,
-                send,
-              });
-              if (!roundResult.ok) break;
-              const { streamedContent, toolCalls, roundFinishReason, hasToolCallDeltas } =
-                roundResult;
-
-              if (!toolCalls.length) {
-                // Cursor: narrated "I'll search" with no tool_calls → force real search.
-                if (
-                  cursorModel &&
-                  searchEnabled &&
-                  streamedContent &&
-                  narratesSearchInsteadOfCalling(streamedContent)
-                ) {
-                  if (!(await runProactiveSearch())) return;
-                  break;
-                }
-                // Announced "I'll fetch/read first" with no tool_calls — force a real call.
-                // Always on when those tools are available (not only Auto-review): otherwise
-                // the turn ends on narration and the UI looks "interrupted".
-                if (streamedContent && round < MAX_TOOL_ROUNDS - 1) {
-                  const pending = detectPendingToolIntent(streamedContent, {
-                    searchEnabled,
-                    integrations: authorizedIntegrations,
-                  });
-                  if (pending.length) {
-                    midTurnCorrection = { surfaces: pending, kind: 'intent' };
-                    emitMidTurnReview(send, midTurnCorrection);
-                    workingMessages.push({
-                      role: 'assistant',
-                      content: streamedContent,
-                    });
-                    workingMessages.push({
-                      role: 'user',
-                      content: buildPendingIntentPrompt(pending),
-                    });
-                    break;
-                  }
-                }
-                // Claimed a tool success (Notion / GitHub / Google / web / skill)
-                // without emitting tool_calls — Reviewer pushes a corrective turn.
-                // Skip surfaces that already have successful receipts earlier this turn
-                // (e.g. answer cites「根据搜索结果」after a real web_search round).
-                if (autoReview && streamedContent && round < MAX_TOOL_ROUNDS - 1) {
-                  const faked = detectFakedToolNarration(streamedContent, {
-                    searchEnabled,
-                    integrations: authorizedIntegrations,
-                    skillCreator: skillCreatorOn,
-                  });
-                  const turnRecord = buildExecutionRecordFromMessages(workingMessages, {
-                    afterIndex: autoReviewTurnBoundary,
-                  });
-                  const missing = filterSurfacesMissingReceipt(faked, turnRecord);
-                  if (missing.length) {
-                    midTurnCorrection = { surfaces: missing, kind: 'success' };
-                    emitMidTurnReview(send, midTurnCorrection);
-                    workingMessages.push({
-                      role: 'assistant',
-                      content: streamedContent,
-                    });
-                    workingMessages.push({
-                      role: 'user',
-                      content: buildCorrectionPrompt(missing),
-                    });
-                    break;
-                  }
-                }
-                // Malformed / aborted tool_calls (e.g. deltas without a function name —
-                // common on weaker free models). Content was already streamed as content.
-                // Fall through to the final completion pass without tools.
-                if (hasToolCallDeltas) {
-                  break;
-                }
-                // Only end here when the model already streamed a user-visible answer.
-                // Reasoning-only chunks (common on GLM with tools enabled) must fall
-                // through to the final completion pass — otherwise the bubble stays empty.
-                if (streamedContent.trim()) {
-                  // After a failed tool, narration without a retry is incomplete —
-                  // push a recovery turn while rounds remain so the model can fix args
-                  // (e.g. missing Notion page_id) instead of leaving a half outline.
-                  if (lastToolRoundHadFailure && round < MAX_TOOL_ROUNDS - 1) {
-                    workingMessages.push({
-                      role: 'assistant',
-                      content: streamedContent,
-                    });
-                    workingMessages.push({
-                      role: 'user',
-                      content: [
-                        'Your previous tool call(s) FAILED — see the tool result error payloads above.',
-                        'Either emit corrected tool_calls now (e.g. include required fields like page_id),',
-                        'OR clearly explain the failure and stop. Do not claim the write succeeded.',
-                        'Do not leave a half-written outline or empty section headings.',
-                      ].join(' '),
-                    });
-                    lastToolRoundHadFailure = false;
-                    break;
-                  }
-                  // Early DONE used to skip runFinalCompletion entirely — so Auto-review
-                  // post-audit never ran on "model said stop after narration" turns.
-                  // Soft-audit here for visibility; mid-turn correction above should
-                  // already have forced tool_calls when rounds remain.
-                  if (autoReview) {
-                    const audit = await postAudit(streamedContent, 'audit', {
-                      finishReason: roundFinishReason,
-                      truncated: roundFinishReason === 'length',
-                    });
-                    // Warn-level heuristics stay panel-only; only verified
-                    // errors are worth making the model amend itself.
-                    const actionable = actionableReviewIssues(audit.issues);
-                    if (actionable.length) {
-                      await streamReviewCorrection(actionable, streamedContent);
-                    }
-                  }
-                  send(streamCompletionPayload(roundFinishReason || 'stop'));
-                  controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                  controller.close();
-                  return;
-                }
-                break;
-              }
-
-              // Tool calls present — any narration already landed in the bubble as content.
-              // The follow-up answer still comes from the final stage after tools execute.
-
-              usedTools = true;
-              let roundHadToolFailure = false;
-              workingMessages.push({
-                role: 'assistant',
-                content: streamedContent || null,
-                tool_calls: toolCalls.map((tc) => ({
-                  id: tc.id,
-                  type: 'function',
-                  function: { name: tc.name, arguments: tc.arguments },
-                })),
-              });
-
-              for (const tc of toolCalls) {
-                const fallbackQuery = buildToolFallbackQuery({
-                  toolCall: tc,
-                  userAsk,
-                  streamedContent,
-                  workingMessages,
-                });
-                const result = await executeRegisteredTool(
-                  enabledTools,
-                  {
-                    name: tc.name,
-                    callId: tc.id,
-                    rawArguments: tc.arguments,
-                    fallbackQuery,
-                  },
-                  toolCtx,
-                );
-                const payload = String(result.content || '');
-                if (toolResultIndicatesFailure(payload)) {
-                  roundHadToolFailure = true;
-                }
-                workingMessages.push({
-                  role: 'tool',
-                  tool_call_id: tc.id,
-                  content: result.content,
-                });
-              }
-              if (roundHadToolFailure) lastToolRoundHadFailure = true;
-            }
-          }
+          const toolRoundsState = {
+            usedTools,
+            lastToolRoundHadFailure,
+            midTurnCorrection,
+          };
+          const toolRoundsOutcome = await runToolRounds({
+            state: toolRoundsState,
+            activeToolDefs,
+            apiKey,
+            baseURL,
+            signal: clientSignal,
+            model: requestedModel,
+            temperature,
+            workingMessages,
+            enableThinking: thinking,
+            reasoningAsContent,
+            idleMs: STREAM_IDLE_TIMEOUT_MS,
+            maxTotalMs: STREAM_MAX_TOTAL_MS,
+            cursorModel,
+            searchEnabled,
+            autoReview,
+            authorizedIntegrations,
+            skillCreatorOn,
+            autoReviewTurnBoundary,
+            userAsk,
+            enabledTools,
+            toolCtx,
+            send,
+            closeStreamDone: () => {
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            },
+            runProactiveSearch,
+            postAudit,
+            streamReviewCorrection,
+            actionableReviewIssues,
+            executeRegisteredTool,
+          });
+          usedTools = toolRoundsState.usedTools;
+          lastToolRoundHadFailure = toolRoundsState.lastToolRoundHadFailure;
+          midTurnCorrection = toolRoundsState.midTurnCorrection;
+          if (toolRoundsOutcome.status === 'stream_closed') return;
 
           const finalMessages = usedTools
             ? [

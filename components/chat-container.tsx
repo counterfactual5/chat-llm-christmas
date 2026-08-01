@@ -6,6 +6,9 @@
  *  Account status                  hooks/chat/use-account.ts + lib/chat/account/client.ts
  *  Notion/GitHub/Google status     hooks/chat/use-integrations.ts + lib/chat/integrations/client.ts
  *  Session hydrate / persist       hooks/chat/use-session-persist.ts + lib/chat/session/persist.ts
+ *  Attachments ingest / upload     hooks/chat/use-attachments.ts
+ *  Skills toggle / create / delete hooks/chat/use-skills.ts
+ *  Slash menu                      hooks/chat/use-slash.ts
  *  OAuth return query              lib/chat/account/oauth-return.ts
  *  Send / queue / resume / review   hooks/chat/use-logic.ts
  *    queue helpers                 lib/chat/turn/task-queue.ts
@@ -48,6 +51,9 @@ import { useChatLogic } from '@/hooks/chat/use-logic';
 import { useChatAccount } from '@/hooks/chat/use-account';
 import { useChatIntegrations } from '@/hooks/chat/use-integrations';
 import { useChatSessionPersist } from '@/hooks/chat/use-session-persist';
+import { useChatAttachments } from '@/hooks/chat/use-attachments';
+import { useChatSkills } from '@/hooks/chat/use-skills';
+import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
@@ -85,12 +91,7 @@ import {
 import { withMarkedAssistantIncomplete } from '@/lib/chat/session/mutations';
 import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream/client';
 import { cn } from '@/lib/utils';
-import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
-import {
-  BUILTIN_SKILLS,
-  SKILL_CREATOR_ID,
-  skillSlashName,
-} from '@/lib/skills/creator';
+import { BUILTIN_SKILLS, SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import {
@@ -114,9 +115,6 @@ export default function ChatContainer() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageContent, setEditingMessageContent] = useState('');
-  const [editingMessageAttachments, setEditingMessageAttachments] = useState<IngestedAttachment[]>(
-    [],
-  );
 
   // Model & Auth State
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -151,25 +149,15 @@ export default function ChatContainer() {
    */
   const [replyWaitByMessage, setReplyWaitByMessage] = useState<Record<string, boolean>>({});
 
-  // Skills State
-  const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [isSavingSkill, setIsSavingSkill] = useState(false);
+  // Skills / attachments state lives in dedicated hooks (wired below after account + session helpers).
   const [googleMcpMenuOpen, setGoogleMcpMenuOpen] = useState(false);
   const [plusFlyout, setPlusFlyout] = useState<
     null | 'commands' | 'skills' | 'mcp' | 'tools'
   >(null);
-  const [showSkillModal, setShowSkillModal] = useState(false);
-  const [skillDraftTitle, setSkillDraftTitle] = useState('');
-  const [skillDraftContent, setSkillDraftContent] = useState('');
-  const [skillModalError, setSkillModalError] = useState('');
-  const [skillPendingDelete, setSkillPendingDelete] = useState<SkillItem | null>(null);
-  const [isDeletingSkill, setIsDeletingSkill] = useState(false);
   const [isSkillPickerOpen, setIsSkillPickerOpen] = useState(false);
-  const [slashHighlight, setSlashHighlight] = useState(0);
   const skillPickerRef = useRef<HTMLDivElement>(null);
   const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
-  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
   const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   /** Per-source groups within Reference Material; all start collapsed. */
@@ -180,9 +168,7 @@ export default function ChatContainer() {
   const [systemPrompt, setSystemPrompt] = useState('');
   /** When the user explicitly clears web sources, suppress auto-restore from history. */
   const [webSourcesCleared, setWebSourcesCleared] = useState(false);
-  const [attachments, setAttachments] = useState<IngestedAttachment[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const [attachError, setAttachError] = useState('');
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
 
@@ -208,14 +194,13 @@ export default function ChatContainer() {
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const sessionsRef = useRef(sessions);
   const activeSessionIdRef = useRef(activeSessionId);
-  const skillsRef = useRef(skills);
+  const skillsRef = useRef<SkillItem[]>([]);
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
 
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
-  skillsRef.current = skills;
 
   const createNewSession = useCallback(() => {
     // Switch to a blank composer. The draft is kept in memory only and is
@@ -265,6 +250,19 @@ export default function ChatContainer() {
     [activeSessionId],
   );
 
+  const setActiveSkillIds = useCallback(
+    (updater: string[] | ((prev: string[]) => string[])) => {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          const next = typeof updater === 'function' ? updater(s.skillIds || []) : updater;
+          return { ...s, skillIds: next, updatedAt: Date.now() };
+        }),
+      );
+    },
+    [activeSessionId],
+  );
+
   const fetchModels = useCallback(async () => {
     setModelsLoading(true);
     try {
@@ -298,6 +296,54 @@ export default function ChatContainer() {
     }
   }, []);
 
+  const {
+    isAccountBound,
+    accountUsername,
+    refreshAccountStatus,
+    bindWithApiKey,
+    disconnectAccountCore,
+  } = useChatAccount();
+
+  const {
+    attachments,
+    setAttachments,
+    attachmentsExpanded,
+    setAttachmentsExpanded,
+    editingMessageAttachments,
+    setEditingMessageAttachments,
+    attachError,
+    setAttachError,
+    addIngestedFiles,
+    addEditIngestedFiles,
+    removeAttachment,
+    removeEditingMessageAttachment,
+  } = useChatAttachments({ isAccountBound });
+
+  const {
+    skills,
+    setSkills,
+    isSavingSkill,
+    showSkillModal,
+    setShowSkillModal,
+    skillDraftTitle,
+    setSkillDraftTitle,
+    skillDraftContent,
+    setSkillDraftContent,
+    skillModalError,
+    setSkillModalError,
+    skillPendingDelete,
+    setSkillPendingDelete,
+    isDeletingSkill,
+    toggleSkill,
+    attachSkill,
+    openNewSkillModal,
+    createSkill,
+    requestDeleteSkill,
+    confirmDeleteSkill,
+  } = useChatSkills({ setActiveSkillIds, setIsSkillPickerOpen });
+
+  skillsRef.current = skills;
+
   const fetchSkills = useCallback(async () => {
     try {
       const res = await fetch('/api/skills', { cache: 'no-store' });
@@ -308,15 +354,7 @@ export default function ChatContainer() {
     } catch (e) {
       console.error('Failed to fetch skills', e);
     }
-  }, []);
-
-  const {
-    isAccountBound,
-    accountUsername,
-    refreshAccountStatus,
-    bindWithApiKey,
-    disconnectAccountCore,
-  } = useChatAccount();
+  }, [setSkills]);
 
   const {
     chatsHydrated,
@@ -595,7 +633,10 @@ export default function ChatContainer() {
           BUILTIN_SKILLS.find((skill) => skill.id === id) ||
           skills.find((skill) => skill.id === id),
         )
-        .filter((skill): skill is SkillItem => Boolean(skill)),
+        .filter(
+          (skill): skill is SkillItem =>
+            Boolean(skill) && skill?.id !== SKILL_CREATOR_ID,
+        ),
     [activeSkillIds, skills],
   );
 
@@ -652,7 +693,25 @@ export default function ChatContainer() {
     !m.reasoning &&
     !m.toolRuns?.length;
 
+  const deleteStoredFile = async (fileId: string) => {
+    if (!fileId || fileId.startsWith('local:')) return;
+    const res = await fetch(`/api/files/${encodeURIComponent(fileId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 404) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(String(data?.error || `Delete file failed (${res.status})`));
+    }
+  };
+
   const removeGeneratedImage = (entry: GeneratedImageEntry) => {
+    const message = messages.find((item) => item.id === entry.messageId);
+    const image = message?.images?.[entry.imageIndex];
+    if (image?.fileId) {
+      void deleteStoredFile(image.fileId).catch((error) =>
+        console.warn('[files] delete generated image failed:', error),
+      );
+    }
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id !== activeSessionId) return s;
@@ -669,6 +728,11 @@ export default function ChatContainer() {
   };
 
   const removeGeneratedFile = (entry: GeneratedFileEntry) => {
+    if (!entry.url.startsWith('local://')) {
+      void deleteStoredFile(entry.id).catch((error) =>
+        console.warn('[files] delete generated file failed:', error),
+      );
+    }
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id !== activeSessionId) return s;
@@ -691,21 +755,28 @@ export default function ChatContainer() {
     );
   };
 
-  const setActiveSkillIds = (updater: string[] | ((prev: string[]) => string[])) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== activeSessionId) return s;
-        const next = typeof updater === 'function' ? updater(s.skillIds || []) : updater;
-        return { ...s, skillIds: next, updatedAt: Date.now() };
-      }),
-    );
-  };
-
   const openLoginModal = () => {
     if (isAccountBound) return;
     setAuthModalMode('login');
     setShowAuthModal(true);
   };
+
+  const {
+    slashMenuItems,
+    slashHighlight,
+    setSlashHighlight,
+    consumeSlashItem,
+  } = useChatSlash({
+    input,
+    setInput,
+    skills,
+    isAccountBound,
+    setActiveSkillIds,
+    setIsSkillPickerOpen,
+    openLoginModal,
+    attachSkill,
+    t,
+  });
 
   const openNotionModal = () => {
     if (!isAccountBound) {
@@ -792,96 +863,6 @@ export default function ChatContainer() {
       const withoutLegacy = prev.filter((id) => id !== 'google');
       return withoutLegacy.includes(service) ? withoutLegacy : [...withoutLegacy, service];
     });
-  };
-
-  const toggleSkill = (skillId: string) => {
-    setActiveSkillIds((prev) =>
-      prev.includes(skillId) ? prev.filter((id) => id !== skillId) : [...prev, skillId],
-    );
-  };
-
-  const attachSkill = (skill: SkillItem) => {
-    setActiveSkillIds((prev) => (prev.includes(skill.id) ? prev : [...prev, skill.id]));
-    setIsSkillPickerOpen(false);
-  };
-
-  /** Trailing `/query` at start of input or after a newline — slash-command mode. */
-  const slashMatch = input.match(/(?:^|\n)\/([^\n]*)$/);
-  const slashRaw = slashMatch ? slashMatch[1] : null;
-  const slashQuery = slashRaw != null ? slashRaw.trim().toLowerCase() : null;
-  /** True once the user typed a space after `/cmd` (arguments started). */
-  const slashHasArgs = slashRaw != null && /\s/.test(slashRaw);
-
-  type SlashMenuItem =
-    | { kind: 'command'; id: string; title: string; insert: string; hint: string }
-    | { kind: 'skill'; skill: SkillItem };
-
-  const slashMenuItems = useMemo((): SlashMenuItem[] => {
-    // Hide once a command is complete (`/image`) or args started (`/image …`).
-    if (slashQuery == null || slashHasArgs) return [];
-    const items: SlashMenuItem[] = [];
-    const imagePrefix =
-      slashQuery === '' ||
-      ('image'.startsWith(slashQuery) && slashQuery !== 'image') ||
-      ('img'.startsWith(slashQuery) && slashQuery !== 'img');
-    if (imagePrefix) {
-      items.push({
-        kind: 'command',
-        id: 'image',
-        title: t('generateImage'),
-        insert: '/image ',
-        hint: t('imageHint'),
-      });
-    }
-    const skillPrefix =
-      slashQuery === '' ||
-      ('skill'.startsWith(slashQuery) && slashQuery !== 'skill') ||
-      ('skill-create'.startsWith(slashQuery) && slashQuery !== 'skill-create');
-    if (skillPrefix) {
-      items.push({
-        kind: 'command',
-        id: 'skill-create',
-        title: '创建 Skill',
-        insert: '/skill ',
-        hint: '描述用途与要求',
-      });
-    }
-    if (isAccountBound) {
-      for (const s of skills) {
-        const name = skillSlashName(s.title);
-        if (
-          slashQuery === '' ||
-          (name.startsWith(slashQuery) && name !== slashQuery) ||
-          (s.title.toLowerCase().includes(slashQuery) && name !== slashQuery)
-        ) {
-          items.push({ kind: 'skill', skill: s });
-        }
-      }
-    }
-    return items.slice(0, 8);
-  }, [slashQuery, slashHasArgs, skills, isAccountBound]);
-
-  const consumeSlashItem = (item: SlashMenuItem) => {
-    if (item.kind === 'command') {
-      if (item.id === 'skill-create') {
-        if (!isAccountBound) {
-          openLoginModal();
-          return;
-        }
-        setActiveSkillIds((prev) =>
-          prev.includes(SKILL_CREATOR_ID) ? prev : [...prev, SKILL_CREATOR_ID],
-        );
-      }
-      setInput((prev) =>
-        prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? `\n${item.insert}` : item.insert)),
-      );
-      setIsSkillPickerOpen(false);
-      setSlashHighlight(0);
-      return;
-    }
-    attachSkill(item.skill);
-    setInput((prev) => prev.replace(/(?:^|\n)\/[^\n]*$/, (seg) => (seg.startsWith('\n') ? '\n' : '')));
-    setSlashHighlight(0);
   };
 
   const lastMessage = messages[messages.length - 1];
@@ -1165,96 +1146,6 @@ export default function ChatContainer() {
     clearLocalSessions();
     createNewSession();
     await fetchModels();
-  };
-
-  const applyIngestedFiles = async (
-    files: FileList | File[],
-    append: (placeholders: IngestedAttachment[]) => void,
-    patch: (id: string, updater: (x: IngestedAttachment) => IngestedAttachment) => void,
-  ) => {
-    setAttachError('');
-    const { attachments: next, errors } = await ingestFiles(files);
-
-    const placeholders: IngestedAttachment[] = next.map((a) => ({
-      ...a,
-      uploading: Boolean(a.dataUrl && isAccountBound),
-    }));
-
-    if (placeholders.length > 0) {
-      append(placeholders);
-    }
-
-    for (const a of next) {
-      if (!a.dataUrl || !isAccountBound) continue;
-
-      try {
-        const res = await fetch('/api/files', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
-        });
-        const data = await res.json();
-        if (res.ok && data?.id) {
-          const fileId = String(data.id);
-          patch(a.id, (x) => ({
-            ...x,
-            uploading: false,
-            uploadError: false,
-            fileId,
-            previewUrl: `/api/files/${encodeURIComponent(fileId)}`,
-          }));
-          continue;
-        }
-        if (isAccountBound) {
-          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: !x.dataUrl }));
-          continue;
-        }
-      } catch {
-        if (isAccountBound) {
-          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: !x.dataUrl }));
-          continue;
-        }
-      }
-
-      patch(a.id, (x) => ({ ...x, uploading: false }));
-    }
-    if (errors.length > 0) setAttachError(errors.join(' · '));
-  };
-
-  const addIngestedFiles = async (files: FileList | File[]) => {
-    await applyIngestedFiles(
-      files,
-      (placeholders) => {
-        setAttachments((prev) => [...prev, ...placeholders]);
-        setAttachmentsExpanded(true);
-      },
-      (id, updater) => setAttachments((prev) => prev.map((x) => (x.id === id ? updater(x) : x))),
-    );
-  };
-
-  const addEditIngestedFiles = async (files: FileList | File[]) => {
-    await applyIngestedFiles(
-      files,
-      (placeholders) => setEditingMessageAttachments((prev) => [...prev, ...placeholders]),
-      (id, updater) =>
-        setEditingMessageAttachments((prev) => prev.map((x) => (x.id === id ? updater(x) : x))),
-    );
-  };
-
-  const removeEditingMessageAttachment = (id: string) => {
-    setEditingMessageAttachments((prev) => {
-      const target = prev.find((a) => a.id === id);
-      if (target?.previewUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(target.previewUrl);
-      }
-      return prev.filter((a) => a.id !== id);
-    });
-  };
-
-  const removeAttachment = (id: string) => {
-    const toRemove = attachments.find((a) => a.id === id);
-    if (toRemove?.previewUrl) URL.revokeObjectURL(toRemove.previewUrl);
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
   };
 
   const selectedSpec = useMemo(() => {
@@ -1598,79 +1489,11 @@ export default function ChatContainer() {
     [contextBreakdown],
   );
 
-  const openNewSkillModal = () => {
-    setSkillDraftTitle('');
-    setSkillDraftContent('');
-    setSkillModalError('');
-    setShowSkillModal(true);
-  };
-
-  const createSkill = async (title: string, content: string) => {
-    const trimmedTitle = title.trim();
-    const trimmedContent = content.trim();
-    if (!trimmedTitle || !trimmedContent) {
-      setSkillModalError('请填写名称和内容');
-      return false;
-    }
-    setIsSavingSkill(true);
-    setSkillModalError('');
-    try {
-      const res = await fetch('/api/skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: trimmedTitle, content: trimmedContent }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || '保存失败');
-      if (json.success || json.data) {
-        const saved = json.data || { id: crypto.randomUUID(), title: trimmedTitle, content: trimmedContent };
-        setSkills((prev) => [saved, ...prev.filter((s) => s.id !== saved.id)]);
-        setShowSkillModal(false);
-        return true;
-      }
-      throw new Error(json?.error || '保存失败');
-    } catch (e: any) {
-      console.error(e);
-      setSkillModalError(e?.message || '保存失败');
-      alert(e?.message || '保存失败');
-      return false;
-    } finally {
-      setIsSavingSkill(false);
-    }
-  };
-
-  const requestDeleteSkill = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const skill = skills.find((s) => s.id === id) || null;
-    if (!skill) return;
-    setSkillPendingDelete(skill);
-  };
-
-  const confirmDeleteSkill = async () => {
-    if (!skillPendingDelete || isDeletingSkill) return;
-    setIsDeletingSkill(true);
-    try {
-      await fetch(`/api/skills/${skillPendingDelete.id}`, { method: 'DELETE' });
-      setSkills((prev) => prev.filter((s) => s.id !== skillPendingDelete.id));
-      setActiveSkillIds((prev) => prev.filter((id) => id !== skillPendingDelete.id));
-      setSkillPendingDelete(null);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsDeletingSkill(false);
-    }
-  };
-
   // Remember the user's model choice across refreshes.
   useEffect(() => {
     if (!selectedModel) return;
     localStorage.setItem('llm_christmas_selected_model', selectedModel);
   }, [selectedModel]);
-
-  // Keep slash highlight in range when the filtered list shrinks.
-  useEffect(() => {
-    setSlashHighlight(0);
-  }, [slashQuery]);
 
   // Close skill picker on outside click.
   useEffect(() => {

@@ -216,6 +216,13 @@ export function applyResearchEvent(
       if (status === 'planning') {
         if (!hasPendingTool(m, 'research_plan')) {
           m = startTool(m, 'research_plan', detail || 'planning research outline').message;
+        } else if (detail && detail !== 'claimed') {
+          const toolRuns = ensureTools(m).map((run) =>
+            run.name === 'research_plan' && run.status === 'start'
+              ? { ...run, query: detail }
+              : run,
+          );
+          m = { ...m, toolRuns };
         }
       } else if (status === 'verifying') {
         if (!hasPendingTool(m, 'research_verify')) {

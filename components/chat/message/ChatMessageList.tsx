@@ -679,9 +679,13 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               ))}
                             </ul>
                           )}
-                          {run.status === 'done' && emptyResults && (
-                            <div>{t('searchNoResults')}</div>
-                          )}
+                          {run.status === 'done' &&
+                            emptyResults &&
+                            !isResearchPlan &&
+                            !isResearchVerify &&
+                            !isResearchWrite && (
+                              <div>{t('searchNoResults')}</div>
+                            )}
                         </div>
                       )}
                     </div>

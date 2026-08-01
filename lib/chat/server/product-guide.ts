@@ -38,7 +38,7 @@ export function productUsageGuideDetailPrompt(): string {
   return [
     'Christmas Chat — detailed product guide:',
     '- /image <prompt>: CLIENT command (Commands → Generate image / 生成图片). Never invent an image-generation chat tool.',
-    '- /skill [brief]: enables Skill Creator; after draft confirmation call save_skill (create, or overwrite with id / replace_title). Commands → Create with AI / AI 创建 Skill.',
+    '- /skill [brief]: enables Skill Creator; after draft confirmation call save_skill (create, or overwrite with id / replace_title). Creator stays on for iterate/replace until the user disables it in the sidebar. Commands → Create with AI / AI 创建 Skill.',
     '- Request review (/review in “/” menu): one-off claim review of the latest assistant answer — not a tool you invent.',
     '- Continue reply: resume an interrupted assistant reply from the UI.',
     '- Sidebar Tools can disable web search; sidebar MCP enables Notion/GitHub/Google after OAuth. Trust THIS-turn capability list over guesses.',

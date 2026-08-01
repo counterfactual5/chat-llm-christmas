@@ -48,8 +48,6 @@ export type StreamChatDeps = {
   getActiveSessionId: () => string;
   scrollToBottom: () => void;
   fetchSkills: () => void | Promise<void>;
-  /** One-shot Skill Creator command ends after save_skill succeeds. */
-  onSkillSaved: (sessionId: string) => void;
   onGeneratedFileForActiveSession: () => void;
   onWebSourcesUpdated: (opts: {
     openContextPanel: boolean;
@@ -391,13 +389,13 @@ export async function streamChatResponse(
             deps.onWebSourcesUpdated(sideEffects);
           }
           // save_skill persisted to the account — refresh the sidebar list.
+          // Skill Creator stays active so the user can iterate / replace next.
           if (
             parsed.tool.status === 'done' &&
             parsed.tool.name === 'save_skill' &&
             !parsed.tool.error
           ) {
             void deps.fetchSkills();
-            deps.onSkillSaved(sessionId);
           }
         }
         if (parsed.file_created && typeof parsed.file_created === 'object') {

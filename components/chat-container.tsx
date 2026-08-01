@@ -1050,21 +1050,6 @@ export default function ChatContainer() {
         getActiveSessionId: () => activeSessionIdRef.current,
         scrollToBottom,
         fetchSkills,
-        onSkillSaved: (savedSessionId) => {
-          setSessions((prev) =>
-            prev.map((session) =>
-              session.id === savedSessionId
-                ? {
-                    ...session,
-                    skillIds: (session.skillIds || []).filter(
-                      (id) => id !== SKILL_CREATOR_ID,
-                    ),
-                    updatedAt: Date.now(),
-                  }
-                : session,
-            ),
-          );
-        },
         onGeneratedFileForActiveSession: () => {
           setPicturesExpanded(true);
           setOutputGroupsOpen((prev) => ({ ...prev, files: true }));

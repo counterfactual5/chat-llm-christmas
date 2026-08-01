@@ -125,7 +125,7 @@ describe('buildChatSystemParts', () => {
     }).join('\n');
     expect(parts).toContain('Skill Creator OFF');
     expect(parts).toContain('/skill');
-    expect(parts).toContain('dump a file as a substitute');
+    expect(parts).toContain('Do not paste the full Skill body');
   });
 });
 

@@ -1,14 +1,14 @@
 /**
- * One-shot `/skill` command workflow that interviews the user and writes a
- * complete, reusable Skill. It remains active only until save_skill succeeds.
+ * `/skill` command workflow that interviews the user and writes a reusable Skill.
+ * Stays active for create → iterate → replace until the user turns Skill Creator off.
  */
 
 export const SKILL_CREATOR_ID = 'builtin:skill-creator';
 
 export const SKILL_CREATOR_CONTENT = [
-  'You are the one-shot /skill command workflow for this chat product.',
+  'You are the /skill command workflow for this chat product.',
   'Goal: turn the user\'s rough idea into ONE complete, reusable Skill (a system prompt) they can save to their account.',
-  'Stay focused on creating or replacing this single Skill. After save_skill succeeds, the command automatically exits.',
+  'Stay focused on creating or replacing Skills. Skill Creator stays ON after a successful save so the user can immediately refine and overwrite — do not pretend the tool disappeared. The user turns it off from the sidebar when done.',
   '',
   'Interview checklist (ask briefly, batch questions):',
   '1) Purpose & scope — what task/workflow should it handle?',
@@ -30,9 +30,9 @@ export const SKILL_CREATOR_CONTENT = [
   '- After confirmation, call save_skill exactly once with the final title and content.',
   '- Create new: pass title + content only.',
   '- Replace/overwrite an existing Skill: also pass id (preferred) or replace_title from the account skill catalog. Do not create a duplicate when the user asked to replace.',
+  '- After a successful save, if the user asks to update/replace again, call save_skill again with id or replace_title — do not say the environment cannot save.',
   '- NEVER claim the Skill is saved unless save_skill returned success with an id — narrating "已保存" without that tool call is a failure.',
-  '- If save_skill is unavailable or fails, preserve the draft, report the exact error, and tell the user to keep Skill Creator on (/skill) or use sidebar manual add. Do NOT dump the Skill as a downloadable file as a substitute.',
-  '- If save_skill fails, do not automatically retry; retry only after the user explicitly asks.',
+  '- If save_skill fails, report the exact error and wait for the user before retrying. Do NOT dump the Skill as a downloadable file or a giant fenced block as a substitute.',
 ].join('\n');
 
 export type BuiltinSkill = { id: string; title: string; content: string };
@@ -81,7 +81,7 @@ export function formatAccountSkillCatalog(
  */
 export function skillPersistenceGatePrompt(skillCreatorOn: boolean): string {
   if (skillCreatorOn) {
-    return 'Skill Creator ON: after confirmation call save_skill (create, or overwrite via id / replace_title). Never claim saved without tool success; never dump a file as a substitute.';
+    return 'Skill Creator ON: after confirmation call save_skill (create, or overwrite via id / replace_title). Iterate/replace in this chat with the same tool. Never claim saved without tool success; never dump a file or full Skill body as a substitute.';
   }
-  return 'Skill Creator OFF: save_skill unavailable. If the user wants AI to save/replace a Skill, tell them to run /skill (or Commands → Create with AI) first — or use sidebar Add manually / 手动添加. Do not invent a save tool or dump a file as a substitute.';
+  return 'Skill Creator OFF: save_skill unavailable. If the user wants AI to save/replace a Skill, reply in ONE short sentence: run /skill (or Commands → Create with AI), or use sidebar Add manually / 手动添加. Do not invent a save tool. Do not paste the full Skill body, a fenced dump, or a downloadable file as a substitute.';
 }

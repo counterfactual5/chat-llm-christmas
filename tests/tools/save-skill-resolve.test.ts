@@ -102,8 +102,10 @@ describe('skillPersistenceGatePrompt', () => {
     expect(off).toContain('Skill Creator OFF');
     expect(off).toContain('/skill');
     expect(off).toContain('手动添加');
+    expect(off).toContain('Do not paste the full Skill body');
     const on = skillPersistenceGatePrompt(true);
     expect(on).toContain('Skill Creator ON');
     expect(on).toContain('save_skill');
+    expect(on).toContain('Iterate/replace');
   });
 });

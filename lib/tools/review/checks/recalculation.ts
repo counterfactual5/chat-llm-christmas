@@ -1,11 +1,11 @@
-import type { ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/types';
+import type { ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/core/types';
 import {
   formatNumber,
   isTableSeparator,
   parseNumberToken,
   splitTableRow,
   stripCodeBlocks,
-} from '@/lib/tools/review/shared';
+} from '@/lib/tools/review/core/shared';
 
 type Token = { type: 'num'; value: number } | { type: 'op'; value: string } | { type: 'paren'; value: '(' | ')' };
 

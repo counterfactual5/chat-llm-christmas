@@ -1,4 +1,4 @@
-import { getReviewGateLevel } from '@/lib/tools/review/evidence';
+import { getReviewGateLevel } from '@/lib/tools/review/core/evidence';
 import { buildConsistencyCheck } from '@/lib/tools/review/checks/consistency';
 import { detectDegenerateOutput } from '@/lib/tools/review/checks/completeness';
 import { buildRecalculationCheck } from '@/lib/tools/review/checks/recalculation';
@@ -7,7 +7,7 @@ import {
   emitReviewReport,
   emitReviewerFindings,
   planReviewChecks,
-} from '@/lib/tools/review/report';
+} from '@/lib/tools/review/core/report';
 import { findingId, synthesizeFindings } from '@/lib/tools/review/checks/tool-claims';
 import type {
   ClaimAuditResult,
@@ -26,7 +26,7 @@ import type {
   ReviewReport,
   ReviewerPhase,
   VerifierResult,
-} from '@/lib/tools/review/types';
+} from '@/lib/tools/review/core/types';
 
 const VALID_SURFACES = new Set<string>([
   'notion',
@@ -54,11 +54,14 @@ export const VERIFIER_SYSTEM_PROMPT = [
   'Output ONLY valid JSON (no markdown fences) with this shape:',
   '{"findings":[{"severity":"error"|"warn","surface":"notion"|"github"|"gmail"|"calendar"|"drive"|"web_search"|"web_read"|"save_skill"|"create_file","verdict":"pending_intent"|"unsupported"|"tool_failed"|"no_receipt","claim":"short quote or paraphrase","evidence":"which receipt contradicts or is missing"}],"summary":"one sentence"}',
   'Rules:',
-  '- pending_intent: announced they would call a tool but record has no matching call.',
-  '- no_receipt: claimed success/search result but no matching successful receipt.',
-  '- tool_failed: claimed success but matching tool failed.',
-  '- unsupported: claim is weakly tied to receipts (use sparingly as warn).',
+  '- pending_intent: only an explicit first-person immediate promise at the END of the answer (for example “I will search now”) that stopped without a matching call.',
+  '- no_receipt: only a direct first-person completion claim about this turn (for example “I created the page” or “according to my search”) with no matching successful receipt.',
+  '- tool_failed: only when the assistant directly says the action succeeded but the matching receipt explicitly failed.',
+  '- unsupported: claim is weakly tied to receipts (use sparingly and only as warn).',
+  '- NEVER treat tutorials, workflow steps, examples/anti-examples, quotations, hypothetical or conditional wording, recommendations, capability descriptions, or rules such as “do not claim it was saved” as executed actions.',
+  '- Mere mentions of tool names, URLs, “search results”, files, pages, email, PRs, or phrases inside code blocks are not execution claims.',
   '- Do not duplicate pure URL-list mismatches (a separate citation check covers those). Focus on whether narrated actions/results match receipts.',
+  '- If semantic intent is ambiguous, return no finding. Prefer false negatives over interrupting a valid answer.',
   '- If everything checks out, return {"findings":[],"summary":"All checked claims match receipts."}.',
   '- Prefer fewer high-confidence findings over speculative ones.',
 ].join('\n');
@@ -332,23 +335,27 @@ export async function runFullClaimAudit(
 
 export function actionableReviewIssues(issues: ReviewIssue[]): ReviewIssue[] {
   if (getReviewGateLevel() === 0) return [];
-  return issues.filter((i) => {
-    if (i.severity !== 'error') return false;
-    // Blurb-only / unverifiable must never drive correction (Foundry: unverifiable ≠ wrong).
-    if (/\[unverifiable\b/i.test(i.detail) || /\bunverifiable\b/i.test(`${i.title} ${i.detail}`)) {
-      return false;
+  return issues.filter((issue) => {
+    if (issue.severity !== 'error') return false;
+    const text = `${issue.title} ${issue.detail}`;
+
+    // Automatic rewriting is intentionally narrower than the review panel.
+    // Semantic/heuristic checks remain visible, but should not interrupt a
+    // useful answer unless they establish a concrete, high-confidence failure.
+    if (issue.kind === 'mid_turn' || issue.kind === 'tool_receipt') {
+      return /no matching|without.*receipt|tool failed|claimed.*succeeded|forced another tool round/i.test(
+        text,
+      );
     }
-    if (/collapsed into garbage|degenerat|repeated letter|smashed URL|token soup/i.test(`${i.title} ${i.detail}`)) {
-      return false;
+    if (issue.kind === 'recalculation') return /Verified as|Column verifies as/i.test(text);
+    if (issue.kind === 'completeness') return /cut off|Unclosed code block/i.test(text);
+    if (issue.kind === 'vulnerability') {
+      return /credential|access key|private key|secret|token/i.test(text);
     }
-    // Completeness auto-correct only for hard structural failures.
-    if (
-      i.kind === 'completeness' &&
-      !/cut off|Unclosed code|collapsed into garbage/i.test(`${i.title} ${i.detail}`)
-    ) {
-      return false;
-    }
-    return true;
+
+    // Citation, staleness, consistency, and code-quality findings may depend on
+    // incomplete context or style choices. Show them as advice; never auto-rewrite.
+    return false;
   });
 }
 

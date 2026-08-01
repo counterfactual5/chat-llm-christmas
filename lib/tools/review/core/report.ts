@@ -26,9 +26,9 @@ import type {
   ReviewPlan,
   ReviewReport,
   ReviewerPhase,
-} from '@/lib/tools/review/types';
-import { REVIEWER_CHECK_KINDS } from '@/lib/tools/review/types';
-import { extractNumericTokens, jaccard, titleWords } from '@/lib/tools/review/shared';
+} from '@/lib/tools/review/core/types';
+import { REVIEWER_CHECK_KINDS } from '@/lib/tools/review/core/types';
+import { extractNumericTokens, jaccard, titleWords } from '@/lib/tools/review/core/shared';
 
 function shouldIncludeToolReceipt(
   phase: ReviewerPhase,

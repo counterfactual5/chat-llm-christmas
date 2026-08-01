@@ -7,8 +7,8 @@ import {
   haystackFor,
   strongestFor,
   type EvidenceStrength,
-} from '@/lib/tools/review/evidence';
-import type { CitationAnchor, CitationAudit, ExecutionRecordEntry, ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/types';
+} from '@/lib/tools/review/core/evidence';
+import type { CitationAnchor, CitationAudit, ExecutionRecordEntry, ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/core/types';
 import {
   clauseAfter,
   clauseBefore,
@@ -19,7 +19,7 @@ import {
   normalizeUrl,
   stripCodeBlocks,
   trimUrlTail,
-} from '@/lib/tools/review/shared';
+} from '@/lib/tools/review/core/shared';
 
 const URL_RE = /https?:\/\/[^\s"'\`<>()\[\]{}\\|]+/gi;
 

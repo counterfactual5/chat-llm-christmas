@@ -1,11 +1,11 @@
-import type { ExecutionRecordEntry, ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/types';
+import type { ExecutionRecordEntry, ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/core/types';
 import {
   collectSources,
   hasWebSearchOrReadReceipt,
   splitSentences,
   stripCodeBlocks,
   yearsIn,
-} from '@/lib/tools/review/shared';
+} from '@/lib/tools/review/core/shared';
 
 const TIME_MARKER_RE =
   /截至|截止|目前|现在|当前|最新|至今|如今|今年|本月|本周|今天|现阶段|as of|currently|latest|to date|right now|today|nowadays/i;

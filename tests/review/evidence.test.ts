@@ -6,7 +6,7 @@ import {
   factAppearsIn,
   gradeClaimGap,
   strongestFor,
-} from '@/lib/tools/review/evidence';
+} from '@/lib/tools/review/core/evidence';
 
 describe('review evidence', () => {
   it('normalizes currency and thousands separators when matching facts', () => {

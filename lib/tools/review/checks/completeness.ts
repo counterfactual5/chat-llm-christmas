@@ -1,4 +1,4 @@
-import type { ReviewCheck, ReviewCheckItem, ReviewInput } from '@/lib/tools/review/types';
+import type { ReviewCheck, ReviewCheckItem, ReviewInput } from '@/lib/tools/review/core/types';
 
 export function detectDegenerateOutput(text: string): string | null {
   const raw = String(text || '');

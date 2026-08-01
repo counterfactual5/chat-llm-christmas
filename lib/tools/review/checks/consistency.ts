@@ -1,5 +1,5 @@
-import type { ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/types';
-import { splitTableRow, stripCodeBlocks } from '@/lib/tools/review/shared';
+import type { ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/core/types';
+import { splitTableRow, stripCodeBlocks } from '@/lib/tools/review/core/shared';
 
 const GENERIC_LABEL_RE =
   /^(?:值|数值|数量|内容|示例|例如|如下|结果|说明|备注|其中|比如|note|value|example|result|total)$/i;

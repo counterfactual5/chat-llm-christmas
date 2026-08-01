@@ -51,6 +51,7 @@ import {
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
+import { unwrapMarkdownDocumentFence } from '@/lib/markdown/document-fence';
 import { expandLiteralBreaks } from '@/lib/markdown/breaks';
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
 
@@ -808,7 +809,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         pre({ children }: any) { return <>{children}</>; },
                       }}
                     >
-                      {prepareChatMarkdown(text, { streaming })}
+                      {prepareChatMarkdown(unwrapMarkdownDocumentFence(text), { streaming })}
                     </ReactMarkdown>
                   </div>
                 );

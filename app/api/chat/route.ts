@@ -1,14 +1,7 @@
 import OpenAI from 'openai';
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchFreeModelNames, looksFreeByName } from '@/lib/models/pricing';
-import {
-  CURSOR_WEB_CHAT_PROMPT,
-  DEFAULT_SYSTEM_PROMPT,
-  activeIntegrationsPrompt,
-  conversationIsolationPrompt,
-  getModelSpec,
-  isCursorStyleModel,
-} from '@/lib/models/specs';
+import { getModelSpec, isCursorStyleModel } from '@/lib/models/specs';
 import type { SearchOutcome } from '@/lib/tools/search/engine';
 import {
   createStampLeakStripper,
@@ -30,15 +23,8 @@ import {
 import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand';
 import { streamCompletionPayload } from '@/lib/chat/stream/truncation';
 import {
-  getNotionMcpAccessToken,
-  getGitHubAccessToken,
-  getGoogleAccessToken,
-  resolveOwnerId,
   upsertNotionConnection,
   upsertGoogleConnection,
-  wantsGoogleToken,
-  normalizeGoogleIntegrations,
-  enabledGoogleServices,
 } from '@/lib/integrations';
 import {
   gatewayBaseURL as filesBaseURL,
@@ -66,7 +52,6 @@ import {
   lastUserMessageIndex,
   synthesizeFindings,
   FINDINGS_RESPONSE_SYSTEM,
-  REVIEWER_SYSTEM_PROMPT,
   type ReviewFinding,
   type ReviewIssue,
   type ClaimAuditResult,
@@ -102,6 +87,15 @@ import {
   sanitizeChatMessages,
   withMessageTimestamps,
 } from '@/lib/chat/server/messages';
+import { resolveAuthorizedIntegrations } from '@/lib/chat/server/credentials';
+import {
+  buildChatSystemParts,
+  joinChatSystemParts,
+} from '@/lib/chat/server/system-prompt';
+import {
+  buildToolFallbackQuery,
+  toolResultIndicatesFailure,
+} from '@/lib/chat/server/tool-execution';
 
 export const runtime = 'edge';
 export const maxDuration = 300;
@@ -169,62 +163,23 @@ export async function POST(req: NextRequest) {
     const chatMessages = messages as any[];
 
     const openai = new OpenAI({ apiKey, baseURL });
-    const requestedIntegrations = normalizeGoogleIntegrations(integrations);
     const skillCreatorOn = skills.some((s) => isSkillCreatorId(String(s?.id || '')));
-    // Intersect client toggles with vault OAuth — never trust integrations alone.
-    const authorizedIntegrations: string[] = [];
-    let notionAccessToken: string | undefined;
-    let githubAccessToken: string | undefined;
-    let googleAccessToken: string | undefined;
-    let notionOwnerId: string | null = null;
-    let googleOwnerId: string | null = null;
-    let notionVaultUpdate: Awaited<
-      ReturnType<typeof getNotionMcpAccessToken>
-    >['updatedNotion'];
-    let googleVaultUpdate: Awaited<
-      ReturnType<typeof getGoogleAccessToken>
-    >['updatedGoogle'];
-    if (requestedIntegrations.includes('notion') && isBoundAccount) {
-      notionOwnerId = await resolveOwnerId(req);
-      if (notionOwnerId) {
-        const mcp = await getNotionMcpAccessToken(req, notionOwnerId);
-        if (mcp.token) {
-          authorizedIntegrations.push('notion');
-          notionAccessToken = mcp.token;
-          notionVaultUpdate = mcp.updatedNotion;
-        }
-      }
-    }
-    if (requestedIntegrations.includes('github') && isBoundAccount) {
-      const ownerId = notionOwnerId ?? (await resolveOwnerId(req));
-      if (ownerId) {
-        const token = await getGitHubAccessToken(req, ownerId);
-        if (token) {
-          authorizedIntegrations.push('github');
-          githubAccessToken = token;
-        }
-      }
-    }
-    const requestedGoogleServices = enabledGoogleServices(requestedIntegrations);
-    if (requestedGoogleServices.length > 0 && isBoundAccount) {
-      const ownerId = notionOwnerId ?? (await resolveOwnerId(req));
-      if (ownerId) {
-        const mcp = await getGoogleAccessToken(req, ownerId);
-        if (mcp.token) {
-          authorizedIntegrations.push(...requestedGoogleServices);
-          googleAccessToken = mcp.token;
-          googleVaultUpdate = mcp.updatedGoogle;
-          googleOwnerId = ownerId;
-        }
-      }
-    }
-    // Zhipu Vision MCP: no OAuth — just needs a logged-in CPA account (user key).
-    if (requestedIntegrations.includes('zhipu-vision') && isBoundAccount && boundUserKey) {
-      authorizedIntegrations.push('zhipu-vision');
-    }
-    const googleRequestedButUnauthorized =
-      wantsGoogleToken(requestedIntegrations) &&
-      !enabledGoogleServices(authorizedIntegrations).length;
+    const {
+      authorizedIntegrations,
+      notionAccessToken,
+      githubAccessToken,
+      googleAccessToken,
+      notionOwnerId,
+      googleOwnerId,
+      notionVaultUpdate,
+      googleVaultUpdate,
+      googleRequestedButUnauthorized,
+    } = await resolveAuthorizedIntegrations({
+      req,
+      integrations,
+      isBoundAccount,
+      boundUserKey,
+    });
     // Only tools for integrations the user enabled *and* authorized enter the
     // model context (definitions + system guidance). Off / unlinked ⇒ not included.
     let enabledTools = await resolveEnabledToolsAsync(
@@ -245,70 +200,27 @@ export async function POST(req: NextRequest) {
     let toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
 
-    const systemParts: string[] = [];
-    if (isCursorStyleModel(requestedModel)) {
-      systemParts.push(CURSOR_WEB_CHAT_PROMPT);
-    }
-    systemParts.push(timeContextSystemPrompt());
-    systemParts.push(String(systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT);
-    if (threadId) {
-      systemParts.push(conversationIsolationPrompt(threadId));
-    }
-    systemParts.push(
-      activeIntegrationsPrompt({
-        searchEnabled,
-        integrations: authorizedIntegrations,
-        googleRequestedButUnauthorized,
-      }),
-    );
-    if (toolsGuidance) {
-      systemParts.push(toolsGuidance);
-    }
-    for (const skill of skills) {
-      const title = String(skill?.title || 'Skill').trim();
-      const content = String(skill?.content || '').trim();
-      if (!content) continue;
-      systemParts.push(`Active Skill — ${title}:\n${content}`);
-    }
-    if (requestReview) {
-      systemParts.push(
-        'The user explicitly requested a claim review of the conversation. Verify each assistant turn against that turn’s own tool receipts (not a pooled bag of all tools). If a claim lacks a real tool receipt for its turn, retract it. Otherwise confirm briefly.',
-      );
-    }
-    if (autoReview || requestReview) {
-      systemParts.push(REVIEWER_SYSTEM_PROMPT);
-    }
-    if (String(referenceText || '').trim()) {
-      systemParts.push(
-        `Reference material provided by the user. Treat it as authoritative context:\n\n${String(referenceText).trim()}`,
-      );
-    }
-
     const hasGeneratedImages = chatMessages.some(
       (m) => m?.role === 'assistant' && Array.isArray(m.images) && m.images.length > 0,
     );
     const hasGeneratedFiles = chatMessages.some(
       (m) => m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0,
     );
-    if (hasGeneratedImages) {
-      systemParts.push(
-        [
-          'This chat already contains image(s) generated by Christmas Chat’s /image pipeline.',
-          'They are shown in the UI and may be attached to later user turns for vision models.',
-          'Never claim those images failed to generate, and never blame missing folders/workspaces.',
-          'If the user asks about “这张图/刚才的图/生成的图”, refer to the generated image in this chat — do not web-search for substitutes unless asked.',
-        ].join(' '),
-      );
-    }
-    if (hasGeneratedFiles) {
-      systemParts.push(
-        [
-          'This chat already contains downloadable file(s) created via create_file.',
-          'They appear in the Output panel. Refer to those existing files when the user asks about them.',
-          'To add more files, call create_file again — do not pretend a file exists without a successful create_file receipt.',
-        ].join(' '),
-      );
-    }
+    const systemParts = buildChatSystemParts({
+      model: requestedModel,
+      systemPrompt,
+      threadId,
+      searchEnabled,
+      authorizedIntegrations,
+      googleRequestedButUnauthorized,
+      toolsGuidance,
+      skills,
+      requestReview,
+      autoReview,
+      referenceText,
+      hasGeneratedImages,
+      hasGeneratedFiles,
+    });
 
     type ImageRef = { url?: string; fileId?: string; prompt?: string };
 
@@ -620,7 +532,7 @@ export async function POST(req: NextRequest) {
     const zhipuVisionOn = authorizedIntegrations.includes('zhipu-vision');
 
     const workingMessages: any[] = [
-      { role: 'system', content: systemParts.join('\n\n---\n\n') },
+      { role: 'system', content: joinChatSystemParts(systemParts) },
       ...withMessageTimestamps(normalizedMessages),
     ];
 
@@ -1335,20 +1247,12 @@ export async function POST(req: NextRequest) {
               });
 
               for (const tc of toolCalls) {
-                // Prefer a concrete URL from recent tool payloads when web_read
-                // omits `url` (common on free models that confuse it with search).
-                let fallbackQuery = userAsk || streamedContent;
-                if (/^web[_-]?read$/i.test(tc.name)) {
-                  const fromArgs = String(tc.arguments || '');
-                  const fromHistory = workingMessages
-                    .slice(-12)
-                    .filter((m) => m?.role === 'tool')
-                    .map((m) => String(m.content || ''))
-                    .join('\n');
-                  fallbackQuery = [fromArgs, streamedContent, fromHistory, userAsk]
-                    .filter(Boolean)
-                    .join('\n');
-                }
+                const fallbackQuery = buildToolFallbackQuery({
+                  toolCall: tc,
+                  userAsk,
+                  streamedContent,
+                  workingMessages,
+                });
                 const result = await executeRegisteredTool(
                   enabledTools,
                   {
@@ -1360,11 +1264,7 @@ export async function POST(req: NextRequest) {
                   toolCtx,
                 );
                 const payload = String(result.content || '');
-                if (
-                  /"ok"\s*:\s*false/i.test(payload) ||
-                  /"error"\s*:\s*"/i.test(payload) ||
-                  /MCP error|Input validation error|invalid_type/i.test(payload)
-                ) {
+                if (toolResultIndicatesFailure(payload)) {
                   roundHadToolFailure = true;
                 }
                 workingMessages.push({

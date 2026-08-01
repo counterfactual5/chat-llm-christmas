@@ -1,4 +1,4 @@
-import type { ClaimVerdict, EvidenceStrength, EvidenceUnit } from '@/lib/tools/review/evidence';
+import type { ClaimVerdict, EvidenceStrength, EvidenceUnit } from '@/lib/tools/review/core/evidence';
 
 export type FakedToolSurface =
   | 'notion'

@@ -13,20 +13,22 @@ import {
 } from '@/lib/chat/message/tool-tags';
 import { normalizeGoogleIntegrations } from '@/lib/integrations/google/services';
 import {
-  serializeReviewToolRuns,
   withAppendedAssistantContent,
   withAppendedAssistantGeneratedFile,
   withAppendedAssistantReasoning,
-  withAppendedAssistantReviewFix,
   withEmptyReplyFallback,
   withMarkedAssistantIncomplete,
   withPromotedOrphanReasoning,
   withSeededAssistantCleanup,
   withSettledOpenToolRuns,
+  type GeneratedFileInput,
+} from '@/lib/chat/session/assistant-mutations';
+import {
+  serializeReviewToolRuns,
+  withAppendedAssistantReviewFix,
   withUpsertedAssistantToolRun,
   withUpsertedReviewFindings,
   withUpsertedReviewReport,
-  type GeneratedFileInput,
 } from '@/lib/chat/session/mutations';
 
 export type StreamChatApiMessage = ReturnType<

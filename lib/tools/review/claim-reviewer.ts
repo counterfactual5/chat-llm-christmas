@@ -18,10 +18,10 @@
  * Product capability (not MCP, not a model-callable tool).
  */
 
-export { getReviewGateLevel } from '@/lib/tools/review/evidence';
-export type { ClaimVerdict, EvidenceStrength, EvidenceUnit, ReviewGateLevel } from '@/lib/tools/review/evidence';
+export { getReviewGateLevel } from '@/lib/tools/review/core/evidence';
+export type { ClaimVerdict, EvidenceStrength, EvidenceUnit, ReviewGateLevel } from '@/lib/tools/review/core/evidence';
 
-export * from '@/lib/tools/review/types';
+export * from '@/lib/tools/review/core/types';
 
 export {
   normalizeUrl,
@@ -34,7 +34,7 @@ export {
   clauseAfter,
   hostOf,
   formatExecutionRecordForUi,
-} from '@/lib/tools/review/shared';
+} from '@/lib/tools/review/core/shared';
 
 export {
   REVIEWER_SYSTEM_PROMPT,
@@ -77,7 +77,7 @@ export {
   emitReviewerFindings,
   runClaimAudit,
   emitReviewerStep,
-} from '@/lib/tools/review/report';
+} from '@/lib/tools/review/core/report';
 
 export {
   VERIFIER_SYSTEM_PROMPT,
@@ -96,4 +96,4 @@ export {
   buildFindingsResponsePrompt,
   buildReviewIssuesResponsePrompt,
   FINDINGS_RESPONSE_SYSTEM,
-} from '@/lib/tools/review/verifier';
+} from '@/lib/tools/review/core/verifier';

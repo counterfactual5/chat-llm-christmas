@@ -1,5 +1,5 @@
-import type { ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/types';
-import { extractCodeBlocks } from '@/lib/tools/review/shared';
+import type { ReviewCheck, ReviewCheckItem } from '@/lib/tools/review/core/types';
+import { extractCodeBlocks } from '@/lib/tools/review/core/shared';
 
 type CodeBlock = { lang: string; code: string };
 

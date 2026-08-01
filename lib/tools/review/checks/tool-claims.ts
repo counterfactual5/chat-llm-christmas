@@ -1,7 +1,7 @@
 import {
   extractEvidenceFromPayload,
   makeEvidenceUnit,
-} from '@/lib/tools/review/evidence';
+} from '@/lib/tools/review/core/evidence';
 import type {
   ChatMessageLike,
   ClientToolRun,
@@ -15,21 +15,52 @@ import type {
   ReviewFinding,
   ReviewFindingVerdict,
   ReviewReport,
-} from '@/lib/tools/review/types';
-import { extractUrls, formatExecutionRecordForUi, normalizeUrl, trimUrlTail } from '@/lib/tools/review/shared';
+} from '@/lib/tools/review/core/types';
+import { extractUrls, formatExecutionRecordForUi, normalizeUrl, trimUrlTail } from '@/lib/tools/review/core/shared';
 
 export const REVIEWER_SYSTEM_PROMPT = [
-  '【Claim Reviewer — 硬性约束】',
-  '任何「已创建/已更新/已发送/根据搜索/已保存」类声明，必须对应本轮真实 tool_calls 的成功回执。',
-  '任何「先读一下/Let me fetch/我来搜索」类意图，必须立刻发出真实 tool_calls，禁止只口头说要做却结束本轮。',
-  '只口头叙述而没有 tool_calls = 失败，必须立即发出真实 tool_calls，或明确撤回并禁止编造 notion.so / github.com / google.com 等链接。',
+  '【Claim Reviewer — 高置信度约束】',
+  '只审查助手对本轮真实外部操作作出的直接完成声明，例如“我已创建/更新/发送/搜索/保存”。此类声明必须有成功 tool_calls 回执。',
+  '教程、步骤说明、示例/反例、引用、假设、条件句、建议、能力描述，以及“应当/可以/不要声称”等规范性文字都不是执行声明，不得据此判错。',
+  '只有当回复停在明确的第一人称即时操作承诺（如“我现在去搜索”）且没有 tool_calls 时，才要求继续调用或撤回。语义不确定时保持宽松，不强制纠正。',
 ].join('');
+
+function proseOutsideCodeExamples(text: string): string {
+  return String(text || '')
+    .replace(/```[\s\S]*?(?:```|$)/g, '')
+    .replace(/`[^`\n]*`/g, '')
+    // Markdown quotations usually reproduce user/source text, not the assistant's action.
+    .replace(/^\s*>.*$/gm, '');
+}
+
+const NON_OPERATIONAL_PREFIX_RE =
+  /^\s*(?:#{1,6}\s*)?(?:示例|例如|比如|举例|反例|错误(?:示例)?|正确(?:示例)?|注意|说明|规则|要求|约束|流程|步骤|模板|格式|伪代码|教程|用法|建议|如果|若|假如|假设|当.+时|可(?:以|用于)|应(?:当|该)|需要|必须|不得|不要|禁止|避免|推荐|用户可以|模型可以|the example|example|anti-example|if\b|when\b|should\b|must\b|never\b|do not\b)/i;
+
+function operationalSegments(text: string): string[] {
+  return proseOutsideCodeExamples(text)
+    .split(/\n+|(?<=[。！？!?；;])\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .filter((segment) => !NON_OPERATIONAL_PREFIX_RE.test(segment))
+    .filter(
+      (segment) =>
+        !/(?:不要|不得|禁止|避免|不能|不可|无需|不应|未曾|没有)(?:.{0,12})(?:声称|表示|假装|编造|创建|更新|发送|保存|搜索|读取)/i.test(
+          segment,
+        ),
+    );
+}
+
+function someOperationalSegment(text: string, predicate: (segment: string) => boolean): boolean {
+  return operationalSegments(text).some(predicate);
+}
 
 export function detectFakedToolNarration(
   text: string,
   opts: { searchEnabled: boolean; integrations: string[]; skillCreator?: boolean },
 ): FakedToolSurface[] {
-  const t = String(text || '');
+  // Evaluate local prose segments instead of combining unrelated keywords
+  // across an entire tutorial or long-form answer.
+  const t = proseOutsideCodeExamples(text);
   if (!t.trim()) return [];
   const set = new Set(
     (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
@@ -37,28 +68,36 @@ export function detectFakedToolNarration(
   const found: FakedToolSurface[] = [];
 
   if (set.has('notion')) {
-    const hasNotionUrl = /(app\.notion\.com|notion\.so|notion\.site)\//i.test(t);
-    const claimsWrite =
-      /(正在(更新|写入|创建)|已(经)?(更新|写入|创建|改好|重构)|更新页面|写入.*页面|按你的要求重构|创建了?(这个|一个)?(页面|模板))/i.test(
-        t,
-      ) || /(updated|created|wrote|writing)\s+(the\s+)?(notion\s+)?page/i.test(t);
-    // Require Notion signal — bare「更新页面」in generic docs talk is too common.
-    if (claimsWrite && (hasNotionUrl || /Notion|notion\.so/i.test(t))) found.push('notion');
+    const claimsNotionWrite = someOperationalSegment(t, (segment) => {
+      const notionSignal = /Notion|notion\.so|notion\.site|notion 页面/i.test(segment);
+      const directCompletion =
+        /(?:我|已经|已|刚刚|现已).{0,6}(?:更新|写入|创建|改好|重构).{0,14}(?:Notion|页面|模板)|(?:updated|created|wrote)\s+(?:the\s+)?(?:notion\s+)?page/i.test(
+          segment,
+        );
+      return notionSignal && directCompletion;
+    });
+    if (claimsNotionWrite) found.push('notion');
   }
 
   if (set.has('github')) {
-    const claimsWrite =
-      /(已(经)?(创建|提交|打开|评论)|正在(创建|提交|打开|评论)).{0,12}(issue|PR|pull request|拉取请求)|created (an? )?(issue|PR|pull request)|opened (an? )?(PR|pull request)|commented on (the )?(issue|PR)/i.test(
-        t,
-      );
-    // Do NOT flag mere github.com links that mention issue/PR in ordinary discussion.
-    if (claimsWrite) found.push('github');
+    if (
+      someOperationalSegment(t, (segment) =>
+        /(?:我|已经|已|刚刚|现已).{0,6}(?:创建|提交|打开|评论).{0,12}(?:issue|PR|pull request|拉取请求)|(?:I\s+)?(?:created|opened|commented on)\s+(?:an?\s+|the\s+)?(?:issue|PR|pull request)/i.test(
+          segment,
+        ),
+      )
+    ) {
+      found.push('github');
+    }
   }
 
   if (set.has('gmail')) {
     if (
-      /(已(经)?(发送|回复|转发)|正在发送).{0,8}(邮件|邮箱|gmail)|sent (the )?(email|mail)|replied to/i.test(t) ||
-      (/mail\.google\.com/i.test(t) && /(已(经)?(发送|回复)|正在发送|sent |replied )/i.test(t))
+      someOperationalSegment(t, (segment) =>
+        /(?:我|已经|已|刚刚|现已).{0,6}(?:发送|回复|转发).{0,8}(?:邮件|邮箱|gmail)|(?:I\s+)?(?:sent|replied to|forwarded)\s+(?:the\s+)?(?:email|mail)/i.test(
+          segment,
+        ),
+      )
     ) {
       found.push('gmail');
     }
@@ -66,11 +105,11 @@ export function detectFakedToolNarration(
 
   if (set.has('calendar')) {
     if (
-      /(已(经)?(创建|添加|安排)|正在(创建|添加)).{0,10}(日程|日历|会议|event)|created (a )?(calendar )?event|scheduled (a )?(meeting|event)/i.test(
-        t,
-      ) ||
-      (/calendar\.google\.com/i.test(t) &&
-        /(已(经)?(创建|添加|安排)|正在(创建|添加)|created |scheduled )/i.test(t))
+      someOperationalSegment(t, (segment) =>
+        /(?:我|已经|已|刚刚|现已).{0,6}(?:创建|添加|安排).{0,10}(?:日程|日历|会议|event)|(?:I\s+)?(?:created|scheduled)\s+(?:a\s+)?(?:calendar\s+)?(?:meeting|event)/i.test(
+          segment,
+        ),
+      )
     ) {
       found.push('calendar');
     }
@@ -78,11 +117,11 @@ export function detectFakedToolNarration(
 
   if (set.has('drive')) {
     if (
-      /(已(经)?(上传|创建|分享)|正在(上传|创建)).{0,10}(文件|文档|Drive|网盘)|uploaded (a )?file|created (a )?doc/i.test(
-        t,
-      ) ||
-      (/drive\.google\.com/i.test(t) &&
-        /(已(经)?(上传|创建|分享)|正在(上传|创建)|uploaded |created )/i.test(t))
+      someOperationalSegment(t, (segment) =>
+        /(?:我|已经|已|刚刚|现已).{0,6}(?:上传|创建|分享).{0,10}(?:文件|文档|Drive|网盘)|(?:I\s+)?(?:uploaded|created|shared)\s+(?:a\s+|the\s+)?(?:file|doc|document)/i.test(
+          segment,
+        ),
+      )
     ) {
       found.push('drive');
     }
@@ -90,19 +129,24 @@ export function detectFakedToolNarration(
 
   if (opts.searchEnabled) {
     if (
-      /(根据(联网)?搜索|搜索(结果|显示|表明)|检索到)|according to (my |the )?(web )?search|I found the following links/i.test(
+      someOperationalSegment(
         t,
-      ) &&
-      /https?:\/\//i.test(t)
+        (segment) =>
+          /(?:根据(?:我的|本轮|刚才的)?(?:联网)?搜索结果|搜索结果(?:显示|表明)|我(?:已经|已|刚刚)?检索到|according to (?:my |the )?(?:web )?search|I found the following links)/i.test(
+            segment,
+          ) && /https?:\/\//i.test(segment),
+      )
     ) {
       found.push('web_search');
     }
-    // Require first-person “I read” — 「根据该页」alone is normal when citing a user-pasted URL.
     if (
-      /(我(已经|已)?(读完|阅读完|抓取了|打开并读了)|I (have )?read (the )?(page|article)|according to the page I (just )?read)/i.test(
+      someOperationalSegment(
         t,
-      ) &&
-      /https?:\/\//i.test(t)
+        (segment) =>
+          /(?:我(?:已经|已|刚刚)?(?:读完|阅读完|抓取了|打开并读了)|I (?:have )?read (?:the )?(?:page|article)|according to the page I (?:just )?read)/i.test(
+            segment,
+          ) && /https?:\/\//i.test(segment),
+      )
     ) {
       found.push('web_read');
     }
@@ -110,17 +154,21 @@ export function detectFakedToolNarration(
 
   if (opts.skillCreator) {
     if (
-      /(已(经)?(保存|存入)|保存成功|skill 已(经)?保存|saved (the )?skill)/i.test(t) &&
-      /skill/i.test(t)
+      someOperationalSegment(t, (segment) =>
+        /(?:我|已经|已|刚刚|现已).{0,8}(?:保存|存入).{0,10}skill|skill.{0,8}(?:保存成功|已(?:经)?保存)|(?:I\s+)?saved\s+(?:the\s+)?skill/i.test(
+          segment,
+        ),
+      )
     ) {
       found.push('save_skill');
     }
   }
 
-  // Deliverable file claims — not “生成了文件说明/文件结构” pedagogy.
   if (
-    /(create_file|local:\/\/|文件卡片|已(经)?(用工具)?(生成|创建|写入|保存).{0,16}(\.md|\.py|\.ts|\.tsx|\.js|\.json|\.txt)|created (the )?file|saved (the )?file|wrote (the )?file to)/i.test(
-      t,
+    someOperationalSegment(t, (segment) =>
+      /(?:我|已经|已|刚刚|现已).{0,8}(?:用\s*create_file\s*)?(?:生成|创建|写入|保存).{0,16}(?:\.md|\.pdf|\.docx|\.xlsx|\.png|\.py|\.ts|\.tsx|\.js|\.json|\.txt)(?:\b|文件)|(?:I\s+)?(?:created|saved|wrote)\s+(?:the\s+)?file(?:\s+to)?/i.test(
+        segment,
+      ),
     )
   ) {
     found.push('create_file');
@@ -133,55 +181,49 @@ export function detectPendingToolIntent(
   text: string,
   opts: { searchEnabled: boolean; integrations: string[] },
 ): FakedToolSurface[] {
-  const t = String(text || '');
-  if (!t.trim()) return [];
-  // Meta talk about searching (why search / don't need search) is not an intent to call.
-  const skipWebIntent =
-    /(不(用|需要|该|必|再)(去)?(搜索|联网|搜)|基础知识|知识库(里面)?都有|为什么(还)?要(搜索|搜)|认知校准|搜索不到|搜不到)/i.test(
-      t,
-    ) && !/(正在(联网)?搜索|立即(执行)?搜索|马上搜索|I('ll| will) search now)/i.test(t);
-
+  // Intent correction is disruptive, so only inspect the final two operational
+  // segments. A tutorial may describe “first search, then read” much earlier.
+  const segments = operationalSegments(text).slice(-2);
+  if (!segments.length) return [];
   const set = new Set(
     (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
   );
   const found: FakedToolSurface[] = [];
+  const matchesTail = (pattern: RegExp) => segments.some((segment) => pattern.test(segment));
 
-  if (set.has('notion')) {
-    const notionCtx = /Notion|notion\.so|notion\.site|(当前)?页面|工作区|workspace/i.test(t);
-    const intendsNotion =
-      notionCtx &&
-      /(先(读|看|获取|拉取|打开)|让我(先)?(读|看|获取|拉取)|我(先|来)(读|看|获取).{0,16}(页面|内容|Notion)|读一下(当前)?(页面|内容)|看一下(当前)?页面|fetch (the )?(current )?(page|content)|let me (first )?(fetch|read|get|load).{0,24}(page|notion)|I('ll| will) (first )?(fetch|read|get).{0,24}(page|notion)|正在(读取|获取|拉取).{0,12}(页面|内容|Notion)|然后重写|then (rewrite|update)|重写——|重写—)/i.test(
-        t,
-      );
-    if (intendsNotion) found.push('notion');
+  if (
+    set.has('notion') &&
+    matchesTail(
+      /(?:让我|我(?:现在|马上|先|来)|正在).{0,8}(?:读取|获取|拉取|打开|查看).{0,16}(?:Notion|当前页面|页面内容)|let me (?:first )?(?:fetch|read|get|load).{0,24}(?:page|notion)|I(?:'ll| will) (?:now |first )?(?:fetch|read|get).{0,24}(?:page|notion)/i,
+    )
+  ) {
+    found.push('notion');
   }
 
-  if (opts.searchEnabled && !skipWebIntent) {
-    // Clear live-web intent only. Avoid bare「我搜索不到」/「查清区别」.
+  if (opts.searchEnabled) {
     if (
-      /(先.{0,8}(联网|上网)?(搜索|搜一下)|让我(去)?(联网|上网)?(搜索|搜一下)|我来(联网|上网)?(搜索|搜一下)|正在(联网|上网)?搜索|我(将|会)(立即|马上)?(去)?(执行)?搜索|联网查一下|上网查一下|I'll (go )?(and )?search|let me search|searching (the )?(web|internet)|look\s*up (online|on the web))/i.test(
-        t,
+      matchesTail(
+        /(?:让我|我(?:现在|马上|立即|来)|正在).{0,8}(?:联网|上网)?(?:搜索|搜一下|查一下)|I(?:'ll| will) search (?:now|the web)|let me search (?:the web|online|now)|searching (?:the )?(?:web|internet) now/i,
       )
     ) {
       found.push('web_search');
     }
     if (
-      /(先(读|打开).{0,10}(链接|网页|文章)|let me (read|open) (the )?(page|link|article)|I'll (read|open) (the )?(page|link))/i.test(
-        t,
+      matchesTail(
+        /(?:让我|我(?:现在|马上|先|来)|正在).{0,8}(?:读|打开|读取).{0,10}(?:链接|网页|文章)|let me (?:read|open) (?:the )?(?:page|link|article)|I(?:'ll| will) (?:now )?(?:read|open) (?:the )?(?:page|link|article)/i,
       )
     ) {
       found.push('web_read');
     }
   }
 
-  if (set.has('github')) {
-    if (
-      /(先(看|读|获取).{0,12}(仓库|repo|issue|PR)|let me (check|fetch|read).{0,12}(repo|issue|PR|pull)|我(先|来)(看|读|获取).{0,12}(仓库|repo|issue|PR))/i.test(
-        t,
-      )
-    ) {
-      found.push('github');
-    }
+  if (
+    set.has('github') &&
+    matchesTail(
+      /(?:让我|我(?:现在|马上|先|来)|正在).{0,8}(?:看|读|获取|检查).{0,12}(?:仓库|repo|issue|PR)|let me (?:check|fetch|read).{0,12}(?:repo|issue|PR|pull)|I(?:'ll| will) (?:now |first )?(?:check|fetch|read).{0,12}(?:repo|issue|PR|pull)/i,
+    )
+  ) {
+    found.push('github');
   }
 
   return found;

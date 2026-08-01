@@ -1,4 +1,4 @@
-import type { ExecutionRecordEntry, ExecutionSource } from '@/lib/tools/review/types';
+import type { ExecutionRecordEntry, ExecutionSource } from '@/lib/tools/review/core/types';
 
 const URL_RE = /https?:\/\/[^\s"'`<>()\[\]{}\\|]+/gi;
 

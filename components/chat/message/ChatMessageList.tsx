@@ -14,15 +14,6 @@ import {
   Image as ImageIcon,
   Globe,
   ShieldCheck,
-  Calculator,
-  ShieldAlert,
-  Wrench,
-  RotateCcw,
-  Link2,
-  CalendarClock,
-  Scale,
-  ListChecks,
-  Bug,
   X,
   Download,
 } from 'lucide-react';
@@ -44,10 +35,14 @@ import { displayAssistantParts } from '@/lib/chat/message/display';
 import {
   buildActivitySteps,
   buildTimelineSegments,
+  findLastContentSegmentId,
   type ProcessStep,
   type TimelineSegment,
   type ToolStep,
 } from '@/lib/chat/message/timeline';
+import { classifyToolRun, getToolRunLabelKey } from '@/lib/chat/message/tool-classify';
+import { getReviewCheckTitleKey } from '@/lib/chat/message/review-labels';
+import { getReviewCheckIcon } from './helpers/review-check-icon';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
@@ -436,43 +431,16 @@ export function ChatMessageList(props: ChatMessageListProps) {
                 const renderToolStep = (step: ToolStep) => {
                   const run = toolById.get(step.toolRunId);
                   if (!run) return null;
-                  const isNotion =
-                    run.name.startsWith('notion_') ||
-                    run.name.startsWith('notion-') ||
-                    run.provider === 'notion';
-                  const isGitHub =
-                    run.provider === 'github' ||
-                    /^github[-_]/i.test(run.name);
-                  const isGoogle =
-                    run.provider === 'google' ||
-                    /^(gmail|calendar|drive)[-_]/i.test(run.name);
-                  const isGmail = isGoogle && /^gmail[-_]/i.test(run.name);
-                  const isCalendar =
-                    isGoogle && /^calendar[-_]/i.test(run.name);
-                  const isDrive = isGoogle && /^drive[-_]/i.test(run.name);
-                  const isNotionFetch =
-                    /fetch/i.test(run.name) && isNotion;
-                  const isNotionWrite =
-                    isNotion &&
-                    /create|update|move|duplicate|append|delete|trash|comment|write/i.test(
-                      run.name,
-                    );
-                  const isGoogleWrite =
-                    isGoogle &&
-                    /create|update|send|reply|forward|delete|draft|modify|trash|batch|move|copy|share|revoke|upload|export|comment|acl|insert|write/i.test(
-                      run.name,
-                    );
-                  const isWebRead =
-                    run.name === 'web_read' || run.name === 'web-read';
-                  const isCreateFile = run.name === 'create_file';
-                  const isImageUnderstand =
-                    run.name === 'image_understand' ||
-                    run.provider === 'zhipu-vision' ||
-                    run.provider === 'image-understand' ||
-                    run.provider === 'glm-ocr' ||
-                    run.provider === 'nemotron-omni';
-                  const isClaimReviewer =
-                    run.provider === 'claim-reviewer';
+                  const classification = classifyToolRun(run);
+                  const {
+                    isNotion,
+                    isNotionFetch,
+                    isGitHub,
+                    isGoogle,
+                    isImageUnderstand,
+                    isCreateFile,
+                    isClaimReviewer,
+                  } = classification;
                   if (isClaimReviewer) return null;
                   const failed = run.status === 'done' && Boolean(run.error);
                   const emptyResults =
@@ -489,62 +457,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   // Expand only while in flight; auto-collapse when done
                   // so Process doesn't bury the answer. Explicit toggles win.
                   const expanded = toolRunOpen[run.id] ?? searching;
-                  const googleLabel = (() => {
-                    if (isGoogleWrite) {
-                      return searching ? t('writingGoogle') : t('wroteGoogle');
-                    }
-                    if (isGmail) {
-                      return searching ? t('searchingGmail') : t('searchedGmail');
-                    }
-                    if (isCalendar) {
-                      return searching ? t('searchingCalendar') : t('searchedCalendar');
-                    }
-                    if (isDrive) {
-                      return searching ? t('searchingDrive') : t('searchedDrive');
-                    }
-                    return searching ? t('searchingGoogle') : t('searchedGoogle');
-                  })();
-                  const label = isClaimReviewer
-                    ? searching
-                      ? t('reviewingClaims')
-                      : t('reviewedClaims')
-                    : isGoogle
-                    ? failed
-                      ? t('toolFailed')
-                      : googleLabel
-                    : searching
-                      ? isNotionWrite
-                        ? t('writingNotion')
-                        : isNotionFetch
-                          ? t('readingNotion')
-                          : isNotion
-                            ? t('searchingNotion')
-                            : isGitHub
-                              ? t('searchingGitHub')
-                              : isImageUnderstand
-                                ? t('understandingImage')
-                                : isCreateFile
-                                  ? t('creatingFile')
-                                  : isWebRead
-                                    ? t('readingWeb')
-                                    : t('searchingWeb')
-                      : failed
-                        ? t('toolFailed')
-                        : isNotionWrite
-                          ? t('wroteNotion')
-                          : isNotionFetch
-                            ? t('readNotion')
-                            : isNotion
-                              ? t('searchedNotion')
-                              : isGitHub
-                                ? t('searchedGitHub')
-                                : isImageUnderstand
-                                  ? t('understoodImage')
-                                  : isCreateFile
-                                    ? t('createdFile')
-                                    : isWebRead
-                                      ? t('readWeb')
-                                      : t('searchedWeb');
+                  const label = t(getToolRunLabelKey(classification, { searching, failed }));
                   return (
                     <div key={step.id} className="overflow-hidden">
                       <button
@@ -1053,29 +966,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       (c) => c.clean !== false && (c.items?.length || 0) === 0,
                     );
 
-                  const checkTitle = (kind: ReviewCheckKind) => {
-                    if (kind === 'mid_turn') return t('reviewMidTurn');
-                    if (kind === 'tool_receipt') return t('reviewToolReceipt');
-                    if (kind === 'citation') return t('reviewCitation');
-                    if (kind === 'staleness') return t('reviewStaleness');
-                    if (kind === 'recalculation') return t('reviewRecalculation');
-                    if (kind === 'consistency') return t('reviewConsistency');
-                    if (kind === 'completeness') return t('reviewCompleteness');
-                    if (kind === 'code_quality') return t('reviewCodeQuality');
-                    return t('reviewVulnerability');
-                  };
-
-                  const CheckIcon = (kind: ReviewCheckKind) => {
-                    if (kind === 'mid_turn') return RotateCcw;
-                    if (kind === 'tool_receipt') return Wrench;
-                    if (kind === 'citation') return Link2;
-                    if (kind === 'staleness') return CalendarClock;
-                    if (kind === 'recalculation') return Calculator;
-                    if (kind === 'consistency') return Scale;
-                    if (kind === 'completeness') return ListChecks;
-                    if (kind === 'code_quality') return Bug;
-                    return ShieldAlert;
-                  };
+                  const checkTitle = (kind: ReviewCheckKind) => t(getReviewCheckTitleKey(kind));
+                  const CheckIcon = getReviewCheckIcon;
 
                   const renderCheck = (
                     check: NonNullable<Message['reviewReport']>['checks'][number],
@@ -1354,10 +1246,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               {renderAnswerMarkdown(
                                 seg.text,
                                 answerStreaming &&
-                                  seg.id ===
-                                    [...timelineSegments]
-                                      .reverse()
-                                      .find((s) => s.type === 'content')?.id,
+                                  seg.id === findLastContentSegmentId(timelineSegments),
                               )}
                             </div>
                           ),

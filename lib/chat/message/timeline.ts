@@ -221,3 +221,11 @@ export function buildTimelineSegments(opts: {
   }
   return segs;
 }
+
+/** Id of the last `content` segment, used to mark it as the streaming tail. */
+export function findLastContentSegmentId(segments: TimelineSegment[]): string | undefined {
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (segments[i].type === 'content') return segments[i].id;
+  }
+  return undefined;
+}

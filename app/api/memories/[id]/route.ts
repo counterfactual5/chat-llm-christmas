@@ -1,31 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { chatBackendMemoriesURL } from '@/lib/chat-backend';
 
 export const runtime = 'edge';
 
-const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/memories';
-
 type Params = { params: Promise<{ id: string }> };
 
-async function proxyRequest(
-  req: NextRequest,
-  method: string,
-  id: string,
-) {
+async function proxyRequest(req: NextRequest, method: string, id: string) {
   const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
   if (!boundUserKey) {
     return NextResponse.json({ error: '请先连接主站账号' }, { status: 401 });
   }
 
   try {
-    const upstreamRes = await fetch(`${MAIN_SITE_BASE}/${encodeURIComponent(id)}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${boundUserKey}`,
+    const upstreamRes = await fetch(
+      `${chatBackendMemoriesURL()}/${encodeURIComponent(id)}`,
+      {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${boundUserKey}`,
+        },
+        body: method === 'PUT' ? await req.text() : undefined,
+        cache: 'no-store',
       },
-      body: method === 'PUT' ? await req.text() : undefined,
-      cache: 'no-store',
-    });
+    );
     const data = await upstreamRes.json().catch(() => ({}));
     return NextResponse.json(data, { status: upstreamRes.status });
   } catch (error: any) {

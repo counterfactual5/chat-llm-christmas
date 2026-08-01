@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { NextRequest } from 'next/server';
 import {
   gatewayBaseURL,
+  filesGatewayBaseURL,
   uploadGatewayBase64Png,
   uploadGatewayFile,
 } from '@/lib/files/gateway';
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
     if (prompt.length > 4000) return jsonError('Prompt is too long (max 4000 chars).', 400);
 
     const baseURL = gatewayBaseURL();
+    const filesBaseURL = filesGatewayBaseURL();
     const openai = new OpenAI({ apiKey: boundUserKey, baseURL });
 
     // GPT Image models always return b64_json and reject `response_format`.
@@ -105,7 +107,7 @@ export async function POST(req: NextRequest) {
       if (b64) {
         const uploaded = await uploadGatewayBase64Png({
           apiKey: boundUserKey,
-          baseURL,
+          baseURL: filesBaseURL,
           b64,
           filename: `gen-${Date.now()}.png`,
           model: filesModel,
@@ -120,7 +122,7 @@ export async function POST(req: NextRequest) {
         const bytes = new Uint8Array(await fetched.arrayBuffer());
         const uploaded = await uploadGatewayFile({
           apiKey: boundUserKey,
-          baseURL,
+          baseURL: filesBaseURL,
           bytes,
           filename: `gen-${Date.now()}.png`,
           mime: fetched.headers.get('content-type') || 'image/png',

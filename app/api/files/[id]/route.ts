@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { gatewayBaseURL } from '@/lib/files/gateway';
+import { filesGatewayBaseURL } from '@/lib/files/gateway';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
   }
 
-  const baseURL = gatewayBaseURL();
+  const baseURL = filesGatewayBaseURL();
   const res = await fetch(`${baseURL}/files/${encodeURIComponent(fileId)}/content`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -68,7 +68,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   const res = await fetch(
-    `${gatewayBaseURL()}/files/${encodeURIComponent(fileId)}`,
+    `${filesGatewayBaseURL()}/files/${encodeURIComponent(fileId)}`,
     {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${apiKey}` },

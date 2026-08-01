@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { chatBackendSessionsURL } from '@/lib/chat-backend';
 
 export const runtime = 'edge';
-const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/sessions';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -20,7 +20,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   try {
     const upstreamRes = await fetch(
-      `${MAIN_SITE_BASE}/${encodeURIComponent(sessionId)}`,
+      `${chatBackendSessionsURL()}/${encodeURIComponent(sessionId)}`,
       {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${boundUserKey}` },

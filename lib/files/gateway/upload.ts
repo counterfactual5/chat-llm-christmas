@@ -1,6 +1,6 @@
 /** Upload helpers for the llm.christmas (NewAPI) Files API. */
 
-import { gatewayBaseURL, resolveUploadModel } from './base';
+import { filesGatewayBaseURL, resolveUploadModel } from './base';
 import { parseDataUrl } from './data-url';
 import type { GatewayFileRef } from './types';
 
@@ -23,7 +23,7 @@ export async function uploadGatewayFile(opts: {
   /** Gateway routing model — required by NewAPI; defaults from env or gpt-4o. */
   model?: string;
 }): Promise<GatewayFileRef> {
-  const baseURL = (opts.baseURL || gatewayBaseURL()).replace(/\/$/, '');
+  const baseURL = (opts.baseURL || filesGatewayBaseURL()).replace(/\/$/, '');
   const model = resolveUploadModel(opts.model);
   const purposes = opts.purpose
     ? [opts.purpose]

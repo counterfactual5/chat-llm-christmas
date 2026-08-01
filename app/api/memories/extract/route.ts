@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { completeOnce } from '@/lib/chat/server/upstream';
+import { chatBackendMemoriesURL } from '@/lib/chat-backend';
 import {
   MEMORY_EXTRACTION_SYSTEM_PROMPT,
   buildMemoryExtractionUserPrompt,
@@ -10,7 +11,6 @@ import type { MemoryCandidate, MemoryExtractMessage } from '@/lib/memories/types
 export const runtime = 'edge';
 export const maxDuration = 60;
 
-const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/memories';
 const MIN_CONFIDENCE = 0.55;
 
 function jsonError(message: string, status = 400) {
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
       })),
     };
 
-    const upstreamRes = await fetch(`${MAIN_SITE_BASE}/batch`, {
+    const upstreamRes = await fetch(`${chatBackendMemoriesURL()}/batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  FlaskConical,
   Send,
   Square,
 } from 'lucide-react';
@@ -161,6 +162,11 @@ export type ChatComposerProps = {
   isCompacting: boolean;
   stopGenerating: () => void;
   enqueueOrSubmit: () => void;
+
+  deepResearchEnabled: boolean;
+  setDeepResearchEnabled: (v: boolean) => void;
+  researchBusy: boolean;
+  cancelResearch: () => void;
 };
 
 export function ChatComposer(props: ChatComposerProps) {
@@ -251,6 +257,10 @@ export function ChatComposer(props: ChatComposerProps) {
     isCompacting,
     stopGenerating,
     enqueueOrSubmit,
+    deepResearchEnabled,
+    setDeepResearchEnabled,
+    researchBusy,
+    cancelResearch,
   } = props;
 
   return (
@@ -1054,9 +1064,23 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
 
         <div className="flex items-center gap-2">
-          {isActiveLoading ? (
+          <button
+            type="button"
+            title={deepResearchEnabled ? '深度研究已开' : '深度研究'}
+            onClick={() => setDeepResearchEnabled(!deepResearchEnabled)}
+            className={cn(
+              'inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors',
+              deepResearchEnabled
+                ? 'border-amber-700/40 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100'
+                : 'border-stone-200 text-stone-500 hover:bg-stone-50 dark:border-stone-700 dark:hover:bg-stone-800',
+            )}
+          >
+            <FlaskConical className="h-3.5 w-3.5" />
+            研究
+          </button>
+          {isActiveLoading || researchBusy ? (
             <Button 
-              onClick={() => stopGenerating()}
+              onClick={() => (researchBusy ? cancelResearch() : stopGenerating())}
               size="icon" 
               title={t('stop')}
               className="h-8 w-8 rounded-full bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900"
@@ -1068,7 +1092,7 @@ export function ChatComposer(props: ChatComposerProps) {
               onClick={() => enqueueOrSubmit()}
               disabled={(!input.trim() && quotedSelections.length === 0 && attachments.length === 0) || isCompacting}
               size="icon" 
-              title="Send"
+              title={deepResearchEnabled ? '开始深度研究' : 'Send'}
               className={cn(
                 "h-8 w-8 rounded-full transition-all active:scale-95",
                 (input.trim() || attachments.length > 0)

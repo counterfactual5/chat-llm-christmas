@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { gatewayBaseURL, resolveUploadModel } from '@/lib/files/gateway/base';
+import {
+  filesGatewayBaseURL,
+  gatewayBaseURL,
+  resolveUploadModel,
+} from '@/lib/files/gateway/base';
 import { parseDataUrl } from '@/lib/files/gateway/data-url';
 import { toImageContentPart } from '@/lib/files/gateway/content-parts';
 import { generatedImageAssistantSummary } from '@/lib/files/gateway/prompts';
@@ -19,6 +23,14 @@ describe('gatewayBaseURL', () => {
   it('strips a trailing slash from the env override', () => {
     process.env.LLM_CHRISTMAS_BASE_URL = 'https://example.com/v1/';
     expect(gatewayBaseURL()).toBe('https://example.com/v1');
+  });
+});
+
+describe('filesGatewayBaseURL', () => {
+  it('defaults to chat-api /v1', () => {
+    delete process.env.CHAT_FILES_BASE_URL;
+    delete process.env.CHAT_BACKEND_BASE;
+    expect(filesGatewayBaseURL()).toBe('https://api.chat.llm.christmas/v1');
   });
 });
 

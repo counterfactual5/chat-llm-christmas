@@ -9,7 +9,7 @@
  */
 
 import OpenAI from 'openai';
-import { toImageContentPart } from '@/lib/files/gateway';
+import { filesGatewayBaseURL, toImageContentPart } from '@/lib/files/gateway';
 import { zhipuApiKey } from '@/lib/tools/zhipu/credentials';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';
@@ -110,7 +110,8 @@ export async function resolveImageUrlForVision(
   const fileId = gatewayFileIdFromRef(raw);
   if (!fileId) throw new Error('Invalid image reference');
 
-  const base = gateway.baseURL.replace(/\/$/, '');
+  // Files live on chat-api; LLM gateway baseURL is not used for /files content.
+  const base = filesGatewayBaseURL();
   const res = await fetch(`${base}/files/${encodeURIComponent(fileId)}/content`, {
     headers: { Authorization: `Bearer ${gateway.apiKey}` },
   });

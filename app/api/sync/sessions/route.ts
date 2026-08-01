@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { chatBackendSessionsURL } from '@/lib/chat-backend';
 
 export const runtime = 'edge';
-const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/sessions';
 
-/** Proxy session cloud-sync to the portal with the bound account key. */
+/** Proxy session cloud-sync to chat-api with the bound account key. */
 async function proxyRequest(req: NextRequest, method: string) {
   const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
   if (!boundUserKey) {
@@ -11,7 +11,7 @@ async function proxyRequest(req: NextRequest, method: string) {
   }
 
   try {
-    const upstreamRes = await fetch(MAIN_SITE_BASE, {
+    const upstreamRes = await fetch(chatBackendSessionsURL(), {
       method,
       headers: {
         'Content-Type': 'application/json',

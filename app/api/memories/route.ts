@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { chatBackendMemoriesURL } from '@/lib/chat-backend';
 
 export const runtime = 'edge';
-
-const MAIN_SITE_BASE = 'https://llm.christmas/portal/chat/memories';
 
 async function proxyRequest(req: NextRequest, method: string, targetUrl: string) {
   const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
@@ -29,10 +28,14 @@ async function proxyRequest(req: NextRequest, method: string, targetUrl: string)
 
 export async function GET(req: NextRequest) {
   const limit = new URL(req.url).searchParams.get('limit') || '50';
-  return proxyRequest(req, 'GET', `${MAIN_SITE_BASE}?limit=${encodeURIComponent(limit)}`);
+  return proxyRequest(
+    req,
+    'GET',
+    `${chatBackendMemoriesURL()}?limit=${encodeURIComponent(limit)}`,
+  );
 }
 
-/** Create/update a batch of memories on the portal. */
+/** Create/update a batch of memories on chat-api. */
 export async function POST(req: NextRequest) {
-  return proxyRequest(req, 'POST', `${MAIN_SITE_BASE}/batch`);
+  return proxyRequest(req, 'POST', `${chatBackendMemoriesURL()}/batch`);
 }

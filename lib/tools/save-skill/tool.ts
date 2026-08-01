@@ -1,12 +1,18 @@
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
+import { chatBackendSkillsURL } from '@/lib/chat-backend';
 import {
   resolveSaveSkillTarget,
   type AccountSkillSummary,
   type SaveSkillArgs,
 } from '@/lib/tools/save-skill/resolve-target';
 
-export const SKILLS_API_URL = 'https://llm.christmas/portal/chat/skills';
+export function skillsApiURL(): string {
+  return chatBackendSkillsURL();
+}
+
+/** @deprecated use skillsApiURL() — kept for existing imports */
+export const SKILLS_API_URL = 'https://api.chat.llm.christmas/v1/skills';
 
 function skillCreatorActive(ctx: ToolRuntimeContext): boolean {
   const skills = ctx.requestSkills || [];
@@ -14,7 +20,7 @@ function skillCreatorActive(ctx: ToolRuntimeContext): boolean {
 }
 
 async function listAccountSkills(apiKey: string): Promise<AccountSkillSummary[]> {
-  const res = await fetch(SKILLS_API_URL, {
+  const res = await fetch(skillsApiURL(), {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -115,7 +121,9 @@ export function createSaveSkillTool(): ChatTool {
 
         const method = target.mode === 'replace' ? 'PUT' : 'POST';
         const url =
-          target.mode === 'replace' ? `${SKILLS_API_URL}/${encodeURIComponent(target.id)}` : SKILLS_API_URL;
+          target.mode === 'replace'
+            ? `${skillsApiURL()}/${encodeURIComponent(target.id)}`
+            : skillsApiURL();
         const res = await fetch(url, {
           method,
           headers: {

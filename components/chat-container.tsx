@@ -14,6 +14,7 @@
  *  Send / queue / resume / review   hooks/chat/use-logic.ts
  *    queue helpers                 lib/chat/turn/task-queue.ts
  *    continue / claim-review plan  lib/chat/turn/continuation.ts
+ *  Deep research                   hooks/chat/use-deep-research.ts + components/chat/research/*
  *  Client SSE consumer             lib/chat/stream/client.ts
  *  Session normalize / LWW merge   lib/chat/session/store.ts
  *  Message list / composer / …     components/chat/*
@@ -49,6 +50,7 @@ import {
 } from '@/lib/chat/stream/reply-truncation';
 import { isAssistantError, messagePlainText } from '@/lib/chat/message/display';
 import { useChatLogic } from '@/hooks/chat/use-logic';
+import { useDeepResearch } from '@/hooks/chat/use-deep-research';
 import { useChatAccount } from '@/hooks/chat/use-account';
 import { useChatIntegrations } from '@/hooks/chat/use-integrations';
 import { useChatSessionPersist } from '@/hooks/chat/use-session-persist';
@@ -163,6 +165,7 @@ export default function ChatContainer() {
   const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [picturesExpanded, setPicturesExpanded] = useState(false);
+  const [researchExpanded, setResearchExpanded] = useState(true);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   /** Per-source groups within Reference Material; all start collapsed. */
   const [referenceGroupsOpen, setReferenceGroupsOpen] = useState<Record<string, boolean>>({});
@@ -1362,6 +1365,91 @@ export default function ChatContainer() {
     messageImagesToIngested,
   });
 
+  const deepResearch = useDeepResearch();
+
+  // When a research job finishes with a report, mirror it into the local session
+  // (server also writebacks; this keeps the current tab snappy).
+  useEffect(() => {
+    const j = deepResearch.job;
+    if (!j || j.status !== 'done' || !j.reportMarkdown) return;
+    const sid = j.sessionId || activeSessionId;
+    if (!sid) return;
+    const marker = `research_${j.jobId}_`;
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sid) return s;
+        if ((s.messages || []).some((m) => String(m.id || '').startsWith(marker))) {
+          return s;
+        }
+        const now = Date.now();
+        const msg: Message = {
+          id: `${marker}${now}`,
+          role: 'assistant',
+          content: j.reportMarkdown!,
+          timestamp: now,
+        };
+        return {
+          ...s,
+          updatedAt: now,
+          messages: [...(s.messages || []), msg],
+        };
+      }),
+    );
+  }, [deepResearch.job, activeSessionId]);
+
+  const submitComposer = useCallback(() => {
+    if (deepResearch.enabled) {
+      if (!isAccountBound) {
+        openLoginModal();
+        return;
+      }
+      const q = input.trim();
+      if (!q) return;
+      const sid = activeSessionId;
+      const now = Date.now();
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sid) return s;
+          const userMsg: Message = {
+            id: `research_user_${now}`,
+            role: 'user',
+            content: q,
+            timestamp: now,
+          };
+          return {
+            ...s,
+            updatedAt: now,
+            title:
+              !s.title || s.title === 'New Chat'
+                ? `研究: ${q.slice(0, 40)}`
+                : s.title,
+            messages: [...(s.messages || []), userMsg],
+          };
+        }),
+      );
+      setInput('');
+      setIsContextPanelOpen(true);
+      setResearchExpanded(true);
+      void deepResearch.start({
+        query: q,
+        mode: deepResearch.mode,
+        sessionId: sid,
+        model: selectedModel || undefined,
+      });
+      return;
+    }
+    enqueueOrSubmit();
+  }, [
+    deepResearch,
+    isAccountBound,
+    openLoginModal,
+    input,
+    setInput,
+    activeSessionId,
+    selectedModel,
+    enqueueOrSubmit,
+  ]);
+
   const {
     slashMenuItems,
     slashHighlight,
@@ -1624,7 +1712,7 @@ export default function ChatContainer() {
       e.preventDefault();
       // Prevent holding down Enter to spawn dozens of identical tasks
       if (e.repeat) return;
-      enqueueOrSubmit();
+      submitComposer();
     }
   };
 
@@ -1943,7 +2031,11 @@ export default function ChatContainer() {
           isActiveLoading={isActiveLoading}
           isCompacting={isCompacting}
           stopGenerating={stopGenerating}
-          enqueueOrSubmit={enqueueOrSubmit}
+          enqueueOrSubmit={submitComposer}
+          deepResearchEnabled={deepResearch.enabled}
+          setDeepResearchEnabled={deepResearch.setEnabled}
+          researchBusy={deepResearch.busy}
+          cancelResearch={() => void deepResearch.cancel()}
         />
 
       </div>
@@ -1991,6 +2083,16 @@ export default function ChatContainer() {
           const next = await runCompact(messages);
           if (next) updateActiveSession(next);
         }}
+        researchExpanded={researchExpanded}
+        onToggleResearchExpanded={() => setResearchExpanded((v) => !v)}
+        deepResearchEnabled={deepResearch.enabled}
+        researchMode={deepResearch.mode}
+        onResearchModeChange={deepResearch.setMode}
+        researchJob={deepResearch.job}
+        researchEvents={deepResearch.events}
+        researchBusy={deepResearch.busy}
+        researchError={deepResearch.error}
+        onCancelResearch={() => void deepResearch.cancel()}
       />
         </div>
       </div>

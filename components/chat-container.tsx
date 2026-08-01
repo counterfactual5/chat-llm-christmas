@@ -1687,10 +1687,11 @@ export default function ChatContainer() {
   }, [messages, isActiveLoading]);
 
   // Switching conversations should land at the latest message.
+  // Clear the previewed file (it belongs to the previous session) but keep the
+  // Preview panel open/closed as a layout preference — same as Context.
   useEffect(() => {
     stickToBottomRef.current = true;
     scrollToBottom(true);
-    setIsPreviewPanelOpen(false);
     setPreviewFileEntry(null);
   }, [activeSessionId]);
 

@@ -28,6 +28,7 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
+  Eye,
   Menu,
   PanelRightOpen,
   PanelRightClose,
@@ -86,7 +87,8 @@ import {
 import { ChatSidebar } from '@/components/chat/session/ChatSidebar';
 import { ChatComposer } from '@/components/chat/composer/ChatComposer';
 import { ChatMessageList } from '@/components/chat/message/ChatMessageList';
-import { ChatContextPanel, type PanelPreview } from '@/components/chat/panels/ChatContextPanel';
+import { ChatContextPanel } from '@/components/chat/panels/ChatContextPanel';
+import { ChatPreviewPanel } from '@/components/chat/panels/ChatPreviewPanel';
 import { ChatModals } from '@/components/chat/overlays/ChatModals';
 import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import {
@@ -170,6 +172,12 @@ export default function ChatContainer() {
   const skillPickerRef = useRef<HTMLDivElement>(null);
   const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
+  const [isPreviewPanelOpen, setIsPreviewPanelOpen] = useState(false);
+  const [previewFileEntry, setPreviewFileEntry] = useState<GeneratedFileEntry | null>(null);
+  const openFilePreview = (entry: GeneratedFileEntry) => {
+    setPreviewFileEntry(entry);
+    setIsPreviewPanelOpen(true);
+  };
   const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   /** Per-source groups within Reference Material; all start collapsed. */
@@ -184,12 +192,6 @@ export default function ChatContainer() {
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
   const [filesManagerOpen, setFilesManagerOpen] = useState(false);
-  /** Master-detail preview shown inline in the Context panel (Output → file/image). */
-  const [panelPreview, setPanelPreview] = useState<PanelPreview | null>(null);
-  const openPanelPreview = (preview: PanelPreview) => {
-    setPanelPreview(preview);
-    setIsContextPanelOpen(true);
-  };
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
@@ -1688,7 +1690,8 @@ export default function ChatContainer() {
   useEffect(() => {
     stickToBottomRef.current = true;
     scrollToBottom(true);
-    setPanelPreview(null);
+    setIsPreviewPanelOpen(false);
+    setPreviewFileEntry(null);
   }, [activeSessionId]);
 
   // While the assistant turn is still open but the stream has gone idle (no new
@@ -2053,6 +2056,24 @@ export default function ChatContainer() {
             <Button
               variant="ghost"
               size="sm"
+              onClick={() => setIsPreviewPanelOpen((v) => !v)}
+              className={cn(
+                'text-xs gap-1.5',
+                isPreviewPanelOpen
+                  ? 'bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100'
+                  : 'text-stone-500',
+              )}
+            >
+              {isPreviewPanelOpen ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+              {t('previewPanel')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
               className={cn("text-xs gap-1.5", isContextPanelOpen ? "bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100" : "text-stone-500")}
             >
@@ -2089,8 +2110,8 @@ export default function ChatContainer() {
               addEditIngestedFiles={addEditIngestedFiles}
               removeEditingMessageAttachment={removeEditingMessageAttachment}
               setImagePreviewSrc={setImagePreviewSrc}
-              onPreviewImage={(entry) => openPanelPreview({ kind: 'image', entry })}
-              onPreviewFile={(entry) => openPanelPreview({ kind: 'file', entry })}
+              onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
+              onPreviewFile={openFilePreview}
               cancelEditMessage={cancelEditMessage}
               saveEditedMessage={saveEditedMessageOrResearch}
               editUserMessage={editUserMessage}
@@ -2207,12 +2228,32 @@ export default function ChatContainer() {
         />
 
       </div>
+      <ChatPreviewPanel
+        open={isPreviewPanelOpen}
+        onClose={() => setIsPreviewPanelOpen(false)}
+        file={previewFileEntry}
+        onExpandFullscreen={() => {
+          if (!previewFileEntry || typeof previewFileEntry.content !== 'string') return;
+          setFilePreview({
+            id: previewFileEntry.id,
+            name: previewFileEntry.name,
+            mimeType: previewFileEntry.mimeType,
+            content: previewFileEntry.content,
+            size: previewFileEntry.size,
+          });
+        }}
+        onJumpToMessage={() => {
+          if (!previewFileEntry) return;
+          scrollToMessage(previewFileEntry.messageId);
+        }}
+        onDownload={() => {
+          if (!previewFileEntry) return;
+          void downloadGeneratedFile(previewFileEntry);
+        }}
+      />
       <ChatContextPanel
         open={isContextPanelOpen}
-        onClose={() => {
-          setIsContextPanelOpen(false);
-          setPanelPreview(null);
-        }}
+        onClose={() => setIsContextPanelOpen(false)}
         picturesExpanded={picturesExpanded}
         onTogglePicturesExpanded={() => setPicturesExpanded((v) => !v)}
         outputGroupsOpen={outputGroupsOpen}
@@ -2221,38 +2262,13 @@ export default function ChatContainer() {
         }
         images={generatedImageHistory}
         files={generatedFileHistory}
-        onPreviewImage={(entry) => openPanelPreview({ kind: 'image', entry })}
-        onPreviewFile={(entry) => openPanelPreview({ kind: 'file', entry })}
+        onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
+        onPreviewFile={openFilePreview}
         onScrollToMessage={scrollToMessage}
         onDownloadImage={(entry) => void downloadGeneratedImage(entry)}
         onRemoveImage={removeGeneratedImage}
         onDownloadFile={(entry) => void downloadGeneratedFile(entry)}
         onRemoveFile={removeGeneratedFile}
-        preview={panelPreview}
-        onClosePreview={() => setPanelPreview(null)}
-        onExpandPreview={() => {
-          if (!panelPreview) return;
-          if (panelPreview.kind === 'image') {
-            setImagePreviewSrc(panelPreview.entry.url);
-          } else if (typeof panelPreview.entry.content === 'string') {
-            setFilePreview({
-              id: panelPreview.entry.id,
-              name: panelPreview.entry.name,
-              mimeType: panelPreview.entry.mimeType,
-              content: panelPreview.entry.content,
-              size: panelPreview.entry.size,
-            });
-          }
-        }}
-        onJumpToPreviewMessage={() => {
-          if (!panelPreview) return;
-          scrollToMessage(panelPreview.entry.messageId);
-        }}
-        onDownloadPreview={() => {
-          if (!panelPreview) return;
-          if (panelPreview.kind === 'image') void downloadGeneratedImage(panelPreview.entry);
-          else void downloadGeneratedFile(panelPreview.entry);
-        }}
         referenceExpanded={referenceExpanded}
         onToggleReferenceExpanded={() => setReferenceExpanded((v) => !v)}
         referenceGroupsOpen={referenceGroupsOpen}

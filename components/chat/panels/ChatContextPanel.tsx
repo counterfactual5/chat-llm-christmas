@@ -1,24 +1,14 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  ArrowUpRight,
-  ChevronDown,
-  ChevronLeft,
-  Download,
-  Maximize2,
-  PanelRightClose,
-  Settings2,
-} from 'lucide-react';
+import { ChevronDown, PanelRightClose, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FilePreviewContent } from '@/components/files/FilePreviewOverlay';
 import type {
   ExternalReferenceSourceKind,
   WebSearchSource,
 } from '@/lib/chat/types';
-import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   OutputPanel,
@@ -26,11 +16,6 @@ import {
   type GeneratedImageEntry,
 } from './OutputPanel';
 import { ReferencePanel } from './ReferencePanel';
-
-/** What the side panel is currently showing in "detail" (master-detail) mode. */
-export type PanelPreview =
-  | { kind: 'image'; entry: GeneratedImageEntry }
-  | { kind: 'file'; entry: GeneratedFileEntry };
 
 const SYSTEM_PRESETS = [
   { label: 'Concise', value: 'Answer concisely. Prefer short, direct sentences and skip preamble.' },
@@ -61,13 +46,6 @@ export type ChatContextPanelProps = {
   onRemoveImage: (entry: GeneratedImageEntry) => void;
   onDownloadFile: (entry: GeneratedFileEntry) => void;
   onRemoveFile: (entry: GeneratedFileEntry) => void;
-
-  /** Master-detail preview shown in place of the list when a file/image is opened. */
-  preview: PanelPreview | null;
-  onClosePreview: () => void;
-  onExpandPreview: () => void;
-  onJumpToPreviewMessage: () => void;
-  onDownloadPreview: () => void;
 
   referenceExpanded: boolean;
   onToggleReferenceExpanded: () => void;
@@ -112,11 +90,6 @@ export function ChatContextPanel({
   onRemoveImage,
   onDownloadFile,
   onRemoveFile,
-  preview,
-  onClosePreview,
-  onExpandPreview,
-  onJumpToPreviewMessage,
-  onDownloadPreview,
   referenceExpanded,
   onToggleReferenceExpanded,
   referenceGroupsOpen,
@@ -141,102 +114,22 @@ export function ChatContextPanel({
   canCompact,
   onCompact,
 }: ChatContextPanelProps) {
-  const { t } = useLocale();
-  const previewFile =
-    preview?.kind === 'file' && typeof preview.entry.content === 'string'
-      ? {
-          id: preview.entry.id,
-          name: preview.entry.name,
-          mimeType: preview.entry.mimeType,
-          content: preview.entry.content,
-          size: preview.entry.size,
-        }
-      : null;
-  const previewTitle =
-    preview?.kind === 'image' ? preview.entry.prompt || 'Image' : preview?.entry.name;
-
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: preview ? 460 : 280, opacity: 1 }}
+          animate={{ width: 280, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
-          transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
-          className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col overflow-hidden"
+          className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col"
         >
-          <div className="flex h-14 items-center justify-between gap-2 px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
-            {preview ? (
-              <button
-                type="button"
-                onClick={onClosePreview}
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-medium text-stone-700 hover:text-stone-900 dark:text-stone-300 dark:hover:text-stone-100"
-              >
-                <ChevronLeft className="h-4 w-4 shrink-0 opacity-60" />
-                <span className="truncate">{previewTitle}</span>
-              </button>
-            ) : (
-              <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">Context</span>
-            )}
-            <div className="flex shrink-0 items-center gap-0.5">
-              {preview && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    title={t('viewInChat')}
-                    onClick={onJumpToPreviewMessage}
-                    className="h-8 w-8 text-stone-500"
-                  >
-                    <ArrowUpRight className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    title={t('expandFullscreen')}
-                    onClick={onExpandPreview}
-                    className="h-8 w-8 text-stone-500"
-                  >
-                    <Maximize2 className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    title={t('download')}
-                    onClick={onDownloadPreview}
-                    className="h-8 w-8 text-stone-500"
-                  >
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-              <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-stone-500">
-                <PanelRightClose className="h-4 w-4" />
-              </Button>
-            </div>
+          <div className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
+            <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">Context</span>
+            <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-stone-500">
+              <PanelRightClose className="h-4 w-4" />
+            </Button>
           </div>
 
-          {preview ? (
-            <ScrollArea className="flex-1">
-              {preview.kind === 'image' ? (
-                <div className="flex items-center justify-center p-4">
-                  <img
-                    src={preview.entry.url}
-                    alt={preview.entry.prompt}
-                    className="max-w-full rounded-lg border border-stone-200 dark:border-stone-800"
-                  />
-                </div>
-              ) : previewFile ? (
-                <div className="px-4 py-4">
-                  <FilePreviewContent file={previewFile} />
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-2 px-4 py-12 text-center text-xs text-stone-400">
-                  <span>{t('noPreviewAvailable')}</span>
-                </div>
-              )}
-            </ScrollArea>
-          ) : (
           <ScrollArea className="flex-1 px-4 py-4">
             <div className="space-y-2">
               <OutputPanel
@@ -267,7 +160,6 @@ export function ChatContextPanel({
                 onRequestClearSources={onRequestClearSources}
               />
 
-              {/* System Prompt — collapsible */}
               <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
                 <button
                   type="button"
@@ -345,7 +237,6 @@ export function ChatContextPanel({
               </div>
             </div>
           </ScrollArea>
-          )}
 
           <div className="p-4 border-t border-stone-200/50 dark:border-stone-800/50 shrink-0 bg-stone-50 dark:bg-stone-900/50 text-xs text-stone-500 space-y-1.5">
             <div className="flex justify-between">

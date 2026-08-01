@@ -348,13 +348,31 @@ export function actionableReviewIssues(issues: ReviewIssue[]): ReviewIssue[] {
       );
     }
     if (issue.kind === 'recalculation') return /Verified as|Column verifies as/i.test(text);
-    if (issue.kind === 'completeness') return /cut off|Unclosed code block/i.test(text);
+    if (issue.kind === 'completeness') {
+      return /cut off|Unclosed code block|collapsed into garbage|long repeated/i.test(text);
+    }
+    if (issue.kind === 'citation') {
+      // A missing URL or search-blurb miss is only advisory. A strong body read
+      // that still lacks the cited fact is concrete enough for a bounded retraction.
+      return /\[(?:unsupported|contradicted)\/strong\]/i.test(text);
+    }
+    if (issue.kind === 'staleness') {
+      // Only explicit stale cutoffs become corrections; "newest source" and
+      // general freshness heuristics remain panel-only.
+      return /^Dated .+ but now is \d{4}/i.test(issue.title);
+    }
+    if (issue.kind === 'code_quality') {
+      // These local rules are deterministic likely bugs. Warn-level style smells
+      // (empty catch, radix, loose equality, etc.) stay advisory.
+      return /Off-by-one loop bound|Mutable default argument/i.test(issue.title);
+    }
     if (issue.kind === 'vulnerability') {
-      return /credential|access key|private key|secret|token/i.test(text);
+      // Vulnerability errors are deliberately narrow patterns after placeholder
+      // and negative-example filtering. Warn-level sinks never reach this gate.
+      return true;
     }
 
-    // Citation, staleness, consistency, and code-quality findings may depend on
-    // incomplete context or style choices. Show them as advice; never auto-rewrite.
+    // Consistency findings are heuristic warnings and remain panel-only.
     return false;
   });
 }
@@ -484,6 +502,30 @@ export function buildFindingsResponsePrompt(
     .join('\n');
 }
 
+function correctionExcerpt(
+  assistantText: string,
+  opts: { collapsedDiagram: boolean; codeOrSecurity: boolean; sensitiveLeak: boolean },
+): string {
+  const text = String(assistantText || '').trim();
+  if (!text) return '';
+  if (opts.sensitiveLeak) {
+    return '(Sensitive original excerpt omitted. Do not repeat any credential or key value.)';
+  }
+  if (opts.collapsedDiagram) {
+    const marker = text.search(/[─━═]{40,}/);
+    if (marker < 0) return text.slice(-1200);
+    const start = Math.max(0, marker - 350);
+    const end = Math.min(text.length, marker + 1000);
+    return text.slice(start, end);
+  }
+  if (opts.codeOrSecurity) {
+    const blocks = [...text.matchAll(/```[^\n]*\n[\s\S]*?```/g)].map((m) => m[0]);
+    if (blocks.length) return blocks.join('\n\n').slice(0, 2400);
+  }
+  if (text.length <= 1800) return text;
+  return `${text.slice(0, 900)}\n\n[…middle omitted…]\n\n${text.slice(-900)}`;
+}
+
 export function buildReviewIssuesResponsePrompt(
   issues: ReviewIssue[],
   assistantText?: string,
@@ -500,18 +542,71 @@ export function buildReviewIssuesResponsePrompt(
         `${i + 1}. [${issue.severity}/${issue.kind}] ${issue.title}\n   ${issue.detail}`,
     )
     .join('\n');
-  // Tiny excerpt only for locating the bad claim — not so the model can rewrite everything.
-  const excerpt = String(assistantText || '').trim().slice(0, 800);
+  const hasDegenerateOutput = issues.some(
+    (issue) =>
+      issue.kind === 'completeness' &&
+      /collapsed into garbage|long repeated/i.test(`${issue.title} ${issue.detail}`),
+  );
+  const hasCutoff = issues.some(
+    (issue) => issue.kind === 'completeness' && /cut off/i.test(`${issue.title} ${issue.detail}`),
+  );
+  const hasUnclosedFence = issues.some(
+    (issue) =>
+      issue.kind === 'completeness' && /Unclosed code block/i.test(`${issue.title} ${issue.detail}`),
+  );
+  const hasCodeOrSecurity = issues.some(
+    (issue) => issue.kind === 'code_quality' || issue.kind === 'vulnerability',
+  );
+  const hasSensitiveLeak = issues.some(
+    (issue) =>
+      issue.kind === 'vulnerability' &&
+      /access key|secret key|personal access token|private key|credential|token/i.test(
+        `${issue.title} ${issue.detail}`,
+      ),
+  );
+  const taskDirectives = [
+    hasDegenerateOutput
+      ? '- Replace the malformed diagram/section with a readable fenced `text` block using real line breaks or a valid Mermaid diagram.'
+      : '',
+    hasCutoff
+      ? '- Continue only the missing ending of the cut-off answer. Do not restart from the beginning.'
+      : '',
+    hasUnclosedFence
+      ? '- Supply a corrected, closed replacement for the incomplete code block or its missing tail.'
+      : '',
+    issues.some((issue) => issue.kind === 'citation')
+      ? '- Retract or narrow claims that strong retrieved page text does not support. Do not invent a replacement source or URL.'
+      : '',
+    issues.some((issue) => issue.kind === 'staleness')
+      ? '- Correct the time framing: state the real cutoff and do not invent newer facts without retrieval.'
+      : '',
+    issues.some((issue) => issue.kind === 'code_quality')
+      ? '- Give the minimal corrected code fragment for each deterministic code bug.'
+      : '',
+    issues.some((issue) => issue.kind === 'vulnerability')
+      ? '- For unsafe code, give a minimal safer replacement. For leaked credentials, never repeat the value; tell the user to revoke/rotate it and use environment or secret storage.'
+      : '',
+  ].filter(Boolean);
+  // Include the most useful context for the correction without feeding leaked
+  // credentials back into another model call.
+  const excerpt = correctionExcerpt(String(assistantText || ''), {
+    collapsedDiagram: hasDegenerateOutput,
+    codeOrSecurity: hasCodeOrSecurity,
+    sensitiveLeak: hasSensitiveLeak,
+  });
+  const taskLine = taskDirectives.length
+    ? ['Write a SHORT actionable correction, not merely a warning:', ...taskDirectives].join('\n')
+    : 'Write a SHORT annotation note only — the original answer stays visible and cannot be un-sent.';
   return [
     'Automatic review found issues in the previous answer (already shown to the user above the Review panel).',
-    'Write a SHORT annotation note only — the original answer stays visible and cannot be un-sent.',
+    taskLine,
     '',
     'Hard rules:',
     '- Do NOT repeat or rewrite the full prior answer.',
     '- Do NOT restate sections that were already fine.',
     '- Do NOT say you “revoked / 撤销 / removed / deleted” text that the user can still see above.',
     '- Do NOT ask the user to ignore the whole answer, and do not re-output a corrected full answer.',
-    '- Prefer a few bullets or one short paragraph (usually under 120 words).',
+    '- Prefer a few bullets or one short paragraph (usually under 120 words). For a malformed diagram, a concise replacement fenced block or Mermaid diagram may be longer when required for legibility.',
     '- For citation issues marked unsupported (full page evidence): say the figure is not backed by the read page text. For unverifiable (search blurb only): say the number was not in the retrieval headline — do not claim the article is wrong, and do not pretend the body was read.',
     '- For arithmetic: state the corrected equation/number only.',
     '- For tool-receipt issues: say what was not actually done / not backed by a receipt.',
@@ -527,9 +622,9 @@ export function buildReviewIssuesResponsePrompt(
 }
 
 export const FINDINGS_RESPONSE_SYSTEM = [
-  'You write a brief review annotation after an automatic check.',
+  'You write a brief review correction after an automatic check.',
   'The prior answer is already on screen — you cannot unsay it. Annotate risks and limits; do not claim to have revoked or deleted visible text.',
-  'Output ONLY a short delta note — never a full restatement of the prior answer.',
+  'Output ONLY a short delta correction — never a full restatement of the prior answer. If the issue is a malformed/collapsed diagram, provide a readable replacement diagram or fenced text block instead of merely describing the defect.',
   'Be concise and honest. Prefer “未在检索摘要中核实 / 请谨慎采信” for unverifiable blurbs; use “全文摘录中未见” only when evidence was a full page read.',
   'Do not call tools. Do not invent URLs or tool payloads.',
 ].join(' ');

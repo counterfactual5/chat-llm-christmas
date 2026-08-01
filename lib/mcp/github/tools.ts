@@ -7,11 +7,14 @@ import {
 import { githubMcpServerUrl } from '@/lib/integrations/github/oauth';
 
 const GITHUB_SYSTEM_PROMPT = [
-  "You have GitHub MCP tools for the user's connected account (repos, issues, PRs, Actions, etc.).",
-  'Use search/list tools before mutating when the user only asked to explore.',
+  "You have GitHub MCP tools for the user's connected account (repos, code, files, issues, PRs, releases, and Actions).",
+  'GitHub routing takes precedence over generic web guidance: when the user provides or asks about a github.com repository, file, directory, issue, pull request, release, or GitHub documentation URL, use GitHub MCP first.',
+  'For repository research, inspect the repository metadata and README first; then use GitHub tools to read the relevant docs, files, or code. Do not treat a rendered GitHub homepage or a search snippet as complete repository documentation.',
+  'Use web_read for github.com only as a fallback when GitHub MCP is unavailable this turn, cannot access the requested resource, or the requested content is outside GitHub data.',
+  'Use search/list/read tools before mutating when the user only asked to explore.',
   'For write actions (create issue, comment, merge, etc.), confirm intent from the user message before calling.',
-  'Do not invent repository names, issue numbers, or URLs — only use tool results.',
-  'Cite repo/issue/PR links from tool results when answering.',
+  'Do not invent repository names, paths, issue numbers, or URLs — only use tool results.',
+  'Only cite GitHub repository, file, documentation, issue, PR, or release URLs returned or explicitly retrieved by a GitHub tool in this turn.',
 ].join(' ');
 
 function githubToken(ctx: ToolRuntimeContext): string | null {

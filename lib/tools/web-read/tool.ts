@@ -124,6 +124,7 @@ const WEB_READ_SYSTEM_PROMPT = [
   'You also have a web_read tool to fetch the full text of a specific public URL.',
   'Typical flow: web_search to find links, then web_read on 1–3 promising URLs when snippets are insufficient.',
   'Call web_read when the user pastes a link and asks you to summarize or extract details from that page.',
+  'Exception: when GitHub MCP is available this turn, do not use web_read as the primary path for github.com repository, file, directory, issue, pull request, release, or documentation URLs. Use GitHub MCP first; web_read is only a fallback if GitHub MCP cannot access the requested resource.',
   'Always pass an absolute http(s) URL in the `url` field (copy it from web_search results). Do not pass a search query.',
   'Do not invent page contents — only use what web_read returns.',
 ].join(' ');

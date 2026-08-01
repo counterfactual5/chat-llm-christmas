@@ -652,7 +652,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
                       components={{
                         p({ children }: any) {
-                          return <p className="mb-4 leading-7 last:mb-0">{children}</p>;
+                          return (
+                            <p className="mb-4 whitespace-pre-wrap leading-7 last:mb-0">
+                              {children}
+                            </p>
+                          );
                         },
                         h1({ children }: any) {
                           return <h1 className="text-xl font-bold mt-6 mb-3 text-stone-900 dark:text-stone-100">{children}</h1>;

@@ -1,16 +1,38 @@
 import type { ReviewCheck, ReviewCheckItem, ReviewInput } from '@/lib/tools/review/core/types';
 
+function proseOutsideFencedBlocks(text: string): string {
+  return String(text || '').replace(/```[\s\S]*?(?:```|$)/g, ' ');
+}
+
 export function detectDegenerateOutput(text: string): string | null {
   const raw = String(text || '');
   if (raw.length < 80) return null;
 
-  // Long same-char / same-short-token runs (aaaaaaaa / AAAAA / ——–).
-  const run = raw.match(/([^\s])\1{39,}/);
+  // Repeated box-drawing characters are valid inside fenced ASCII diagrams.
+  // Only inspect prose, where a long run usually means the model flattened a
+  // diagram into one malformed paragraph.
+  const prose = proseOutsideFencedBlocks(raw);
+  const run = prose.match(/([^\s])\1{39,}/);
   if (run) {
-    return `Output collapsed into a long repeated "${run[1]}" run — generation likely failed mid-reply.`;
+    const lineStart = prose.lastIndexOf('\n', run.index ?? 0) + 1;
+    const lineEndRaw = prose.indexOf('\n', (run.index ?? 0) + run[0].length);
+    const lineEnd = lineEndRaw === -1 ? prose.length : lineEndRaw;
+    const line = prose.slice(lineStart, lineEnd);
+    const isBoxDrawing = /[─━═]/.test(run[1]);
+    const flattenedBoxArt =
+      isBoxDrawing &&
+      /[┌┐└┘│┃╭╮╰╯]/.test(line) &&
+      line.length >= 100 &&
+      /\S\s+[│┃]\s+\S/.test(line);
+
+    // A horizontal rule on its own line may be intentional. The broken case is
+    // a whole box diagram flattened into one prose line.
+    if (!isBoxDrawing || flattenedBoxArt) {
+      return `Output collapsed into a long repeated "${run[1]}" run — generation likely failed mid-reply.`;
+    }
   }
 
-  const tail = raw.slice(-1200);
+  const tail = prose.slice(-1200);
   // URL / path soup: many broken https fragments or hex-ish tokens jammed together.
   const httpsBits = (tail.match(/https?(?:s|:|\/)/gi) || []).length;
   const hexish = (tail.match(/\b[a-f0-9]{8,}\b/gi) || []).length;

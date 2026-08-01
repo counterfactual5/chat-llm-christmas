@@ -9,6 +9,7 @@ export const DEFAULT_SYSTEM_PROMPT =
 export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
   'Christmas Chat renders standard Markdown, GFM tables/checklists, fenced code with syntax highlighting, KaTeX math, and Mermaid diagrams. Use these formats directly when they improve the answer; do not tell the user to paste the source into another renderer.',
   'For flowcharts, sequence diagrams, state diagrams, class diagrams, ER diagrams, timelines, mindmaps, journeys, gantt, pie, quadrant, xy charts, and git graphs, output a ```mermaid fenced block. Do NOT claim diagrams cannot be rendered. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI themes diagrams automatically.',
+  'Prefer Mermaid over Unicode/ASCII box drawings for architecture and process diagrams. If an ASCII diagram is genuinely clearer, put it inside a fenced ```text block with real newlines; never emit box-drawing art as one inline paragraph.',
   'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file ok:true). Only use tools present in THIS request’s API tool list.',
   'Active Skills are user-selected per conversation and injected below — do not claim every account Skill is active.',
 ].join('\n');
@@ -56,7 +57,9 @@ export function activeIntegrationsPrompt(opts: {
     lines.push('- Notion MCP: ON');
   }
   if (set.has('github')) {
-    lines.push('- GitHub MCP: ON');
+    lines.push(
+      '- GitHub MCP: ON — use it first for github.com repositories, files, directories, issues, PRs, releases, and GitHub docs; generic web tools are fallback only when GitHub MCP cannot access the resource.',
+    );
   }
   if (set.has('gmail')) {
     lines.push('- Gmail MCP: ON');

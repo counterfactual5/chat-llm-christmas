@@ -17,6 +17,7 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('Continue reply');
     expect(text).toContain('手动添加');
     expect(text).toContain('create_file');
+    expect(text).toContain('GitHub repo/file/issue/PR/release research uses GitHub tools before generic web tools');
     expect(text).toContain('follow the user’s language');
   });
 });
@@ -27,6 +28,8 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('detailed product guide');
     expect(text).toContain('CLIENT command');
     expect(text).toContain('Sidebar Tools');
+    expect(text).toContain('GitHub MCP is enabled for this chat, it is the primary path');
+    expect(text).toContain('generic webpage reading is fallback only');
   });
 });
 

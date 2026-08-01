@@ -14,6 +14,32 @@ export const ZHIPU_MCP_SEARCH_URL =
 export const ZHIPU_MCP_READER_URL =
   'https://open.bigmodel.cn/api/mcp/web_reader/mcp';
 
+/** Prefer a readable string over "[object Object]" in logs / thrown Errors. */
+export function formatUnknownError(err: unknown): string {
+  if (err instanceof Error) {
+    const msg = String(err.message || '').trim();
+    return msg || err.name || 'Error';
+  }
+  if (typeof err === 'string') return err.trim() || 'Error';
+  if (err && typeof err === 'object') {
+    const rec = err as Record<string, unknown>;
+    for (const key of ['message', 'error', 'msg', 'detail']) {
+      const v = rec[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (v && typeof v === 'object') {
+        const nested = formatUnknownError(v);
+        if (nested && nested !== '[object Object]') return nested;
+      }
+    }
+    try {
+      return JSON.stringify(err).slice(0, 400);
+    } catch {
+      // fall through
+    }
+  }
+  return String(err || 'Error');
+}
+
 export function parseMaybeJson(text: string): unknown {
   const raw = String(text || '').trim();
   if (!raw) return null;
@@ -94,6 +120,12 @@ function internalProxySecret(): string {
   );
 }
 
+function protectionBypassHeaders(): Record<string, string> {
+  const bypass = (process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '').trim();
+  if (!bypass) return {};
+  return { 'x-vercel-protection-bypass': bypass };
+}
+
 /**
  * On Edge, call the Node.js `/api/internal/zhipu-mcp` proxy.
  * Direct Edge → open.bigmodel.cn frequently returns HTML 405.
@@ -105,23 +137,35 @@ export async function callZhipuMcpViaNodeProxy(body: {
 }): Promise<unknown> {
   const secret = internalProxySecret();
   if (!secret) throw new Error('ZHIPU_API_KEY missing for Edge→Node proxy');
-  const res = await fetch(`${internalProxyOrigin()}/api/internal/zhipu-mcp`, {
+  const origin = internalProxyOrigin();
+  const res = await fetch(`${origin}/api/internal/zhipu-mcp`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-christmas-internal': secret,
+      ...protectionBypassHeaders(),
     },
     body: JSON.stringify(body),
     cache: 'no-store',
   });
-  const data = (await res.json().catch(() => ({}))) as {
+  const raw = await res.text().catch(() => '');
+  let data: {
     ok?: boolean;
-    error?: string;
+    error?: unknown;
     hits?: unknown;
     page?: unknown;
-  };
+  } = {};
+  try {
+    data = raw ? (JSON.parse(raw) as typeof data) : {};
+  } catch {
+    throw new Error(
+      `Zhipu Node proxy HTTP ${res.status} non-JSON from ${origin}: ${raw.slice(0, 180) || '(empty)'}`,
+    );
+  }
   if (!res.ok || !data.ok) {
-    throw new Error(data.error || `Zhipu Node proxy HTTP ${res.status}`);
+    throw new Error(
+      formatUnknownError(data.error) || `Zhipu Node proxy HTTP ${res.status} from ${origin}`,
+    );
   }
   return data;
 }

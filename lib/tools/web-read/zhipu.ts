@@ -21,19 +21,30 @@ export type ZhipuMcpReadResult = {
 /**
  * Call Coding Plan web reader MCP (`webReader` / `web_reader`).
  * Returns page markdown/text; throws on MCP / tool errors.
+ *
+ * @param forceDirect — Node proxy must set true to avoid Edge→proxy recursion.
  */
-export async function zhipuMcpWebRead(url: string): Promise<ZhipuMcpReadResult> {
+export async function zhipuMcpWebRead(
+  url: string,
+  opts?: { forceDirect?: boolean },
+): Promise<ZhipuMcpReadResult> {
   // Edge → open.bigmodel.cn often returns HTML 405; hop through Node proxy.
-  if (isVercelEdgeRuntime()) {
+  if (!opts?.forceDirect && isVercelEdgeRuntime()) {
     const data = (await callZhipuMcpViaNodeProxy({
       action: 'read',
       url: String(url || '').trim(),
     })) as { page?: ZhipuMcpReadResult };
     const page = data.page;
-    if (!page?.content?.trim()) {
+    const content = String(page?.content || '').trim();
+    if (!content) {
       throw new Error('Zhipu MCP webReader returned empty content');
     }
-    return page;
+    return {
+      url: String(page?.url || url),
+      title: page?.title ? String(page.title) : undefined,
+      description: page?.description ? String(page.description) : undefined,
+      content,
+    };
   }
 
   const client = createZhipuMcpClient(ZHIPU_MCP_READER_URL);

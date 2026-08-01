@@ -12,6 +12,7 @@
 import { PROVIDERS } from '@/lib/tools/web-read/fetchers';
 import type { WebReadOutcome } from '@/lib/tools/web-read/types';
 import { normalizeUrl } from '@/lib/tools/web-read/url';
+import { formatUnknownError } from '@/lib/tools/zhipu/mcp-helpers';
 
 export type { WebReadOutcome } from '@/lib/tools/web-read/types';
 
@@ -33,9 +34,9 @@ export async function webRead(urlInput: string): Promise<WebReadOutcome> {
     try {
       return await provider.read(url);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err || 'failed');
+      const message = formatUnknownError(err);
       errors.push(`${provider.name}: ${message}`);
-      console.warn(`[web_read] ${provider.name} failed, trying next:`, message);
+      console.warn(`[web_read] ${provider.name} failed, trying next: ${message}`);
     }
   }
 

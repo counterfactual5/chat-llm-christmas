@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { zhipuMcpWebSearch } from '@/lib/tools/search/zhipu';
 import { zhipuMcpWebRead } from '@/lib/tools/web-read/zhipu';
 import { zhipuApiKey } from '@/lib/tools/zhipu/credentials';
+import { formatUnknownError } from '@/lib/tools/zhipu/mcp-helpers';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -53,7 +54,8 @@ export async function POST(req: NextRequest) {
       if (!query) {
         return NextResponse.json({ ok: false, error: 'Missing query' }, { status: 400 });
       }
-      const hits = await zhipuMcpWebSearch(query);
+      // forceDirect: this route is Node — never re-enter the Edge→proxy hop.
+      const hits = await zhipuMcpWebSearch(query, { forceDirect: true });
       return NextResponse.json({ ok: true, hits });
     }
     if (action === 'read') {
@@ -61,12 +63,12 @@ export async function POST(req: NextRequest) {
       if (!url) {
         return NextResponse.json({ ok: false, error: 'Missing url' }, { status: 400 });
       }
-      const page = await zhipuMcpWebRead(url);
+      const page = await zhipuMcpWebRead(url, { forceDirect: true });
       return NextResponse.json({ ok: true, page });
     }
     return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err || 'failed');
+    const message = formatUnknownError(err);
     console.warn('[zhipu-mcp proxy]', action, message);
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }

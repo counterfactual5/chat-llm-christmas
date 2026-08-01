@@ -51,10 +51,16 @@ function hitsFromParsed(parsed: unknown): ZhipuMcpSearchHit[] {
 /**
  * Call Coding Plan web search MCP (`webSearchPrime` / `web_search_prime`).
  * Returns normalized hits; throws on MCP / tool errors.
+ *
+ * @param forceDirect — Node proxy must set true to avoid Edge→proxy→Edge recursion
+ *   if `EdgeRuntime` is unexpectedly present.
  */
-export async function zhipuMcpWebSearch(query: string): Promise<ZhipuMcpSearchHit[]> {
+export async function zhipuMcpWebSearch(
+  query: string,
+  opts?: { forceDirect?: boolean },
+): Promise<ZhipuMcpSearchHit[]> {
   // Edge → open.bigmodel.cn often returns HTML 405; hop through Node proxy.
-  if (isVercelEdgeRuntime()) {
+  if (!opts?.forceDirect && isVercelEdgeRuntime()) {
     const data = (await callZhipuMcpViaNodeProxy({
       action: 'search',
       query: String(query || '').trim(),

@@ -12,6 +12,7 @@
 
 import { PROVIDERS } from '@/lib/tools/search/providers';
 import type { SearchOutcome, WebSearchOptions } from '@/lib/tools/search/types';
+import { formatUnknownError } from '@/lib/tools/zhipu/mcp-helpers';
 
 export type { SearchHit, SearchOutcome, WebSearchOptions } from '@/lib/tools/search/types';
 export { annotateHitFreshness } from '@/lib/tools/search/freshness';
@@ -39,10 +40,10 @@ export async function webSearch(
       }
       errors.push(`${provider.name}: empty`);
       console.warn(`[web_search] ${provider.name} returned empty, trying next`);
-    } catch (err: any) {
-      const message = err?.message || String(err);
+    } catch (err: unknown) {
+      const message = formatUnknownError(err);
       errors.push(`${provider.name}: ${message}`);
-      console.warn(`[web_search] ${provider.name} failed, trying next:`, message);
+      console.warn(`[web_search] ${provider.name} failed, trying next: ${message}`);
     }
   }
 

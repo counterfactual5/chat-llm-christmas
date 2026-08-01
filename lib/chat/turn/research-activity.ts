@@ -231,6 +231,13 @@ export function applyResearchEvent(
   if (kind === 'phase') {
     const status = String(payload.status || '');
     const detail = typeof payload.detail === 'string' ? payload.detail : '';
+    // Continue from checkpoints briefly walks planning/search/synthesize again
+    // with "resuming saved …" — do not open new Process panels for those skips
+    // or Continue looks like a full restart.
+    const isCheckpointSkip =
+      /^resuming\s+saved\b/i.test(detail) ||
+      (detail === 'claimed' &&
+        (m.activity || []).some((s) => s.kind === 'stage'));
     if (
       status === 'planning' ||
       status === 'searching' ||
@@ -238,6 +245,14 @@ export function applyResearchEvent(
       status === 'verifying' ||
       status === 'writing'
     ) {
+      if (isCheckpointSkip) {
+        return {
+          ...m,
+          incomplete: true,
+          truncationReason: undefined,
+          research: m.research ? { ...m.research, status } : m.research,
+        };
+      }
       m = openStage(m, STAGE_TITLE[status] || status);
       m = {
         ...m,

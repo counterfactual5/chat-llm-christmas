@@ -201,7 +201,6 @@ describe('research activity → timeline stages', () => {
       kind: 'report_delta',
       payload: { text: '## 用户问题直答\n答案' },
     });
-    // Simulate settle before file (as withResearchReport does).
     m = withResearchReport(m, '## 用户问题直答\n完整报告', {
       id: 'f1',
       name: 'research_report.md',
@@ -214,14 +213,75 @@ describe('research activity → timeline stages', () => {
     expect(m.truncationReason).toBeUndefined();
     expect(m.research?.status).toBe('done');
     expect(m.content).toContain('完整报告');
-    // Only one research_write tool — no orphan after the answer.
     expect(m.toolRuns?.filter((r) => r.name === 'research_write')).toHaveLength(1);
     const writeIdx = (m.activity || []).findIndex(
-      (s) => s.kind === 'tool' && m.toolRuns?.find((r) => r.id === (s as { toolRunId: string }).toolRunId)?.name === 'research_write',
+      (s) =>
+        s.kind === 'tool' &&
+        m.toolRuns?.find((r) => r.id === (s as { toolRunId: string }).toolRunId)
+          ?.name === 'research_write',
     );
-    const contentIdx = (m.activity || []).findIndex((s) => s.kind === 'content');
-    // No content activity step after Write (content lives on message.content).
-    expect(contentIdx).toBe(-1);
+    expect((m.activity || []).some((s) => s.kind === 'content')).toBe(false);
     expect(writeIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not open new stages for resume checkpoint skips', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a7',
+      jobId: 'rs_7',
+      query: '腿抽筋',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'planning', detail: 'planning research outline' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'searching', detail: 'searching 2 queries' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'synthesizing', detail: 'cross-source synthesis' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'verifying', detail: 'fact-checking synthesis' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'error',
+      payload: { message: 'LLM HTTP 524' },
+    });
+    const stagesBefore = (m.activity || []).filter((s) => s.kind === 'stage').length;
+    expect(stagesBefore).toBe(4);
+
+    // Continue / resume walks checkpoints — must not duplicate Plan/Search/…
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'planning', detail: 'claimed' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'planning', detail: 'resuming saved plan' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'searching', detail: 'resuming saved sources' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'synthesizing', detail: 'resuming saved synthesis' },
+    });
+    expect((m.activity || []).filter((s) => s.kind === 'stage')).toHaveLength(stagesBefore);
+
+    // Real verify retry reuses the existing Verify panel (same stage title)
+    // and starts a new verify tool under it — no duplicate stage chrome.
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'verifying', detail: 'fact-checking synthesis' },
+    });
+    expect((m.activity || []).filter((s) => s.kind === 'stage')).toHaveLength(stagesBefore);
+    expect(m.research?.status).toBe('verifying');
+    expect(m.toolRuns?.some((r) => r.name === 'research_verify' && r.status === 'start')).toBe(
+      true,
+    );
   });
 });

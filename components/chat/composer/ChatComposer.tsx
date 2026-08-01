@@ -167,6 +167,7 @@ export type ChatComposerProps = {
   enqueueOrSubmit: () => void;
 
   researchBusy: boolean;
+  researchError?: string | null;
   cancelResearch: () => void;
 };
 
@@ -259,6 +260,7 @@ export function ChatComposer(props: ChatComposerProps) {
     stopGenerating,
     enqueueOrSubmit,
     researchBusy,
+    researchError,
     cancelResearch,
   } = props;
 
@@ -278,9 +280,9 @@ export function ChatComposer(props: ChatComposerProps) {
       cancelQueuedMessage={cancelQueuedMessage}
     />
 
-    {(attachError || compactNotice) && (
+    {(attachError || compactNotice || researchError) && (
       <div className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
-        {attachError || compactNotice}
+        {researchError || attachError || compactNotice}
       </div>
     )}
 
@@ -297,7 +299,7 @@ export function ChatComposer(props: ChatComposerProps) {
         >
           <button
             type="button"
-            onClick={() => resumeIncompleteReply()}
+            onClick={() => resumeIncompleteReply({ force: true })}
             title={truncationInfo.reason || 'Continue the previous reply'}
             className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3.5 py-1.5 text-xs font-medium text-stone-700 shadow-sm transition-colors hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800"
           >

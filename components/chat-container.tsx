@@ -1495,24 +1495,50 @@ export default function ChatContainer() {
       const sessionMessages =
         sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
       const last = sessionMessages[sessionMessages.length - 1];
-      if (
+      const researchJobId = last?.research?.jobId;
+      const researchStatus = String(last?.research?.status || '');
+      const researchNeedsContinue =
         last?.role === 'assistant' &&
-        last.research?.jobId &&
-        (last.incomplete ||
-          last.research.status === 'failed' ||
-          last.research.status === 'cancelled')
-      ) {
+        Boolean(researchJobId) &&
+        (Boolean(last.incomplete) ||
+          Boolean(last.truncationReason) ||
+          researchStatus === 'failed' ||
+          researchStatus === 'cancelled' ||
+          (researchStatus !== 'done' && researchStatus !== ''));
+      if (researchNeedsContinue && researchJobId) {
         if (deepResearch.busy) return;
         const lastUserContent =
           [...sessionMessages].reverse().find((m) => m.role === 'user')?.content || '';
-        const q = last.research.query || parseResearchCommand(lastUserContent)?.query || '';
-        if (!q) return;
+        const q =
+          String(last.research?.query || '').trim() ||
+          parseResearchCommand(lastUserContent)?.query ||
+          '';
+        if (!q) {
+          // Surface why Continue did nothing — missing query blocks resume.
+          setSessions((prev) =>
+            prev.map((s) => {
+              if (s.id !== sessionId) return s;
+              return {
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === last.id
+                    ? {
+                        ...m,
+                        incomplete: true,
+                        truncationReason:
+                          'Missing research query — re-run /research with your question',
+                      }
+                    : m,
+                ),
+              };
+            }),
+          );
+          return;
+        }
         const mode =
-          (last.research.mode as ResearchModeHint | undefined) || deepResearch.mode;
-        // Same jobId — reattach or server-side checkpoint resume. Never POST a
-        // brand-new research job (that wiped Plan/Search and looked like a restart).
+          (last.research?.mode as ResearchModeHint | undefined) || deepResearch.mode;
         await deepResearch.resume({
-          jobId: last.research.jobId,
+          jobId: researchJobId,
           sessionId,
           assistantId: last.id,
           query: q,
@@ -1520,9 +1546,9 @@ export default function ChatContainer() {
         });
         return;
       }
-      await resumeIncompleteReply(opts);
+      await resumeIncompleteReply({ force: true, ...opts });
     },
-    [activeSessionId, deepResearch, resumeIncompleteReply],
+    [activeSessionId, deepResearch, resumeIncompleteReply, setSessions],
   );
 
   const saveEditedMessageOrResearch = useCallback(
@@ -2212,6 +2238,7 @@ export default function ChatContainer() {
                 stopGenerating={stopOrCancel}
                 enqueueOrSubmit={submitComposer}
                 researchBusy={deepResearch.busy}
+                researchError={deepResearch.error}
                 cancelResearch={() => void deepResearch.cancel()}
               />
             </div>

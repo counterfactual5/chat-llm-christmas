@@ -252,67 +252,6 @@ export function useDeepResearch(opts: {
     [beginLoading, listen, setSessions],
   );
 
-  /**
-   * Continue an interrupted research turn: reattach if still running, otherwise
-   * ask the backend to resume the same job from checkpoints (do not create a new job).
-   */
-  const resume = useCallback(
-    async (opts: {
-      jobId: string;
-      sessionId: string;
-      assistantId: string;
-      query: string;
-      mode: ResearchMode;
-    }) => {
-      const { jobId, sessionId, assistantId, query, mode } = opts;
-      setError(null);
-      try {
-        let remote = await refreshJob(jobId).catch(() => null);
-        const running = new Set([
-          'queued',
-          'planning',
-          'searching',
-          'synthesizing',
-          'verifying',
-          'writing',
-        ]);
-        if (remote?.status === 'done') {
-          const report = remote.reportMarkdown || '';
-          const file = remote.reportFile;
-          if (report) {
-            patchAssistant(setSessions, sessionId, assistantId, (m) =>
-              withResearchReport(m, report, file),
-            );
-          }
-          return remote;
-        }
-        if (remote && running.has(String(remote.status))) {
-          await reattach({ jobId, sessionId, assistantId, query, mode });
-          return remote;
-        }
-
-        const res = await fetch(`/api/research/${encodeURIComponent(jobId)}/resume`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.success === false) {
-          throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-        }
-        remote = (data.data as ResearchJob) || remote;
-        await reattach({ jobId, sessionId, assistantId, query, mode });
-        return remote;
-      } catch (err: unknown) {
-        setBusy(false);
-        endLoading(sessionId);
-        setError(err instanceof Error ? err.message : String(err));
-        return null;
-      }
-    },
-    [endLoading, reattach, refreshJob, setSessions],
-  );
-
   const start = useCallback(
     async (startOpts: StartOpts) => {
       const query = String(startOpts.query || '').trim();
@@ -386,6 +325,101 @@ export function useDeepResearch(opts: {
       }
     },
     [beginLoading, endLoading, listen, setSessions],
+  );
+
+  /**
+   * Continue an interrupted research turn: reattach if still running, otherwise
+   * ask the backend to resume the same job from checkpoints (do not create a new job).
+   */
+  const resume = useCallback(
+    async (opts: {
+      jobId: string;
+      sessionId: string;
+      assistantId: string;
+      query: string;
+      mode: ResearchMode;
+    }) => {
+      const { jobId, sessionId, assistantId, query, mode } = opts;
+      setError(null);
+      setBusy(true);
+      beginLoading(sessionId);
+      try {
+        let remote = await refreshJob(jobId).catch(() => null);
+        const running = new Set([
+          'queued',
+          'planning',
+          'searching',
+          'synthesizing',
+          'verifying',
+          'writing',
+        ]);
+        if (remote?.status === 'done') {
+          const report = remote.reportMarkdown || '';
+          const file = remote.reportFile;
+          if (report) {
+            patchAssistant(setSessions, sessionId, assistantId, (m) =>
+              withResearchReport(m, report, file),
+            );
+            return remote;
+          }
+          // Marked done but no report body — force a checkpoint resume/rewrite.
+        }
+        if (remote && running.has(String(remote.status))) {
+          setBusy(false);
+          endLoading(sessionId);
+          await reattach({ jobId, sessionId, assistantId, query, mode });
+          return remote;
+        }
+
+        const res = await fetch(`/api/research/${encodeURIComponent(jobId)}/resume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) {
+          const msg = String(data?.error || data?.message || `HTTP ${res.status}`);
+          // Old backends without /resume: fall back to a fresh job on the same bubble.
+          if (res.status === 404 || /not found|找不到|Cannot POST|404/i.test(msg)) {
+            setBusy(false);
+            endLoading(sessionId);
+            const created = await start({
+              query,
+              mode,
+              sessionId,
+              assistantId,
+            });
+            if (!created) {
+              throw new Error(msg || '无法恢复研究任务');
+            }
+            return created;
+          }
+          throw new Error(msg);
+        }
+        remote = (data.data as ResearchJob) || remote;
+        setBusy(false);
+        endLoading(sessionId);
+        await reattach({ jobId, sessionId, assistantId, query, mode });
+        return remote;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
+        patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+          ...m,
+          incomplete: true,
+          truncationReason: msg || 'Failed to continue research',
+        }));
+        return null;
+      } finally {
+        // reattach/start manage their own busy flag while listening; only clear
+        // when we finished synchronously (done report) or errored out.
+        if (!activeRef.current) {
+          setBusy(false);
+          endLoading(sessionId);
+        }
+      }
+    },
+    [beginLoading, endLoading, reattach, refreshJob, setSessions, start],
   );
 
   const cancel = useCallback(async () => {

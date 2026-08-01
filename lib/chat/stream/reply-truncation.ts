@@ -23,6 +23,22 @@ export type TruncationHints = {
   serverReason?: string;
 };
 
+/**
+ * Condense a raw backend error (often several `;`-joined validation clauses,
+ * e.g. research quality-gate failures) into a short label for inline UI.
+ * The full text should still be shown via a `title` tooltip.
+ */
+export function shortenTruncationReason(reason: string, maxLen = 42): string {
+  const text = String(reason || '').trim();
+  if (!text) return '';
+  // Keep only the lead clause before the first `;`/`；` list separator.
+  const lead = text.split(/[;；]/)[0].trim();
+  const extraClauses = text.split(/[;；]/).length - 1;
+  let short = lead.length > maxLen ? `${lead.slice(0, maxLen).trimEnd()}…` : lead;
+  if (extraClauses > 0) short += `（等 ${extraClauses + 1} 项）`;
+  return short;
+}
+
 /** Body ends mid-structure even when the provider reported stop. */
 export function looksAbruptlyCutOff(content: string): { truncated: boolean; reason: string } {
   const text = (content || '').trimEnd();

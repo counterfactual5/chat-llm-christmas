@@ -80,7 +80,7 @@ export type ChatComposerProps = {
   compactNotice: string;
 
   canResumeIncomplete: boolean;
-  truncationInfo: { reason: string };
+  truncationInfo: { reason: string; shortReason?: string };
   resumeIncompleteReply: (opts?: { force?: boolean }) => void;
 
   attachments: IngestedAttachment[];
@@ -280,11 +280,21 @@ export function ChatComposer(props: ChatComposerProps) {
       cancelQueuedMessage={cancelQueuedMessage}
     />
 
-    {(attachError || compactNotice || researchError) && (
-      <div className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
-        {researchError || attachError || compactNotice}
-      </div>
-    )}
+    {/* Skip the amber banner when it's the same error the Continue pill
+        below already summarizes — otherwise long research quality-gate
+        errors get printed out twice in a row. */}
+    {(() => {
+      const suppressResearchError =
+        canResumeIncomplete && Boolean(researchError) && researchError === truncationInfo.reason;
+      const bannerText = researchError && !suppressResearchError
+        ? researchError
+        : attachError || compactNotice;
+      return bannerText ? (
+        <div className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
+          {bannerText}
+        </div>
+      ) : null;
+    })()}
 
     {/* Continue — only when the last reply was clearly interrupted.
         Sits above the composer so it reads as "finish that reply".
@@ -305,9 +315,9 @@ export function ChatComposer(props: ChatComposerProps) {
           >
             <Play className="h-3 w-3 fill-current" />
             Continue
-            {truncationInfo.reason && (
-              <span className="hidden sm:inline font-normal text-stone-500 dark:text-stone-400">
-                · {truncationInfo.reason}
+            {(truncationInfo.shortReason || truncationInfo.reason) && (
+              <span className="hidden sm:inline max-w-[280px] truncate font-normal text-stone-500 dark:text-stone-400">
+                · {truncationInfo.shortReason || truncationInfo.reason}
               </span>
             )}
           </button>

@@ -51,6 +51,7 @@ import {
   analyzeTruncation,
   hasSuccessfulRetrievalTools,
   looksAbruptlyCutOff,
+  shortenTruncationReason,
 } from '@/lib/chat/stream/reply-truncation';
 import { isAssistantError, messagePlainText } from '@/lib/chat/message/display';
 import { useChatLogic } from '@/hooks/chat/use-logic';
@@ -899,23 +900,30 @@ export default function ChatContainer() {
 
   const lastMessage = messages[messages.length - 1];
   const truncationInfo = useMemo(() => {
+    const withShort = (info: { truncated: boolean; reason: string }) => ({
+      ...info,
+      // Backend research quality-gate errors are `;`-joined multi-clause
+      // strings — too long/technical for an inline pill. Full text stays
+      // available via the `title` tooltip; this is only for the label.
+      shortReason: info.reason ? shortenTruncationReason(info.reason) : '',
+    });
     if (!lastMessage || lastMessage.role !== 'assistant') {
-      return { truncated: false, reason: '' };
+      return withShort({ truncated: false, reason: '' });
     }
     // Failed requests need Retry, not Continue-from-partial.
     if (isAssistantError(lastMessage)) {
-      return { truncated: false, reason: '' };
+      return withShort({ truncated: false, reason: '' });
     }
     // Refresh / navigate away mid-stream often leaves an empty incomplete bubble
     // (Process was spinning, no answer token yet). Offer Continue to re-run.
     if (lastMessage.incomplete && !String(lastMessage.content || '').trim()) {
-      return {
+      return withShort({
         truncated: true,
         reason: lastMessage.truncationReason || 'Reply was interrupted',
-      };
+      });
     }
     if (!lastMessage.content?.trim()) {
-      return { truncated: false, reason: '' };
+      return withShort({ truncated: false, reason: '' });
     }
     const toolsOk = hasSuccessfulRetrievalTools(lastMessage.toolRuns);
     const base = analyzeTruncation(
@@ -930,9 +938,9 @@ export default function ChatContainer() {
     // Mid-turn often leaves the bubble ending on "我先去读…" even after tools
     // already ran — don't keep offering Continue / "Stopped before calling tools".
     if (base.truncated && base.reason === 'Stopped before calling tools' && toolsOk) {
-      return { truncated: false, reason: '' };
+      return withShort({ truncated: false, reason: '' });
     }
-    if (base.truncated) return base;
+    if (base.truncated) return withShort(base);
 
     // Tool failed and the model never finished a recovery answer — common when
     // Notion/GitHub writes error mid-turn and the body dies on a heading.
@@ -941,17 +949,17 @@ export default function ChatContainer() {
     );
     if (failedTools) {
       const abrupt = looksAbruptlyCutOff(lastMessage.content);
-      if (abrupt.truncated) return abrupt;
+      if (abrupt.truncated) return withShort(abrupt);
       const body = lastMessage.content.trim();
       // Short narration after a failed write, without acknowledging the error.
       if (
         body.length < 500 &&
         !/(失败|错误|无法|error|failed|invalid|page_id|缺少|参数)/i.test(body)
       ) {
-        return { truncated: true, reason: 'Stopped after a tool error' };
+        return withShort({ truncated: true, reason: 'Stopped after a tool error' });
       }
     }
-    return base;
+    return withShort(base);
   }, [lastMessage]);
   const NEAR_BOTTOM_PX = 96;
 

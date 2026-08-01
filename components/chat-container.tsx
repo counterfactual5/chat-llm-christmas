@@ -763,23 +763,6 @@ export default function ChatContainer() {
     setShowAuthModal(true);
   };
 
-  const {
-    slashMenuItems,
-    slashHighlight,
-    setSlashHighlight,
-    consumeSlashItem,
-  } = useChatSlash({
-    input,
-    setInput,
-    skills,
-    isAccountBound,
-    setActiveSkillIds,
-    setIsSkillPickerOpen,
-    openLoginModal,
-    attachSkill,
-    t,
-  });
-
   const openNotionModal = () => {
     if (!isAccountBound) {
       openLoginModal();
@@ -1355,6 +1338,24 @@ export default function ChatContainer() {
     setEditingMessageId,
     messages,
     messageImagesToIngested,
+  });
+
+  const {
+    slashMenuItems,
+    slashHighlight,
+    setSlashHighlight,
+    consumeSlashItem,
+  } = useChatSlash({
+    input,
+    setInput,
+    skills,
+    isAccountBound,
+    setActiveSkillIds,
+    setIsSkillPickerOpen,
+    openLoginModal,
+    attachSkill,
+    requestClaimReview,
+    t,
   });
 
   // Only offer Continue when we have a clear interruption signal — not for every

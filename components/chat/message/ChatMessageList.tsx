@@ -40,14 +40,14 @@ import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message } from '@/lib/chat/types';
-import { displayAssistantParts } from '@/lib/chat/message-display';
+import { displayAssistantParts } from '@/lib/chat/message/display';
 import {
   buildActivitySteps,
   buildTimelineSegments,
   type ProcessStep,
   type TimelineSegment,
   type ToolStep,
-} from '@/lib/chat/timeline';
+} from '@/lib/chat/message/timeline';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';

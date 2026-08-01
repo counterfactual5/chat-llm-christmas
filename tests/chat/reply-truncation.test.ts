@@ -4,7 +4,7 @@ import {
   buildContinuationPrompt,
   looksAbruptlyCutOff,
   looksLikeToolNarration,
-} from '@/lib/chat/reply-truncation';
+} from '@/lib/chat/stream/reply-truncation';
 
 describe('reply truncation', () => {
   it('identifies unclosed code fences even when the provider reports a natural stop', () => {

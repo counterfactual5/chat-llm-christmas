@@ -5,12 +5,12 @@ import {
   removeTaskById,
   selectTasksToDrain,
   type QueuedTask,
-} from '@/lib/chat/task-queue';
+} from '@/lib/chat/turn/task-queue';
 import {
   gateResumeIncompleteReply,
   markdownTableSeamPrefix,
   pickResumeBranch,
-} from '@/lib/chat/continuation';
+} from '@/lib/chat/turn/continuation';
 import type { Message } from '@/lib/chat/types';
 
 function task(id: string, sessionId: string): QueuedTask {

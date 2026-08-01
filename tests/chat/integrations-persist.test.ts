@@ -3,8 +3,8 @@ import {
   enableGoogleSurfacesOnNewestSession,
   stripGoogleMcpFromSessions,
   stripMcpIdFromSessions,
-} from '@/lib/chat/integrations-client';
-import { sessionsWorthPersisting } from '@/lib/chat/sessions';
+} from '@/lib/chat/integrations/client';
+import { sessionsWorthPersisting } from '@/lib/chat/session/store';
 import type { ChatSession } from '@/lib/chat/types';
 
 function session(

@@ -3,7 +3,7 @@ import {
   mergeSyncedSessions,
   normalizeRestoredSession,
   sessionsForCloudSync,
-} from '@/lib/chat/sessions';
+} from '@/lib/chat/session/store';
 import type { ChatSession } from '@/lib/chat/types';
 
 function session(id: string, updatedAt: number, content = 'hello'): ChatSession {

@@ -43,7 +43,7 @@ import {
   dayKeyOf,
   formatDayGroupLabel,
   sessionsForSidebar,
-} from '@/lib/chat/sidebar';
+} from '@/lib/chat/context/sidebar';
 import { BUILTIN_SKILLS, skillSlashName } from '@/lib/skills/creator';
 
 export type ChatSidebarProps = {

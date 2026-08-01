@@ -36,27 +36,27 @@ import {
   collectWebSourcesFromMessages,
   formatWebSourcesForReference,
   referenceSourceKind,
-} from '@/lib/chat/references';
+} from '@/lib/chat/context/references';
 import {
   analyzeTruncation,
   hasSuccessfulRetrievalTools,
   looksAbruptlyCutOff,
-} from '@/lib/chat/reply-truncation';
-import { isAssistantError, messagePlainText } from '@/lib/chat/message-display';
-import { useChatLogic } from '@/hooks/use-chat-logic';
-import { useChatAccount } from '@/hooks/use-chat-account';
-import { useChatIntegrations } from '@/hooks/use-chat-integrations';
-import { useChatSessionPersist } from '@/hooks/use-chat-session-persist';
-import { parseImageCommand } from '@/lib/chat/image-command';
-import { clearLocalSessions } from '@/lib/chat/session-persist';
+} from '@/lib/chat/stream/reply-truncation';
+import { isAssistantError, messagePlainText } from '@/lib/chat/message/display';
+import { useChatLogic } from '@/hooks/chat/use-logic';
+import { useChatAccount } from '@/hooks/chat/use-account';
+import { useChatIntegrations } from '@/hooks/chat/use-integrations';
+import { useChatSessionPersist } from '@/hooks/chat/use-session-persist';
+import { parseImageCommand } from '@/lib/chat/turn/image-command';
+import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   clearOAuthReturnQuery,
   oauthReturnNeedsUrlClean,
   parseOAuthReturnParams,
   planOAuthReturnUi,
   type AuthModalMode,
-} from '@/lib/chat/oauth-return';
-import { enableGoogleSurfacesOnNewestSession } from '@/lib/chat/integrations-client';
+} from '@/lib/chat/account/oauth-return';
+import { enableGoogleSurfacesOnNewestSession } from '@/lib/chat/integrations/client';
 import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
@@ -70,14 +70,14 @@ import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import {
   appendQuotedSelection,
   parseQuotedUserMessage,
-} from '@/lib/chat/quotes';
+} from '@/lib/chat/message/quotes';
 import {
   messageImagesToIngested,
   sessionHasImages,
   toApiMessages,
-} from '@/lib/chat/api-messages';
-import { withMarkedAssistantIncomplete } from '@/lib/chat/session-mutations';
-import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream-response';
+} from '@/lib/chat/message/api-messages';
+import { withMarkedAssistantIncomplete } from '@/lib/chat/session/mutations';
+import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream/client';
 import { cn } from '@/lib/utils';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import { BUILTIN_SKILLS, isSkillCreatorId, skillSlashName } from '@/lib/skills/creator';

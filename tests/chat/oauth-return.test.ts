@@ -3,7 +3,7 @@ import {
   oauthReturnNeedsUrlClean,
   parseOAuthReturnParams,
   planOAuthReturnUi,
-} from '@/lib/chat/oauth-return';
+} from '@/lib/chat/account/oauth-return';
 
 describe('oauth-return', () => {
   it('parses provider return flags from the query string', () => {

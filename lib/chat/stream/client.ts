@@ -41,6 +41,7 @@ export type StreamChatDeps = {
   skillsPayloadForSession: (
     sessionId: string,
   ) => Array<{ id: string; title: string; content: string }>;
+  memoriesPayload: () => Array<{ id: string; kind: string; content: string }>;
   getNotionConnected: () => boolean;
   getGitHubConnected: () => boolean;
   getGoogleConnected: () => boolean;
@@ -53,6 +54,12 @@ export type StreamChatDeps = {
   onWebSourcesUpdated: (opts: {
     openContextPanel: boolean;
     unsetWebSourcesCleared: boolean;
+  }) => void;
+  /** Fired after a normal reply settles so memory extraction can run off-path. */
+  onReplySettled?: (opts: {
+    sessionId: string;
+    requestReview?: boolean;
+    incomplete: boolean;
   }) => void;
 };
 
@@ -113,6 +120,7 @@ export async function streamChatResponse(
       systemPrompt: deps.systemPrompt,
       referenceText: combinedReference,
       skills: deps.skillsPayloadForSession(sessionId),
+      memories: deps.memoriesPayload(),
       conversationId: sessionId,
       integrations,
       autoReview: deps.getSessions().find((s) => s.id === sessionId)?.autoReview ?? true,
@@ -281,6 +289,11 @@ export async function streamChatResponse(
     markAssistantIncomplete(verdict.truncated, {
       finishReason,
       truncationReason: verdict.reason || undefined,
+    });
+    deps.onReplySettled?.({
+      sessionId,
+      requestReview: Boolean(requestReview),
+      incomplete: verdict.truncated,
     });
   };
 

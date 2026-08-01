@@ -53,6 +53,7 @@ import { useChatIntegrations } from '@/hooks/chat/use-integrations';
 import { useChatSessionPersist } from '@/hooks/chat/use-session-persist';
 import { useChatAttachments } from '@/hooks/chat/use-attachments';
 import { useChatSkills } from '@/hooks/chat/use-skills';
+import { useChatMemories } from '@/hooks/chat/use-memories';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
@@ -95,6 +96,8 @@ import { BUILTIN_SKILLS, SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import { FileManagerModal } from '@/components/files/FileManagerModal';
+import { MemoryManagerModal } from '@/components/memories/MemoryManagerModal';
+import { scheduleMemoryExtraction } from '@/lib/memories/scheduler';
 import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
@@ -173,6 +176,7 @@ export default function ChatContainer() {
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
   const [filesManagerOpen, setFilesManagerOpen] = useState(false);
+  const [memoriesManagerOpen, setMemoriesManagerOpen] = useState(false);
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
@@ -344,6 +348,21 @@ export default function ChatContainer() {
     confirmDeleteSkill,
   } = useChatSkills({ setActiveSkillIds, setIsSkillPickerOpen });
 
+  const {
+    memories,
+    setMemories,
+    loading: memoriesLoading,
+    error: memoriesError,
+    saving: memoriesSaving,
+    fetchMemories,
+    mergeSaved: mergeSavedMemories,
+    updateMemory,
+    deleteMemory,
+    exportMarkdown,
+    importMarkdown,
+    enabledMemoriesPayload,
+  } = useChatMemories();
+
   skillsRef.current = skills;
 
   const fetchSkills = useCallback(async () => {
@@ -404,7 +423,7 @@ export default function ChatContainer() {
         else hydrateGuest();
 
         const boot: Array<Promise<unknown>> = [fetchModels()];
-        if (bound) boot.push(fetchSkills(), fetchIntegrations());
+        if (bound) boot.push(fetchSkills(), fetchMemories(), fetchIntegrations());
         await Promise.all(boot);
 
         for (const action of planOAuthReturnUi(oauth, bound)) {
@@ -1015,6 +1034,7 @@ export default function ChatContainer() {
         selectedModel,
         systemPrompt,
         skillsPayloadForSession,
+        memoriesPayload,
         getNotionConnected: () => Boolean(notionStatusRef.current?.connected),
         getGitHubConnected: () => Boolean(githubStatusRef.current?.connected),
         getGoogleConnected: () => Boolean(googleStatusRef.current?.connected),
@@ -1044,6 +1064,20 @@ export default function ChatContainer() {
         onWebSourcesUpdated: ({ openContextPanel, unsetWebSourcesCleared }) => {
           if (unsetWebSourcesCleared) setWebSourcesCleared(false);
           if (openContextPanel) queueMicrotask(() => setIsContextPanelOpen(true));
+        },
+        onReplySettled: ({ sessionId: settledId, requestReview: wasReview, incomplete }) => {
+          scheduleMemoryExtraction(
+            {
+              getSession: (id) => sessionsRef.current.find((s) => s.id === id),
+              getSelectedModel: () => selectedModel,
+              getExistingMemories: () => enabledMemoriesPayload(),
+              isAccountBound: () => Boolean(isAccountBound),
+              setMemoryExtractCursor,
+              onMemoriesSaved: mergeSavedMemories,
+            },
+            settledId,
+            { requestReview: wasReview, incomplete },
+          );
         },
       },
       sessionId,
@@ -1110,6 +1144,7 @@ export default function ChatContainer() {
       closeAuthModal();
       await fetchModels();
       await fetchSkills();
+      await fetchMemories();
       await fetchIntegrations();
     } catch (error: any) {
       setAccountError(error?.message || '绑定失败');
@@ -1128,6 +1163,7 @@ export default function ChatContainer() {
     setGoogleStatus(null);
     setSessions([]);
     setSkills([]);
+    setMemories([]);
     clearLocalSessions();
     createNewSession();
     await fetchModels();
@@ -1540,6 +1576,21 @@ export default function ChatContainer() {
       .map((s) => ({ id: s.id, title: s.title, content: s.content }));
   };
 
+  const setMemoryExtractCursor = useCallback((sessionId: string, messageId: string) => {
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === sessionId
+          ? { ...session, memoryExtractCursor: messageId, updatedAt: Date.now() }
+          : session,
+      ),
+    );
+  }, []);
+
+  const memoriesPayload = useCallback(
+    () => enabledMemoriesPayload(),
+    [enabledMemoriesPayload],
+  );
+
 
   const exportChat = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1750,6 +1801,7 @@ export default function ChatContainer() {
         onOpenGitHubModal={openGitHubModal}
         onOpenGoogleModal={openGoogleModal}
         onOpenFilesModal={() => setFilesManagerOpen(true)}
+        onOpenMemoriesModal={() => setMemoriesManagerOpen(true)}
         onOpenLoginModal={openLoginModal}
         onSetAutoReview={setActiveAutoReview}
         onDisconnectAccount={disconnectAccount}
@@ -1963,6 +2015,20 @@ export default function ChatContainer() {
       />
 
       <FileManagerModal open={filesManagerOpen} onClose={() => setFilesManagerOpen(false)} />
+
+      <MemoryManagerModal
+        open={memoriesManagerOpen}
+        onClose={() => setMemoriesManagerOpen(false)}
+        memories={memories}
+        loading={memoriesLoading}
+        saving={memoriesSaving}
+        error={memoriesError}
+        onRefresh={fetchMemories}
+        onUpdate={updateMemory}
+        onDelete={deleteMemory}
+        onExportMarkdown={exportMarkdown}
+        onImportMarkdown={importMarkdown}
+      />
 
       <ChatModals
         confirmClearSourcesOpen={confirmClearSourcesOpen}

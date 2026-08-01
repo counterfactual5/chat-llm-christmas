@@ -35,6 +35,12 @@ export type ChatSkillInput = {
   content?: string;
 };
 
+export type ChatMemoryInput = {
+  id?: string;
+  kind?: string;
+  content?: string;
+};
+
 export type ChatRequestBody = {
   /** Raw body messages — must still pass validateChatMessages before use. */
   messages: unknown;
@@ -43,6 +49,7 @@ export type ChatRequestBody = {
   systemPrompt: string;
   referenceText: string;
   skills: ChatSkillInput[];
+  memories: ChatMemoryInput[];
   conversationId: string;
   enableSearch: boolean;
   integrations: string[];
@@ -64,6 +71,9 @@ export function normalizeIntegrationIds(raw: unknown): string[] {
 export function parseChatRequestBody(raw: unknown): ChatRequestBody {
   const body = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const skills = Array.isArray(body.skills) ? (body.skills as ChatSkillInput[]) : [];
+  const memories = Array.isArray(body.memories)
+    ? (body.memories as ChatMemoryInput[])
+    : [];
   return {
     // Preserve missing/non-array messages so the route can return the same 400 as before.
     messages: body.messages,
@@ -75,6 +85,7 @@ export function parseChatRequestBody(raw: unknown): ChatRequestBody {
     systemPrompt: body.systemPrompt == null ? '' : String(body.systemPrompt),
     referenceText: body.referenceText == null ? '' : String(body.referenceText),
     skills,
+    memories,
     conversationId: body.conversationId == null ? '' : String(body.conversationId),
     enableSearch: body.enableSearch !== false,
     integrations: normalizeIntegrationIds(body.integrations),

@@ -14,6 +14,7 @@ describe('buildChatSystemParts', () => {
       { title: 'Keep me', content: '  Skill instructions  ' },
       { title: 'Skip me', content: '   ' },
     ],
+    memories: [{ kind: 'preference', content: '  Prefer Chinese  ' }],
     requestReview: false,
     autoReview: false,
     referenceText: '  Reference facts  ',
@@ -27,6 +28,8 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('Custom instructions');
     expect(parts).toContain('Use registered tools.');
     expect(parts).toContain('Active Skill — Keep me:\nSkill instructions');
+    expect(parts.join('\n')).toContain('Known facts about the user');
+    expect(parts.join('\n')).toContain('[preference] Prefer Chinese');
     expect(parts.join('\n')).toContain('Reference material provided by the user. Treat it as authoritative context:\n\nReference facts');
     expect(parts.join('\n')).not.toContain('Skip me');
     expect(joinChatSystemParts(['one', 'two'])).toBe('one\n\n---\n\ntwo');

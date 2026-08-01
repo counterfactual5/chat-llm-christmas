@@ -8,6 +8,8 @@
  *  Session hydrate / persist       hooks/use-chat-session-persist.ts + lib/chat/session-persist.ts
  *  OAuth return query              lib/chat/oauth-return.ts
  *  Send / queue / resume / review   hooks/use-chat-logic.ts
+ *    queue helpers                 lib/chat/task-queue.ts
+ *    continue / claim-review plan  lib/chat/continuation.ts
  *  Client SSE consumer             lib/chat/stream-response.ts
  *  Session normalize / LWW merge   lib/chat/sessions.ts
  *  Message list / composer / …     components/chat/*

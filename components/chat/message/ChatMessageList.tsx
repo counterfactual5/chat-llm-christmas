@@ -561,10 +561,12 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isCreateFile &&
                           !isSaveSkill &&
                           !isClaimReviewer &&
+                          !isWebRead &&
                           !isResearchPlan &&
                           !isResearchSynthesize &&
                           !isResearchVerify &&
-                          !isResearchWrite && (
+                          !isResearchWrite &&
+                          !isResearchSources && (
                             <span className="opacity-50">
                               {t('searchedVia').replace(
                                 '{provider}',

@@ -302,10 +302,16 @@ export function applyResearchEvent(
     if (status === 'ok' || status === 'empty') {
       const count = Number(payload.count || 0);
       const provider = String(payload.provider || 'none');
+      const rawError = status === 'empty' ? String(payload.error || '').trim() : '';
+      // Soft empty (provider returned zero hits) must not show as Failed.
+      // Hard failures (HTTP/config) keep the error string for the red label.
+      const softEmpty =
+        !rawError ||
+        /:\s*empty\b/i.test(rawError) ||
+        /no results/i.test(rawError) ||
+        /未返回|无结果|empty result/i.test(rawError);
       const error =
-        status === 'empty'
-          ? String(payload.error || 'No results')
-          : undefined;
+        status === 'empty' && rawError && !softEmpty ? rawError : undefined;
       const hits = Array.isArray(payload.hits) ? payload.hits : [];
       const results =
         hits.length > 0
@@ -339,10 +345,11 @@ export function applyResearchEvent(
   if (kind === 'read') {
     const url = String(payload.url || '');
     const chars = Number(payload.chars || 0);
+    // Reads are direct URL fetches — no search provider. Do not label as
+    // "via research" (that was a placeholder and confused the timeline).
     return finishTool(m, {
       name: 'web_read',
       query: url,
-      provider: 'research',
       results: /^https?:\/\//i.test(url)
         ? [{ title: url, url, snippet: chars ? `${chars} chars` : 'ok' }]
         : undefined,

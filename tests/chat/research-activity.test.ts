@@ -97,6 +97,75 @@ describe('research activity → timeline stages', () => {
     expect(syn?.results?.[0]?.snippet).toContain('1200');
   });
 
+  it('records soft-empty search without Failed error', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a6',
+      jobId: 'rs_6',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'search',
+      payload: {
+        query: 'nocturnal leg cramps causes prevention medical',
+        status: 'start',
+      },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'search',
+      payload: {
+        query: 'nocturnal leg cramps causes prevention medical',
+        status: 'empty',
+        provider: 'none',
+        count: 0,
+        error: 'zhipu: Zhipu MCP returned no results',
+      },
+    });
+    const run = m.toolRuns?.find((r) => r.name === 'web_search');
+    expect(run?.status).toBe('done');
+    expect(run?.error).toBeFalsy();
+    expect(run?.results?.length || 0).toBe(0);
+  });
+
+  it('keeps hard search failures as errors', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a7',
+      jobId: 'rs_7',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'search',
+      payload: { query: 'x', status: 'start' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'search',
+      payload: {
+        query: 'x',
+        status: 'empty',
+        provider: 'none',
+        count: 0,
+        error: 'tavily: Tavily HTTP 502',
+      },
+    });
+    const run = m.toolRuns?.find((r) => r.name === 'web_search');
+    expect(run?.error).toContain('Tavily HTTP 502');
+  });
+
+  it('records web_read without a fake research provider label', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a5',
+      jobId: 'rs_5',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: { url: 'https://example.com/a', chars: 420 },
+    });
+    const read = m.toolRuns?.find((r) => r.name === 'web_read');
+    expect(read?.status).toBe('done');
+    expect(read?.provider).toBeFalsy();
+    expect(read?.query).toBe('https://example.com/a');
+  });
+
   it('marks failed research incomplete with truncationReason', () => {
     let m = createResearchAssistantMessage({
       id: 'a3',

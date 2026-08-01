@@ -71,12 +71,12 @@ export function CodeBlock({ language, value }: CodeBlockProps) {
   };
 
   return (
-    <div className="group relative my-4 overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900/80">
+    <div className="group relative my-4 max-w-full min-w-0 overflow-hidden rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900/80">
       <div className="flex items-center justify-between border-b border-stone-200 bg-stone-100/80 px-4 py-2 dark:border-stone-700 dark:bg-stone-800">
-        <span className="text-xs font-medium text-stone-500 dark:text-stone-400">{language}</span>
+        <span className="truncate text-xs font-medium text-stone-500 dark:text-stone-400">{language}</span>
         <button
           onClick={copyToClipboard}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-stone-500 transition-colors hover:bg-stone-200/80 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+          className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-stone-500 transition-colors hover:bg-stone-200/80 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-200"
           aria-label="Copy code"
         >
           {copied ? (
@@ -92,7 +92,7 @@ export function CodeBlock({ language, value }: CodeBlockProps) {
           )}
         </button>
       </div>
-      <pre className="overflow-x-auto p-4 text-sm leading-relaxed">
+      <pre className="max-w-full overflow-x-auto p-4 text-sm leading-relaxed">
         <code
           className={cn('hljs font-mono whitespace-pre', `language-${language}`)}
           dangerouslySetInnerHTML={{ __html: highlighted }}

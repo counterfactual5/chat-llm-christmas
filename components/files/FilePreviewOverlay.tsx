@@ -99,7 +99,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   return markdown ? (
     <div
       className={cn(
-        'chat-markdown mx-auto max-w-3xl text-[15px] leading-relaxed text-stone-800 dark:text-stone-200',
+        'chat-markdown mx-auto w-full min-w-0 max-w-3xl break-words text-[15px] leading-relaxed text-stone-800 dark:text-stone-200',
         '[&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-bold',
         '[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold',
         '[&_p]:mb-4 [&_p]:leading-7 [&_p:last-child]:mb-0',
@@ -107,13 +107,23 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
         '[&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-6',
         '[&_blockquote]:border-l-2 [&_blockquote]:border-stone-300 [&_blockquote]:pl-3 [&_blockquote]:text-stone-500',
         '[&_a]:text-sky-700 [&_a]:underline dark:[&_a]:text-sky-400',
-        '[&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-stone-200 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-stone-200 [&_td]:px-2 [&_td]:py-1',
+        '[&_pre]:max-w-full [&_pre]:overflow-x-auto',
+        '[&_img]:max-w-full',
       )}
     >
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
         components={{
+          table({ children }: any) {
+            return (
+              <div className="my-4 w-full max-w-full overflow-x-auto">
+                <table className="w-full border-collapse text-left text-sm [&_th]:border [&_th]:border-stone-200 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-stone-200 [&_td]:px-2 [&_td]:py-1">
+                  {children}
+                </table>
+              </div>
+            );
+          },
           code({ className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const value = String(children ?? '').replace(/\n$/, '');
@@ -123,12 +133,15 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
             }
             return (
               <code
-                className="rounded bg-stone-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-stone-800"
+                className="break-all rounded bg-stone-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-stone-800"
                 {...props}
               >
                 {children}
               </code>
             );
+          },
+          pre({ children }: any) {
+            return <>{children}</>;
           },
         }}
       >
@@ -136,7 +149,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
       </ReactMarkdown>
     </div>
   ) : (
-    <div className="-mx-1">
+    <div className="min-w-0 max-w-full">
       <CodeBlock language={language} value={file.content} />
     </div>
   );
@@ -165,10 +178,13 @@ export function FilePreviewOverlay({
       role="dialog"
       aria-modal
       aria-label={labels?.preview || 'File preview'}
-      onClick={onClose}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
     >
       <div
-        className="flex max-h-[min(92vh,1100px)] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-950"
+        className="flex max-h-[min(92vh,1100px)] min-h-0 w-full min-w-0 max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-950"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
@@ -198,7 +214,10 @@ export function FilePreviewOverlay({
           )}
           <button
             type="button"
-            onClick={onClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             className="rounded-lg p-2 text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-200"
             aria-label={labels?.close || 'Close preview'}
           >
@@ -206,7 +225,7 @@ export function FilePreviewOverlay({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6">
           <FilePreviewContent file={file} />
         </div>
       </div>

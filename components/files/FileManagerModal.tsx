@@ -139,10 +139,17 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
 
   if (!open) return null;
 
+  const previewOpen = Boolean(imagePreview || textPreview);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
-      onClick={() => !deleting && onClose()}
+      onClick={() => {
+        // Keep Files open while a nested preview is showing; closing preview
+        // must not dismiss the manager (overlay clicks bubble here otherwise).
+        if (deleting || previewOpen) return;
+        onClose();
+      }}
     >
       <section
         className="flex max-h-[min(42rem,calc(100vh-2rem))] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-800 dark:bg-stone-900"

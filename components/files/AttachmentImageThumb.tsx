@@ -143,11 +143,17 @@ export function ImagePreviewOverlay({ src, onClose }: ImagePreviewOverlayProps) 
       role="dialog"
       aria-modal
       aria-label="Image preview"
-      onClick={onClose}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
     >
       <button
         type="button"
-        onClick={onClose}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
         className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
         aria-label="Close preview"
       >

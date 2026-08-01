@@ -108,14 +108,14 @@ export function ChatPreviewPanel({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
             {!file ? (
               <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                 <FileText className="h-8 w-8 opacity-40" />
                 <span>{t('previewPanelEmpty')}</span>
               </div>
             ) : canRender ? (
-              <div className="px-4 py-4">
+              <div className="min-w-0 max-w-full px-4 py-4">
                 <FilePreviewContent file={canRender} />
               </div>
             ) : (

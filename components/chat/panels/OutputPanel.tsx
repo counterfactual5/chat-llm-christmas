@@ -1,7 +1,8 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowUpRight, ChevronDown, Download, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { FileEntryActions } from '@/components/files/FileEntryActions';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -154,31 +155,25 @@ export function OutputPanel({
                                   </span>
                                 </span>
                               </button>
-                              <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                <button
-                                  type="button"
-                                  title={t('viewInChat')}
-                                  onClick={() => onScrollToMessage(entry.messageId)}
-                                  className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                >
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  title={t('download')}
-                                  onClick={() => onDownloadImage(entry)}
-                                  className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  title={t('delete')}
-                                  onClick={() => onRemoveImage(entry)}
-                                  className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
+                              <div className="flex shrink-0 items-center self-center">
+                                <FileEntryActions
+                                  onDownload={() => onDownloadImage(entry)}
+                                  downloadLabel={t('download')}
+                                  moreLabel={t('moreActions')}
+                                  items={[
+                                    {
+                                      label: t('viewInChat'),
+                                      icon: <ArrowUpRight className="h-3.5 w-3.5" />,
+                                      onSelect: () => onScrollToMessage(entry.messageId),
+                                    },
+                                    {
+                                      label: t('delete'),
+                                      icon: <Trash2 className="h-3.5 w-3.5" />,
+                                      destructive: true,
+                                      onSelect: () => onRemoveImage(entry),
+                                    },
+                                  ]}
+                                />
                               </div>
                             </div>
                           ))}
@@ -235,31 +230,25 @@ export function OutputPanel({
                                   </span>
                                 </span>
                               </button>
-                              <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                <button
-                                  type="button"
-                                  title={t('viewInChat')}
-                                  onClick={() => onScrollToMessage(entry.messageId)}
-                                  className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                >
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  title={t('download')}
-                                  onClick={() => onDownloadFile(entry)}
-                                  className="rounded p-1 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  title={t('delete')}
-                                  onClick={() => onRemoveFile(entry)}
-                                  className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
+                              <div className="flex shrink-0 items-center self-center">
+                                <FileEntryActions
+                                  onDownload={() => onDownloadFile(entry)}
+                                  downloadLabel={t('download')}
+                                  moreLabel={t('moreActions')}
+                                  items={[
+                                    {
+                                      label: t('viewInChat'),
+                                      icon: <ArrowUpRight className="h-3.5 w-3.5" />,
+                                      onSelect: () => onScrollToMessage(entry.messageId),
+                                    },
+                                    {
+                                      label: t('delete'),
+                                      icon: <Trash2 className="h-3.5 w-3.5" />,
+                                      destructive: true,
+                                      onSelect: () => onRemoveFile(entry),
+                                    },
+                                  ]}
+                                />
                               </div>
                             </div>
                           ))}

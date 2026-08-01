@@ -9,6 +9,8 @@ import { MermaidBlock, isMermaidLanguage } from '@/components/markdown/diagrams/
 interface CodeBlockProps {
   language: string;
   value: string;
+  /** Soft-wrap long lines (Preview panels). Default keeps horizontal scroll. */
+  wrap?: boolean;
 }
 
 const LANGUAGE_ALIASES: Record<string, string> = {
@@ -52,7 +54,7 @@ function highlightCode(value: string, language: string) {
   }
 }
 
-export function CodeBlock({ language, value }: CodeBlockProps) {
+export function CodeBlock({ language, value, wrap = false }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const highlighted = useMemo(() => highlightCode(value, language), [value, language]);
 
@@ -92,9 +94,20 @@ export function CodeBlock({ language, value }: CodeBlockProps) {
           )}
         </button>
       </div>
-      <pre className="max-w-full overflow-x-auto p-4 text-sm leading-relaxed">
+      <pre
+        className={cn(
+          'max-w-full p-4 text-sm leading-relaxed',
+          wrap ? 'overflow-x-hidden' : 'overflow-x-auto',
+        )}
+      >
         <code
-          className={cn('hljs font-mono whitespace-pre', `language-${language}`)}
+          className={cn(
+            'hljs font-mono',
+            wrap
+              ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'
+              : 'whitespace-pre',
+            `language-${language}`,
+          )}
           dangerouslySetInnerHTML={{ __html: highlighted }}
         />
       </pre>

@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Download, FileText, Image as ImageIcon, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
+import { FileText, Image as ImageIcon, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatFileSize } from '@/components/chat/panels/OutputPanel';
 import { ImagePreviewOverlay } from '@/components/files/AttachmentImageThumb';
+import { FileEntryActions } from '@/components/files/FileEntryActions';
 import {
   FilePreviewOverlay,
   type FilePreviewPayload,
 } from '@/components/files/FilePreviewOverlay';
+import { useLocale } from '@/lib/i18n';
 
 export type AccountFile = {
   id: string;
@@ -57,6 +59,7 @@ function formatDate(timestamp: number): string {
 }
 
 export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
+  const { t } = useLocale();
   const [files, setFiles] = useState<AccountFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -212,22 +215,22 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
                       {file.purpose ? ` · ${file.purpose}` : ''} · ID {shortFileId(file)}
                     </p>
                   </button>
-                  <a
-                    href={`/api/files/${encodeURIComponent(file.id)}`}
-                    download={file.filename || undefined}
-                    className="rounded-md p-2 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-700 dark:hover:text-stone-200"
-                    title="Download"
-                  >
-                    <Download className="h-4 w-4" />
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => setPendingDelete(file)}
-                    className="rounded-md p-2 text-stone-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-                    title="Delete permanently"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <FileEntryActions
+                    size="md"
+                    onDownload={() =>
+                      window.open(`/api/files/${encodeURIComponent(file.id)}`, '_blank', 'noopener,noreferrer')
+                    }
+                    downloadLabel={t('download')}
+                    moreLabel={t('moreActions')}
+                    items={[
+                      {
+                        label: t('delete'),
+                        icon: <Trash2 className="h-3.5 w-3.5" />,
+                        destructive: true,
+                        onSelect: () => setPendingDelete(file),
+                      },
+                    ]}
+                  />
                 </li>
               ))}
             </ul>

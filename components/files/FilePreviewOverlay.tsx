@@ -107,7 +107,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
         '[&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-6',
         '[&_blockquote]:border-l-2 [&_blockquote]:border-stone-300 [&_blockquote]:pl-3 [&_blockquote]:text-stone-500',
         '[&_a]:text-sky-700 [&_a]:underline dark:[&_a]:text-sky-400',
-        '[&_pre]:max-w-full [&_pre]:overflow-x-auto',
+        '[&_pre]:max-w-full [&_pre]:overflow-x-hidden',
         '[&_img]:max-w-full',
       )}
     >
@@ -129,7 +129,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
             const value = String(children ?? '').replace(/\n$/, '');
             const inline = !match && !String(children ?? '').includes('\n');
             if (!inline && match) {
-              return <CodeBlock language={match[1]} value={value} />;
+              return <CodeBlock language={match[1]} value={value} wrap />;
             }
             return (
               <code
@@ -150,7 +150,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
     </div>
   ) : (
     <div className="min-w-0 max-w-full">
-      <CodeBlock language={language} value={file.content} />
+      <CodeBlock language={language} value={file.content} wrap />
     </div>
   );
 }

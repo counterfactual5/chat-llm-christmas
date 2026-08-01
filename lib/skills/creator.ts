@@ -108,9 +108,9 @@ export function formatAccountSkillCatalog(
  */
 export function skillPersistenceGatePrompt(skillCreatorOn: boolean): string {
   const trustPrior =
-    'Tool receipts already in this chat are authoritative: if a prior save_skill (or other tool) returned ok:true / an id, that write already happened on the account — never retract it, never say it was fake because THIS-turn flags differ, and never tell the user to re-save manually unless a later tool call actually failed.';
+    'Past tool outcomes in this chat are settled by what that call actually returned at the time. THIS-turn flags only gate new calls now — they do not rewrite history.';
   if (skillCreatorOn) {
     return `Skill Creator ON: after confirmation call save_skill (create, or overwrite via id / replace_title). Iterate/replace in this chat with the same tool. Never claim saved without tool success; never dump a file or full Skill body as a substitute. ${trustPrior}`;
   }
-  return `Skill Creator OFF: save_skill unavailable THIS turn only. If the user wants AI to save/replace again, reply in ONE short sentence: run /skill (or Commands → Create with AI), or use sidebar Add manually / 手动添加. Do not invent a save tool. Do not paste the full Skill body, a fenced dump, or a downloadable file as a substitute. ${trustPrior}`;
+  return `Skill Creator OFF: save_skill unavailable — you cannot create or replace Skills via tools this turn. If the user wants AI save/replace again, reply in ONE short sentence: run /skill (or Commands → Create with AI), or use sidebar Add manually / 手动添加. Do not invent a save tool. Do not paste the full Skill body, a fenced dump, or a downloadable file as a substitute. ${trustPrior}`;
 }

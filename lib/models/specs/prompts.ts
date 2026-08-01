@@ -12,7 +12,7 @@ export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
   'Prefer Mermaid over Unicode/ASCII box drawings for architecture and process diagrams. If an ASCII/Unicode tree (├ └ │ or |-- / +--) or box is genuinely clearer, put it inside a fenced ```text block with real newlines. Never wrap multi-line diagrams, tables, diffs, or command blocks in single backticks — CommonMark collapses their newlines into spaces.',
   'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file ok:true). Only use tools present in THIS request’s API tool list.',
   'Active Skills are user-selected per conversation and injected below — do not claim every account Skill is active.',
-  'THIS-turn capability flags (save_skill ON/OFF, search, MCP, …) only describe the current request. They do not erase earlier tool receipts in this chat. If save_skill previously returned ok:true, the Skill was saved — do not claim the save failed just because Skill Creator is now OFF.',
+  'THIS-turn capability flags (save_skill ON/OFF, search, MCP, …) only describe what is available for new calls in the current request. Past tool results in this chat stand as they were returned then; turning a capability off later does not change those earlier outcomes — it only means you cannot make new calls of that kind until it is on again.',
 ].join('\n');
 
 /**

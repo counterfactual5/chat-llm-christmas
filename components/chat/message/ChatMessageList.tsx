@@ -22,7 +22,7 @@ import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
 import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
 import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Textarea } from '@/components/ui/textarea';
-import { CodeBlock } from '@/components/markdown/code-block';
+import { CodeBlock } from '@/components/markdown/code/code-block';
 import {
   AttachmentImageThumb,
   isImageAttachment,
@@ -46,8 +46,8 @@ import { getReviewCheckIcon } from './helpers/review-check-icon';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
-import { unwrapMarkdownDocumentFence } from '@/lib/markdown/document-fence';
-import { expandLiteralBreaks } from '@/lib/markdown/breaks';
+import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
+import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
 
 const KATEX_OPTIONS = {

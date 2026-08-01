@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unwrapMarkdownDocumentFence } from '@/lib/markdown/document-fence';
+import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
 
 describe('unwrapMarkdownDocumentFence', () => {
   it('unwraps a whole fenced Markdown document', () => {

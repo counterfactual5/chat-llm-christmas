@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import hljs from 'highlight.js/lib/common';
 import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { MermaidBlock, isMermaidLanguage } from '@/components/markdown/mermaid-block';
+import { MermaidBlock, isMermaidLanguage } from '@/components/markdown/diagrams/mermaid-block';
 
 interface CodeBlockProps {
   language: string;

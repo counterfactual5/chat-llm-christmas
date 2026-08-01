@@ -104,11 +104,58 @@ export function useDeepResearch(opts: {
   }, []);
 
   const listen = useCallback(
-    async (jobId: string, sessionId: string, assistantId: string) => {
+    async (
+      jobId: string,
+      sessionId: string,
+      assistantId: string,
+      opts?: {
+        /**
+         * Rebuild timeline off-screen from SSE replay, then swap once.
+         * Avoids the Continue flash where Process clears then reappears.
+         */
+        deferUiUntilCatchUp?: boolean;
+        seed?: { query: string; mode: ResearchMode };
+      },
+    ) => {
       stopStream();
       const ac = new AbortController();
       abortRef.current = ac;
       activeRef.current = { jobId, sessionId, assistantId };
+      const deferUi = Boolean(opts?.deferUiUntilCatchUp);
+      let rebuilt: Message = createResearchAssistantMessage({
+        id: assistantId,
+        jobId,
+        query: opts?.seed?.query || '',
+        mode: opts?.seed?.mode,
+      });
+      let uiLive = !deferUi;
+      let sawEvent = false;
+      let catchUpTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const commitCatchUp = () => {
+        if (uiLive) return;
+        uiLive = true;
+        if (catchUpTimer) {
+          clearTimeout(catchUpTimer);
+          catchUpTimer = null;
+        }
+        // No replay yet — keep the visible timeline instead of wiping it empty.
+        if (!sawEvent) return;
+        // Preserve the existing bubble id/timestamp; replace activity in one paint.
+        patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+          ...rebuilt,
+          id: m.id,
+          timestamp: m.timestamp || rebuilt.timestamp,
+        }));
+      };
+
+      const scheduleCatchUpCommit = () => {
+        if (uiLive) return;
+        if (catchUpTimer) clearTimeout(catchUpTimer);
+        // Historical events arrive in a burst; commit after the burst settles.
+        catchUpTimer = setTimeout(commitCatchUp, 80);
+      };
+
       try {
         const res = await fetch(
           `/api/research/${encodeURIComponent(jobId)}/stream?last_event_id=0`,
@@ -140,9 +187,16 @@ export function useDeepResearch(opts: {
           const kind = eventKind || 'message';
           eventKind = 'message';
 
-          patchAssistant(setSessions, sessionId, assistantId, (m) =>
-            applyResearchEvent(m, { kind, payload }),
-          );
+          rebuilt = applyResearchEvent(rebuilt, { kind, payload });
+          sawEvent = true;
+
+          if (uiLive) {
+            patchAssistant(setSessions, sessionId, assistantId, (m) =>
+              applyResearchEvent(m, { kind, payload }),
+            );
+          } else {
+            scheduleCatchUpCommit();
+          }
 
           if (kind === 'phase' && typeof payload.status === 'string') {
             setJob((prev) =>
@@ -180,6 +234,7 @@ export function useDeepResearch(opts: {
           }
         }
         flush();
+        commitCatchUp();
 
         const finalJob = await refreshJob(jobId).catch(() => null);
         if (finalJob?.status === 'done' && finalJob.reportMarkdown) {
@@ -197,6 +252,10 @@ export function useDeepResearch(opts: {
           );
         }
       } catch (err: unknown) {
+        if (catchUpTimer) {
+          clearTimeout(catchUpTimer);
+          catchUpTimer = null;
+        }
         if ((err as { name?: string })?.name === 'AbortError') {
           patchAssistant(setSessions, sessionId, assistantId, (m) => ({
             ...m,
@@ -215,6 +274,7 @@ export function useDeepResearch(opts: {
           truncationReason: msg || 'Research stream interrupted',
         }));
       } finally {
+        if (catchUpTimer) clearTimeout(catchUpTimer);
         setBusy(false);
         endLoading(sessionId);
         if (activeRef.current?.jobId === jobId) activeRef.current = null;
@@ -243,11 +303,24 @@ export function useDeepResearch(opts: {
         mode,
         status: 'queued',
       });
-      // Reset timeline then replay all events for a consistent Process panel.
-      patchAssistant(setSessions, sessionId, assistantId, () =>
-        createResearchAssistantMessage({ id: assistantId, jobId, query, mode }),
-      );
-      await listen(jobId, sessionId, assistantId);
+      // Keep the existing Process timeline visible while SSE catch-up rebuilds
+      // off-screen; only clear incomplete/error chrome so Continue feels live.
+      patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+        ...m,
+        incomplete: false,
+        truncationReason: undefined,
+        research: {
+          ...(m.research || { jobId, query, mode }),
+          jobId,
+          query,
+          mode,
+          status: 'queued',
+        },
+      }));
+      await listen(jobId, sessionId, assistantId, {
+        deferUiUntilCatchUp: true,
+        seed: { query, mode },
+      });
     },
     [beginLoading, listen, setSessions],
   );

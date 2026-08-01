@@ -3,15 +3,15 @@
 /**
  * Chat shell — wires UI panels to hooks. Prefer jumping to the owning module:
  *
- *  Account status                  hooks/use-chat-account.ts + lib/chat/account-client.ts
- *  Notion/GitHub/Google status     hooks/use-chat-integrations.ts + lib/chat/integrations-client.ts
- *  Session hydrate / persist       hooks/use-chat-session-persist.ts + lib/chat/session-persist.ts
- *  OAuth return query              lib/chat/oauth-return.ts
- *  Send / queue / resume / review   hooks/use-chat-logic.ts
- *    queue helpers                 lib/chat/task-queue.ts
- *    continue / claim-review plan  lib/chat/continuation.ts
- *  Client SSE consumer             lib/chat/stream-response.ts
- *  Session normalize / LWW merge   lib/chat/sessions.ts
+ *  Account status                  hooks/chat/use-account.ts + lib/chat/account/client.ts
+ *  Notion/GitHub/Google status     hooks/chat/use-integrations.ts + lib/chat/integrations/client.ts
+ *  Session hydrate / persist       hooks/chat/use-session-persist.ts + lib/chat/session/persist.ts
+ *  OAuth return query              lib/chat/account/oauth-return.ts
+ *  Send / queue / resume / review   hooks/chat/use-logic.ts
+ *    queue helpers                 lib/chat/turn/task-queue.ts
+ *    continue / claim-review plan  lib/chat/turn/continuation.ts
+ *  Client SSE consumer             lib/chat/stream/client.ts
+ *  Session normalize / LWW merge   lib/chat/session/store.ts
  *  Message list / composer / …     components/chat/*
  *  /api/chat server                app/api/chat/route.ts (+ lib/chat/server/)
  */

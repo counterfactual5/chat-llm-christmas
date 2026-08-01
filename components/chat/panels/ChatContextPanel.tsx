@@ -9,6 +9,7 @@ import type {
   ExternalReferenceSourceKind,
   WebSearchSource,
 } from '@/lib/chat/types';
+import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   OutputPanel,
@@ -114,6 +115,7 @@ export function ChatContextPanel({
   canCompact,
   onCompact,
 }: ChatContextPanelProps) {
+  const { t } = useLocale();
   return (
     <AnimatePresence>
       {open && (
@@ -124,7 +126,9 @@ export function ChatContextPanel({
           className="h-full shrink-0 border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 flex flex-col"
         >
           <div className="relative flex h-14 items-center justify-center px-4 border-b border-stone-200/50 dark:border-stone-800/50 shrink-0">
-            <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">Context</span>
+            <span className="font-semibold text-stone-700 dark:text-stone-300 text-sm">
+              {t('context')}
+            </span>
             <Button
               variant="ghost"
               size="icon"

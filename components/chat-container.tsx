@@ -31,7 +31,6 @@ import {
   Eye,
   Menu,
   PanelRightOpen,
-  PanelRightClose,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
@@ -102,7 +101,6 @@ import {
 } from '@/lib/chat/message/api-messages';
 import { withMarkedAssistantIncomplete } from '@/lib/chat/session/mutations';
 import { streamChatResponse as runStreamChatResponse } from '@/lib/chat/stream/client';
-import { cn } from '@/lib/utils';
 import { BUILTIN_SKILLS, SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
@@ -2040,267 +2038,265 @@ export default function ChatContainer() {
         onDisconnectAccount={disconnectAccount}
       />
 
-        {/* --- Main Area --- */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
+        {/* --- Main Area: chat column + full-height side panels --- */}
+        <div className="flex-1 flex min-w-0 min-h-0 bg-[#F9F8F6] dark:bg-stone-950 h-full overflow-hidden">
+          {/* Chat column — header only spans messages/composer */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+            <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-[#F9F8F6] dark:bg-stone-950 z-10 shrink-0">
+              <div className="flex items-center gap-3">
+                {!isSidebarOpen && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsSidebarOpen(true)}
+                    className="text-stone-500 hover:bg-stone-200/50 dark:hover:bg-stone-800/50"
+                  >
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                )}
+              </div>
 
-        {/* Minimal Header */}
-        <header className="flex h-14 items-center justify-between px-4 border-b border-stone-200/50 dark:border-stone-800/50 bg-[#F9F8F6] dark:bg-stone-950 z-10 shrink-0">
-          <div className="flex items-center gap-3">
-            {!isSidebarOpen && (
-              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(true)} className="text-stone-500 hover:bg-stone-200/50 dark:hover:bg-stone-800/50">
-                <Menu className="h-5 w-5" />
-              </Button>
-            )}
+              <div className="flex items-center gap-0.5">
+                {!isPreviewPanelOpen && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsPreviewPanelOpen(true)}
+                    title={t('previewPanel')}
+                    aria-label={t('previewPanel')}
+                    className="h-8 w-8 text-stone-500"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                )}
+                {!isContextPanelOpen && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsContextPanelOpen(true)}
+                    title={t('context')}
+                    aria-label={t('context')}
+                    className="h-8 w-8 text-stone-500"
+                  >
+                    <PanelRightOpen className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </header>
+
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              <ChatMessageList
+                messages={messages}
+                selectedModel={selectedModel}
+                isActiveLoading={isActiveLoading || deepResearch.busy}
+                lastMessage={lastMessage}
+                replyWaitByMessage={replyWaitByMessage}
+                scrollRef={scrollRef}
+                messagesContentRef={messagesContentRef}
+                handleMessagesScroll={handleMessagesScroll}
+                handleSubmit={handleSubmit}
+                editingMessageId={editingMessageId}
+                editingMessageContent={editingMessageContent}
+                setEditingMessageContent={setEditingMessageContent}
+                editingMessageAttachments={editingMessageAttachments}
+                handleEditMessageKeyDown={handleEditMessageKeyDown}
+                onPasteEditFiles={onPasteEditFiles}
+                bindImeGuards={bindImeGuards}
+                editImeComposingRef={editImeComposingRef}
+                editImeEnterLockRef={editImeEnterLockRef}
+                addEditIngestedFiles={addEditIngestedFiles}
+                removeEditingMessageAttachment={removeEditingMessageAttachment}
+                setImagePreviewSrc={setImagePreviewSrc}
+                onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
+                onPreviewFile={openFilePreview}
+                cancelEditMessage={cancelEditMessage}
+                saveEditedMessage={saveEditedMessageOrResearch}
+                editUserMessage={editUserMessage}
+                parseQuotedUserMessage={parseQuotedUserMessage}
+                reasoningOpen={reasoningOpen}
+                setReasoningOpen={setReasoningOpen}
+                toolRunOpen={toolRunOpen}
+                setToolRunOpen={setToolRunOpen}
+                downloadGeneratedFile={downloadGeneratedFile}
+                canRetryFailed={canRetryFailed}
+                retryFailedReply={retryFailedReply}
+                isAssistantError={isAssistantError}
+                memorySavedNotice={
+                  memorySavedNotice?.sessionId === activeSessionId
+                    ? { count: memorySavedNotice.count }
+                    : null
+                }
+                onViewMemorySaved={() => {
+                  dismissMemorySavedNotice();
+                  openMemoriesModal();
+                }}
+                onDismissMemorySaved={dismissMemorySavedNotice}
+              />
+              <ChatComposer
+                activeQueue={activeQueue}
+                queueExpanded={queueExpanded}
+                setQueueExpanded={setQueueExpanded}
+                queuePaused={queuePaused}
+                resumeQueue={resumeQueue}
+                clearQueue={clearQueue}
+                jumpQueueAndSubmit={jumpQueueAndSubmit}
+                cancelQueuedMessage={cancelQueuedMessage}
+                attachError={attachError}
+                compactNotice={compactNotice}
+                canResumeIncomplete={canResumeIncomplete}
+                truncationInfo={truncationInfo}
+                resumeIncompleteReply={resumeIncompleteOrResearch}
+                attachments={attachments}
+                setImagePreviewSrc={setImagePreviewSrc}
+                removeAttachment={removeAttachment}
+                activeSkills={activeSkills}
+                skillCreatorActive={activeSkillIds.includes(SKILL_CREATOR_ID)}
+                dismissSkillCreator={() =>
+                  setActiveSkillIds((prev) => prev.filter((id) => id !== SKILL_CREATOR_ID))
+                }
+                toggleSkill={toggleSkill}
+                onPreviewSkill={openSkillPreview}
+                quotedSelections={quotedSelections}
+                setQuotedSelections={setQuotedSelections}
+                removeQuotedSelection={removeQuotedSelection}
+                slashMenuItems={slashMenuItems}
+                slashHighlight={slashHighlight}
+                consumeSlashItem={consumeSlashItem}
+                input={input}
+                setInput={setInput}
+                handleKeyDown={handleKeyDown}
+                onPasteFiles={onPasteFiles}
+                textareaRef={textareaRef}
+                textareaImeProps={bindImeGuards(composerImeComposingRef, composerImeEnterLockRef)}
+                modelsLoading={modelsLoading}
+                selectedModel={selectedModel}
+                isSkillPickerOpen={isSkillPickerOpen}
+                setIsSkillPickerOpen={setIsSkillPickerOpen}
+                skillPickerRef={skillPickerRef}
+                plusMenuButtonRef={plusMenuButtonRef}
+                plusFlyout={plusFlyout}
+                setPlusFlyout={setPlusFlyout}
+                googleMcpMenuOpen={googleMcpMenuOpen}
+                setGoogleMcpMenuOpen={setGoogleMcpMenuOpen}
+                setIsModelMenuOpen={setIsModelMenuOpen}
+                isAccountBound={isAccountBound}
+                skills={skills}
+                activeSkillIds={activeSkillIds}
+                fetchSkills={fetchSkills}
+                fetchIntegrations={fetchIntegrations}
+                openLoginModal={openLoginModal}
+                requestClaimReview={requestClaimReview}
+                lastMessage={lastMessage}
+                isAssistantError={isAssistantError}
+                activeAutoReview={activeAutoReview}
+                setActiveAutoReview={setActiveAutoReview}
+                modelSupportsVision={Boolean(selectedSpec?.vision)}
+                notionStatus={notionStatus}
+                githubStatus={githubStatus}
+                googleStatus={googleStatus}
+                notionMcpOn={notionMcpOn}
+                githubMcpOn={githubMcpOn}
+                gmailMcpOn={gmailMcpOn}
+                calendarMcpOn={calendarMcpOn}
+                driveMcpOn={driveMcpOn}
+                setNotionMcpEnabled={setNotionMcpEnabled}
+                setGitHubMcpEnabled={setGitHubMcpEnabled}
+                setGoogleServiceEnabled={setGoogleServiceEnabled}
+                openNotionModal={openNotionModal}
+                openGitHubModal={openGitHubModal}
+                openGoogleModal={openGoogleModal}
+                isModelMenuOpen={isModelMenuOpen}
+                modelMenuRef={modelMenuRef}
+                modelSearchRef={modelSearchRef}
+                modelSearchQuery={modelSearchQuery}
+                setModelSearchQuery={setModelSearchQuery}
+                availableModels={availableModels}
+                filteredModels={filteredModels}
+                hasImages={hasImages}
+                zhipuVisionOn={zhipuVisionOn}
+                setActiveMcpIds={setActiveMcpIds}
+                setSelectedModel={setSelectedModel}
+                isActiveLoading={isActiveLoading || deepResearch.busy}
+                isCompacting={isCompacting}
+                stopGenerating={stopOrCancel}
+                enqueueOrSubmit={submitComposer}
+                researchBusy={deepResearch.busy}
+                cancelResearch={() => void deepResearch.cancel()}
+              />
+            </div>
           </div>
 
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsPreviewPanelOpen((v) => !v)}
-              className={cn(
-                'text-xs gap-1.5',
-                isPreviewPanelOpen
-                  ? 'bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100'
-                  : 'text-stone-500',
-              )}
-            >
-              {isPreviewPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-              {t('previewPanel')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
-              className={cn("text-xs gap-1.5", isContextPanelOpen ? "bg-stone-200/50 dark:bg-stone-800 text-stone-900 dark:text-stone-100" : "text-stone-500")}
-            >
-              {isContextPanelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-              {t('context')}
-            </Button>
-          </div>
-        </header>
-
-        {/* Messages and Context Split */}
-        <div className="flex-1 flex min-h-0 overflow-hidden relative">
-
-          {/* Messages Area */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <ChatMessageList
-              messages={messages}
-              selectedModel={selectedModel}
-              isActiveLoading={isActiveLoading || deepResearch.busy}
-              lastMessage={lastMessage}
-              replyWaitByMessage={replyWaitByMessage}
-              scrollRef={scrollRef}
-              messagesContentRef={messagesContentRef}
-              handleMessagesScroll={handleMessagesScroll}
-              handleSubmit={handleSubmit}
-              editingMessageId={editingMessageId}
-              editingMessageContent={editingMessageContent}
-              setEditingMessageContent={setEditingMessageContent}
-              editingMessageAttachments={editingMessageAttachments}
-              handleEditMessageKeyDown={handleEditMessageKeyDown}
-              onPasteEditFiles={onPasteEditFiles}
-              bindImeGuards={bindImeGuards}
-              editImeComposingRef={editImeComposingRef}
-              editImeEnterLockRef={editImeEnterLockRef}
-              addEditIngestedFiles={addEditIngestedFiles}
-              removeEditingMessageAttachment={removeEditingMessageAttachment}
-              setImagePreviewSrc={setImagePreviewSrc}
-              onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
-              onPreviewFile={openFilePreview}
-              cancelEditMessage={cancelEditMessage}
-              saveEditedMessage={saveEditedMessageOrResearch}
-              editUserMessage={editUserMessage}
-              parseQuotedUserMessage={parseQuotedUserMessage}
-              reasoningOpen={reasoningOpen}
-              setReasoningOpen={setReasoningOpen}
-              toolRunOpen={toolRunOpen}
-              setToolRunOpen={setToolRunOpen}
-              downloadGeneratedFile={downloadGeneratedFile}
-              canRetryFailed={canRetryFailed}
-              retryFailedReply={retryFailedReply}
-              isAssistantError={isAssistantError}
-              memorySavedNotice={
-                memorySavedNotice?.sessionId === activeSessionId
-                  ? { count: memorySavedNotice.count }
-                  : null
-              }
-              onViewMemorySaved={() => {
-                dismissMemorySavedNotice();
-                openMemoriesModal();
-              }}
-              onDismissMemorySaved={dismissMemorySavedNotice}
-            />
-        <ChatComposer
-          activeQueue={activeQueue}
-          queueExpanded={queueExpanded}
-          setQueueExpanded={setQueueExpanded}
-          queuePaused={queuePaused}
-          resumeQueue={resumeQueue}
-          clearQueue={clearQueue}
-          jumpQueueAndSubmit={jumpQueueAndSubmit}
-          cancelQueuedMessage={cancelQueuedMessage}
-          attachError={attachError}
-          compactNotice={compactNotice}
-          canResumeIncomplete={canResumeIncomplete}
-          truncationInfo={truncationInfo}
-          resumeIncompleteReply={resumeIncompleteOrResearch}
-          attachments={attachments}
-          setImagePreviewSrc={setImagePreviewSrc}
-          removeAttachment={removeAttachment}
-          activeSkills={activeSkills}
-          skillCreatorActive={activeSkillIds.includes(SKILL_CREATOR_ID)}
-          dismissSkillCreator={() =>
-            setActiveSkillIds((prev) => prev.filter((id) => id !== SKILL_CREATOR_ID))
-          }
-          toggleSkill={toggleSkill}
-          onPreviewSkill={openSkillPreview}
-          quotedSelections={quotedSelections}
-          setQuotedSelections={setQuotedSelections}
-          removeQuotedSelection={removeQuotedSelection}
-          slashMenuItems={slashMenuItems}
-          slashHighlight={slashHighlight}
-          consumeSlashItem={consumeSlashItem}
-          input={input}
-          setInput={setInput}
-          handleKeyDown={handleKeyDown}
-          onPasteFiles={onPasteFiles}
-          textareaRef={textareaRef}
-          textareaImeProps={bindImeGuards(composerImeComposingRef, composerImeEnterLockRef)}
-          modelsLoading={modelsLoading}
-          selectedModel={selectedModel}
-          isSkillPickerOpen={isSkillPickerOpen}
-          setIsSkillPickerOpen={setIsSkillPickerOpen}
-          skillPickerRef={skillPickerRef}
-          plusMenuButtonRef={plusMenuButtonRef}
-          plusFlyout={plusFlyout}
-          setPlusFlyout={setPlusFlyout}
-          googleMcpMenuOpen={googleMcpMenuOpen}
-          setGoogleMcpMenuOpen={setGoogleMcpMenuOpen}
-          setIsModelMenuOpen={setIsModelMenuOpen}
-          isAccountBound={isAccountBound}
-          skills={skills}
-          activeSkillIds={activeSkillIds}
-          fetchSkills={fetchSkills}
-          fetchIntegrations={fetchIntegrations}
-          openLoginModal={openLoginModal}
-          requestClaimReview={requestClaimReview}
-          lastMessage={lastMessage}
-          isAssistantError={isAssistantError}
-          activeAutoReview={activeAutoReview}
-          setActiveAutoReview={setActiveAutoReview}
-          modelSupportsVision={Boolean(selectedSpec?.vision)}
-          notionStatus={notionStatus}
-          githubStatus={githubStatus}
-          googleStatus={googleStatus}
-          notionMcpOn={notionMcpOn}
-          githubMcpOn={githubMcpOn}
-          gmailMcpOn={gmailMcpOn}
-          calendarMcpOn={calendarMcpOn}
-          driveMcpOn={driveMcpOn}
-          setNotionMcpEnabled={setNotionMcpEnabled}
-          setGitHubMcpEnabled={setGitHubMcpEnabled}
-          setGoogleServiceEnabled={setGoogleServiceEnabled}
-          openNotionModal={openNotionModal}
-          openGitHubModal={openGitHubModal}
-          openGoogleModal={openGoogleModal}
-          isModelMenuOpen={isModelMenuOpen}
-          modelMenuRef={modelMenuRef}
-          modelSearchRef={modelSearchRef}
-          modelSearchQuery={modelSearchQuery}
-          setModelSearchQuery={setModelSearchQuery}
-          availableModels={availableModels}
-          filteredModels={filteredModels}
-          hasImages={hasImages}
-          zhipuVisionOn={zhipuVisionOn}
-          setActiveMcpIds={setActiveMcpIds}
-          setSelectedModel={setSelectedModel}
-          isActiveLoading={isActiveLoading || deepResearch.busy}
-          isCompacting={isCompacting}
-          stopGenerating={stopOrCancel}
-          enqueueOrSubmit={submitComposer}
-          researchBusy={deepResearch.busy}
-          cancelResearch={() => void deepResearch.cancel()}
-        />
-
-      </div>
-      <ChatPreviewPanel
-        open={isPreviewPanelOpen}
-        onClose={() => setIsPreviewPanelOpen(false)}
-        file={previewFileEntry}
-        onExpandFullscreen={() => {
-          if (!previewFileEntry || typeof previewFileEntry.content !== 'string') return;
-          setFilePreview({
-            id: previewFileEntry.id,
-            name: previewFileEntry.name,
-            mimeType: previewFileEntry.mimeType,
-            content: previewFileEntry.content,
-            size: previewFileEntry.size,
-          });
-        }}
-        onJumpToMessage={() => {
-          if (!previewFileEntry) return;
-          scrollToMessage(previewFileEntry.messageId);
-        }}
-        onDownload={() => {
-          if (!previewFileEntry) return;
-          void downloadGeneratedFile(previewFileEntry);
-        }}
-      />
-      <ChatContextPanel
-        open={isContextPanelOpen}
-        onClose={() => setIsContextPanelOpen(false)}
-        picturesExpanded={picturesExpanded}
-        onTogglePicturesExpanded={() => setPicturesExpanded((v) => !v)}
-        outputGroupsOpen={outputGroupsOpen}
-        onToggleOutputGroup={(key) =>
-          setOutputGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
-        }
-        images={generatedImageHistory}
-        files={generatedFileHistory}
-        onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
-        onPreviewFile={openFilePreview}
-        onScrollToMessage={scrollToMessage}
-        onDownloadImage={(entry) => void downloadGeneratedImage(entry)}
-        onRemoveImage={removeGeneratedImage}
-        onDownloadFile={(entry) => void downloadGeneratedFile(entry)}
-        onRemoveFile={removeGeneratedFile}
-        referenceExpanded={referenceExpanded}
-        onToggleReferenceExpanded={() => setReferenceExpanded((v) => !v)}
-        referenceGroupsOpen={referenceGroupsOpen}
-        onToggleReferenceGroup={(key) =>
-          setReferenceGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
-        }
-        userUploadReferences={userUploadReferences}
-        referenceSourceGroups={referenceSourceGroups}
-        webSourcesCount={webSources.length}
-        onOpenUploadReference={openUploadReference}
-        onRequestClearSources={() => setConfirmClearSourcesOpen(true)}
-        systemPromptExpanded={systemPromptExpanded}
-        onToggleSystemPromptExpanded={() => setSystemPromptExpanded((v) => !v)}
-        systemPrompt={systemPrompt}
-        onSystemPromptChange={setSystemPrompt}
-        messagesCount={messages.length}
-        selectedModel={selectedModel}
-        contextLimit={contextLimit}
-        usableLimit={usableLimit}
-        usageRatio={usageRatio}
-        estimatedTokens={estimatedTokens}
-        contextSources={contextSources}
-        isCompacting={isCompacting}
-        canCompact={messages.length >= 4}
-        onCompact={async () => {
-          const next = await runCompact(messages);
-          if (next) updateActiveSession(next);
-        }}
-      />
+          <ChatPreviewPanel
+            open={isPreviewPanelOpen}
+            onClose={() => setIsPreviewPanelOpen(false)}
+            file={previewFileEntry}
+            onExpandFullscreen={() => {
+              if (!previewFileEntry || typeof previewFileEntry.content !== 'string') return;
+              setFilePreview({
+                id: previewFileEntry.id,
+                name: previewFileEntry.name,
+                mimeType: previewFileEntry.mimeType,
+                content: previewFileEntry.content,
+                size: previewFileEntry.size,
+              });
+            }}
+            onJumpToMessage={() => {
+              if (!previewFileEntry) return;
+              scrollToMessage(previewFileEntry.messageId);
+            }}
+            onDownload={() => {
+              if (!previewFileEntry) return;
+              void downloadGeneratedFile(previewFileEntry);
+            }}
+          />
+          <ChatContextPanel
+            open={isContextPanelOpen}
+            onClose={() => setIsContextPanelOpen(false)}
+            picturesExpanded={picturesExpanded}
+            onTogglePicturesExpanded={() => setPicturesExpanded((v) => !v)}
+            outputGroupsOpen={outputGroupsOpen}
+            onToggleOutputGroup={(key) =>
+              setOutputGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+            }
+            images={generatedImageHistory}
+            files={generatedFileHistory}
+            onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
+            onPreviewFile={openFilePreview}
+            onScrollToMessage={scrollToMessage}
+            onDownloadImage={(entry) => void downloadGeneratedImage(entry)}
+            onRemoveImage={removeGeneratedImage}
+            onDownloadFile={(entry) => void downloadGeneratedFile(entry)}
+            onRemoveFile={removeGeneratedFile}
+            referenceExpanded={referenceExpanded}
+            onToggleReferenceExpanded={() => setReferenceExpanded((v) => !v)}
+            referenceGroupsOpen={referenceGroupsOpen}
+            onToggleReferenceGroup={(key) =>
+              setReferenceGroupsOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+            }
+            userUploadReferences={userUploadReferences}
+            referenceSourceGroups={referenceSourceGroups}
+            webSourcesCount={webSources.length}
+            onOpenUploadReference={openUploadReference}
+            onRequestClearSources={() => setConfirmClearSourcesOpen(true)}
+            systemPromptExpanded={systemPromptExpanded}
+            onToggleSystemPromptExpanded={() => setSystemPromptExpanded((v) => !v)}
+            systemPrompt={systemPrompt}
+            onSystemPromptChange={setSystemPrompt}
+            messagesCount={messages.length}
+            selectedModel={selectedModel}
+            contextLimit={contextLimit}
+            usableLimit={usableLimit}
+            usageRatio={usageRatio}
+            estimatedTokens={estimatedTokens}
+            contextSources={contextSources}
+            isCompacting={isCompacting}
+            canCompact={messages.length >= 4}
+            onCompact={async () => {
+              const next = await runCompact(messages);
+              if (next) updateActiveSession(next);
+            }}
+          />
         </div>
-      </div>
 
       <ChatQuoteToolbar
         messagesContentRef={messagesContentRef}

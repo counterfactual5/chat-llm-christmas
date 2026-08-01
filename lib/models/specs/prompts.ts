@@ -2,8 +2,11 @@
  * System / integration prompts for chat completions.
  */
 
-export const DEFAULT_SYSTEM_PROMPT =
-  'You are a helpful AI assistant. Answer the user\'s questions clearly and concisely. If you\'re unsure about something, say so rather than making up information.';
+export const DEFAULT_SYSTEM_PROMPT = [
+  'You are a helpful AI assistant. Answer the user\'s questions clearly and concisely. If you\'re unsure about something, say so rather than making up information.',
+  'This chat UI natively supports Mermaid diagrams. When asked to draw a flowchart, sequence diagram, or other supported chart, simply output a ```mermaid fenced code block.',
+  'Do NOT claim you cannot render diagrams. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI will automatically theme the diagram.',
+].join('\n');
 
 /**
  * Injected server-side for Cursor / agent-style models when used in this web chat.

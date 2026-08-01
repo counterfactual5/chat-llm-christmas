@@ -20,6 +20,7 @@ export type ToolRunClassification = {
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
   isResearchPlan: boolean;
+  isResearchSynthesize: boolean;
   isResearchVerify: boolean;
   isResearchWrite: boolean;
   isResearchSources: boolean;
@@ -57,6 +58,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     run.provider === 'nemotron-omni';
   const isClaimReviewer = run.provider === 'claim-reviewer';
   const isResearchPlan = run.name === 'research_plan';
+  const isResearchSynthesize = run.name === 'research_synthesize';
   const isResearchVerify = run.name === 'research_verify';
   const isResearchWrite = run.name === 'research_write';
   const isResearchSources = run.name === 'research_sources';
@@ -77,6 +79,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isImageUnderstand,
     isClaimReviewer,
     isResearchPlan,
+    isResearchSynthesize,
     isResearchVerify,
     isResearchWrite,
     isResearchSources,
@@ -107,6 +110,7 @@ export function getToolRunLabelKey(
     isImageUnderstand,
     isClaimReviewer,
     isResearchPlan,
+    isResearchSynthesize,
     isResearchVerify,
     isResearchWrite,
     isResearchSources,
@@ -116,6 +120,10 @@ export function getToolRunLabelKey(
   if (isResearchPlan) {
     if (failed) return 'toolFailed';
     return searching ? 'researchPlanning' : 'researchPlanned';
+  }
+  if (isResearchSynthesize) {
+    if (failed) return 'toolFailed';
+    return searching ? 'researchSynthesizing' : 'researchSynthesized';
   }
   if (isResearchVerify) {
     if (failed) return 'toolFailed';

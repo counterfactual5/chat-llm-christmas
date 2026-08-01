@@ -106,7 +106,7 @@ export function buildActivitySteps(
 /**
  * Group consecutive reasoning/tool steps into Process panels.
  * A `stage` step closes the current panel and opens a new one with that title
- * (Deep Research: Plan / Search / Verify / Write).
+ * (Deep Research: Plan / Search / Synthesize / Verify / Write).
  * Content breaks the group. Generated files are deferred so a
  * batch of create_file tools stays in one Process, then all
  * file cards render together underneath.

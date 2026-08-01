@@ -13,6 +13,7 @@ export type ResearchSseEvent = {
 const STAGE_TITLE: Record<string, string> = {
   planning: 'Plan',
   searching: 'Search',
+  synthesizing: 'Synthesize',
   verifying: 'Verify',
   writing: 'Write',
 };
@@ -205,7 +206,13 @@ export function applyResearchEvent(
   if (kind === 'phase') {
     const status = String(payload.status || '');
     const detail = typeof payload.detail === 'string' ? payload.detail : '';
-    if (status === 'planning' || status === 'searching' || status === 'verifying' || status === 'writing') {
+    if (
+      status === 'planning' ||
+      status === 'searching' ||
+      status === 'synthesizing' ||
+      status === 'verifying' ||
+      status === 'writing'
+    ) {
       m = openStage(m, STAGE_TITLE[status] || status);
       m = {
         ...m,
@@ -224,9 +231,19 @@ export function applyResearchEvent(
           );
           m = { ...m, toolRuns };
         }
+      } else if (status === 'synthesizing') {
+        m = settleOpenTools(m);
+        if (!hasPendingTool(m, 'research_synthesize')) {
+          m = startTool(
+            m,
+            'research_synthesize',
+            detail || 'cross-source synthesis',
+          ).message;
+        }
       } else if (status === 'verifying') {
+        m = settleOpenTools(m);
         if (!hasPendingTool(m, 'research_verify')) {
-          m = startTool(m, 'research_verify', detail || 'fact-checking sources').message;
+          m = startTool(m, 'research_verify', detail || 'fact-checking synthesis').message;
         }
       } else if (status === 'writing') {
         m = settleOpenTools(m);
@@ -380,6 +397,25 @@ export function applyResearchEvent(
       m = { ...m, toolRuns, incomplete: true };
     }
     return m;
+  }
+
+  if (kind === 'synthesis') {
+    const chars = Number(payload.chars || 0);
+    const preview =
+      typeof payload.preview === 'string' ? String(payload.preview).trim() : '';
+    return finishTool(m, {
+      name: 'research_synthesize',
+      provider: 'research',
+      results: [
+        {
+          title: 'Synthesis',
+          url: '',
+          snippet: preview
+            ? `${chars} chars · ${preview.slice(0, 160)}`
+            : `${chars} chars`,
+        },
+      ],
+    });
   }
 
   if (kind === 'verified') {

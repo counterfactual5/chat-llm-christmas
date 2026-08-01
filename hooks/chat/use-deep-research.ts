@@ -2,7 +2,7 @@
 
 /**
  * Deep Research client: create job, stream SSE, patch the assistant
- * message in the main chat timeline (Plan / Search / Verify / Write).
+ * message in the main chat timeline (Plan / Search / Synthesize / Verify / Write).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';

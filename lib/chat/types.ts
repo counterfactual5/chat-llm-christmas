@@ -5,7 +5,7 @@ export type MessageActivityStep =
   | { id: string; kind: 'tool'; toolRunId: string }
   | { id: string; kind: 'content'; text: string }
   | { id: string; kind: 'file'; fileId: string }
-  /** Opens a new Process panel with a custom title (e.g. Plan / Search / Verify). */
+  /** Opens a new Process panel with a custom title (e.g. Plan / Search / Synthesize / Verify). */
   | { id: string; kind: 'stage'; title: string };
 
 export type MessageToolRun = {

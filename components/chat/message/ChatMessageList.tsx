@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   ListTree,
   PenLine,
+  Layers,
   BookOpen,
   X,
   Download,
@@ -456,6 +457,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isClaimReviewer,
                     isWebRead,
                     isResearchPlan,
+                    isResearchSynthesize,
                     isResearchVerify,
                     isResearchWrite,
                     isResearchSources,
@@ -485,6 +487,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       isSaveSkill ||
                       isWebRead ||
                       isResearchPlan ||
+                      isResearchSynthesize ||
                       isResearchVerify ||
                       isResearchWrite ||
                       (!isNotion &&
@@ -520,6 +523,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
                         ) : isResearchPlan ? (
                           <ListTree className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isResearchSynthesize ? (
+                          <Layers className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isResearchVerify ? (
                           <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isResearchWrite ? (
@@ -557,6 +562,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isSaveSkill &&
                           !isClaimReviewer &&
                           !isResearchPlan &&
+                          !isResearchSynthesize &&
                           !isResearchVerify &&
                           !isResearchWrite && (
                             <span className="opacity-50">
@@ -682,6 +688,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           {run.status === 'done' &&
                             emptyResults &&
                             !isResearchPlan &&
+                            !isResearchSynthesize &&
                             !isResearchVerify &&
                             !isResearchWrite && (
                               <div>{t('searchNoResults')}</div>

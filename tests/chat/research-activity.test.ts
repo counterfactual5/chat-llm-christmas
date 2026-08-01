@@ -74,6 +74,29 @@ describe('research activity → timeline stages', () => {
     expect(m.activity?.some((s) => s.kind === 'content')).toBe(true);
   });
 
+  it('opens Synthesize panel from synthesizing phase', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a4',
+      jobId: 'rs_4',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'synthesizing', detail: 'cross-source synthesis' },
+    });
+    expect(m.activity?.some((s) => s.kind === 'stage' && s.title === 'Synthesize')).toBe(
+      true,
+    );
+    expect(m.toolRuns?.some((r) => r.name === 'research_synthesize')).toBe(true);
+    m = applyResearchEvent(m, {
+      kind: 'synthesis',
+      payload: { chars: 1200, preview: '跨源对比…' },
+    });
+    const syn = m.toolRuns?.find((r) => r.name === 'research_synthesize');
+    expect(syn?.status).toBe('done');
+    expect(syn?.results?.[0]?.snippet).toContain('1200');
+  });
+
   it('marks failed research incomplete with truncationReason', () => {
     let m = createResearchAssistantMessage({
       id: 'a3',

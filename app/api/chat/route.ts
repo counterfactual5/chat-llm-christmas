@@ -4,7 +4,6 @@ import { fetchFreeModelNames, looksFreeByName } from '@/lib/models/pricing';
 import { getModelSpec, isCursorStyleModel } from '@/lib/models/specs';
 import type { SearchOutcome } from '@/lib/tools/search/engine';
 import {
-  createStampLeakStripper,
   timeContextSystemPrompt,
   freshnessForQuery,
   enrichSearchQuery,
@@ -38,21 +37,15 @@ import {
   buildCorrectionPrompt,
   buildPendingIntentPrompt,
   buildExecutionRecordFromMessages,
-  buildExecutionRecordFromToolRuns,
   filterSurfacesMissingReceipt,
   runFullClaimAudit,
   emitMidTurnReview,
-  emitReviewReport,
-  buildReviewReport,
-  buildFindingsResponsePrompt,
   buildReviewIssuesResponsePrompt,
   actionableReviewIssues,
   verifyCorrectionText,
   rejectedCorrectionNote,
   lastUserMessageIndex,
-  synthesizeFindings,
   FINDINGS_RESPONSE_SYSTEM,
-  type ReviewFinding,
   type ReviewIssue,
   type ClaimAuditResult,
   type MidTurnCorrection,
@@ -64,20 +57,19 @@ import {
   validateChatMessages,
 } from '@/lib/chat/server/request';
 import {
-  streamTimeoutError,
-  streamWaitBudget,
-} from '@/lib/chat/server/stream-budget';
-import {
   modelDumpsAnswerInReasoning,
   modelNeedsThinkingForTools,
   wantsThinking,
 } from '@/lib/chat/server/thinking';
+import { runPlainCompletionStream } from '@/lib/chat/server/plain-completion';
+import { runToolCallStreamRound } from '@/lib/chat/server/tool-round';
+import { streamFinalCompletion } from '@/lib/chat/server/final-completion';
 import {
-  completeOnce,
-  splitCompletionDelta,
-  streamChatCompletionsRaw,
-  withTimeout,
-} from '@/lib/chat/server/upstream';
+  auditReviewTurns,
+  buildReviewAnswerMessages,
+  collectReviewTurns,
+} from '@/lib/chat/server/review-turns';
+import { completeOnce, withTimeout } from '@/lib/chat/server/upstream';
 import {
   extractToolCalls,
   lastUserMessageHasImageParts,
@@ -580,132 +572,43 @@ export async function POST(req: NextRequest) {
               'claim verifier',
             );
 
-          type ReviewToolRun = NonNullable<
-            NonNullable<typeof reviewContext>['toolRuns']
-          >[number];
-          type ReviewTurn = {
-            messageId: string;
-            assistantText: string;
-            toolRuns?: ReviewToolRun[];
-          };
-          const rawTurns = Array.isArray(reviewContext?.turns)
-            ? reviewContext!.turns!
-            : [];
-          const turns: ReviewTurn[] = rawTurns
-            .map((t: { messageId?: string; assistantText?: string; toolRuns?: ReviewToolRun[] }) => ({
-              messageId: String(t?.messageId || '').trim(),
-              assistantText: String(t?.assistantText || '').trim(),
-              toolRuns: t?.toolRuns,
-            }))
-            .filter((t: ReviewTurn) => t.messageId && t.assistantText);
-          // Backward compat: single-turn payload without `turns`.
-          if (!turns.length && priorText) {
-            turns.push({
-              messageId: String(reviewContext?.targetMessageId || '').trim() || 'last',
-              assistantText: priorText,
-              toolRuns: reviewContext?.toolRuns,
-            });
-          }
+          const turns = collectReviewTurns(reviewContext, priorText);
 
-          let findings: ReviewFinding[] = [];
-          let reviewIssues: ReviewIssue[] = [];
           try {
-            if (turns.length) {
-              const focusId =
-                String(reviewContext?.targetMessageId || '').trim() ||
-                turns[turns.length - 1]!.messageId;
-              for (const turn of turns) {
-                const priorRecord = buildExecutionRecordFromToolRuns(turn.toolRuns || []);
-                // Spend the LLM verifier on the focused (usually latest) turn, and
-                // on earlier turns only when local heuristics already found errors.
-                const earlyErrors = synthesizeFindings(
-                  turn.assistantText,
-                  priorRecord,
-                  auditOpts,
-                ).some((f) => f.severity === 'error');
-                const audit = await runFullClaimAudit(
-                  send,
-                  turn.assistantText,
-                  priorRecord,
-                  auditOpts,
-                  'requested',
-                  verifierComplete,
-                  {
-                    forceLlm: turn.messageId === focusId || earlyErrors,
-                    targetMessageId: turn.messageId,
-                    emitEmpty: true,
-                    userAsk,
-                    signal: clientSignal,
-                  },
-                );
-                findings = findings.concat(audit.findings);
-                reviewIssues = reviewIssues.concat(audit.issues);
-              }
-            } else {
-              emitReviewReport(
-                send,
-                buildReviewReport({
-                  assistantText: '',
-                  record: [],
-                  findings: [],
-                  phase: 'requested',
-                }),
-                reviewContext?.targetMessageId,
-              );
-            }
+            const { findings, issues: reviewIssues } = await auditReviewTurns({
+              turns,
+              targetMessageId: reviewContext?.targetMessageId,
+              auditOpts,
+              userAsk,
+              signal: clientSignal,
+              send,
+              verifierComplete,
+            });
 
             // Dedicated response path: address findings only (no tools / no persona bleed).
-            const reviewMessages = [
-              { role: 'system', content: FINDINGS_RESPONSE_SYSTEM },
-              {
-                role: 'user',
-                content: reviewIssues.length
-                  ? buildReviewIssuesResponsePrompt(reviewIssues, priorText || turns.map((t) => t.assistantText).join('\n\n'))
-                  : buildFindingsResponsePrompt(findings, priorText || turns.map((t) => t.assistantText).join('\n\n')),
-              },
-            ];
-            const reviewStream = streamChatCompletionsRaw({
+            const reviewMessages = buildReviewAnswerMessages({
+              findings,
+              issues: reviewIssues,
+              priorText,
+              turns,
+            });
+            let sawText = false;
+            const { lastFinishReason } = await runPlainCompletionStream({
               apiKey,
               baseURL,
               signal: clientSignal,
-              body: {
-                model: requestedModel,
-                temperature: 0.3,
-                messages: sanitizeChatMessages(reviewMessages),
+              model: requestedModel,
+              temperature: 0.3,
+              messages: sanitizeChatMessages(reviewMessages),
+              onContent: (text) => {
+                sawText = true;
+                send({ content: text });
+              },
+              onReasoning: (text) => {
+                sawText = true;
+                send({ reasoning: text });
               },
             });
-            let sawText = false;
-            let lastFinishReason: string | null = null;
-            const stampStripper = createStampLeakStripper();
-            for await (const chunk of reviewStream) {
-              const choice = chunk?.choices?.[0];
-              const delta = choice?.delta || {};
-              const finish_reason = choice?.finish_reason || null;
-              if (finish_reason) lastFinishReason = finish_reason;
-              let { content, reasoning } = splitCompletionDelta(delta, {
-                reasoningAsContent: false,
-              });
-              if (content) content = stampStripper.push(content);
-              if (finish_reason) {
-                const rest = stampStripper.flush();
-                if (rest) content = (content || '') + rest;
-              }
-              if (content) {
-                sawText = true;
-                send({ content });
-              }
-              if (reasoning) {
-                sawText = true;
-                send({ reasoning });
-              }
-            }
-            {
-              const rest = stampStripper.flush();
-              if (rest) {
-                sawText = true;
-                send({ content: rest });
-              }
-            }
             if (!sawText) {
               send({
                 content: findings.length
@@ -815,37 +718,17 @@ export async function POST(req: NextRequest) {
               content: buildReviewIssuesResponsePrompt(issues, priorText),
             },
           ];
-          const correctionStream = streamChatCompletionsRaw({
+          // Buffer the whole draft, then verify locally — streaming a bad
+          // correction to the user is worse than a short delay.
+          const { content: draft } = await runPlainCompletionStream({
             apiKey,
             baseURL,
             signal: clientSignal,
-            body: {
-              model: requestedModel,
-              temperature: 0.2,
-              messages: sanitizeChatMessages(correctionMessages),
-            },
+            model: requestedModel,
+            temperature: 0.2,
+            messages: sanitizeChatMessages(correctionMessages),
+            checkAbortedEachChunk: true,
           });
-          // Buffer the whole draft, then verify locally — streaming a bad
-          // correction to the user is worse than a short delay.
-          let draft = '';
-          const stampStripper = createStampLeakStripper();
-          for await (const chunk of correctionStream) {
-            if (clientSignal.aborted) break;
-            const choice = chunk?.choices?.[0];
-            const delta = choice?.delta || {};
-            const finish_reason = choice?.finish_reason || null;
-            let { content } = splitCompletionDelta(delta, { reasoningAsContent: false });
-            if (content) content = stampStripper.push(content);
-            if (finish_reason) {
-              const rest = stampStripper.flush();
-              if (rest) content = (content || '') + rest;
-            }
-            if (content) draft += content;
-          }
-          if (!clientSignal.aborted) {
-            const rest = stampStripper.flush();
-            if (rest) draft += rest;
-          }
 
           const verified = verifyCorrectionText(draft, {
             priorLength: String(priorText || '').length,
@@ -978,143 +861,23 @@ export async function POST(req: NextRequest) {
           // incrementally even when the model decides not to call tools.
           if (activeToolDefs.length > 0 && !usedTools) {
             for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-              let streamedContent = '';
-              let streamedReasoning = '';
-              // Accumulate streamed tool_calls: index → {id, name, arguments}
-              const toolCallDeltas = new Map<number, { id: string; name: string; arguments: string }>();
-              let roundFinishReason: string | null = null;
-              const roundStampStripper = createStampLeakStripper();
-
-              let streamIter: AsyncGenerator<any>;
-              try {
-                const raw = streamChatCompletionsRaw({
-                  apiKey,
-                  baseURL,
-                  signal: clientSignal,
-                  body: {
-                    model: requestedModel,
-                    temperature,
-                    messages: sanitizeChatMessages(workingMessages),
-                    tools: activeToolDefs,
-                    tool_choice: 'auto',
-                    ...(thinking ? { enable_thinking: true } : {}),
-                  },
-                });
-                streamIter = (async function* () {
-                  // Bound each tools round by idle stall + total wall clock.
-                  const iter = raw[Symbol.asyncIterator]();
-                  const startedAt = Date.now();
-                  let lastChunkAt = startedAt;
-                  while (true) {
-                    const remaining = streamWaitBudget({
-                      startedAt,
-                      lastChunkAt,
-                      idleMs: STREAM_IDLE_TIMEOUT_MS,
-                      maxTotalMs: STREAM_MAX_TOTAL_MS,
-                    });
-                    if (remaining <= 0) {
-                      throw streamTimeoutError(
-                        'tools round',
-                        STREAM_IDLE_TIMEOUT_MS,
-                        STREAM_MAX_TOTAL_MS,
-                        startedAt,
-                        lastChunkAt,
-                      );
-                    }
-                    try {
-                      const next = await withTimeout(
-                        iter.next(),
-                        remaining,
-                        'tools round chunk',
-                      );
-                      if (next.done) break;
-                      lastChunkAt = Date.now();
-                      yield next.value;
-                    } catch (chunkErr: unknown) {
-                      const msg =
-                        chunkErr instanceof Error
-                          ? chunkErr.message
-                          : String(chunkErr || 'failed');
-                      if (/timed out/i.test(msg)) {
-                        throw streamTimeoutError(
-                          'tools round',
-                          STREAM_IDLE_TIMEOUT_MS,
-                          STREAM_MAX_TOTAL_MS,
-                          startedAt,
-                          lastChunkAt,
-                        );
-                      }
-                      throw chunkErr;
-                    }
-                  }
-                })();
-              } catch (toolErr: any) {
-                console.warn('tools round skipped:', toolErr?.message || toolErr);
-                break;
-              }
-
-              // Whether we've seen any tool_call delta (used for post-stream routing).
-              let hasToolCallDeltas = false;
-
-              try {
-                for await (const chunk of streamIter) {
-                  const choice = chunk?.choices?.[0];
-                  const delta = choice?.delta || {};
-                  const finishReason = choice?.finish_reason || null;
-                  if (finishReason) roundFinishReason = finishReason;
-
-                  // --- tool_calls accumulation ---
-                  if (Array.isArray(delta.tool_calls)) {
-                    hasToolCallDeltas = true;
-                    for (const tc of delta.tool_calls) {
-                      const idx = tc.index ?? 0;
-                      const existing = toolCallDeltas.get(idx) || { id: '', name: '', arguments: '' };
-                      if (tc.id) existing.id = tc.id;
-                      if (tc.function?.name) existing.name += tc.function.name;
-                      if (tc.function?.arguments) existing.arguments += tc.function.arguments;
-                      toolCallDeltas.set(idx, existing);
-                    }
-                  }
-
-                  // --- content / reasoning ---
-                  // Always stream content as content, even after tool_call deltas start.
-                  // Holding the tail back and replaying it as reasoning splits sentences
-                  // across the bubble and a stray Thought step (e.g. "……手册" + Thought"版本。").
-                  const split = splitCompletionDelta(delta, { reasoningAsContent });
-                  let contentChunk = split.content;
-                  if (split.reasoning) {
-                    streamedReasoning += split.reasoning;
-                    send({ reasoning: split.reasoning });
-                  }
-
-                  if (contentChunk) {
-                    contentChunk = roundStampStripper.push(contentChunk);
-                    if (contentChunk) {
-                      streamedContent += contentChunk;
-                      send({ content: contentChunk });
-                    }
-                  }
-                }
-              } catch (toolStreamErr: any) {
-                // Timeout / upstream abort during streaming used to escape here and
-                // surface as a hard "Request failed". Soft-fail: keep any partial
-                // tool_calls / content and fall through to the same post-stream logic.
-                console.warn(
-                  'tools round stream aborted:',
-                  toolStreamErr?.message || toolStreamErr,
-                );
-              }
-              // Flush stamp stripper
-              {
-                const rest = roundStampStripper.flush();
-                if (rest) {
-                  streamedContent += rest;
-                  send({ content: rest });
-                }
-              }
-
-              // Build toolCalls array from accumulated deltas
-              const toolCalls = [...toolCallDeltas.values()].filter((tc) => tc.name);
+              const roundResult = await runToolCallStreamRound({
+                apiKey,
+                baseURL,
+                signal: clientSignal,
+                model: requestedModel,
+                temperature,
+                messages: sanitizeChatMessages(workingMessages),
+                tools: activeToolDefs,
+                enableThinking: thinking,
+                reasoningAsContent,
+                idleMs: STREAM_IDLE_TIMEOUT_MS,
+                maxTotalMs: STREAM_MAX_TOTAL_MS,
+                send,
+              });
+              if (!roundResult.ok) break;
+              const { streamedContent, toolCalls, roundFinishReason, hasToolCallDeltas } =
+                roundResult;
 
               if (!toolCalls.length) {
                 // Cursor: narrated "I'll search" with no tool_calls → force real search.
@@ -1306,119 +1069,29 @@ export async function POST(req: NextRequest) {
             foldReasoning: boolean;
             messages?: any[];
           }) => {
-            const finalStream = streamChatCompletionsRaw({
+            const result = await streamFinalCompletion({
               apiKey,
               baseURL,
               signal: clientSignal,
-              body: {
-                model: requestedModel,
-                temperature,
-                messages: sanitizeChatMessages(opts.messages || finalMessages),
-                ...(opts.enableThinking ? { enable_thinking: true } : {}),
-              },
+              model: requestedModel,
+              temperature,
+              messages: sanitizeChatMessages(opts.messages || finalMessages),
+              enableThinking: opts.enableThinking,
+              foldReasoning: opts.foldReasoning,
+              idleMs: STREAM_IDLE_TIMEOUT_MS,
+              maxTotalMs: STREAM_MAX_TOTAL_MS,
+              send,
             });
-
-            let sawText = false;
-            let sawContent = false;
-            let lastFinishReason: string | null = null;
-            let contentBuf = '';
-            const stampStripper = createStampLeakStripper();
-            let reasoningOnlyBuf = '';
-            const iter = finalStream[Symbol.asyncIterator]();
-            const startedAt = Date.now();
-            let lastChunkAt = startedAt;
-            while (true) {
-              const remaining = streamWaitBudget({
-                startedAt,
-                lastChunkAt,
-                idleMs: STREAM_IDLE_TIMEOUT_MS,
-                maxTotalMs: STREAM_MAX_TOTAL_MS,
-              });
-              if (remaining <= 0) {
-                throw streamTimeoutError(
-                  'final completion',
-                  STREAM_IDLE_TIMEOUT_MS,
-                  STREAM_MAX_TOTAL_MS,
-                  startedAt,
-                  lastChunkAt,
-                );
-              }
-              let next;
-              try {
-                next = await withTimeout(iter.next(), remaining, 'final completion');
-              } catch (chunkErr: unknown) {
-                const msg =
-                  chunkErr instanceof Error ? chunkErr.message : String(chunkErr || 'failed');
-                if (/timed out/i.test(msg)) {
-                  throw streamTimeoutError(
-                    'final completion',
-                    STREAM_IDLE_TIMEOUT_MS,
-                    STREAM_MAX_TOTAL_MS,
-                    startedAt,
-                    lastChunkAt,
-                  );
-                }
-                throw chunkErr;
-              }
-              if (next.done) break;
-              lastChunkAt = Date.now();
-              const chunk = next.value;
-              const choice = chunk?.choices?.[0];
-              const delta = choice?.delta || {};
-              const finish_reason = choice?.finish_reason || null;
-              if (finish_reason) lastFinishReason = finish_reason;
-
-              let { content, reasoning } = splitCompletionDelta(delta, {
-                reasoningAsContent: opts.foldReasoning,
-              });
-
-              if (content) content = stampStripper.push(content);
-              if (finish_reason) {
-                const rest = stampStripper.flush();
-                if (rest) content = (content || '') + rest;
-              }
-
-              if (content) {
-                sawText = true;
-                sawContent = true;
-                contentBuf += content;
-              }
-              if (reasoning) {
-                sawText = true;
-                reasoningOnlyBuf += reasoning;
-              }
-              if (content || reasoning) {
-                send({
-                  content: content || undefined,
-                  reasoning: reasoning || undefined,
-                });
-              }
-            }
-            {
-              const rest = stampStripper.flush();
-              if (rest) {
-                sawText = true;
-                sawContent = true;
-                contentBuf += rest;
-                send({ content: rest });
-              }
-            }
             // Claim Reviewer post-audit: catch claims that slipped through to the
             // final text without tool receipts. Surface Findings; auto-correct errors.
             let auditResult: ClaimAuditResult = emptyAudit();
-            if (sawContent && autoReview) {
-              auditResult = await postAudit(contentBuf, 'audit', {
-                finishReason: lastFinishReason,
-                truncated: lastFinishReason === 'length',
+            if (result.sawContent && autoReview) {
+              auditResult = await postAudit(result.contentBuf, 'audit', {
+                finishReason: result.lastFinishReason,
+                truncated: result.lastFinishReason === 'length',
               });
             }
-            // If reasoning arrived but no content, do NOT fold server-side.
-            // The client promotes orphan reasoning → content at settle time,
-            // preserving the proper Process / answer split.
-            if (!sawContent && reasoningOnlyBuf.trim()) {
-              sawText = true;
-            }
-            return { sawText, sawContent, lastFinishReason, contentBuf, auditResult };
+            return { ...result, auditResult };
           };
 
           let finalResult = await runFinalCompletion({

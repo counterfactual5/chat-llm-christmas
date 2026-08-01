@@ -5,10 +5,10 @@
 
 import {
   CHAT_OUTPUT_CAPABILITIES_PROMPT,
-  CURSOR_WEB_CHAT_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
   activeIntegrationsPrompt,
   conversationIsolationPrompt,
+  cursorWebChatPrompt,
   isCursorStyleModel,
 } from '@/lib/models/specs';
 import { timeContextSystemPrompt } from '@/lib/chat/context/time-context';
@@ -16,6 +16,10 @@ import { REVIEWER_SYSTEM_PROMPT } from '@/lib/tools/review/claim-reviewer';
 import type { ChatSkillInput } from '@/lib/chat/server/request';
 import { formatMemoriesForSystemPrompt } from '@/lib/memories/prompt';
 import { skillPersistenceGatePrompt } from '@/lib/skills/creator';
+import {
+  memoryBehaviorPrompt,
+  productUsageGuidePrompt,
+} from '@/lib/chat/server/product-guide';
 
 export type BuildChatSystemPartsOpts = {
   model: string;
@@ -39,14 +43,17 @@ export type BuildChatSystemPartsOpts = {
 };
 
 export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
+  const skillCreatorOn = Boolean(opts.skillCreatorOn);
   const systemParts: string[] = [];
   if (isCursorStyleModel(opts.model)) {
-    systemParts.push(CURSOR_WEB_CHAT_PROMPT);
+    systemParts.push(cursorWebChatPrompt({ searchEnabled: opts.searchEnabled }));
   }
   systemParts.push(timeContextSystemPrompt());
   systemParts.push(String(opts.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT);
   systemParts.push(CHAT_OUTPUT_CAPABILITIES_PROMPT);
-  systemParts.push(skillPersistenceGatePrompt(Boolean(opts.skillCreatorOn)));
+  systemParts.push(productUsageGuidePrompt());
+  systemParts.push(skillPersistenceGatePrompt(skillCreatorOn));
+  systemParts.push(memoryBehaviorPrompt());
   if (opts.threadId) {
     systemParts.push(conversationIsolationPrompt(opts.threadId));
   }
@@ -55,6 +62,7 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
       searchEnabled: opts.searchEnabled,
       integrations: opts.authorizedIntegrations,
       googleRequestedButUnauthorized: opts.googleRequestedButUnauthorized,
+      skillCreatorOn,
     }),
   );
   if (opts.toolsGuidance) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildChatSystemParts, joinChatSystemParts } from '@/lib/chat/server/system-prompt';
+import { cursorWebChatPrompt } from '@/lib/models/specs';
 
 describe('buildChatSystemParts', () => {
   const base = {
@@ -44,6 +45,37 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('Do NOT claim diagrams cannot be rendered');
     expect(parts).toContain('Only use tools present in the API tool list');
     expect(parts).toContain('Active Skills are user-selected per conversation');
+    expect(parts).toContain('/image client command');
+  });
+
+  it('includes a product usage guide for Commands and features', () => {
+    const parts = buildChatSystemParts(base).join('\n');
+
+    expect(parts).toContain('product usage guide');
+    expect(parts).toContain('/image <prompt>');
+    expect(parts).toContain('/skill');
+    expect(parts).toContain('Request review');
+    expect(parts).toContain('Continue reply');
+    expect(parts).toContain('Add manually');
+    expect(parts).toContain('create_file');
+    expect(parts).toContain('Files — account file manager');
+    expect(parts).toContain('Memories');
+    expect(parts).toContain('Account memory behavior');
+    expect(parts).toContain('no memory-write tool');
+  });
+
+  it('lists create_file and command inventory in active capabilities', () => {
+    const parts = buildChatSystemParts({
+      ...base,
+      skillCreatorOn: false,
+      searchEnabled: false,
+      authorizedIntegrations: [],
+    }).join('\n');
+
+    expect(parts).toContain('create_file: save downloadable');
+    expect(parts).toContain('save_skill: OFF');
+    expect(parts).toContain('web_search / web_read: not enabled');
+    expect(parts).toContain('/image (generate image)');
   });
 
   it('adds review and generated-output safeguards when requested', () => {
@@ -68,6 +100,7 @@ describe('buildChatSystemParts', () => {
     });
     expect(parts.join('\n')).toContain('id=sk_1 · Demo');
     expect(parts.join('\n')).toContain('Skill Creator is ON');
+    expect(parts.join('\n')).toContain('save_skill: ON');
   });
 
   it('steers the model to ask for /skill when Skill Creator is off', () => {
@@ -78,5 +111,20 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('save_skill is NOT available');
     expect(parts).toContain('type /skill');
     expect(parts).toContain('do NOT dump the Skill as a downloadable file');
+  });
+});
+
+describe('cursorWebChatPrompt', () => {
+  it('does not advertise web_search when search is off', () => {
+    const off = cursorWebChatPrompt({ searchEnabled: false });
+    expect(off).toContain('本轮未启用网页搜索');
+    expect(off).not.toContain('公开网页资料请用 web_search');
+    expect(off).toContain('create_file');
+    expect(off).toContain('/image');
+  });
+
+  it('mentions web_search when search is on', () => {
+    const on = cursorWebChatPrompt({ searchEnabled: true });
+    expect(on).toContain('公开网页资料请用 web_search');
   });
 });

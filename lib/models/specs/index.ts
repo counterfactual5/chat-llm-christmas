@@ -19,6 +19,7 @@ export {
   DEFAULT_SYSTEM_PROMPT,
   CHAT_OUTPUT_CAPABILITIES_PROMPT,
   CURSOR_WEB_CHAT_PROMPT,
+  cursorWebChatPrompt,
   activeIntegrationsPrompt,
   conversationIsolationPrompt,
 } from '@/lib/models/specs/prompts';

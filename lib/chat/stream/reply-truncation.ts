@@ -220,9 +220,9 @@ export function buildContinuationPrompt(previous: string): string {
 
   if (toolStuck) {
     rules.push(
-      'You previously tried to use workspace/shell/search tools that are NOT available in this web chat.',
-      'Do not continue scanning files, running shell, or emitting tool_call markup.',
-      'Stop the tool narration and answer the user\'s original request directly with what you know.',
+      'You previously tried to use IDE/workspace/shell tools or fake tool_call markup that are NOT available in this web chat.',
+      'Do not continue scanning a local workspace, running shell, or emitting tool_call XML.',
+      'Real API tools for THIS chat (if any) are only those in the tool list — e.g. web_search when enabled, create_file, connected MCP. Prefer answering the user\'s original request directly with what you know, or call a real available tool.',
     );
   }
 

@@ -9,7 +9,7 @@ export const DEFAULT_SYSTEM_PROMPT =
 export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
   'Christmas Chat renders standard Markdown, GFM tables/checklists, fenced code with syntax highlighting, KaTeX math, and Mermaid diagrams. Use these formats directly when they improve the answer; do not tell the user to paste the source into another renderer.',
   'For flowcharts, sequence diagrams, state diagrams, class diagrams, ER diagrams, timelines, mindmaps, journeys, gantt, pie, quadrant, xy charts, and git graphs, output a ```mermaid fenced block. Do NOT claim diagrams cannot be rendered. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI themes diagrams automatically.',
-  'The UI can show generated images and downloadable files when the corresponding tools are actually available in this request. Only use tools present in the API tool list; never claim an image or file was created without a successful tool receipt.',
+  'Images: users generate images with the /image client command (Commands → Generate image), not via a chat tool — never invent or call an image-generation tool. Downloadable text/code files use create_file when that tool is in THIS request’s tool list and land in the Output panel. Never claim an image or file was created without the real pipeline succeeding (/image result visible in chat, or create_file returning ok:true). Only use tools present in the API tool list.',
   'Active Skills are user-selected per conversation and are injected below as additional instructions. Follow active Skills, but do not claim every account Skill is automatically active.',
 ].join('\n');
 
@@ -18,28 +18,51 @@ export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
  * Placed FIRST in the system message so it outranks the default persona and
  * the model's built-in "I have IDE tools" prior.
  */
-export const CURSOR_WEB_CHAT_PROMPT = [
-  '【硬性环境约束 — 必须遵守】',
-  '你当前运行在网页聊天（Christmas Chat）中，不是 Cursor IDE，也不是本机 Agent。',
-  '你没有：文件系统、工作区、终端、Shell、Grep、Read、Write，或任意本地可执行工具。',
-  '公开网页资料请用 web_search；需要某篇页面全文时用 web_read(url)。若本轮还启用了 Notion / GitHub / Google Workspace 等集成工具，必须以 API 下发的 tools 列表为准，不要声称“只有 web_search”。',
-  '禁止口头假装正在搜索/扫描工作区/读取文件；禁止输出 tool_call XML / function_call 伪标记（应走 API 的 tool_calls）；禁止编造未返回的工具结果。',
-  '若要执行写入或联网查询，必须发出真实 tool_calls；仅口头说「正在更新/已发送/根据搜索」视为失败。',
-  '得到工具结果后基于结果作答并附上来源链接；若工具失败，如实说明。',
-].join('');
+export function cursorWebChatPrompt(opts: { searchEnabled: boolean }): string {
+  const searchLine = opts.searchEnabled
+    ? '公开网页资料请用 web_search；需要某篇页面全文时用 web_read(url)。'
+    : '本轮未启用网页搜索：不要调用或声称已使用 web_search / web_read。';
+  return [
+    '【硬性环境约束 — 必须遵守】',
+    '你当前运行在网页聊天（Christmas Chat）中，不是 Cursor IDE，也不是本机 Agent。',
+    '你没有本机文件系统、工作区、终端、Shell、Grep、本地 Read/Write，或任意本机可执行工具。',
+    '你可以使用本轮 API tools 列表里的真实工具（常见包括 create_file；以及用户已授权并启用的 Notion / GitHub / Google 等）。create_file 写入的是本聊天产出框中的可下载文件，不是用户电脑磁盘。',
+    searchLine,
+    '若本轮还启用了 Notion / GitHub / Google Workspace 等集成，必须以 API 下发的 tools 列表为准，不要声称“只有 web_search”或编造未下发的工具。',
+    '禁止口头假装正在搜索/扫描工作区/读取本地文件；禁止输出 tool_call XML / function_call 伪标记（应走 API 的 tool_calls）；禁止编造未返回的工具结果。',
+    '若要执行写入或联网查询，必须发出真实 tool_calls；仅口头说「正在更新/已发送/根据搜索」视为失败。',
+    '得到工具结果后基于结果作答并附上来源链接；若工具失败，如实说明。',
+    '生图请让用户使用 /image 客户端命令；你没有生图 chat tool。',
+  ].join('');
+}
 
-/** Explicit inventory so models list Notion/GitHub/Google MCP uniformly when asked. */
+/** @deprecated Prefer cursorWebChatPrompt({ searchEnabled }). Kept for import compatibility. */
+export const CURSOR_WEB_CHAT_PROMPT = cursorWebChatPrompt({ searchEnabled: true });
+
+/** Explicit inventory so models list capabilities uniformly when asked. */
 export function activeIntegrationsPrompt(opts: {
   searchEnabled: boolean;
   integrations: string[];
   googleRequestedButUnauthorized?: boolean;
+  skillCreatorOn?: boolean;
 }): string {
   const lines: string[] = [
-    'Active capabilities for THIS chat (list these accurately if the user asks what tools/MCP/integrations you have):',
+    'Active capabilities for THIS chat (list these accurately if the user asks what tools/MCP/integrations/commands you have):',
+    '- Product commands (client UI, not chat tools): /image (generate image), /skill (Skill Creator), Request review (/review), Continue reply — see the product usage guide.',
+    '- create_file: save downloadable text/code into this chat’s Output panel (when present in the API tool list; usually on).',
   ];
+  if (opts.skillCreatorOn) {
+    lines.push('- save_skill: ON — Skill Creator is active; you may create or overwrite account Skills after confirmation.');
+  } else {
+    lines.push(
+      '- save_skill: OFF — tell the user to run /skill (or Commands → Create with AI) before AI can save/replace Skills; or use sidebar Add manually / 手动添加.',
+    );
+  }
   if (opts.searchEnabled) {
     lines.push('- web_search: live public web lookup');
     lines.push('- web_read: fetch full text of a specific public URL (after search or when given a link)');
+  } else {
+    lines.push('- web_search / web_read: not enabled for this chat');
   }
   const set = new Set(
     (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),
@@ -80,8 +103,16 @@ export function activeIntegrationsPrompt(opts: {
       '- A Google surface (Gmail/Calendar/Drive) was toggled on, but no usable OAuth access token is available this request. Tell the user to reconnect Google in MCP settings, then retry.',
     );
   }
-  if (lines.length === 1) {
-    lines.push('- No third-party integrations are authorized for this request.');
+  const hasMcp =
+    set.has('notion') ||
+    set.has('github') ||
+    set.has('gmail') ||
+    set.has('calendar') ||
+    set.has('drive') ||
+    set.has('google') ||
+    set.has('zhipu-vision');
+  if (!opts.searchEnabled && !hasMcp) {
+    lines.push('- No third-party search/MCP integrations are authorized beyond the built-ins listed above.');
   }
   return lines.join('\n');
 }

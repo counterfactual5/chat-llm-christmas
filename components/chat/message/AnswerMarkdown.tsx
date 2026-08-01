@@ -17,7 +17,7 @@ const KATEX_OPTIONS = {
 /** The standard answer/review-fix Markdown presentation used by the chat timeline. */
 export function AnswerMarkdown({ text, streaming }: { text: string; streaming: boolean }) {
   return (
-    <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3">
+    <div className="chat-markdown w-full text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3 [&_sup]:text-[0.7em] [&_sup_a]:text-orange-700 [&_sup_a]:no-underline dark:[&_sup_a]:text-orange-300 [&_section[data-footnotes]]:mt-6 [&_section[data-footnotes]]:border-t [&_section[data-footnotes]]:border-stone-200 [&_section[data-footnotes]]:pt-3 [&_section[data-footnotes]]:text-[13px] [&_section[data-footnotes]]:text-stone-500 dark:[&_section[data-footnotes]]:border-stone-700 dark:[&_section[data-footnotes]]:text-stone-400 [&_section[data-footnotes]_h2]:text-xs [&_section[data-footnotes]_h2]:font-semibold [&_section[data-footnotes]_h2]:uppercase [&_section[data-footnotes]_h2]:tracking-wider [&_section[data-footnotes]_h2]:text-stone-400">
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
@@ -79,6 +79,9 @@ export function AnswerMarkdown({ text, streaming }: { text: string; streaming: b
           },
           pre({ children }: any) {
             return <>{children}</>;
+          },
+          sup({ children }: any) {
+            return <sup className="ml-0.5 font-medium">{children}</sup>;
           },
         }}
       >

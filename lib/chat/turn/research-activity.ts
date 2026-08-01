@@ -389,6 +389,64 @@ export function applyResearchEvent(
     });
   }
 
+  if (kind === 'report_reset') {
+    return {
+      ...m,
+      content: '',
+      incomplete: true,
+    };
+  }
+
+  if (kind === 'report_delta') {
+    const replace =
+      typeof payload.replace === 'string' ? String(payload.replace) : null;
+    if (replace != null) {
+      return { ...m, content: replace, incomplete: true };
+    }
+    const text = String(payload.text || '');
+    if (!text) return m;
+    return {
+      ...m,
+      content: `${m.content || ''}${text}`,
+      incomplete: true,
+    };
+  }
+
+  if (kind === 'file') {
+    const id = String(payload.id || '');
+    if (!id) return m;
+    const file = {
+      id,
+      name: String(payload.name || 'research-report.md'),
+      mimeType: String(payload.mimeType || 'text/markdown'),
+      size: Number(payload.size) || 0,
+      url: String(payload.url || `local://${id}`),
+      content:
+        typeof payload.content === 'string' ? String(payload.content) : undefined,
+      createdAt: Number(payload.createdAt) || Date.now(),
+    };
+    const files = [...(m.files || [])].filter((f) => f.id !== id);
+    files.push(file);
+    const activity = ensureActivity(m);
+    if (!activity.some((s) => s.kind === 'file' && s.fileId === id)) {
+      activity.push({ id: newId('file'), kind: 'file', fileId: id });
+    }
+    return finishTool(
+      { ...m, files, activity },
+      {
+        name: 'research_write',
+        provider: 'research',
+        results: [
+          {
+            title: file.name,
+            url: '',
+            snippet: `${file.mimeType} · ${file.size} bytes`,
+          },
+        ],
+      },
+    );
+  }
+
   if (kind === 'quality') {
     const ok = Boolean(payload.ok);
     const errors = Array.isArray(payload.errors) ? payload.errors.map(String) : [];

@@ -215,6 +215,16 @@ export function buildTimelineSegments(opts: {
   );
   flushFiles();
 
+  // Research / live stream: content may sit on message.content before an
+  // activity content step exists — still show it after the process panels.
+  if (visibleContent.trim() && !segs.some((s) => s.type === 'content')) {
+    segs.push({
+      type: 'content',
+      id: `${messageId}-content-live`,
+      text: visibleContent,
+    });
+  }
+
   if (messageIsStreaming && segs.length === 0) {
     segs.push({
       type: 'process',

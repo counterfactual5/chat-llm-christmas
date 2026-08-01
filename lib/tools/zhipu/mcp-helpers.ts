@@ -101,13 +101,28 @@ export function isVercelEdgeRuntime(): boolean {
   return typeof (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime !== 'undefined';
 }
 
+function withHttps(hostOrUrl: string): string {
+  const s = hostOrUrl.trim().replace(/\/$/, '');
+  if (!s) return '';
+  return s.startsWith('http://') || s.startsWith('https://') ? s : `https://${s}`;
+}
+
 function internalProxyOrigin(): string {
-  const explicit = (process.env.CHAT_PUBLIC_URL || process.env.NEXT_PUBLIC_APP_URL || '')
-    .trim()
-    .replace(/\/$/, '');
+  // Prefer a public hostname over VERCEL_URL. Deployment URLs
+  // (*.vercel.app) are often behind Vercel Deployment Protection, which
+  // blocks Edge→self fetches with "Protected deployment" even when the
+  // custom domain (chat.llm.christmas) is open and returns our 401 JSON.
+  const explicit = withHttps(
+    process.env.CHAT_PUBLIC_URL || process.env.NEXT_PUBLIC_APP_URL || '',
+  );
   if (explicit) return explicit;
-  const vercel = (process.env.VERCEL_URL || '').trim().replace(/\/$/, '');
-  if (vercel) return vercel.startsWith('http') ? vercel : `https://${vercel}`;
+  const production = withHttps(process.env.VERCEL_PROJECT_PRODUCTION_URL || '');
+  if (production) return production;
+  if (process.env.VERCEL_ENV === 'production') {
+    return 'https://chat.llm.christmas';
+  }
+  const vercel = withHttps(process.env.VERCEL_URL || '');
+  if (vercel) return vercel;
   return 'https://chat.llm.christmas';
 }
 

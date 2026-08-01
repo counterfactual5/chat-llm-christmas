@@ -2,6 +2,7 @@
  * Top-level orchestration: the single entry point chat rendering calls to
  * turn raw model markdown into something remark-math/KaTeX can render safely.
  */
+import { promoteInlineAsciiArtToFences } from '@/lib/markdown/core/ascii-art';
 import { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
 import { hasUnclosedDisplayMath } from './detect';
 import { escapeCurrencyDollars, fixFlankingEmphasis } from './emphasis';
@@ -13,6 +14,8 @@ export function prepareChatMarkdown(content: string, opts?: { streaming?: boolea
   // Flanking first (while `$` is still raw), then escape currency for remark-math.
   out = fixFlankingEmphasis(out);
   out = escapeCurrencyDollars(out);
+  // Before remark parses: single-backtick ASCII trees lose newlines (CommonMark).
+  out = promoteInlineAsciiArtToFences(out);
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
   // rest of the message into one giant math/“quote-looking” block (even after

@@ -49,6 +49,10 @@ import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { formatFileSize } from '../panels/OutputPanel';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
+import {
+  looksLikeAsciiTree,
+  reflowCollapsedAsciiTree,
+} from '@/lib/markdown/core/ascii-art';
 import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
 import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
@@ -728,10 +732,17 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         code({ className, children, ...props }: any) {
                           // react-markdown v10 no longer passes `inline`. Block
                           // fences/indented code have a language class and/or newlines;
-                          // bare `inline` spans have neither.
+                          // bare `inline` spans have neither. ASCII trees wrapped in
+                          // single backticks often arrive flattened (CommonMark soft
+                          // breaks → spaces) — reflow and promote those to <pre>.
                           const match = /language-(\w+)/.exec(className || '');
-                          const value = String(children).replace(/\n$/, '');
-                          const isBlock = Boolean(match) || value.includes('\n');
+                          let value = String(children).replace(/\n$/, '');
+                          const treeish = looksLikeAsciiTree(value);
+                          if (treeish) value = reflowCollapsedAsciiTree(value);
+                          const isBlock =
+                            Boolean(match) ||
+                            value.includes('\n') ||
+                            (treeish && (value.match(/[├└]/g) || []).length >= 2);
                           if (isBlock && match) {
                             return <CodeBlock language={match[1]} value={value} />;
                           }

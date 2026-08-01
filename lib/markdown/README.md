@@ -1,14 +1,32 @@
-# Markdown 处理层
+# Markdown
 
-这里存放不依赖 React UI 的 Markdown 预处理和解析辅助逻辑。
+## `lib/markdown/` — 预处理（无 React）
+
+不依赖 React UI 的 Markdown 预处理和解析辅助逻辑。
 
 | Path | Responsibility |
 |------|----------------|
 | `core/` | 通用 Markdown 处理：流式软换行、整篇文档代码围栏兼容。 |
-| `math/` | 数学公式识别、规范化、流式截断保护和 KaTeX 辅助。 |
+| `math/` | 数学公式：规范化、检测、流式截断保护、强调/`$` 修复、`prepareChatMarkdown`、KaTeX DOM 辅助。公共入口 `@/lib/markdown/math`（`index.ts` barrel）。 |
 
-## 导入约定
+### 导入约定
 
 - 通用 Markdown 逻辑从 `@/lib/markdown/core/...` 导入。
 - 数学相关逻辑优先从 `@/lib/markdown/math` 公共入口导入。
-- 需要 React、主题、浏览器 DOM 或 Mermaid 的渲染组件不放在这里，而放在 `components/markdown/`。
+- 需要 React、主题、浏览器 DOM 或 Mermaid 的渲染组件放在 `components/markdown/`，不要把浏览器依赖放回本目录。
+
+## `components/markdown/` — 渲染（React）
+
+依赖 React 和浏览器环境的视觉渲染组件。
+
+| Path | Responsibility |
+|------|----------------|
+| `code/` | 代码块渲染、复制和语法高亮；识别 `mermaid` 后转交图表组件。 |
+| `diagrams/` | Mermaid 图表渲染、主题适配、源码回退和复制。 |
+
+```text
+ReactMarkdown
+  └── code/code-block.tsx
+        ├── 普通语言 → highlight.js
+        └── mermaid → diagrams/mermaid-block.tsx
+```

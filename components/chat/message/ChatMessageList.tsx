@@ -725,11 +725,22 @@ export function ChatMessageList(props: ChatMessageListProps) {
                             </td>
                           );
                         },
-                        code({ inline, className, children, ...props }: any) {
+                        code({ className, children, ...props }: any) {
+                          // react-markdown v10 no longer passes `inline`. Block
+                          // fences/indented code have a language class and/or newlines;
+                          // bare `inline` spans have neither.
                           const match = /language-(\w+)/.exec(className || '');
                           const value = String(children).replace(/\n$/, '');
-                          if (!inline && match) {
+                          const isBlock = Boolean(match) || value.includes('\n');
+                          if (isBlock && match) {
                             return <CodeBlock language={match[1]} value={value} />;
+                          }
+                          if (isBlock) {
+                            return (
+                              <pre className="my-4 overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-4 font-mono text-[13px] leading-5 text-stone-800 dark:bg-stone-900/60 dark:text-stone-300">
+                                <code {...props}>{value}</code>
+                              </pre>
+                            );
                           }
                           return (
                             <code {...props} className="rounded bg-stone-200/60 px-1.5 py-0.5 text-xs font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100">

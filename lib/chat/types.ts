@@ -129,6 +129,8 @@ export type ChatSession = {
   webSources?: WebSearchSource[];
   /** User removed inherited sources; retain only sources added by later tool runs. */
   webSourcesCleared?: boolean;
+  /** Last message id already processed by automatic memory extraction. */
+  memoryExtractCursor?: string;
 };
 
 export type SkillItem = { id: string; title: string; content: string };

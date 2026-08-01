@@ -14,6 +14,7 @@ describe('chat request parsing', () => {
       systemPrompt: '',
       referenceText: '',
       skills: [],
+      memories: [],
       conversationId: '',
       enableSearch: true,
       integrations: [],

@@ -27,6 +27,7 @@ import {
   Moon,
   LogOut,
   Key,
+  Brain,
 } from 'lucide-react';
 import { BrandMark } from '@/components/branding/BrandMark';
 import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
@@ -76,6 +77,7 @@ export type ChatSidebarProps = {
   onOpenGitHubModal: () => void;
   onOpenGoogleModal: () => void;
   onOpenFilesModal: () => void;
+  onOpenMemoriesModal: () => void;
   onOpenLoginModal: () => void;
   onSetAutoReview: (enabled: boolean) => void;
   onDisconnectAccount: () => void | Promise<void>;
@@ -110,6 +112,7 @@ export function ChatSidebar({
   onOpenGitHubModal,
   onOpenGoogleModal,
   onOpenFilesModal,
+  onOpenMemoriesModal,
   onOpenLoginModal,
   onSetAutoReview,
   onDisconnectAccount,
@@ -558,6 +561,22 @@ export function ChatSidebar({
               >
                 <FileText className="h-4 w-4 text-stone-500" />
                 <span className="font-medium">Files</span>
+              </button>
+
+              {/* Memory — account-wide durable preferences extracted from chats. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isAccountBound) {
+                    onOpenLoginModal();
+                    return;
+                  }
+                  onOpenMemoriesModal();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50 transition-colors"
+              >
+                <Brain className="h-4 w-4 text-stone-500" />
+                <span className="font-medium">Memory</span>
               </button>
             </div>
           </div>

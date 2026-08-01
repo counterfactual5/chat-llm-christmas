@@ -14,6 +14,7 @@ import {
 import { timeContextSystemPrompt } from '@/lib/chat/context/time-context';
 import { REVIEWER_SYSTEM_PROMPT } from '@/lib/tools/review/claim-reviewer';
 import type { ChatSkillInput } from '@/lib/chat/server/request';
+import { formatMemoriesForSystemPrompt } from '@/lib/memories/prompt';
 
 export type BuildChatSystemPartsOpts = {
   model: string;
@@ -24,6 +25,7 @@ export type BuildChatSystemPartsOpts = {
   googleRequestedButUnauthorized: boolean;
   toolsGuidance: string;
   skills: ChatSkillInput[];
+  memories?: Array<{ kind?: string; content?: string }>;
   requestReview: boolean;
   autoReview: boolean;
   referenceText: string;
@@ -58,6 +60,15 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
     if (!content) continue;
     systemParts.push(`Active Skill — ${title}:\n${content}`);
   }
+  const memoryBlock = formatMemoriesForSystemPrompt(
+    (opts.memories || [])
+      .map((m) => ({
+        kind: String(m?.kind || '').trim(),
+        content: String(m?.content || '').trim(),
+      }))
+      .filter((m) => m.content),
+  );
+  if (memoryBlock) systemParts.push(memoryBlock);
   if (opts.requestReview) {
     systemParts.push(
       'The user explicitly requested a claim review of the conversation. Verify each assistant turn against that turn’s own tool receipts (not a pooled bag of all tools). If a claim lacks a real tool receipt for its turn, retract it. Otherwise confirm briefly.',

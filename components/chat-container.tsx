@@ -8,6 +8,7 @@
  *  Session hydrate / persist       hooks/chat/use-session-persist.ts + lib/chat/session/persist.ts
  *  Attachments ingest / upload     hooks/chat/use-attachments.ts
  *  Skills toggle / create / delete hooks/chat/use-skills.ts
+ *  Account memories / extract      hooks/chat/use-memory-wiring.ts (+ use-memories, lib/memories/)
  *  Slash menu                      hooks/chat/use-slash.ts
  *  OAuth return query              lib/chat/account/oauth-return.ts
  *  Send / queue / resume / review   hooks/chat/use-logic.ts
@@ -53,7 +54,7 @@ import { useChatIntegrations } from '@/hooks/chat/use-integrations';
 import { useChatSessionPersist } from '@/hooks/chat/use-session-persist';
 import { useChatAttachments } from '@/hooks/chat/use-attachments';
 import { useChatSkills } from '@/hooks/chat/use-skills';
-import { useChatMemories } from '@/hooks/chat/use-memories';
+import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
@@ -97,7 +98,6 @@ import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import { FileManagerModal } from '@/components/files/FileManagerModal';
 import { MemoryManagerModal } from '@/components/memories/MemoryManagerModal';
-import { scheduleMemoryExtraction } from '@/lib/memories/scheduler';
 import {
   DEFAULT_SYSTEM_PROMPT,
   estimateTokensFromText,
@@ -176,7 +176,6 @@ export default function ChatContainer() {
   const [imagePreviewSrc, setImagePreviewSrc] = useState<string | null>(null);
   const [filePreview, setFilePreview] = useState<FilePreviewPayload | null>(null);
   const [filesManagerOpen, setFilesManagerOpen] = useState(false);
-  const [memoriesManagerOpen, setMemoriesManagerOpen] = useState(false);
 
   // Settings State
   const [isListening, setIsListening] = useState(false);
@@ -351,17 +350,25 @@ export default function ChatContainer() {
   const {
     memories,
     setMemories,
-    loading: memoriesLoading,
-    error: memoriesError,
-    saving: memoriesSaving,
+    memoriesLoading,
+    memoriesError,
+    memoriesSaving,
     fetchMemories,
-    mergeSaved: mergeSavedMemories,
     updateMemory,
     deleteMemory,
     exportMarkdown,
     importMarkdown,
-    enabledMemoriesPayload,
-  } = useChatMemories();
+    memoriesPayload,
+    memoriesManagerOpen,
+    openMemoriesModal,
+    closeMemoriesModal,
+    onReplySettled: onMemoryReplySettled,
+  } = useMemoryWiring({
+    setSessions,
+    getSession: (id) => sessionsRef.current.find((s) => s.id === id),
+    selectedModel,
+    isAccountBound,
+  });
 
   skillsRef.current = skills;
 
@@ -1065,20 +1072,7 @@ export default function ChatContainer() {
           if (unsetWebSourcesCleared) setWebSourcesCleared(false);
           if (openContextPanel) queueMicrotask(() => setIsContextPanelOpen(true));
         },
-        onReplySettled: ({ sessionId: settledId, requestReview: wasReview, incomplete }) => {
-          scheduleMemoryExtraction(
-            {
-              getSession: (id) => sessionsRef.current.find((s) => s.id === id),
-              getSelectedModel: () => selectedModel,
-              getExistingMemories: () => enabledMemoriesPayload(),
-              isAccountBound: () => Boolean(isAccountBound),
-              setMemoryExtractCursor,
-              onMemoriesSaved: mergeSavedMemories,
-            },
-            settledId,
-            { requestReview: wasReview, incomplete },
-          );
-        },
+        onReplySettled: onMemoryReplySettled,
       },
       sessionId,
       apiMessages,
@@ -1576,21 +1570,6 @@ export default function ChatContainer() {
       .map((s) => ({ id: s.id, title: s.title, content: s.content }));
   };
 
-  const setMemoryExtractCursor = useCallback((sessionId: string, messageId: string) => {
-    setSessions((prev) =>
-      prev.map((session) =>
-        session.id === sessionId
-          ? { ...session, memoryExtractCursor: messageId, updatedAt: Date.now() }
-          : session,
-      ),
-    );
-  }, []);
-
-  const memoriesPayload = useCallback(
-    () => enabledMemoriesPayload(),
-    [enabledMemoriesPayload],
-  );
-
 
   const exportChat = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1801,7 +1780,7 @@ export default function ChatContainer() {
         onOpenGitHubModal={openGitHubModal}
         onOpenGoogleModal={openGoogleModal}
         onOpenFilesModal={() => setFilesManagerOpen(true)}
-        onOpenMemoriesModal={() => setMemoriesManagerOpen(true)}
+        onOpenMemoriesModal={openMemoriesModal}
         onOpenLoginModal={openLoginModal}
         onSetAutoReview={setActiveAutoReview}
         onDisconnectAccount={disconnectAccount}
@@ -2018,7 +1997,7 @@ export default function ChatContainer() {
 
       <MemoryManagerModal
         open={memoriesManagerOpen}
-        onClose={() => setMemoriesManagerOpen(false)}
+        onClose={closeMemoriesModal}
         memories={memories}
         loading={memoriesLoading}
         saving={memoriesSaving}

@@ -1,6 +1,6 @@
-import { useState } from 'react';
 'use client';
 
+import { useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';

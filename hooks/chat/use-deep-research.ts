@@ -284,6 +284,25 @@ export function useDeepResearch(opts: {
               payload: { message: finalJob.error || msg },
             }),
           );
+        } else if (
+          finalJob &&
+          ['queued', 'planning', 'searching', 'synthesizing', 'verifying', 'writing'].includes(
+            String(finalJob.status),
+          )
+        ) {
+          // Proxies often close long SSE without throwing on the client. The job
+          // is still running (e.g. Verify done → Write) — reattach instead of
+          // stamping a fake "Reply was interrupted".
+          setError(null);
+          patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+            ...m,
+            incomplete: false,
+            truncationReason: undefined,
+            research: m.research
+              ? { ...m.research, status: String(finalJob.status) }
+              : m.research,
+          }));
+          reattachAfterDrop = true;
         }
       } catch (err: unknown) {
         if (catchUpTimer) {

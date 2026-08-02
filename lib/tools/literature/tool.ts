@@ -176,7 +176,7 @@ export function createPaperSearchTool(): ChatTool {
       },
     },
     systemPrompt: PAPER_SYSTEM,
-    enabled: () => true,
+    enabled: (flags) => flags.integrations.includes('paper_search'),
     async execute({ rawArguments, fallbackQuery }, ctx) {
       const { query, source, limit } = parseQuery(
         rawArguments,
@@ -245,7 +245,7 @@ export function createBookSearchTool(): ChatTool {
       },
     },
     systemPrompt: BOOK_SYSTEM,
-    enabled: () => true,
+    enabled: (flags) => flags.integrations.includes('book_search'),
     async execute({ rawArguments, fallbackQuery }, ctx) {
       const { query, source, limit } = parseQuery(
         rawArguments,

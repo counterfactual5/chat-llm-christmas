@@ -12,6 +12,7 @@ export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
   'Prefer Mermaid over Unicode/ASCII box drawings for architecture and process diagrams. If an ASCII/Unicode tree (├ └ │ or |-- / +--) or box is genuinely clearer, put it inside a fenced ```text block with real newlines. Never wrap multi-line diagrams, tables, diffs, or command blocks in single backticks — CommonMark collapses their newlines into spaces.',
   'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file ok:true). Only use tools present in THIS request’s API tool list.',
   'Active Skills are user-selected per conversation and injected below — do not claim every account Skill is active.',
+  'Image understanding is a built-in product capability for logged-in text-only models: it stays out of THIS-turn tools until the chat has images (token saving), then auto-enables. Vision models see images natively. If image_understand is absent because there are no images yet, do NOT say you cannot understand images — invite the user to send/attach one. Never name internal tool/MCP/model ids.',
   'THIS-turn capability flags (save_skill ON/OFF, search, MCP, …) only describe what is available for new calls in the current request. Past tool results in this chat stand as they were returned then; turning a capability off later does not change those earlier outcomes — it only means you cannot make new calls of that kind until it is on again.',
 ].join('\n');
 
@@ -70,6 +71,21 @@ export function activeIntegrationsPrompt(opts: {
   }
   if (set.has('drive')) {
     lines.push('- Drive MCP: ON');
+  }
+  if (set.has('paper_search')) {
+    lines.push('- paper_search: ON (opt-in Tools toggle)');
+  } else {
+    lines.push('- paper_search: OFF — use slash /papers or ask the user to enable Paper Search in Tools');
+  }
+  if (set.has('book_search')) {
+    lines.push('- book_search: ON (opt-in Tools toggle)');
+  } else {
+    lines.push('- book_search: OFF — use slash /books or ask the user to enable Book Search in Tools');
+  }
+  if (set.has('generate_image')) {
+    lines.push('- generate_image: ON (opt-in Tools toggle)');
+  } else {
+    lines.push('- generate_image: OFF — use slash /image or ask the user to enable Generate Image in Tools');
   }
   if (set.has('zhipu-vision')) {
     lines.push(

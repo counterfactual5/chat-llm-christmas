@@ -56,7 +56,7 @@ export function createGenerateImageTool(): ChatTool {
       },
     },
     systemPrompt: SYSTEM_PROMPT,
-    enabled: () => true,
+    enabled: (flags) => flags.integrations.includes('generate_image'),
     async execute({ rawArguments, fallbackQuery }, ctx) {
       const prompt = parsePrompt(rawArguments, fallbackQuery || ctx.userAsk);
       if (!prompt) {

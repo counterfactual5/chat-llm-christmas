@@ -22,7 +22,7 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('web|literature|mixed');
     expect(text).toContain('image_understand');
     expect(text).toContain('Notion');
-    expect(text).toContain('zhipu-vision');
+    expect(text).toContain('OPT-IN Tools toggles');
     expect(text).toContain('not a dedicated finance/market data feed');
     expect(text).toContain('NOT product features');
     expect(text).toContain('[ACTIVE]');
@@ -35,9 +35,9 @@ describe('productUsageGuideDetailPrompt', () => {
   it('expands command and UI details', () => {
     const text = productUsageGuideDetailPrompt();
     expect(text).toContain('detailed product guide');
-    expect(text).toContain('generate_image chat tool');
-    expect(text).toContain('Sidebar Tools lists built-in always-on tools');
-    expect(text).toContain('Paper Search / Book Search / Generate Image');
+    expect(text).toContain('generate_image chat tool is opt-in');
+    expect(text).toContain('Sidebar Tools: always-on Web Search');
+    expect(text).toContain('opt-in toggles (default OFF)');
     expect(text).toContain('GitHub MCP is enabled for this chat, it is the primary path');
     expect(text).toContain('generic webpage reading is fallback only');
     expect(text).toContain('no first-class finance');

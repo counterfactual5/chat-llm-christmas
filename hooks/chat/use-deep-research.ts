@@ -106,6 +106,24 @@ export function useDeepResearch(opts: {
     return j;
   }, []);
 
+  /**
+   * Stream drops usually coincide with network blips — a single failed status
+   * probe must not decide the job's fate. Retry briefly before giving up.
+   */
+  const refreshJobWithRetry = useCallback(
+    async (jobId: string, attempts = 2): Promise<ResearchJob | null> => {
+      for (let i = 0; i < attempts; i++) {
+        const j = await refreshJob(jobId).catch(() => null);
+        if (j) return j;
+        if (i < attempts - 1) {
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+      }
+      return null;
+    },
+    [refreshJob],
+  );
+
   const listen = useCallback(
     async (
       jobId: string,
@@ -150,6 +168,10 @@ export function useDeepResearch(opts: {
           ...rebuilt,
           id: m.id,
           timestamp: m.timestamp || rebuilt.timestamp,
+          research:
+            rebuilt.research && !rebuilt.research.query && m.research?.query
+              ? { ...rebuilt.research, query: m.research.query, mode: m.research.mode }
+              : rebuilt.research,
         }));
         const st = String(rebuilt.research?.status || '');
         if (
@@ -270,7 +292,7 @@ export function useDeepResearch(opts: {
         flush();
         commitCatchUp();
 
-        const finalJob = await refreshJob(jobId).catch(() => null);
+        const finalJob = await refreshJobWithRetry(jobId);
         if (finalJob?.status === 'done' && finalJob.reportMarkdown) {
           patchAssistant(setSessions, sessionId, assistantId, (m) =>
             withResearchReport(m, finalJob.reportMarkdown || '', finalJob.reportFile),
@@ -319,7 +341,7 @@ export function useDeepResearch(opts: {
         }
         // Stream drop ≠ job failure — server may still be running. Re-check
         // and reattach instead of falsely showing "Reply was interrupted".
-        const remote = await refreshJob(jobId).catch(() => null);
+        const remote = await refreshJobWithRetry(jobId);
         const running = new Set([
           'queued',
           'planning',
@@ -369,7 +391,16 @@ export function useDeepResearch(opts: {
         if (catchUpTimer) clearTimeout(catchUpTimer);
         if (reattachAfterDrop) {
           // Job still running — reconnect SSE without clearing the busy state.
-          void listen(jobId, sessionId, assistantId);
+          // Defer UI until catch-up: the replay starts from event 0, and applying
+          // it on top of the live timeline would duplicate stages/tool runs.
+          // Small delay avoids hammering a proxy that closes SSE immediately.
+          setTimeout(() => {
+            if (activeRef.current?.jobId !== jobId) return;
+            void listen(jobId, sessionId, assistantId, {
+              deferUiUntilCatchUp: true,
+              seed: opts?.seed,
+            });
+          }, 800);
           return;
         }
         setBusy(false);
@@ -486,7 +517,9 @@ export function useDeepResearch(opts: {
           model: startOpts.model,
         };
         setJob(created);
-        void listen(jobId, sessionId, assistantId);
+        void listen(jobId, sessionId, assistantId, {
+          seed: { query, mode: startOpts.mode },
+        });
         return { ...created, assistantId };
       } catch (err: unknown) {
         setBusy(false);
@@ -602,6 +635,8 @@ export function useDeepResearch(opts: {
         method: 'POST',
       });
       stopStream();
+      // Also blocks the delayed SSE reconnect scheduled after a stream drop.
+      activeRef.current = null;
       if (active) {
         patchAssistant(setSessions, active.sessionId, active.assistantId, (m) =>
           applyResearchEvent(m, {
@@ -619,7 +654,14 @@ export function useDeepResearch(opts: {
     }
   }, [endLoading, job?.jobId, refreshJob, setSessions, stopStream]);
 
-  useEffect(() => () => stopStream(), [stopStream]);
+  useEffect(
+    () => () => {
+      stopStream();
+      // Prevent the delayed post-drop reconnect from firing after unmount.
+      activeRef.current = null;
+    },
+    [stopStream],
+  );
 
   return {
     mode,

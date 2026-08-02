@@ -520,6 +520,26 @@ export default function ChatContainer() {
       prev.map((s) => (s.id === activeSessionId ? { ...s, autoReview: v } : s)),
     );
   };
+  // Opt-in model tools (default OFF) — slash /papers|/books|/image always work.
+  const paperSearchEnabled = activeMcpIds.includes('paper_search');
+  const bookSearchEnabled = activeMcpIds.includes('book_search');
+  const generateImageEnabled = activeMcpIds.includes('generate_image');
+  const setOptionalBuiltinTool = (
+    id: 'paper_search' | 'book_search' | 'generate_image',
+    enabled: boolean,
+  ) => {
+    if (enabled && !isAccountBound) {
+      openLoginModal();
+      return;
+    }
+    setActiveMcpIds((prev) =>
+      enabled
+        ? prev.includes(id)
+          ? prev
+          : [...prev, id]
+        : prev.filter((x) => x !== id),
+    );
+  };
   const webSources = activeSession?.webSources || [];
   const userUploadReferences = useMemo(() => {
     const fromThread = collectUserUploadsFromMessages(messages);
@@ -1735,9 +1755,11 @@ export default function ChatContainer() {
         let sessionChanged = false;
         const messages = s.messages.map((m) => {
           if (m.role !== 'assistant') return m;
+          // Do not require m.incomplete: the SSE-drop reattach path clears the
+          // flag while the job keeps running; a refresh in that window must not
+          // stamp the still-running research tools as interrupted.
           const researchActive =
             Boolean(m.research?.jobId) &&
-            m.incomplete &&
             !['done', 'failed', 'cancelled'].includes(String(m.research?.status || ''));
           if (researchActive) return m;
           const toolsNeedClose = (m.toolRuns || []).some((r) => r.status === 'start');
@@ -2129,6 +2151,12 @@ export default function ChatContainer() {
         onOpenMemoriesModal={openMemoriesModal}
         onOpenLoginModal={openLoginModal}
         onSetAutoReview={setActiveAutoReview}
+        paperSearchEnabled={paperSearchEnabled}
+        bookSearchEnabled={bookSearchEnabled}
+        generateImageEnabled={generateImageEnabled}
+        onSetPaperSearch={(v) => setOptionalBuiltinTool('paper_search', v)}
+        onSetBookSearch={(v) => setOptionalBuiltinTool('book_search', v)}
+        onSetGenerateImage={(v) => setOptionalBuiltinTool('generate_image', v)}
         onDisconnectAccount={disconnectAccount}
       />
 
@@ -2284,6 +2312,12 @@ export default function ChatContainer() {
                 isAssistantError={isAssistantError}
                 activeAutoReview={activeAutoReview}
                 setActiveAutoReview={setActiveAutoReview}
+                paperSearchEnabled={paperSearchEnabled}
+                bookSearchEnabled={bookSearchEnabled}
+                generateImageEnabled={generateImageEnabled}
+                setPaperSearchEnabled={(v) => setOptionalBuiltinTool('paper_search', v)}
+                setBookSearchEnabled={(v) => setOptionalBuiltinTool('book_search', v)}
+                setGenerateImageEnabled={(v) => setOptionalBuiltinTool('generate_image', v)}
                 modelSupportsVision={Boolean(selectedSpec?.vision)}
                 notionStatus={notionStatus}
                 githubStatus={githubStatus}

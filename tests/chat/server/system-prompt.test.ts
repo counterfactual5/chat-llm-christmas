@@ -66,7 +66,7 @@ describe('buildChatSystemParts', () => {
       expandProductGuide: true,
     }).join('\n');
     expect(parts).toContain('detailed product guide');
-    expect(parts).toContain('CLIENT command');
+    expect(parts).toContain('always-available slash command');
   });
 
   it('lists THIS-turn capability flags compactly', () => {

@@ -12,6 +12,7 @@ import {
   stripFakeToolMarkup,
 } from '@/lib/chat/message/tool-tags';
 import { normalizeGoogleIntegrations } from '@/lib/integrations/google/services';
+import { isOptionalBuiltinToolId } from '@/lib/tools/optional-builtins';
 import {
   withAppendedAssistantContent,
   withAppendedAssistantGeneratedFile,
@@ -92,6 +93,7 @@ export async function streamChatResponse(
     if (id === 'gmail' || id === 'calendar' || id === 'drive') return googleConnected;
     // No OAuth — server authorizes via bound CPA key.
     if (id === 'zhipu-vision') return true;
+    if (isOptionalBuiltinToolId(id)) return true;
     return false;
   });
 

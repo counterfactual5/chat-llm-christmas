@@ -114,6 +114,12 @@ export {
 
 export { createGenerateImageTool } from '@/lib/tools/image-generate/tool';
 
+export {
+  OPTIONAL_BUILTIN_TOOL_IDS,
+  isOptionalBuiltinToolId,
+  type OptionalBuiltinToolId,
+} from '@/lib/tools/optional-builtins';
+
 export { createNotionMcpTools } from '@/lib/mcp/notion/tools';
 export { createGitHubMcpTools } from '@/lib/mcp/github/tools';
 export { createGoogleTools, createGoogleMcpTools } from '@/lib/mcp/google/tools';

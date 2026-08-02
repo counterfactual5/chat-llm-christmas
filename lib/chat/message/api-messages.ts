@@ -187,7 +187,11 @@ export function ingestedToMessageImages(
   items: IngestedAttachment[],
 ): NonNullable<Message['images']> {
   return items
-    .filter((a) => a.dataUrl || a.fileId || a.previewUrl)
+    .filter(
+      (a) =>
+        (a.type?.startsWith('image/') || a.dataUrl?.startsWith('data:image')) &&
+        (a.dataUrl || a.fileId || a.previewUrl),
+    )
     .map((a) => ({
       url: a.fileId
         ? `/api/files/${encodeURIComponent(a.fileId)}`

@@ -6,9 +6,11 @@ import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 
 export function attachmentImageSrc(
-  a: Pick<IngestedAttachment, 'previewUrl' | 'dataUrl' | 'fileId'>,
+  a: Pick<IngestedAttachment, 'previewUrl' | 'dataUrl' | 'fileId' | 'type'>,
 ): string | undefined {
-  if (a.fileId) {
+  // Only resolve fileId → /api/files for actual images. PDFs/docs also get fileIds
+  // after direct upload and must not be treated as vision thumbs.
+  if (a.fileId && (!a.type || a.type.startsWith('image/'))) {
     return `/api/files/${encodeURIComponent(a.fileId)}`;
   }
   return a.previewUrl || a.dataUrl;
@@ -16,8 +18,9 @@ export function attachmentImageSrc(
 
 export function isImageAttachment(a: IngestedAttachment): boolean {
   if (a.type.startsWith('image/')) return true;
-  const src = attachmentImageSrc(a);
-  return Boolean(src && (src.startsWith('data:image') || a.previewUrl || a.fileId));
+  // Legacy/offline: data:image without a reliable mime type.
+  if (a.dataUrl?.startsWith('data:image')) return true;
+  return false;
 }
 
 type AttachmentImageThumbProps = {

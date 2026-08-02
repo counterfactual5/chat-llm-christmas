@@ -49,12 +49,16 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             mime: a.type,
           });
           const fileId = String(uploaded.id);
+          const isImage = a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
           patch(a.id, (x) => ({
             ...x,
             uploading: false,
             uploadError: false,
             fileId,
-            previewUrl: `/api/files/${encodeURIComponent(fileId)}`,
+            // Image thumbs may use /api/files/<id>; docs keep extracted text only.
+            previewUrl: isImage
+              ? `/api/files/${encodeURIComponent(fileId)}`
+              : x.previewUrl,
             uploadBlob: undefined,
           }));
         } catch (err: any) {
@@ -63,14 +67,24 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             /too large|FUNCTION_PAYLOAD_TOO_LARGE|payload too large|FILE_TOO_LARGE|413/i.test(
               msg,
             );
+          const isImage =
+            a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
           uploadErrors.push(
             `${a.name}: ${
               payloadTooLarge
-                ? 'Image too large for upload (max ~8MB after compress / 20MB hard limit)'
+                ? isImage
+                  ? 'File too large for upload (max ~8MB after compress / 20MB hard limit)'
+                  : 'File too large for upload (max 20MB)'
                 : msg
             }`,
           );
-          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          // Images: hard fail (can't chat vision without bytes).
+          // Docs/PDFs: soft warn — extracted text still usable for chat.
+          patch(a.id, (x) =>
+            isImage
+              ? { ...x, uploading: false, uploadError: true }
+              : { ...x, uploading: false, uploadError: false, uploadBlob: undefined },
+          );
         }
       }
       const allErrors = [...errors, ...uploadErrors];

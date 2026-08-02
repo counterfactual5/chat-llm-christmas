@@ -149,7 +149,7 @@ async function uploadViaVercelProxy(opts: {
     );
   throw new Error(
     payloadTooLarge
-      ? 'Image too large for upload proxy (enable direct upload / compress further)'
+      ? 'File too large for upload proxy (enable direct upload / compress further)'
       : typeof data?.error === 'string'
         ? data.error
         : `Upload failed (HTTP ${res.status})`,

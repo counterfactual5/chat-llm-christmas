@@ -60,14 +60,16 @@ export function resolvePendingAttachments(
         (a) => isImageAttachment(a) && (a.dataUrl || a.fileId),
       )
     : isActiveSession
-      ? attachments.filter((a) => a.dataUrl || a.fileId)
+      ? attachments.filter(
+          (a) => isImageAttachment(a) && (a.dataUrl || a.fileId),
+        )
       : [];
   const pendingTexts = resendAttachments
-    ? resendAttachments.filter((a) => a.text)
+    ? resendAttachments.filter((a) => Boolean(a.text) && !isImageAttachment(a))
     : baseMessagesOverride
       ? []
       : isActiveSession
-        ? attachments.filter((a) => a.text)
+        ? attachments.filter((a) => Boolean(a.text) && !isImageAttachment(a))
         : [];
 
   if (
@@ -83,7 +85,9 @@ export function resolvePendingAttachments(
   if (uploadChecks.some((a) => a.uploading)) {
     return { ok: false, error: 'upload_in_progress' };
   }
-  if (uploadChecks.some((a) => a.uploadError)) {
+  // Only images hard-block on upload failure (vision needs the stored file).
+  // Docs/PDFs keep extracted text and can still send if binary upload fails.
+  if (uploadChecks.some((a) => a.uploadError && isImageAttachment(a))) {
     return { ok: false, error: 'upload_failed' };
   }
 
@@ -103,9 +107,12 @@ export function assembleUserContent(
 ): string {
   let fullContent = textToSend.trim();
   if (pendingTexts.length > 0) {
-    const contextParts = pendingTexts.map(
-      (a) => `[Attached File: ${a.name}]\n${a.text!.trim()}`,
-    );
+    const contextParts = pendingTexts.map((a) => {
+      const stored = a.fileId
+        ? ` (stored fileId: ${a.fileId})`
+        : '';
+      return `[Attached File: ${a.name}]${stored}\n${a.text!.trim()}`;
+    });
     fullContent =
       contextParts.join('\n\n') + (fullContent ? `\n\n---\n\n${fullContent}` : '');
   }

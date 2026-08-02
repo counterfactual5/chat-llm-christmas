@@ -28,6 +28,7 @@ import {
   Globe,
   Send,
   Square,
+  Loader2,
 } from 'lucide-react';
 import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
 import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
@@ -347,10 +348,23 @@ export function ChatComposer(props: ChatComposerProps) {
             ) : (
               <div
                 key={a.id}
-                className="group flex max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white px-2 py-1.5 text-xs shadow-sm dark:border-stone-700 dark:bg-stone-900"
+                className={cn(
+                  'group flex max-w-full items-center gap-2 rounded-xl border bg-white px-2 py-1.5 text-xs shadow-sm dark:bg-stone-900',
+                  a.uploading
+                    ? 'border-stone-300 opacity-80 dark:border-stone-600'
+                    : 'border-stone-200 dark:border-stone-700',
+                )}
+                title={a.uploading ? 'Uploading…' : a.name}
               >
-                <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                {a.uploading ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-stone-400" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                )}
                 <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
+                {a.fileId && !a.uploading && (
+                  <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400">✓</span>
+                )}
                 <button
                   type="button"
                   onClick={() => removeAttachment(a.id)}

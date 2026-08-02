@@ -72,10 +72,41 @@ describe('attachments', () => {
     ).toBe('[Attached File: a.txt]\nalpha\n\n---\n\nplease summarize');
 
     expect(
+      assembleUserContent('summarize', [
+        att({ id: '1b', name: 'a.pdf', type: 'application/pdf', text: 'pdf body', fileId: 'fid/pdf' }),
+      ]),
+    ).toBe(
+      '[Attached File: a.pdf] (stored fileId: fid/pdf)\npdf body\n\n---\n\nsummarize',
+    );
+
+    expect(
       messageImagesFromAttachments([
         att({ id: '2', name: 'x.png', type: 'image/png', fileId: 'fid/1' }),
       ])[0].url,
     ).toBe('/api/files/fid%2F1');
+  });
+
+  it('does not treat uploaded PDFs as vision images', () => {
+    const pdf = att({
+      id: 'p',
+      name: 'doc.pdf',
+      type: 'application/pdf',
+      text: 'hello',
+      fileId: 'fid/pdf',
+    });
+    const resolved = resolvePendingAttachments({
+      textToSend: 'hi',
+      attachments: [pdf],
+      isActiveSession: true,
+      vision: false,
+      zhipuVisionOn: false,
+      isLoading: false,
+    });
+    expect(resolved).toMatchObject({
+      ok: true,
+      pendingImages: [],
+      pendingTexts: [expect.objectContaining({ id: 'p' })],
+    });
   });
 
   it('gates vision / upload / empty sends', () => {

@@ -228,9 +228,9 @@ export function getToolRunLabelKey(
 }
 
 /**
- * "Fetching results…" belongs under search-like tools that return hit lists.
- * Research plan/synth/verify/write (and reads/writes/image tools) only spin the
- * status label — they must not show a perpetual "Fetching results…" subtitle.
+ * "Fetching results…" only for tools that actually pull hit lists.
+ * Research Plan / Synthesize / Verify / Write share status:"start" with
+ * searches but must never show this subtitle.
  */
 export function toolRunShowsFetchingResults(
   classification: ToolRunClassification,
@@ -240,8 +240,8 @@ export function toolRunShowsFetchingResults(
     classification.isResearchSynthesize ||
     classification.isResearchVerify ||
     classification.isResearchWrite ||
-    classification.isPaperRead ||
     classification.isWebRead ||
+    classification.isPaperRead ||
     classification.isGenerateImage ||
     classification.isCreateFile ||
     classification.isSaveSkill ||
@@ -254,5 +254,19 @@ export function toolRunShowsFetchingResults(
   ) {
     return false;
   }
+  // Explicit search-shaped tools (including research mixed/academic lanes).
+  if (
+    classification.isPaperSearch ||
+    classification.isBookSearch ||
+    classification.isResearchSources ||
+    classification.isResearchMixedSearch ||
+    classification.isResearchAcademicSearch ||
+    classification.isNotion ||
+    classification.isGitHub ||
+    classification.isGoogle
+  ) {
+    return true;
+  }
+  // Remaining in-flight default is web_search.
   return true;
 }

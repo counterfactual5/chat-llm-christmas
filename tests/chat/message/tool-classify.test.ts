@@ -155,24 +155,25 @@ describe('getToolRunLabelKey', () => {
 });
 
 describe('toolRunShowsFetchingResults', () => {
-  it('hides the subtitle for research plan / write stages', () => {
-    expect(
-      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_plan' })),
-    ).toBe(false);
-    expect(
-      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_synthesize' })),
-    ).toBe(false);
-    expect(
-      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_verify' })),
-    ).toBe(false);
-    expect(
-      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_write' })),
-    ).toBe(false);
+  it('hides the subtitle for research plan / synthesize / verify / write', () => {
+    for (const name of [
+      'research_plan',
+      'research_synthesize',
+      'research_verify',
+      'research_write',
+    ]) {
+      expect(toolRunShowsFetchingResults(classifyToolRun({ name }))).toBe(false);
+    }
   });
 
-  it('keeps the subtitle for web / paper / book search', () => {
+  it('keeps the subtitle for web / paper / book / mixed search', () => {
     expect(
       toolRunShowsFetchingResults(classifyToolRun({ name: 'web_search' })),
+    ).toBe(true);
+    expect(
+      toolRunShowsFetchingResults(
+        classifyToolRun({ name: 'web_search', provider: 'openalex+zhipu' }),
+      ),
     ).toBe(true);
     expect(
       toolRunShowsFetchingResults(classifyToolRun({ name: 'research_sources' })),

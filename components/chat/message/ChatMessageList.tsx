@@ -603,7 +603,12 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       </button>
                       {expanded && (
                         <div className="space-y-1 pb-1 pl-5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
-                          {searching && run.query ? (
+                          {/* Query already sits on the status line for research
+                              stages / reads — don't repeat it as a subtitle. */}
+                          {searching &&
+                          run.query &&
+                          !showQueryInline &&
+                          toolRunShowsFetchingResults(classification) ? (
                             <div className="truncate font-mono text-[11px] opacity-80">
                               {run.query}
                             </div>

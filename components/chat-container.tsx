@@ -71,6 +71,7 @@ import {
   type ResearchSourcesHint,
 } from '@/lib/chat/turn/research-command';
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
+import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   clearOAuthReturnQuery,
@@ -1355,6 +1356,8 @@ export default function ChatContainer() {
     editUserMessage,
     cancelEditMessage,
     saveEditedMessage,
+    runLiteratureSearch,
+    runBookDownload,
     stopGenerating,
     handleSubmit,
     loadingBySession,
@@ -1639,6 +1642,42 @@ export default function ChatContainer() {
         });
         return;
       }
+
+      // Same as composer: edit/resend of /papers|/books must not fall through to chat.
+      const literatureCmd = parseLiteratureCommand(content);
+      if (literatureCmd) {
+        if (isActiveLoading || deepResearch.busy) {
+          stopOrCancel();
+        }
+        const sessionMsgs =
+          sessionsRef.current.find((s) => s.id === activeSessionId)?.messages ||
+          messages;
+        const index = sessionMsgs.findIndex((m) => m.id === messageId);
+        if (index < 0) return;
+        const priorMessages = sessionMsgs.slice(0, index);
+        setEditingMessageId(null);
+        setEditingMessageContent('');
+        setEditingMessageAttachments([]);
+        if (literatureCmd.action === 'download') {
+          await runBookDownload(literatureCmd.identifier, {
+            sessionId: activeSessionId,
+            baseMessages: priorMessages,
+          });
+          return;
+        }
+        await runLiteratureSearch(literatureCmd.kind, literatureCmd.query, {
+          sessionId: activeSessionId,
+          baseMessages: priorMessages,
+          source: 'source' in literatureCmd ? literatureCmd.source : undefined,
+          action: literatureCmd.action || 'search',
+          paperId:
+            literatureCmd.kind === 'papers' && 'paperId' in literatureCmd
+              ? literatureCmd.paperId
+              : undefined,
+        });
+        return;
+      }
+
       await saveEditedMessage(messageId);
     },
     [
@@ -1651,6 +1690,8 @@ export default function ChatContainer() {
       startResearchTurn,
       saveEditedMessage,
       requestClaimReview,
+      runLiteratureSearch,
+      runBookDownload,
       setSessions,
       setEditingMessageId,
       setEditingMessageContent,

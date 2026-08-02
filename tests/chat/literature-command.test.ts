@@ -69,6 +69,15 @@ describe('parseLiteratureCommand', () => {
     });
   });
 
+  it('accepts fullwidth slash prefixes (common after edit/paste)', () => {
+    expect(parseLiteratureCommand('／books 毛泽东选集')).toEqual({
+      kind: 'books',
+      action: 'search',
+      query: '毛泽东选集',
+      source: 'auto',
+    });
+  });
+
   it('parses /books sources and download', () => {
     expect(parseLiteratureCommand('/books deep learning')).toEqual({
       kind: 'books',

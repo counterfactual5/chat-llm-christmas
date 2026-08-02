@@ -102,7 +102,11 @@ export function normalizeLiteratureQuery(raw: string): string {
 }
 
 export function parseLiteratureCommand(text: string): LiteratureCommand | null {
-  const raw = text.trim();
+  // Normalize fullwidth slash and stray whitespace from edit/retry paths.
+  const raw = String(text || '')
+    .trim()
+    .replace(/^[／⁄]/, '/')
+    .replace(/^\s*\/\s*/, '/');
   const download = raw.match(BOOKS_DOWNLOAD_RE);
   if (download?.[1]?.trim()) {
     return { kind: 'books', action: 'download', identifier: download[1].trim() };

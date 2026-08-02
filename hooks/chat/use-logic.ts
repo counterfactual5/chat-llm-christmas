@@ -968,6 +968,31 @@ export function useChatLogic(props: UseChatLogicProps) {
       return;
     }
 
+    // /papers /books must not fall through to ordinary chat (model cannot run them).
+    const literatureCmd = parseLiteratureCommand(lastUser.content);
+    if (literatureCmd) {
+      if (literatureCmd.action === 'download') {
+        await runBookDownload(literatureCmd.identifier, {
+          baseMessages: prior,
+          skipDuplicateUser: true,
+          sessionId,
+        });
+        return;
+      }
+      await runLiteratureSearch(literatureCmd.kind, literatureCmd.query, {
+        baseMessages: prior,
+        skipDuplicateUser: true,
+        sessionId,
+        source: 'source' in literatureCmd ? literatureCmd.source : undefined,
+        action: literatureCmd.action || 'search',
+        paperId:
+          literatureCmd.kind === 'papers' && 'paperId' in literatureCmd
+            ? literatureCmd.paperId
+            : undefined,
+      });
+      return;
+    }
+
     stickToBottomRef.current = true;
     scrollToBottom(true);
     beginLoading(sessionId);
@@ -1028,7 +1053,8 @@ export function useChatLogic(props: UseChatLogicProps) {
       editingMessageAttachments.filter((a) => isImageAttachment(a)),
     );
     const hasTextFiles = editingMessageAttachments.some((a) => a.text);
-    if ((!content && resendImages.length === 0 && !hasTextFiles) || isActiveLoading) return;
+    // Do not bail on isActiveLoading — stop the in-flight turn then resubmit with force.
+    if (!content && resendImages.length === 0 && !hasTextFiles) return;
     if (editingMessageAttachments.some((a) => a.uploading)) {
       setAttachError('Wait for image upload to finish');
       return;
@@ -1056,13 +1082,14 @@ export function useChatLogic(props: UseChatLogicProps) {
     setEditingMessageContent('');
     setEditingMessageAttachments([]);
 
+    // force:true so /papers|/books|/image are not blocked by a stale loading flag.
     if (isActiveLoading) {
       stopGenerating();
       setTimeout(() => {
-        void handleSubmit(textToSend, priorMessages, false, sessionId, { resendAttachments });
+        void handleSubmit(textToSend, priorMessages, true, sessionId, { resendAttachments });
       }, 50);
     } else {
-      await handleSubmit(textToSend, priorMessages, false, sessionId, { resendAttachments });
+      await handleSubmit(textToSend, priorMessages, true, sessionId, { resendAttachments });
     }
   };
 
@@ -1101,6 +1128,8 @@ export function useChatLogic(props: UseChatLogicProps) {
     jumpQueueAndSubmit,
     runCompact,
     generateImage,
+    runLiteratureSearch,
+    runBookDownload,
     handleSubmit,
     resumeIncompleteReply,
     requestClaimReview,

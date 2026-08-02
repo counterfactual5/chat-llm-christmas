@@ -147,6 +147,7 @@ export function ChatSidebar({
   const [skillsExpanded, setSkillsExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [builtinsExpanded, setBuiltinsExpanded] = useState(false);
   const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
   const [sessionMenuAnchor, setSessionMenuAnchor] = useState<{
@@ -594,6 +595,98 @@ export function ChatSidebar({
                         <GoogleLogo className="h-3.5 w-3.5 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">Google</span>
                       </button>
+                      <div className="pt-2 pb-1 border-t border-stone-200/50 dark:border-stone-800/50 mt-1 mb-1">
+                        <button
+                          type="button"
+                          onClick={() => setBuiltinsExpanded((v) => !v)}
+                          className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Blocks className="h-3.5 w-3.5" />
+                            {t('builtinToolAlwaysOn')}
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              'h-3 w-3 shrink-0 transition-transform',
+                              builtinsExpanded ? 'rotate-180' : ''
+                            )}
+                          />
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {builtinsExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="space-y-0.5 pt-1">
+<div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('webSearchTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('webReadTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('createFileTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      
+                      
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={
+                          modelSupportsVision
+                            ? t('imageUnderstandDisabledOnVision')
+                            : t('zhipuVisionMcpHint')
+                        }
+                        aria-disabled
+                      >
+                        <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('enableZhipuVisionMcp')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {modelSupportsVision
+                              ? t('imageUnderstandDisabledOnVision')
+                              : t('imageUnderstandBuiltIn')}
+                          </div>
+                        </div>
+                      </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
                     </div>
                   </motion.div>
                 )}
@@ -701,7 +794,34 @@ export function ChatSidebar({
                           aria-label={t('bookSearchTool')}
                         />
                       </div>
-                      <div
+                      
+                      <div className="pt-2 pb-1 border-t border-stone-200/50 dark:border-stone-800/50 mt-1 mb-1">
+                        <button
+                          type="button"
+                          onClick={() => setBuiltinsExpanded((v) => !v)}
+                          className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Blocks className="h-3.5 w-3.5" />
+                            {t('builtinToolAlwaysOn')}
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              'h-3 w-3 shrink-0 transition-transform',
+                              builtinsExpanded ? 'rotate-180' : ''
+                            )}
+                          />
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {builtinsExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="space-y-0.5 pt-1">
+<div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
                         title={t('builtinToolAlwaysOn')}
                         aria-disabled
@@ -761,6 +881,11 @@ export function ChatSidebar({
                               : t('imageUnderstandBuiltIn')}
                           </div>
                         </div>
+                      </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
                   </motion.div>

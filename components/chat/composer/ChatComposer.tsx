@@ -1,3 +1,4 @@
+import { useState } from 'react';
 'use client';
 
 import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
@@ -182,6 +183,7 @@ export type ChatComposerProps = {
 
 export function ChatComposer(props: ChatComposerProps) {
   const { t } = useLocale();
+  const [builtinsExpanded, setBuiltinsExpanded] = useState(false);
   const {
     activeQueue,
     queueExpanded,
@@ -985,7 +987,34 @@ export function ChatComposer(props: ChatComposerProps) {
                               aria-label={t('bookSearchTool')}
                             />
                           </div>
-                          <div
+                          
+                          <div className="pt-2 pb-1 border-t border-stone-200/50 dark:border-stone-800/50 mt-1 mb-1">
+                            <button
+                              type="button"
+                              onClick={() => setBuiltinsExpanded((v) => !v)}
+                              className="flex w-full items-center justify-between px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Blocks className="h-3.5 w-3.5" />
+                                {t('builtinToolAlwaysOn')}
+                              </span>
+                              <ChevronDown
+                                className={cn(
+                                  'h-3 w-3 shrink-0 transition-transform',
+                                  builtinsExpanded ? 'rotate-180' : ''
+                                )}
+                              />
+                            </button>
+                            <AnimatePresence initial={false}>
+                              {builtinsExpanded && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="space-y-0.5 pt-1">
+<div
                             className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
                             title={t('builtinToolAlwaysOn')}
                             aria-disabled
@@ -1045,6 +1074,11 @@ export function ChatComposer(props: ChatComposerProps) {
                                   : t('imageUnderstandBuiltIn')}
                               </div>
                             </div>
+                          </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
                         </motion.div>
                       )}

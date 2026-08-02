@@ -245,7 +245,7 @@ export function useDeepResearch(opts: {
           if (kind === 'error' && payload.message) {
             // During catch-up, ignore stale errors — the latest phase wins above.
             // Only surface errors that arrive while the UI is live.
-            if (uiLive) setError(String(payload.message));
+            if (uiLive) setError(humanizeResearchError(String(payload.message)));
           }
         };
 

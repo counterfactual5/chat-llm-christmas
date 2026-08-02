@@ -187,6 +187,47 @@ describe('research activity → timeline stages', () => {
     expect(m.research?.status).toBe('failed');
   });
 
+  it('report event does not re-flip incomplete after content is set', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a8',
+      jobId: 'rs_8',
+      query: 'x',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'drafting report' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report_delta',
+      payload: { replace: '## 用户问题直答\n完整报告' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report',
+      payload: { chars: 20 },
+    });
+    expect(m.incomplete).toBe(false);
+    expect(m.content).toContain('完整报告');
+  });
+
+  it('skips Verify stage chrome for resuming saved verification', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a9',
+      jobId: 'rs_9',
+      query: 'x',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'verifying', detail: 'fact-checking synthesis' },
+    });
+    const stages = (m.activity || []).filter((s) => s.kind === 'stage').length;
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'verifying', detail: 'resuming saved verification' },
+    });
+    expect((m.activity || []).filter((s) => s.kind === 'stage')).toHaveLength(stages);
+    expect(m.toolRuns?.filter((r) => r.name === 'research_verify')).toHaveLength(1);
+  });
+
   it('withResearchReport clears Continue state and does not append orphan Write', () => {
     let m = createResearchAssistantMessage({
       id: 'a6',

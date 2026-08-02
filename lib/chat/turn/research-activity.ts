@@ -551,9 +551,13 @@ export function applyResearchEvent(
   }
 
   if (kind === 'report') {
+    // Final report settle — do not flip incomplete back to true (Continue
+    // would reappear after a finished research run).
+    const researchDone = m.research?.status === 'done' || Boolean(String(m.content || '').trim());
     m = finishTool(m, {
       name: 'research_write',
       provider: 'research',
+      keepComplete: researchDone,
       results: [
         {
           title: 'Report',
@@ -562,6 +566,9 @@ export function applyResearchEvent(
         },
       ],
     });
+    if (researchDone) {
+      return { ...m, incomplete: false };
+    }
     return m;
   }
 

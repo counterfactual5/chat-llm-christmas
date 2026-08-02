@@ -1,13 +1,17 @@
 'use client';
 
 /**
- * Composer slash-menu: `/image`, `/research`, `/review`, `/skill`, and skill name matching.
+ * Composer slash-menu: `/image`, `/research`, `/papers`, `/books`, `/review`, `/skill`.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import type { SkillItem } from '@/lib/chat/types';
+import type { MessageKey, MessageVars } from '@/lib/i18n/messages';
 import { SKILL_CREATOR_ID, skillSlashName } from '@/lib/skills/creator';
 import type { SlashMenuItem } from '@/components/chat/composer/ChatComposer';
+
+const MODE_TOKENS = new Set(['quick', 'standard', 'rigorous']);
+const SOURCE_TOKENS = new Set(['web', 'literature', 'mixed']);
 
 export function useChatSlash(opts: {
   input: string;
@@ -18,7 +22,7 @@ export function useChatSlash(opts: {
   setIsSkillPickerOpen: (open: boolean) => void;
   openLoginModal: () => void;
   attachSkill: (skill: SkillItem) => void;
-  t: (key: any, vars?: any) => string;
+  t: (key: MessageKey, vars?: MessageVars) => string;
 }) {
   const {
     input,
@@ -44,60 +48,99 @@ export function useChatSlash(opts: {
   const slashMenuItems = useMemo((): SlashMenuItem[] => {
     if (slashQuery == null || slashRaw == null) return [];
 
-    // After `/research ` (or `/研究 `), offer clickable depth modes until a
-    // second token (the actual query) starts — no need to memorize keywords.
     const researchModeMatch = slashRaw.match(/^(?:research|研究)\s+(.*)$/i);
     if (researchModeMatch) {
-      const modeArg = researchModeMatch[1];
-      // Query already started (`/research quick foo`) — hide the picker.
-      if (/\S\s+\S/.test(modeArg)) return [];
-      const modeQuery = modeArg.trim().toLowerCase();
+      const tokens = researchModeMatch[1].trim().split(/\s+/).filter(Boolean);
+      const [first, second] = tokens;
+      const modeDone = MODE_TOKENS.has(first || '');
+      const sourceDone = SOURCE_TOKENS.has(second || '');
+
+      // Phase 1: pick depth (`/research <tab>` or partial mode).
+      if (!modeDone) {
+        const modeQuery = (first || '').toLowerCase();
       const modes: Array<{
-        id: string;
-        token: string;
-        insert: string;
-        titleKey: string;
-        hintKey: string;
-      }> = [
-        {
-          id: 'research-mode-quick',
-          token: 'quick',
-          insert: '/research quick ',
-          titleKey: 'researchModeQuick',
-          hintKey: 'researchModeQuickHint',
-        },
-        {
-          id: 'research-mode-standard',
-          token: 'standard',
-          insert: '/research standard ',
-          titleKey: 'researchModeStandard',
-          hintKey: 'researchModeStandardHint',
-        },
-        {
-          id: 'research-mode-rigorous',
-          token: 'rigorous',
-          insert: '/research rigorous ',
-          titleKey: 'researchModeRigorous',
-          hintKey: 'researchModeRigorousHint',
-        },
-      ];
-      // Mode fully chosen + trailing space → ready for the question.
-      if (
-        modeQuery &&
-        modes.some((m) => m.token === modeQuery) &&
-        /\s$/.test(modeArg)
-      ) {
-        return [];
+          id: string;
+          token: string;
+          insert: string;
+          titleKey: MessageKey;
+          hintKey: MessageKey;
+        }> = [
+          {
+            id: 'research-mode-quick',
+            token: 'quick',
+            insert: '/research quick ',
+            titleKey: 'researchModeQuick' as MessageKey,
+            hintKey: 'researchModeQuickHint' as MessageKey,
+          },
+          {
+            id: 'research-mode-standard',
+            token: 'standard',
+            insert: '/research standard ',
+            titleKey: 'researchModeStandard' as MessageKey,
+            hintKey: 'researchModeStandardHint' as MessageKey,
+          },
+          {
+            id: 'research-mode-rigorous',
+            token: 'rigorous',
+            insert: '/research rigorous ',
+            titleKey: 'researchModeRigorous' as MessageKey,
+            hintKey: 'researchModeRigorousHint' as MessageKey,
+          },
+        ];
+        return modes
+          .filter((m) => !modeQuery || m.token.startsWith(modeQuery))
+          .map((m) => ({
+            kind: 'command' as const,
+            id: m.id,
+            title: t(m.titleKey),
+            insert: m.insert,
+            hint: t(m.hintKey),
+          }));
       }
-      return modes
-        .filter((m) => !modeQuery || m.token.startsWith(modeQuery))
-        .map((m) => ({
-          kind: 'command' as const,
-          id: m.id,
-          title: t(m.titleKey),
-          insert: m.insert,
-          hint: t(m.hintKey),
-        }));
+
+      // Phase 2: after `/research standard `, pick source lane until query starts.
+      if (!sourceDone) {
+        if (tokens.length > 2) return [];
+        if (tokens.length === 2 && !SOURCE_TOKENS.has(second || '')) return [];
+        const sourceQuery = (second || '').toLowerCase();
+        const lanes: Array<{
+          id: string;
+          token: string;
+          titleKey: MessageKey;
+          hintKey: MessageKey;
+        }> = [
+          {
+            id: 'research-source-web',
+            token: 'web',
+            titleKey: 'researchSourceWeb' as MessageKey,
+            hintKey: 'researchSourceWebHint' as MessageKey,
+          },
+          {
+            id: 'research-source-literature',
+            token: 'literature',
+            titleKey: 'researchSourceLiterature' as MessageKey,
+            hintKey: 'researchSourceLiteratureHint' as MessageKey,
+          },
+          {
+            id: 'research-source-mixed',
+            token: 'mixed',
+            titleKey: 'researchSourceMixed' as MessageKey,
+            hintKey: 'researchSourceMixedHint' as MessageKey,
+          },
+        ];
+        return lanes
+          .filter((m) => !sourceQuery || m.token.startsWith(sourceQuery))
+          .map((m) => ({
+            kind: 'command' as const,
+            id: m.id,
+            title: t(m.titleKey),
+            insert: `/research ${first} ${m.token} `,
+            hint: t(m.hintKey),
+          }));
+      }
+
+      // Mode + source chosen — user is typing the actual query.
+      return [];
     }
 
     // Hide once a command is complete (`/image`) or args started (`/image …`).
@@ -127,6 +170,36 @@ export function useChatSlash(opts: {
         title: t('deepResearchCommand'),
         insert: '/research ',
         hint: t('deepResearchCommandHint'),
+      });
+    }
+    const papersPrefix =
+      slashQuery === '' ||
+      ('papers'.startsWith(slashQuery) && slashQuery !== 'papers') ||
+      ('paper'.startsWith(slashQuery) && slashQuery !== 'paper') ||
+      ('论文'.startsWith(slashQuery) && slashQuery !== '论文') ||
+      ('学术'.startsWith(slashQuery) && slashQuery !== '学术');
+    if (papersPrefix) {
+      items.push({
+        kind: 'command',
+        id: 'papers',
+        title: t('papersCommand'),
+        insert: '/papers ',
+        hint: t('papersCommandHint'),
+      });
+    }
+    const booksPrefix =
+      slashQuery === '' ||
+      ('books'.startsWith(slashQuery) && slashQuery !== 'books') ||
+      ('book'.startsWith(slashQuery) && slashQuery !== 'book') ||
+      ('书籍'.startsWith(slashQuery) && slashQuery !== '书籍') ||
+      ('图书'.startsWith(slashQuery) && slashQuery !== '图书');
+    if (booksPrefix) {
+      items.push({
+        kind: 'command',
+        id: 'books',
+        title: t('booksCommand'),
+        insert: '/books ',
+        hint: t('booksCommandHint'),
       });
     }
     const skillPrefix =
@@ -168,7 +241,7 @@ export function useChatSlash(opts: {
         }
       }
     }
-    return items.slice(0, 8);
+    return items.slice(0, 10);
   }, [slashQuery, slashRaw, slashHasArgs, skills, isAccountBound, t]);
 
   const consumeSlashItem = (item: SlashMenuItem) => {
@@ -200,7 +273,7 @@ export function useChatSlash(opts: {
 
   // Keep slash highlight in range when the filtered list shrinks.
   useEffect(() => {
-    setSlashHighlight(0);
+    queueMicrotask(() => setSlashHighlight(0));
   }, [slashRaw]);
 
   return {

@@ -8,6 +8,7 @@
  *  Send estimate:   lib/chat/turn/send-estimate.ts
  *  Stream errors:   lib/chat/turn/stream-error.ts
  *  Image gen:       lib/chat/turn/image-generation.ts
+ *  Literature:      lib/chat/turn/literature-command.ts, literature-search.ts
  *  Account:         hooks/chat/use-account.ts
  *  Integrations:    hooks/chat/use-integrations.ts
  *  Persist:         hooks/chat/use-session-persist.ts
@@ -17,6 +18,7 @@ import { useEffect, useState } from 'react';
 import type { Message, ChatSession } from '@/lib/chat/types';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
+import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
 import { parseSkillCommand } from '@/lib/chat/turn/skill-command';
 import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { useLocale } from '@/lib/i18n';
@@ -65,6 +67,18 @@ import {
   buildImageGenerationThread,
   requestImageGeneration,
 } from '@/lib/chat/turn/image-generation';
+import {
+  buildLiteratureSearchThread,
+  formatLiteratureMarkdown,
+  literatureToolRun,
+  requestBookDownload,
+  requestLiteratureSearch,
+} from '@/lib/chat/turn/literature-search';
+import {
+  bookDownloadToolRun,
+  buildBookDownloadThread,
+  formatBookDownloadMarkdown,
+} from '@/lib/chat/turn/book-download-turn';
 
 export type { QueuedTask };
 export type UseChatLogicProps = {
@@ -400,6 +414,194 @@ export function useChatLogic(props: UseChatLogicProps) {
     return true;
   };
 
+  const runBookDownload = async (
+    identifier: string,
+    opts?: {
+      baseMessages?: Message[];
+      skipDuplicateUser?: boolean;
+      sessionId?: string;
+      alreadyLoading?: boolean;
+    },
+  ): Promise<boolean> => {
+    const id = identifier.trim();
+    if (!id) return false;
+    if (!isAccountBound) {
+      openLoginModal();
+      return false;
+    }
+    const sessionId = opts?.sessionId || activeSessionId;
+    if (isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+
+    stickToBottomRef.current = true;
+    if (sessionId === activeSessionId) scrollToBottom(true);
+    setIsSkillPickerOpen(false);
+    if (sessionId === activeSessionId) setInput('');
+    if (!opts?.alreadyLoading) beginLoading(sessionId);
+
+    const sessionMessages =
+      opts?.baseMessages ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
+      [];
+    const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
+    const { thread, assistantId, newTitle } = buildBookDownloadThread({
+      identifier: id,
+      cleanedBase,
+      skipDuplicateUser: opts?.skipDuplicateUser,
+      currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
+    });
+    updateSession(sessionId, thread, newTitle);
+
+    try {
+      const result = await requestBookDownload(id);
+      if (!result.ok) throw new Error(result.error);
+      const content = formatBookDownloadMarkdown(result);
+      const toolRun = bookDownloadToolRun({
+        identifier: result.identifier,
+        title: result.title,
+        filename: result.filename,
+        sourceUrl: result.sourceUrl,
+      });
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content,
+              incomplete: false,
+              toolRuns: [...(m.toolRuns || []), toolRun],
+              activity: [
+                ...(m.activity || []),
+                { id: crypto.randomUUID(), kind: 'tool', toolRunId: toolRun.id },
+                { id: crypto.randomUUID(), kind: 'file', fileId: result.fileId },
+                { id: crypto.randomUUID(), kind: 'content', text: content },
+              ],
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Book download failed';
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content: `Error: ${message}`,
+              incomplete: false,
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } finally {
+      endLoading(sessionId);
+    }
+    return true;
+  };
+
+  const runLiteratureSearch = async (
+    kind: 'papers' | 'books',
+    query: string,
+    opts?: {
+      baseMessages?: Message[];
+      skipDuplicateUser?: boolean;
+      sessionId?: string;
+      alreadyLoading?: boolean;
+    },
+  ): Promise<boolean> => {
+    const trimmed = query.trim();
+    if (!trimmed) return false;
+    if (!isAccountBound) {
+      openLoginModal();
+      return false;
+    }
+    const sessionId = opts?.sessionId || activeSessionId;
+    if (isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+
+    stickToBottomRef.current = true;
+    if (sessionId === activeSessionId) scrollToBottom(true);
+    setIsSkillPickerOpen(false);
+    if (sessionId === activeSessionId) setInput('');
+    if (!opts?.alreadyLoading) beginLoading(sessionId);
+
+    const sessionMessages =
+      opts?.baseMessages ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
+      [];
+    const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
+    const { thread, assistantId, newTitle } = buildLiteratureSearchThread({
+      kind,
+      query: trimmed,
+      cleanedBase,
+      skipDuplicateUser: opts?.skipDuplicateUser,
+      currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
+    });
+    updateSession(sessionId, thread, newTitle);
+
+    try {
+      const result = await requestLiteratureSearch(kind, trimmed);
+      if (!result.ok) throw new Error(result.error);
+      const content = formatLiteratureMarkdown(
+        kind,
+        result.query,
+        result.provider,
+        result.results,
+      );
+      const toolRun = literatureToolRun(
+        kind,
+        result.query,
+        result.provider,
+        result.results,
+        result.results.length ? undefined : 'No results',
+      );
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content,
+              incomplete: false,
+              toolRuns: [...(m.toolRuns || []), toolRun],
+              activity: [
+                ...(m.activity || []),
+                { id: crypto.randomUUID(), kind: 'tool', toolRunId: toolRun.id },
+                { id: crypto.randomUUID(), kind: 'content', text: content },
+              ],
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Literature search failed';
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content: `Error: ${message}`,
+              incomplete: false,
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } finally {
+      endLoading(sessionId);
+    }
+    return true;
+  };
+
   const handleSubmit = async (
     overrideInput?: string,
     baseMessagesOverride?: Message[],
@@ -416,6 +618,23 @@ export function useChatLogic(props: UseChatLogicProps) {
     if (imagePrompt) {
       if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
       return generateImage(imagePrompt, {
+        sessionId,
+        alreadyLoading: opts?.alreadyLoading,
+        baseMessages: baseMessagesOverride,
+      });
+    }
+
+    const literatureCmd = parseLiteratureCommand(textToSend);
+    if (literatureCmd) {
+      if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+      if (literatureCmd.action === 'download') {
+        return runBookDownload(literatureCmd.identifier, {
+          sessionId,
+          alreadyLoading: opts?.alreadyLoading,
+          baseMessages: baseMessagesOverride,
+        });
+      }
+      return runLiteratureSearch(literatureCmd.kind, literatureCmd.query, {
         sessionId,
         alreadyLoading: opts?.alreadyLoading,
         baseMessages: baseMessagesOverride,

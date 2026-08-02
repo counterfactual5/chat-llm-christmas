@@ -30,3 +30,9 @@ export function chatBackendResearchURL(jobId?: string): string {
   const base = `${chatBackendV1()}/research`;
   return jobId ? `${base}/${encodeURIComponent(jobId)}` : base;
 }
+
+export function chatBackendLiteratureURL(path = ''): string {
+  const base = `${chatBackendV1()}/literature`;
+  const suffix = String(path || '').replace(/^\/+/, '');
+  return suffix ? `${base}/${suffix}` : base;
+}

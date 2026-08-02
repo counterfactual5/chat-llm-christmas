@@ -15,6 +15,7 @@ import {
 } from '@/lib/chat/turn/research-activity';
 
 export type ResearchMode = 'quick' | 'standard' | 'rigorous';
+export type ResearchSources = 'web' | 'literature' | 'mixed';
 
 export type ResearchJob = {
   jobId: string;
@@ -43,6 +44,7 @@ type StartOpts = {
   mode: ResearchMode;
   sessionId: string;
   model?: string;
+  sources?: ResearchSources;
   /** Existing assistant bubble to reuse (Continue / retry). */
   assistantId?: string;
 };
@@ -420,6 +422,7 @@ export function useDeepResearch(opts: {
           body: JSON.stringify({
             query,
             mode: startOpts.mode,
+            sources: startOpts.sources || 'web',
             sessionId,
             model: startOpts.model,
           }),

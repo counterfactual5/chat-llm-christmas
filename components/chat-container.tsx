@@ -64,7 +64,12 @@ import { useChatSkills } from '@/hooks/chat/use-skills';
 import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
-import { formatResearchCommand, parseResearchCommand, type ResearchModeHint } from '@/lib/chat/turn/research-command';
+import {
+  formatResearchCommand,
+  parseResearchCommand,
+  type ResearchModeHint,
+  type ResearchSourcesHint,
+} from '@/lib/chat/turn/research-command';
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
@@ -1415,6 +1420,7 @@ export default function ChatContainer() {
       priorMessages?: Message[];
       userContent?: string;
       mode?: ResearchModeHint;
+      sources?: ResearchSourcesHint;
     }) => {
       if (!isAccountBound) {
         openLoginModal();
@@ -1426,7 +1432,7 @@ export default function ChatContainer() {
       const now = Date.now();
       const mode = opts.mode || deepResearch.mode;
       // Only echo the depth token when the user explicitly chose one.
-      const userContent = opts.userContent || formatResearchCommand(q, opts.mode);
+      const userContent = opts.userContent || formatResearchCommand(q, opts.mode, opts.sources);
       const userMsg: Message = {
         id: `research_user_${now}`,
         role: 'user',
@@ -1458,6 +1464,7 @@ export default function ChatContainer() {
       await deepResearch.start({
         query: q,
         mode,
+        sources: opts.sources,
         sessionId: sid,
         model: selectedModel || undefined,
         assistantId: opts.assistantId,
@@ -1473,6 +1480,7 @@ export default function ChatContainer() {
       void startResearchTurn({
         query: researchCmd.query,
         mode: researchCmd.mode,
+        sources: researchCmd.sources,
         sessionId: activeSessionId,
       });
       return;
@@ -1593,6 +1601,7 @@ export default function ChatContainer() {
         await startResearchTurn({
           query: researchCmd.query,
           mode: researchCmd.mode,
+          sources: researchCmd.sources,
           sessionId: activeSessionId,
           priorMessages,
           userContent: content,

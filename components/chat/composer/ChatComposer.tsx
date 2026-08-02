@@ -469,7 +469,12 @@ export function ChatComposer(props: ChatComposerProps) {
                   item.kind === 'command' && item.id.startsWith('research-mode-'),
               )
                 ? t('researchModePicker')
-                : 'Commands'}
+                : slashMenuItems.every(
+                      (item) =>
+                        item.kind === 'command' && item.id.startsWith('research-source-'),
+                    )
+                  ? t('researchSourcePicker')
+                  : 'Commands'}
             </div>
             {slashMenuItems.map((item, idx) => (
               <button
@@ -494,7 +499,8 @@ export function ChatComposer(props: ChatComposerProps) {
                   ) : item.id === 'continue' ? (
                     <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                   ) : item.id === 'research' ||
-                    item.id.startsWith('research-mode-') ? (
+                    item.id.startsWith('research-mode-') ||
+                    item.id.startsWith('research-source-') ? (
                     <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                   ) : (
                     <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />

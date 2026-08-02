@@ -27,23 +27,38 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
 
       const placeholders: IngestedAttachment[] = next.map((a) => ({
         ...a,
-        uploading: Boolean(a.dataUrl && isAccountBound),
+        uploading: Boolean((a.uploadBlob || a.dataUrl) && isAccountBound),
       }));
 
       if (placeholders.length > 0) {
         append(placeholders);
       }
 
+      const uploadErrors: string[] = [];
       for (const a of next) {
-        if (!a.dataUrl || !isAccountBound) continue;
+        if ((!a.uploadBlob && !a.dataUrl) || !isAccountBound) continue;
 
         try {
-          const res = await fetch('/api/files', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
-          });
-          const data = await res.json();
+          let res: Response;
+          if (a.uploadBlob) {
+            // Multipart avoids base64 inflation that trips Vercel's ~4.5MB body limit.
+            const form = new FormData();
+            form.append('file', a.uploadBlob, a.name);
+            res = await fetch('/api/files', { method: 'POST', body: form });
+          } else {
+            res = await fetch('/api/files', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
+            });
+          }
+          const rawText = await res.text();
+          let data: any = {};
+          try {
+            data = rawText ? JSON.parse(rawText) : {};
+          } catch {
+            data = { error: rawText.slice(0, 200) };
+          }
           if (res.ok && data?.id) {
             const fileId = String(data.id);
             patch(a.id, (x) => ({
@@ -52,23 +67,33 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
               uploadError: false,
               fileId,
               previewUrl: `/api/files/${encodeURIComponent(fileId)}`,
+              uploadBlob: undefined,
             }));
             continue;
           }
-          if (isAccountBound) {
-            patch(a.id, (x) => ({ ...x, uploading: false, uploadError: !x.dataUrl }));
-            continue;
-          }
-        } catch {
-          if (isAccountBound) {
-            patch(a.id, (x) => ({ ...x, uploading: false, uploadError: !x.dataUrl }));
-            continue;
-          }
+          const payloadTooLarge =
+            res.status === 413 ||
+            /FUNCTION_PAYLOAD_TOO_LARGE|payload too large|request entity too large/i.test(
+              `${data?.error || ''} ${rawText}`,
+            );
+          const detail = payloadTooLarge
+            ? 'Image too large for upload (max ~3.5MB after compress)'
+            : typeof data?.error === 'string'
+              ? data.error
+              : `Upload failed (HTTP ${res.status})`;
+          uploadErrors.push(`${a.name}: ${detail}`);
+          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          continue;
+        } catch (err: any) {
+          uploadErrors.push(`${a.name}: ${err?.message || 'upload failed'}`);
+          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
+          continue;
         }
 
         patch(a.id, (x) => ({ ...x, uploading: false }));
       }
-      if (errors.length > 0) setAttachError(errors.join(' · '));
+      const allErrors = [...errors, ...uploadErrors];
+      if (allErrors.length > 0) setAttachError(allErrors.join(' · '));
     },
     [isAccountBound],
   );

@@ -1,11 +1,13 @@
 /** Client-side file ingestion: read/extract dropped files into attachments. */
 
 import type { IngestedAttachment } from './types';
-import { extractDocxText, extractPdfText, readAsDataUrl } from './extractors';
+import { extractDocxText, extractPdfText } from './extractors';
 import { isSupportedDropFile } from './support';
+import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
 
 export type { IngestedAttachment } from './types';
 export { isSupportedDropFile } from './support';
+export { MAX_INGEST_BYTES, MAX_UPLOAD_BYTES } from './compress-image';
 
 export async function ingestFile(file: File): Promise<IngestedAttachment> {
   const base: IngestedAttachment = {
@@ -18,11 +20,16 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
   const name = file.name.toLowerCase();
 
   if (file.type.startsWith('image/')) {
-    const dataUrl = await readAsDataUrl(file);
+    const prepared = await prepareImageForUpload(file);
     return {
       ...base,
-      dataUrl,
-      previewUrl: URL.createObjectURL(file),
+      name: prepared.filename,
+      type: prepared.mime,
+      size: prepared.size,
+      dataUrl: prepared.dataUrl,
+      previewUrl: URL.createObjectURL(prepared.blob),
+      /** Keep binary for multipart upload (avoids base64 inflation on /api/files). */
+      uploadBlob: prepared.blob,
     };
   }
 
@@ -62,7 +69,7 @@ export async function ingestFiles(files: FileList | File[]): Promise<{
       errors.push(`Unsupported file type: ${file.name}`);
       continue;
     }
-    if (file.size > 20 * 1024 * 1024) {
+    if (file.size > MAX_INGEST_BYTES) {
       errors.push(`${file.name} is larger than 20MB`);
       continue;
     }

@@ -460,6 +460,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         title: result.title,
         filename: result.filename,
         sourceUrl: result.sourceUrl,
+        provider: result.provider,
       });
       setSessions((prev) =>
         prev.map((s) => {
@@ -512,6 +513,9 @@ export function useChatLogic(props: UseChatLogicProps) {
       skipDuplicateUser?: boolean;
       sessionId?: string;
       alreadyLoading?: boolean;
+      source?: string;
+      action?: 'search' | 'details' | 'citations' | 'references' | 'author';
+      paperId?: string;
     },
   ): Promise<boolean> => {
     const trimmed = query.trim();
@@ -540,24 +544,31 @@ export function useChatLogic(props: UseChatLogicProps) {
       cleanedBase,
       skipDuplicateUser: opts?.skipDuplicateUser,
       currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
+      source: opts?.source,
+      action: opts?.action,
     });
     updateSession(sessionId, thread, newTitle);
 
     try {
-      const result = await requestLiteratureSearch(kind, trimmed);
+      const result = await requestLiteratureSearch(kind, trimmed, {
+        source: opts?.source,
+        action: opts?.action,
+        paperId: opts?.paperId,
+      });
       if (!result.ok) throw new Error(result.error);
       const content = formatLiteratureMarkdown(
         kind,
         result.query,
         result.provider,
         result.results,
+        { authors: result.authors, action: opts?.action },
       );
       const toolRun = literatureToolRun(
         kind,
         result.query,
         result.provider,
         result.results,
-        result.results.length ? undefined : 'No results',
+        result.results.length || result.authors?.length ? undefined : 'No results',
       );
       setSessions((prev) =>
         prev.map((s) => {
@@ -638,6 +649,12 @@ export function useChatLogic(props: UseChatLogicProps) {
         sessionId,
         alreadyLoading: opts?.alreadyLoading,
         baseMessages: baseMessagesOverride,
+        source: 'source' in literatureCmd ? literatureCmd.source : undefined,
+        action: literatureCmd.action || 'search',
+        paperId:
+          literatureCmd.kind === 'papers' && 'paperId' in literatureCmd
+            ? literatureCmd.paperId
+            : undefined,
       });
     }
 

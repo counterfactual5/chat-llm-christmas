@@ -6,7 +6,10 @@ import type { Message, MessageToolRun } from '@/lib/chat/types';
 import { titleForNewConversation } from '@/lib/chat/turn/attachments';
 import {
   formatLiteratureCommand,
+  type BookSource,
   type LiteratureKind,
+  type PaperAction,
+  type PaperSource,
 } from '@/lib/chat/turn/literature-command';
 
 export type LiteratureHit = {
@@ -20,6 +23,16 @@ export type LiteratureHit = {
   doi?: string;
   archiveId?: string;
   downloadable?: boolean;
+  downloadUrl?: string;
+  paperId?: string;
+  citationCount?: number;
+  venue?: string;
+  tldr?: string;
+  pdfUrl?: string;
+  format?: string;
+  category?: string;
+  md5?: string;
+  size?: string;
 };
 
 export type LiteratureSearchResult =
@@ -29,8 +42,20 @@ export type LiteratureSearchResult =
       query: string;
       provider: string;
       results: LiteratureHit[];
+      authors?: AuthorHit[];
+      paper?: LiteratureHit & { abstract?: string; externalIds?: Record<string, string> };
     }
   | { ok: false; error: string };
+
+export type AuthorHit = {
+  authorId?: string;
+  name: string;
+  affiliations?: string[];
+  paperCount?: number;
+  citationCount?: number;
+  hIndex?: number;
+  url?: string;
+};
 
 export type LiteratureThread = {
   thread: Message[];
@@ -44,12 +69,17 @@ export function buildLiteratureSearchThread(opts: {
   cleanedBase: Message[];
   skipDuplicateUser?: boolean;
   currentTitle?: string;
+  source?: string;
+  action?: string;
   now?: () => number;
   genId?: () => string;
 }): LiteratureThread {
   const now = opts.now ?? Date.now;
   const genId = opts.genId ?? (() => crypto.randomUUID());
-  const command = formatLiteratureCommand(opts.kind, opts.query);
+  const command = formatLiteratureCommand(opts.kind, opts.query, {
+    source: opts.source,
+    action: opts.action,
+  });
   const assistantId = genId();
   const assistantMessage: Message = {
     id: assistantId,
@@ -92,6 +122,7 @@ export type BookDownloadResult =
       fileId: string;
       bytes: number;
       sourceUrl: string;
+      provider?: string;
     }
   | { ok: false; error: string };
 
@@ -115,6 +146,7 @@ export async function requestBookDownload(
     filename?: string;
     bytes?: number;
     sourceUrl?: string;
+    provider?: string;
     file?: { id?: string };
   } = {};
   try {
@@ -139,20 +171,70 @@ export async function requestBookDownload(
     fileId: String(data.file.id),
     bytes: Number(data.bytes) || 0,
     sourceUrl: String(data.sourceUrl || ''),
+    provider: data.provider ? String(data.provider) : undefined,
   };
+}
+
+export type LiteratureSearchOpts = {
+  fetchImpl?: typeof fetch;
+  limit?: number;
+  source?: PaperSource | BookSource | string;
+  action?: PaperAction;
+  paperId?: string;
+  category?: string;
+  year?: string;
+  fieldsOfStudy?: string;
+  sort?: string;
+  oa?: boolean;
+  lang?: string;
+};
+
+function papersPathForAction(action?: PaperAction): string {
+  switch (action) {
+    case 'details':
+      return '/api/literature/papers/details';
+    case 'citations':
+      return '/api/literature/papers/citations';
+    case 'references':
+      return '/api/literature/papers/references';
+    case 'author':
+      return '/api/literature/papers/author';
+    default:
+      return '/api/literature/papers';
+  }
 }
 
 export async function requestLiteratureSearch(
   kind: LiteratureKind,
   query: string,
-  opts?: { fetchImpl?: typeof fetch; limit?: number },
+  opts?: LiteratureSearchOpts,
 ): Promise<LiteratureSearchResult> {
   const doFetch = opts?.fetchImpl ?? fetch;
-  const path = kind === 'books' ? '/api/literature/books' : '/api/literature/papers';
+  const action = opts?.action || 'search';
+  const path =
+    kind === 'books' ? '/api/literature/books' : papersPathForAction(action);
+
+  const body: Record<string, unknown> = {
+    query,
+    limit: opts?.limit ?? 12,
+  };
+  if (opts?.source && opts.source !== 'auto') body.source = opts.source;
+  if (opts?.paperId) body.paperId = opts.paperId;
+  if (opts?.category) body.category = opts.category;
+  if (opts?.year) body.year = opts.year;
+  if (opts?.fieldsOfStudy) body.fieldsOfStudy = opts.fieldsOfStudy;
+  if (opts?.sort) body.sort = opts.sort;
+  if (opts?.oa) body.oa = true;
+  if (opts?.lang) body.lang = opts.lang;
+  if (action === 'author') body.name = query;
+  if (action === 'details' || action === 'citations' || action === 'references') {
+    body.paperId = opts?.paperId || query;
+  }
+
   const res = await doFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, limit: opts?.limit ?? 12 }),
+    body: JSON.stringify(body),
   });
   const raw = await res.text();
   let data: {
@@ -161,6 +243,8 @@ export async function requestLiteratureSearch(
     message?: string;
     provider?: string;
     results?: LiteratureHit[];
+    authors?: AuthorHit[];
+    paper?: LiteratureHit & { abstract?: string; externalIds?: Record<string, string> };
     query?: string;
   } = {};
   try {
@@ -177,6 +261,29 @@ export async function requestLiteratureSearch(
       error: data.error || data.message || `Literature search failed (HTTP ${res.status})`,
     };
   }
+
+  if (action === 'author') {
+    return {
+      ok: true,
+      kind,
+      query: String(data.query || query),
+      provider: 'semantic-scholar',
+      results: [],
+      authors: Array.isArray(data.authors) ? data.authors : [],
+    };
+  }
+
+  if (action === 'details' && data.paper) {
+    return {
+      ok: true,
+      kind,
+      query: String(data.paper.paperId || query),
+      provider: 'semantic-scholar',
+      results: [data.paper],
+      paper: data.paper,
+    };
+  }
+
   return {
     ok: true,
     kind,
@@ -191,8 +298,42 @@ export function formatLiteratureMarkdown(
   query: string,
   provider: string,
   results: LiteratureHit[],
+  extras?: { authors?: AuthorHit[]; action?: PaperAction },
 ): string {
-  const heading = kind === 'books' ? 'Books' : 'Papers';
+  if (extras?.action === 'author' && extras.authors) {
+    if (!extras.authors.length) {
+      return `### Authors\n\nNo authors found for **${query}**.`;
+    }
+    const lines = [`### Authors`, '', `Query: **${query}**`, ''];
+    extras.authors.forEach((a, i) => {
+      const aff = a.affiliations?.slice(0, 2).join(', ');
+      const stats = [
+        a.paperCount != null ? `${a.paperCount} papers` : '',
+        a.citationCount != null ? `${a.citationCount} citations` : '',
+        a.hIndex != null ? `h-index ${a.hIndex}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const name = a.url ? `[${a.name}](${a.url})` : a.name;
+      lines.push(`${i + 1}. ${name}${aff ? ` (${aff})` : ''}`);
+      if (stats) lines.push(`   - ${stats}`);
+      if (a.authorId) lines.push(`   - ID: \`${a.authorId}\``);
+      lines.push('');
+    });
+    return lines.join('\n').trim();
+  }
+
+  const heading =
+    extras?.action === 'citations'
+      ? 'Citations'
+      : extras?.action === 'references'
+        ? 'References'
+        : extras?.action === 'details'
+          ? 'Paper details'
+          : kind === 'books'
+            ? 'Books'
+            : 'Papers';
+
   if (!results.length) {
     return `### ${heading}\n\nNo results for **${query}**.`;
   }
@@ -203,13 +344,38 @@ export function formatLiteratureMarkdown(
     '',
   ];
   results.forEach((hit, i) => {
-    const meta = [hit.authors, hit.year, hit.sourceProvider].filter(Boolean).join(' · ');
-    lines.push(`${i + 1}. [${hit.title || hit.url}](${hit.url})`);
+    const meta = [
+      hit.authors,
+      hit.year,
+      hit.venue,
+      hit.citationCount != null ? `${hit.citationCount} citations` : '',
+      hit.sourceProvider,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    lines.push(`${i + 1}. [${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`);
     if (meta) lines.push(`   - ${meta}`);
-    if (hit.snippet) lines.push(`   - ${hit.snippet.replace(/\s+/g, ' ').slice(0, 280)}`);
-    if (kind === 'books' && hit.downloadable && hit.archiveId) {
-      lines.push('   - Legal download: `/books download ' + hit.archiveId + '`');
+    if (hit.tldr) lines.push(`   - TLDR: ${hit.tldr.replace(/\s+/g, ' ').slice(0, 320)}`);
+    else if (hit.snippet) lines.push(`   - ${hit.snippet.replace(/\s+/g, ' ').slice(0, 280)}`);
+    if (hit.paperId) lines.push(`   - ID: \`${hit.paperId}\``);
+    if (hit.pdfUrl) lines.push(`   - PDF: ${hit.pdfUrl}`);
+    if (kind === 'books' && hit.downloadable) {
+      const dlId =
+        hit.archiveId ||
+        (hit.md5 ? `libgen:${hit.md5}` : '') ||
+        hit.downloadUrl ||
+        '';
+      if (dlId && !String(dlId).startsWith('gutenberg:')) {
+        const label =
+          hit.sourceProvider === 'libgen' || String(dlId).startsWith('libgen:')
+            ? 'Download'
+            : String(dlId).startsWith('http')
+              ? 'Direct download'
+              : 'Download';
+        lines.push(`   - ${label}: \`/books download ${dlId}\``);
+      }
     }
+    if (kind === 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);
     if (hit.doi) lines.push(`   - DOI: \`${hit.doi}\``);
     lines.push('');
   });
@@ -232,7 +398,7 @@ export function literatureToolRun(
     results: results.map((r) => ({
       title: r.title,
       url: r.url,
-      snippet: r.snippet || '',
+      snippet: r.snippet || r.tldr || '',
     })),
     error,
   };

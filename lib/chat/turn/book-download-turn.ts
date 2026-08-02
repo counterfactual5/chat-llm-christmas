@@ -27,7 +27,7 @@ export function buildBookDownloadThread(opts: {
   const assistantMessage: Message = {
     id: assistantId,
     role: 'assistant',
-    content: 'Downloading legal book…',
+    content: 'Downloading book…',
     timestamp: now(),
     incomplete: true,
   };
@@ -62,13 +62,17 @@ export function formatBookDownloadMarkdown(result: {
   bytes: number;
   sourceUrl: string;
   fileId: string;
+  provider?: string;
 }): string {
+  const source =
+    result.sourceUrl ||
+    (result.provider === 'libgen' ? 'Library Genesis' : 'Internet Archive');
   return [
     '### Book downloaded',
     '',
     `**${result.title}**`,
     `- File: \`${result.filename}\` (${result.bytes} bytes)`,
-    `- Source: ${result.sourceUrl || 'Internet Archive'}`,
+    `- Source: ${source}`,
     `- Saved as file \`${result.fileId}\` — open Files panel to download.`,
   ].join('\n');
 }
@@ -78,17 +82,27 @@ export function bookDownloadToolRun(opts: {
   title: string;
   filename: string;
   sourceUrl: string;
+  provider?: string;
 }): MessageToolRun {
+  const provider =
+    opts.provider ||
+    (/^libgen:/i.test(opts.identifier) || /^[a-f0-9]{32}$/i.test(opts.identifier)
+      ? 'libgen'
+      : 'internet-archive');
+  const fallbackUrl =
+    provider === 'libgen'
+      ? `https://libgen.li/ads.php?md5=${opts.identifier.replace(/^libgen:/i, '')}`
+      : `https://archive.org/details/${opts.identifier}`;
   return {
     id: crypto.randomUUID(),
     name: 'book_download',
     status: 'done',
     query: opts.identifier,
-    provider: 'internet-archive',
+    provider,
     results: [
       {
         title: opts.title,
-        url: opts.sourceUrl || `https://archive.org/details/${opts.identifier}`,
+        url: opts.sourceUrl || fallbackUrl,
         snippet: opts.filename,
       },
     ],

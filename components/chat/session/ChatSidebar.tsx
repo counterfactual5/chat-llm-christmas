@@ -773,6 +773,19 @@ export function ChatSidebar({
                       
                       <div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('fileReadToolHint')}
+                        aria-disabled
+                      >
+                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('fileReadTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('fileReadToolHint')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
                         title={
                           modelSupportsVision
                             ? t('imageUnderstandDisabledOnVision')

@@ -68,6 +68,31 @@ async function fetchGatewayFileText(
     }
   }
 
+  // Prefer upload-time text sidecar (PDF/DOCX) — survives history collapse.
+  const extractRes = await fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (extractRes.ok) {
+    try {
+      const data = (await extractRes.json()) as {
+        text?: string;
+        filename?: string;
+        mime?: string;
+      };
+      const text = String(data.text || '');
+      if (text.trim()) {
+        return {
+          ok: true,
+          name: data.filename ? String(data.filename) : filename,
+          text,
+          mime: data.mime ? String(data.mime) : mime,
+        };
+      }
+    } catch {
+      /* fall through to raw content */
+    }
+  }
+
   const res = await fetch(`${base}/files/${encodeURIComponent(fileId)}/content`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -91,9 +116,8 @@ async function fetchGatewayFileText(
     return {
       ok: false,
       error: [
-        `File ${filename} (${ct || 'binary'}) has no text extract in this request cache.`,
-        'PDF/DOCX bodies are extracted when attached; use the fileId from 【历史文件引用】 while the extract is still cached in this chat,',
-        'or re-attach the file.',
+        `File ${filename} (${ct || 'binary'}) has no stored text extract.`,
+        'Re-attach the file so the client can extract text again, or upload with an extract sidecar.',
       ].join(' '),
     };
   }

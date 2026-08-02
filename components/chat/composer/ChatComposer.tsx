@@ -1072,6 +1072,19 @@ export function ChatComposer(props: ChatComposerProps) {
                           
                           <div
                             className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('fileReadToolHint')}
+                            aria-disabled
+                          >
+                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('fileReadTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('fileReadToolHint')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
                             title={
                               modelSupportsVision
                                 ? t('imageUnderstandDisabledOnVision')

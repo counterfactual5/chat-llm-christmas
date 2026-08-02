@@ -36,6 +36,13 @@ export async function POST(req: NextRequest) {
         return json({ error: 'Missing file.' }, 400);
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
+      const extractField = form.get('extract');
+      const extractText =
+        typeof extractField === 'string'
+          ? extractField
+          : extractField instanceof File
+            ? await extractField.text()
+            : '';
       uploaded = await uploadGatewayFile({
         apiKey,
         bytes,
@@ -52,6 +59,7 @@ export async function POST(req: NextRequest) {
                   : /\.gif$/i.test(file.name || '')
                     ? 'image/gif'
                     : file.type || 'application/octet-stream',
+        extractText: extractText.trim() || undefined,
       });
     } else {
       const body = await req.json();

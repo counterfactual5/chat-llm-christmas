@@ -22,6 +22,8 @@ export async function uploadGatewayFile(opts: {
   purpose?: string;
   /** Gateway routing model — required by NewAPI; defaults from env or gpt-4o. */
   model?: string;
+  /** Optional client-extracted text sidecar for PDF/DOCX (chat-api). */
+  extractText?: string;
 }): Promise<GatewayFileRef> {
   const baseURL = (opts.baseURL || filesGatewayBaseURL()).replace(/\/$/, '');
   const model = resolveUploadModel(opts.model);
@@ -43,6 +45,10 @@ export async function uploadGatewayFile(opts: {
     form.append('file', blob, opts.filename);
     form.append('purpose', purpose);
     form.append('model', model);
+    const extract = String(opts.extractText || '').trim();
+    if (extract && !opts.mime?.startsWith('image/')) {
+      form.append('extract', extract);
+    }
 
     // Query param is what NewAPI-compatible distributors can see when the body
     // is multipart (form fields are ignored for channel selection on /files).

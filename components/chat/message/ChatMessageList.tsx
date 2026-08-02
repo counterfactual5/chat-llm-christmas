@@ -473,6 +473,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isBookDownload,
                     isGenerateImage,
                     isCreateFile,
+                    isFileRead,
                     isSaveSkill,
                     isClaimReviewer,
                     isWebRead,
@@ -505,6 +506,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     (isNotion ||
                       isGoogle ||
                       isCreateFile ||
+                      isFileRead ||
                       isSaveSkill ||
                       isWebRead ||
                       isPaperRead ||
@@ -517,6 +519,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         !isGoogle &&
                         !isImageUnderstand &&
                         !isCreateFile &&
+                        !isFileRead &&
                         !isSaveSkill &&
                         !isClaimReviewer));
                   return (
@@ -567,7 +570,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <BookOpen className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isGenerateImage || isImageUnderstand ? (
                           <ImageIcon className="h-3 w-3 shrink-0 opacity-60" />
-                        ) : isCreateFile ? (
+                        ) : isCreateFile || isFileRead ? (
                           <FileText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isSaveSkill ? (
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
@@ -591,6 +594,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isBookDownload &&
                           !isGenerateImage &&
                           !isCreateFile &&
+                          !isFileRead &&
                           !isSaveSkill &&
                           !isClaimReviewer &&
                           !isWebRead &&

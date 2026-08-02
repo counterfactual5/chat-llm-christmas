@@ -53,6 +53,8 @@ export async function uploadAttachmentDirect(opts: {
   dataUrl?: string | null;
   filename: string;
   mime?: string;
+  /** Client-extracted text for PDF/DOCX/plain — stored as chat-api sidecar for file_read. */
+  extractText?: string | null;
 }): Promise<{ id: string; filename?: string; bytes?: number }> {
   let blob = opts.blob || null;
   let filename = opts.filename || 'upload.bin';
@@ -82,6 +84,10 @@ export async function uploadAttachmentDirect(opts: {
   const type = opts.mime || blob.type || 'application/octet-stream';
   form.append('file', blob, filename);
   form.append('purpose', type.startsWith('image/') ? 'vision' : 'assistants');
+  const extract = String(opts.extractText || '').trim();
+  if (extract && !type.startsWith('image/')) {
+    form.append('extract', extract);
+  }
 
   const res = await fetch(ticket.uploadUrl, {
     method: 'POST',
@@ -115,17 +121,24 @@ async function uploadViaVercelProxy(opts: {
   blob?: Blob | null;
   dataUrl?: string | null;
   filename: string;
+  extractText?: string | null;
 }): Promise<{ id: string; filename?: string; bytes?: number }> {
   let res: Response;
   if (opts.blob) {
     const form = new FormData();
     form.append('file', opts.blob, opts.filename);
+    const extract = String(opts.extractText || '').trim();
+    if (extract) form.append('extract', extract);
     res = await fetch('/api/files', { method: 'POST', body: form });
   } else {
     res = await fetch('/api/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataUrl: opts.dataUrl, filename: opts.filename }),
+      body: JSON.stringify({
+        dataUrl: opts.dataUrl,
+        filename: opts.filename,
+        extract: String(opts.extractText || '').trim() || undefined,
+      }),
     });
   }
   const rawText = await res.text();

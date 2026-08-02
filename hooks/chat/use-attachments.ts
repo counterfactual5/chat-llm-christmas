@@ -47,6 +47,7 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             dataUrl: a.dataUrl,
             filename: a.name,
             mime: a.type,
+            extractText: a.text || null,
           });
           const fileId = String(uploaded.id);
           const isImage = a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));

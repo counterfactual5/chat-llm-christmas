@@ -168,6 +168,28 @@ describe('research activity → timeline stages', () => {
     expect(read?.query).toBe('https://example.com/a');
   });
 
+  it('labels academic enrichments as paper_read', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a5b',
+      jobId: 'rs_5b',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: {
+        url: 'https://openalex.org/W123',
+        chars: 800,
+        title: 'Dietary patterns and disease risk',
+        sourceKind: 'paper',
+        sourceProvider: 'openalex',
+      },
+    });
+    const read = m.toolRuns?.find((r) => r.name === 'paper_read');
+    expect(read?.status).toBe('done');
+    expect(read?.provider).toBe('openalex');
+    expect(read?.results?.[0]?.title).toContain('Dietary');
+  });
+
   it('marks failed research incomplete with truncationReason', () => {
     let m = createResearchAssistantMessage({
       id: 'a3',

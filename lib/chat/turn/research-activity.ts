@@ -387,13 +387,28 @@ export function applyResearchEvent(
   if (kind === 'read') {
     const url = String(payload.url || '');
     const chars = Number(payload.chars || 0);
-    // Reads are direct URL fetches — no search provider. Do not label as
-    // "via research" (that was a placeholder and confused the timeline).
+    const sourceKind = String(payload.sourceKind || 'web').toLowerCase();
+    const sourceProvider = String(payload.sourceProvider || '').trim();
+    const title = String(payload.title || '').trim();
+    // Academic enrichments are still HTTP fetches, but the timeline should not
+    // look like a generic "Read webpage" when the hit came from OpenAlex/arXiv.
+    const toolName =
+      sourceKind === 'paper' ||
+      /^(openalex|arxiv|semantic|semantic-scholar|s2)$/i.test(sourceProvider)
+        ? 'paper_read'
+        : 'web_read';
     return finishTool(m, {
-      name: 'web_read',
+      name: toolName,
       query: url,
+      provider: sourceProvider || undefined,
       results: /^https?:\/\//i.test(url)
-        ? [{ title: url, url, snippet: chars ? `${chars} chars` : 'ok' }]
+        ? [
+            {
+              title: title || url,
+              url,
+              snippet: chars ? `${chars} chars` : 'ok',
+            },
+          ]
         : undefined,
     });
   }

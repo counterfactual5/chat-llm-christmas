@@ -466,6 +466,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isResearchVerify,
                     isResearchWrite,
                     isResearchSources,
+                    isPaperRead,
                   } = classification;
                   if (isClaimReviewer) return null;
                   const failed = run.status === 'done' && Boolean(run.error);
@@ -491,6 +492,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       isCreateFile ||
                       isSaveSkill ||
                       isWebRead ||
+                      isPaperRead ||
                       isResearchPlan ||
                       isResearchSynthesize ||
                       isResearchVerify ||
@@ -556,6 +558,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isWebRead ? (
                           <BookOpen className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isPaperRead ? (
+                          <GraduationCap className="h-3 w-3 shrink-0 opacity-60" />
                         ) : (
                           <Globe className="h-3 w-3 shrink-0 opacity-60" />
                         )}
@@ -575,6 +579,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isSaveSkill &&
                           !isClaimReviewer &&
                           !isWebRead &&
+                          !isPaperRead &&
                           !isResearchPlan &&
                           !isResearchSynthesize &&
                           !isResearchVerify &&

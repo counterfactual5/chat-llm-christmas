@@ -132,9 +132,25 @@ describe('getToolRunLabelKey', () => {
     }
   });
 
-  it('reports toolFailed for a failed non-Google run once done', () => {
-    const c = classifyToolRun({ name: 'web_search' });
-    expect(getToolRunLabelKey(c, { searching: false, failed: true })).toBe('toolFailed');
+  it('labels mixed research search and paper reads distinctly', () => {
+    expect(
+      getToolRunLabelKey(
+        classifyToolRun({ name: 'web_search', provider: 'openalex+zhipu' }),
+        { searching: false, failed: false },
+      ),
+    ).toBe('searchedMixed');
+    expect(
+      getToolRunLabelKey(
+        classifyToolRun({ name: 'web_search', provider: 'literature:openalex' }),
+        { searching: true, failed: false },
+      ),
+    ).toBe('searchingPapers');
+    expect(
+      getToolRunLabelKey(classifyToolRun({ name: 'paper_read', provider: 'openalex' }), {
+        searching: false,
+        failed: false,
+      }),
+    ).toBe('readPaper');
   });
 });
 

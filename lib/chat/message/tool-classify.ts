@@ -28,6 +28,10 @@ export type ToolRunClassification = {
   isResearchVerify: boolean;
   isResearchWrite: boolean;
   isResearchSources: boolean;
+  /** Research mixed/literature lane search (provider includes academic indexes). */
+  isResearchAcademicSearch: boolean;
+  isResearchMixedSearch: boolean;
+  isPaperRead: boolean;
 };
 
 /** Classify a tool run by provider/name so the timeline can pick an icon + label. */
@@ -70,6 +74,17 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const isResearchVerify = run.name === 'research_verify';
   const isResearchWrite = run.name === 'research_write';
   const isResearchSources = run.name === 'research_sources';
+  const isPaperRead = run.name === 'paper_read';
+  const provider = String(run.provider || '');
+  const providerHasPaper = /openalex|arxiv|semantic|literature|\bs2\b/i.test(provider);
+  const providerHasWeb =
+    /zhipu|tavily|brave|serper|duckduckgo|wikipedia|google_news|google-news/i.test(provider);
+  // Research search tools are emitted as web_search; lane is encoded in provider.
+  const isResearchMixedSearch =
+    run.name === 'web_search' && providerHasPaper && providerHasWeb;
+  const isResearchAcademicSearch =
+    (run.name === 'web_search' && providerHasPaper && !providerHasWeb) ||
+    /^literature:/i.test(provider);
 
   return {
     isNotion,
@@ -95,6 +110,9 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isResearchVerify,
     isResearchWrite,
     isResearchSources,
+    isResearchAcademicSearch,
+    isResearchMixedSearch,
+    isPaperRead,
   };
 }
 
@@ -130,6 +148,9 @@ export function getToolRunLabelKey(
     isResearchVerify,
     isResearchWrite,
     isResearchSources,
+    isResearchAcademicSearch,
+    isResearchMixedSearch,
+    isPaperRead,
   } = classification;
   const { searching, failed } = state;
 
@@ -151,6 +172,18 @@ export function getToolRunLabelKey(
   }
   if (isResearchSources) {
     return searching ? 'searchingWeb' : 'searchedSources';
+  }
+  if (isResearchMixedSearch) {
+    if (failed) return 'toolFailed';
+    return searching ? 'searchingMixed' : 'searchedMixed';
+  }
+  if (isResearchAcademicSearch) {
+    if (failed) return 'toolFailed';
+    return searching ? 'searchingPapers' : 'searchedPapers';
+  }
+  if (isPaperRead) {
+    if (failed) return 'toolFailed';
+    return searching ? 'readingPaper' : 'readPaper';
   }
   if (isClaimReviewer) {
     return searching ? 'reviewingClaims' : 'reviewedClaims';
@@ -207,6 +240,7 @@ export function toolRunShowsFetchingResults(
     classification.isResearchSynthesize ||
     classification.isResearchVerify ||
     classification.isResearchWrite ||
+    classification.isPaperRead ||
     classification.isWebRead ||
     classification.isGenerateImage ||
     classification.isCreateFile ||

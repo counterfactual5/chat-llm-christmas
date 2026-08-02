@@ -13,11 +13,20 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('quick product map');
     expect(text).toContain('/image');
     expect(text).toContain('/skill');
+    expect(text).toContain('/skill singular');
     expect(text).toContain('Request review');
     expect(text).toContain('Continue reply');
     expect(text).toContain('手动添加');
     expect(text).toContain('create_file');
-    expect(text).toContain('GitHub repo/file/issue/PR/release research uses GitHub tools before generic web tools');
+    expect(text).toContain('/research [quick|standard|rigorous]');
+    expect(text).toContain('web|literature|mixed');
+    expect(text).toContain('image_understand');
+    expect(text).toContain('Notion');
+    expect(text).toContain('zhipu-vision');
+    expect(text).toContain('not a dedicated finance/market data feed');
+    expect(text).toContain('NOT product features');
+    expect(text).toContain('[ACTIVE]');
+    expect(text).toContain('prefer GitHub tools over generic web');
     expect(text).toContain('follow the user’s language');
   });
 });
@@ -30,6 +39,11 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('Sidebar Tools');
     expect(text).toContain('GitHub MCP is enabled for this chat, it is the primary path');
     expect(text).toContain('generic webpage reading is fallback only');
+    expect(text).toContain('no first-class finance');
+    expect(text).toContain('image_understand');
+    expect(text).toContain('/skill not /skills');
+    expect(text).toContain('prefer /papers or /books for dedicated literature');
+    expect(text).toContain('Never upgrade inactive library blurbs');
   });
 });
 

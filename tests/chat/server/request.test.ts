@@ -21,6 +21,7 @@ describe('chat request parsing', () => {
       autoReview: true,
       requestReview: false,
       reviewContext: null,
+      fileExtracts: {},
     });
   });
 

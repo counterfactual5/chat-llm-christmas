@@ -1,5 +1,6 @@
 import type { ChatSession, WebSearchSource } from '@/lib/chat/types';
 import { formatWebSourcesForReference } from '@/lib/chat/context/references';
+import { collectFileExtractsFromMessages } from '@/lib/files/attached-file-blocks';
 import { analyzeTruncation } from '@/lib/chat/stream/reply-truncation';
 import {
   contentHasThinkMarkup,
@@ -81,6 +82,8 @@ export async function streamChatResponse(
   const session = sessions.find((s) => s.id === sessionId);
   const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
   const combinedReference = formatWebSourcesForReference(sessionSources);
+  // Full extracts live in session messages; apiMessages may already be collapsed.
+  const fileExtracts = collectFileExtractsFromMessages(session?.messages || []);
 
   const notionConnected = deps.getNotionConnected();
   const githubConnected = deps.getGitHubConnected();
@@ -123,6 +126,7 @@ export async function streamChatResponse(
       memories: deps.memoriesPayload(),
       conversationId: sessionId,
       integrations,
+      ...(Object.keys(fileExtracts).length ? { fileExtracts } : {}),
       autoReview: deps.getSessions().find((s) => s.id === sessionId)?.autoReview ?? true,
       ...(requestReview && lastAssistantForReview
         ? {

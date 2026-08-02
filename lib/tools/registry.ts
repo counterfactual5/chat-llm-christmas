@@ -40,6 +40,11 @@ export type ToolRuntimeContext = {
     apiKey: string;
     baseURL: string;
   };
+  /**
+   * Extracted text for attached docs in this thread (fileId → body).
+   * Built before history collapse so file_read can re-materialize full text.
+   */
+  fileExtracts?: Record<string, { name?: string; text: string }>;
 };
 
 export type ToolCallInput = {

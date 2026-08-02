@@ -56,6 +56,11 @@ export type ChatRequestBody = {
   autoReview: boolean;
   requestReview: boolean;
   reviewContext: ChatReviewContext | null;
+  /**
+   * Optional map of attached-doc extracts (fileId → text) so file_read still
+   * works after history collapse strips full bodies from older turns.
+   */
+  fileExtracts: Record<string, { name?: string; text: string }>;
 };
 
 const DEFAULT_MODEL = 'deepseek-v4-flash-200k';
@@ -74,6 +79,24 @@ export function parseChatRequestBody(raw: unknown): ChatRequestBody {
   const memories = Array.isArray(body.memories)
     ? (body.memories as ChatMemoryInput[])
     : [];
+  const fileExtracts: Record<string, { name?: string; text: string }> = {};
+  const rawExtracts = body.fileExtracts;
+  if (rawExtracts && typeof rawExtracts === 'object' && !Array.isArray(rawExtracts)) {
+    for (const [key, val] of Object.entries(rawExtracts as Record<string, unknown>)) {
+      const id = String(key || '').trim();
+      if (!id) continue;
+      if (typeof val === 'string' && val.trim()) {
+        fileExtracts[id] = { text: val };
+        continue;
+      }
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        const text = String((val as { text?: unknown }).text || '').trim();
+        if (!text) continue;
+        const name = String((val as { name?: unknown }).name || '').trim();
+        fileExtracts[id] = name ? { name, text } : { text };
+      }
+    }
+  }
   return {
     // Preserve missing/non-array messages so the route can return the same 400 as before.
     messages: body.messages,
@@ -95,6 +118,7 @@ export function parseChatRequestBody(raw: unknown): ChatRequestBody {
       body.reviewContext && typeof body.reviewContext === 'object'
         ? (body.reviewContext as ChatReviewContext)
         : null,
+    fileExtracts,
   };
 }
 

@@ -32,6 +32,11 @@ import {
   uploadGatewayDataUrl,
 } from '@/lib/files/gateway';
 import {
+  collapseAttachedFileBlocksForHistory,
+  collectFileExtractsFromMessages,
+  messagesHaveAttachedFiles,
+} from '@/lib/files/attached-file-blocks';
+import {
   buildExecutionRecordFromMessages,
   runFullClaimAudit,
   buildReviewIssuesResponsePrompt,
@@ -104,6 +109,7 @@ export async function handleChatRequest(req: NextRequest) {
       autoReview,
       requestReview,
       reviewContext,
+      fileExtracts: requestFileExtracts,
     } = parseChatRequestBody(await req.json());
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
     const isBoundAccount = Boolean(boundUserKey);
@@ -175,6 +181,22 @@ export async function handleChatRequest(req: NextRequest) {
     const modelIsVision = getModelSpec(requestedModel).vision;
     if (modelIsVision) {
       enabledTools = enabledTools.filter((t) => t.name !== 'image_understand');
+    }
+    // file_read is only useful when this thread has attached documents.
+    const fromMessages = collectFileExtractsFromMessages(
+      Array.isArray(messages) ? (messages as Array<{ role?: string; content?: unknown }>) : [],
+    );
+    const fileExtracts: Record<string, { name?: string; text: string }> = {
+      ...fromMessages,
+      ...requestFileExtracts,
+    };
+    const hasAttachedDocs =
+      Object.keys(fileExtracts).length > 0 ||
+      messagesHaveAttachedFiles(
+        Array.isArray(messages) ? (messages as Array<{ role?: string; content?: unknown }>) : [],
+      );
+    if (!hasAttachedDocs) {
+      enabledTools = enabledTools.filter((t) => t.name !== 'file_read');
     }
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);
@@ -351,7 +373,12 @@ export async function handleChatRequest(req: NextRequest) {
         continue;
       }
 
-      const text = typeof m.content === 'string' ? m.content : '';
+      const textRaw = typeof m.content === 'string' ? m.content : '';
+      // Older turns: keep describing + fileId only (full body was already seen).
+      const text =
+        role === 'user' && mi !== lastUserMsgIdx
+          ? collapseAttachedFileBlocksForHistory(textRaw)
+          : textRaw;
       const rawImages: any[] = Array.isArray(m.images) ? m.images : [];
 
       // Text-only model + OLDER user turn with never-transcribed uploads:
@@ -585,6 +612,7 @@ export async function handleChatRequest(req: NextRequest) {
           },
           requestSkills: skills,
           gateway: { apiKey, baseURL },
+          ...(Object.keys(fileExtracts).length ? { fileExtracts } : {}),
         };
 
         if (requestReview) {

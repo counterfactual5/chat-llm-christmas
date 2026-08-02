@@ -145,18 +145,21 @@ export function collectUserUploadsFromMessages(messages: Message[]): WebSearchSo
     }
 
     const content = String(m.content || '');
+    // Matches both `[Attached File: name]\nbody` and `… (stored fileId: id)\nbody`,
+    // plus collapsed 【历史文件引用】 lines (snippet only).
     const fileRe =
-      /\[Attached File: ([^\]]+)\]\n([\s\S]*?)(?=\n\n---\n\n|\n\n\[Attached File:|$)/g;
+      /\[Attached File: ([^\]]+)\](?:\s*\(stored fileId:\s*([^)]+)\))?\n([\s\S]*?)(?=\n\n---\n\n|\n\n\[Attached File:|$)/g;
     let match: RegExpExecArray | null;
     while ((match = fileRe.exec(content)) !== null) {
       const name = match[1].trim();
-      const text = match[2].trim();
-      const key = `file:${m.id}:${name}`;
+      const fileId = String(match[2] || '').trim();
+      const text = match[3].trim();
+      const key = fileId ? `file:${fileId}` : `file:${m.id}:${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({
         title: name,
-        url: '',
+        url: fileId ? `/api/files/${encodeURIComponent(fileId)}` : '',
         snippet: text.slice(0, 400),
         provider: 'upload',
         query: 'upload',

@@ -5,6 +5,7 @@ import { createWebReadTool } from '@/lib/tools/web-read/tool';
 import { createImageUnderstandTool } from '@/lib/tools/image-understand/tool';
 import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
 import { createCreateFileTool } from '@/lib/tools/create-file/tool';
+import { createFileReadTool } from '@/lib/tools/file-read/tool';
 import {
   createPaperSearchTool,
   createBookSearchTool,
@@ -24,6 +25,7 @@ export function builtinToolRegistry(): ChatTool[] {
     createBookSearchTool(),
     createGenerateImageTool(),
     createImageUnderstandTool(),
+    createFileReadTool(),
     createSaveSkillTool(),
     createCreateFileTool(),
   ];
@@ -106,6 +108,12 @@ export {
   sanitizeGeneratedFilename,
   mimeFromFilename,
 } from '@/lib/tools/create-file/tool';
+
+export {
+  createFileReadTool,
+  parseFileReadArgs,
+  normalizeFileId,
+} from '@/lib/tools/file-read/tool';
 
 export {
   createPaperSearchTool,

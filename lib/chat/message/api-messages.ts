@@ -1,5 +1,6 @@
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message } from '@/lib/chat/types';
+import { collapseAttachedFileBlocksForHistory } from '@/lib/files/attached-file-blocks';
 import {
   hasPersistedImageTranscription,
   imageRefsFromMessageImages,
@@ -80,6 +81,12 @@ export function toApiMessages(
               ? `/api/files/${encodeURIComponent(img.fileId)}`
               : img.url,
           }));
+      }
+
+      // Older turns: collapse full attached-file bodies → describing + fileId.
+      // Latest turn keeps the full extract so the model can answer immediately.
+      if (i !== lastUserIdx) {
+        content = collapseAttachedFileBlocksForHistory(content || '');
       }
     }
 

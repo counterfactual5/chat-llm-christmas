@@ -6,6 +6,7 @@
 
 import { useCallback, useState } from 'react';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
+import { uploadAttachmentDirect } from '@/lib/files/direct-upload';
 
 export function useChatAttachments(opts: { isAccountBound: boolean }) {
   const { isAccountBound } = opts;
@@ -39,58 +40,38 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
         if ((!a.uploadBlob && !a.dataUrl) || !isAccountBound) continue;
 
         try {
-          let res: Response;
-          if (a.uploadBlob) {
-            // Multipart avoids base64 inflation that trips Vercel's ~4.5MB body limit.
-            const form = new FormData();
-            form.append('file', a.uploadBlob, a.name);
-            res = await fetch('/api/files', { method: 'POST', body: form });
-          } else {
-            res = await fetch('/api/files', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ dataUrl: a.dataUrl, filename: a.name }),
-            });
-          }
-          const rawText = await res.text();
-          let data: any = {};
-          try {
-            data = rawText ? JSON.parse(rawText) : {};
-          } catch {
-            data = { error: rawText.slice(0, 200) };
-          }
-          if (res.ok && data?.id) {
-            const fileId = String(data.id);
-            patch(a.id, (x) => ({
-              ...x,
-              uploading: false,
-              uploadError: false,
-              fileId,
-              previewUrl: `/api/files/${encodeURIComponent(fileId)}`,
-              uploadBlob: undefined,
-            }));
-            continue;
-          }
-          const payloadTooLarge =
-            res.status === 413 ||
-            /FUNCTION_PAYLOAD_TOO_LARGE|payload too large|request entity too large/i.test(
-              `${data?.error || ''} ${rawText}`,
-            );
-          const detail = payloadTooLarge
-            ? 'Image too large for upload (max ~1.5MB after compress)'
-            : typeof data?.error === 'string'
-              ? data.error
-              : `Upload failed (HTTP ${res.status})`;
-          uploadErrors.push(`${a.name}: ${detail}`);
-          patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
-          continue;
+          // Prefer browser → chat-api direct upload (upload ticket); falls back
+          // to same-origin /api/files if the ticket endpoint is not yet live.
+          const uploaded = await uploadAttachmentDirect({
+            blob: a.uploadBlob || null,
+            dataUrl: a.dataUrl,
+            filename: a.name,
+            mime: a.type,
+          });
+          const fileId = String(uploaded.id);
+          patch(a.id, (x) => ({
+            ...x,
+            uploading: false,
+            uploadError: false,
+            fileId,
+            previewUrl: `/api/files/${encodeURIComponent(fileId)}`,
+            uploadBlob: undefined,
+          }));
         } catch (err: any) {
-          uploadErrors.push(`${a.name}: ${err?.message || 'upload failed'}`);
+          const msg = String(err?.message || 'upload failed');
+          const payloadTooLarge =
+            /too large|FUNCTION_PAYLOAD_TOO_LARGE|payload too large|FILE_TOO_LARGE|413/i.test(
+              msg,
+            );
+          uploadErrors.push(
+            `${a.name}: ${
+              payloadTooLarge
+                ? 'Image too large for upload (max ~8MB after compress / 20MB hard limit)'
+                : msg
+            }`,
+          );
           patch(a.id, (x) => ({ ...x, uploading: false, uploadError: true }));
-          continue;
         }
-
-        patch(a.id, (x) => ({ ...x, uploading: false }));
       }
       const allErrors = [...errors, ...uploadErrors];
       if (allErrors.length > 0) setAttachError(allErrors.join(' · '));

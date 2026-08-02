@@ -1,8 +1,9 @@
-/** Client-side image downscale/compress before upload (Vercel request body ~4.5MB). */
+/** Client-side image downscale/compress before upload.
+ *  Direct uploads bypass Vercel body limits; keep edges/size vision-friendly. */
 
-/** Soft ceiling after compress — small enough for Vercel upload (~4.5MB) and
- *  for Edge→LLM vision inlining (base64 ≈ 4/3 size). */
-export const MAX_UPLOAD_BYTES = 1.5 * 1024 * 1024;
+/** Soft ceiling after compress — vision inlining (base64 ≈ 4/3) still goes
+ *  through Edge→LLM; keep well under chat-api's 20MB and practical vision size. */
+export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /** Hard reject before we even try to read (phone RAW / huge PNG). */
 export const MAX_INGEST_BYTES = 20 * 1024 * 1024;
@@ -39,7 +40,7 @@ function canvasToBlob(
 }
 
 /**
- * Downscale + recompress large images so `/api/files` stays under Vercel's body limit.
+ * Downscale + recompress large images for vision inlining + storage.
  * Returns the original file when already small enough / non-browser env.
  */
 export async function prepareImageForUpload(file: File): Promise<{

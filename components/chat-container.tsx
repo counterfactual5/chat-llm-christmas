@@ -46,6 +46,7 @@ import {
   collectWebSourcesFromMessages,
   formatWebSourcesForReference,
   referenceSourceKind,
+  webSourcesForThread,
 } from '@/lib/chat/context/references';
 import {
   analyzeTruncation,
@@ -1003,43 +1004,38 @@ export default function ChatContainer() {
 
   // --- Actions ---
   const updateSession = (sessionId: string, newMessages: Message[], title?: string) => {
-    setSessions((prev) => {
-      const exists = prev.some((s) => s.id === sessionId);
-      let next: ChatSession[];
-      if (!exists) {
-        // First message on a missing draft — materialize the session now.
-        const created: ChatSession = {
-          id: sessionId || crypto.randomUUID(),
-          title: title || 'New Conversation',
+    // Apply against sessionsRef immediately so same-tick readers (handleSubmit →
+    // streamChatResponse / queue) see truncated history + rebuilt Material.
+    // Waiting for the setState updater alone is too late: React batches, and the
+    // render-time `sessionsRef.current = sessions` assignment can briefly keep
+    // the pre-edit snapshot — which re-injected old web_search hits as referenceText.
+    const prev = sessionsRef.current;
+    const exists = prev.some((s) => s.id === sessionId);
+    let next: ChatSession[];
+    if (!exists) {
+      const created: ChatSession = {
+        id: sessionId || crypto.randomUUID(),
+        title: title || 'New Conversation',
+        messages: newMessages,
+        updatedAt: Date.now(),
+        webSources: collectWebSourcesFromMessages(newMessages),
+      };
+      if (!sessionId) setActiveSessionId(created.id);
+      next = [created, ...prev.filter((s) => s.messages.length > 0)];
+    } else {
+      next = prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
           messages: newMessages,
+          title: title || s.title,
           updatedAt: Date.now(),
-          webSources: collectWebSourcesFromMessages(newMessages),
+          webSources: webSourcesForThread(newMessages, s),
         };
-        if (!sessionId) setActiveSessionId(created.id);
-        next = [created, ...prev.filter((s) => s.messages.length > 0)];
-      } else {
-        next = prev.map((s) => {
-          if (s.id !== sessionId) return s;
-          const collectedSources = collectWebSourcesFromMessages(newMessages);
-          const retainedUrls = new Set(collectedSources.map((source) => source.url));
-          return {
-            ...s,
-            messages: newMessages,
-            title: title || s.title,
-            updatedAt: Date.now(),
-            // After an explicit clear, sources are an allowlist. On rollback/edit,
-            // keep only allowlisted sources that still exist in the retained thread.
-            webSources: s.webSourcesCleared
-              ? (s.webSources || []).filter((source) => retainedUrls.has(source.url))
-              : collectedSources,
-          };
-        });
-      }
-      // Same-tick readers (streamChatResponse / queue) must see truncated history
-      // before React paints — otherwise rollback looks like only Material changed.
-      sessionsRef.current = next;
-      return next;
-    });
+      });
+    }
+    sessionsRef.current = next;
+    setSessions(next);
   };
 
   const updateActiveSession = (newMessages: Message[], title?: string) => {
@@ -1048,13 +1044,15 @@ export default function ChatContainer() {
 
   const clearWebSources = () => {
     setWebSourcesCleared(true);
-    setSessions((prev) =>
-      prev.map((s) =>
+    setSessions((prev) => {
+      const next = prev.map((s) =>
         s.id === activeSessionId
           ? { ...s, webSources: undefined, webSourcesCleared: true }
           : s,
-      ),
-    );
+      );
+      sessionsRef.current = next;
+      return next;
+    });
     setConfirmClearSourcesOpen(false);
   };
 

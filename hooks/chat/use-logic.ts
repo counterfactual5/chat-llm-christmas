@@ -51,6 +51,7 @@ import {
   resolvePendingAttachments,
   titleForNewConversation,
 } from '@/lib/chat/turn/attachments';
+import { webSourcesForThread } from '@/lib/chat/context/references';
 import {
   estimateTokensForSend,
   exceedsUsableWindow,
@@ -718,14 +719,18 @@ export function useChatLogic(props: UseChatLogicProps) {
 
     if (!opts?.alreadyLoading) beginLoading(sessionId);
 
-    const projectTokens = (history: Message[]) =>
-      estimateTokensForSend({
+    const projectTokens = (history: Message[]) => {
+      const session = sessionsRef.current.find((s) => s.id === sessionId);
+      return estimateTokensForSend({
         history,
         nextUserText: fullContent,
         pendingImageCount: pendingImages.length,
-        webSources: sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [],
+        // Match the sources we will actually send (thread-derived), not a stale
+        // session.webSources left over from turns truncated by edit/resend.
+        webSources: webSourcesForThread([...history, userMessage], session),
         contextBreakdown,
       });
+    };
 
     const restoreHistoryIfNeeded = () => {
       if (!historySnapshot || !baseMessagesOverride) return;
@@ -768,7 +773,14 @@ export function useChatLogic(props: UseChatLogicProps) {
 
     const controller = new AbortController();
     abortControllersRef.current.set(sessionId, controller);
-    const threadSources = sessionsRef.current.find((s) => s.id === sessionId)?.webSources || [];
+    const sessionAfterTruncate = sessionsRef.current.find((s) => s.id === sessionId);
+    // Always derive Material from the messages in this request. Reading
+    // session.webSources here used to re-attach pre-edit search hits after
+    // Save & resend truncated the visible thread.
+    const threadSources = webSourcesForThread(
+      [...newMessages, assistantMessage],
+      sessionAfterTruncate,
+    );
 
     try {
       await streamChatResponse(

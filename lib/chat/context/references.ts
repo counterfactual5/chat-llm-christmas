@@ -1,4 +1,5 @@
 import type {
+  ChatSession,
   ExternalReferenceSourceKind,
   Message,
   WebSearchSource,
@@ -64,6 +65,21 @@ export function formatWebSourcesForReference(sources: WebSearchSource[]): string
     );
   }
   return blocks.join('\n\n');
+}
+
+/**
+ * Sources that should ride along with a send/edit for this thread.
+ * Always derived from the message list being sent — never from a stale session
+ * `webSources` snapshot (edit/resend truncates messages before React commits).
+ */
+export function webSourcesForThread(
+  messages: Message[],
+  session?: Pick<ChatSession, 'webSources' | 'webSourcesCleared'> | null,
+): WebSearchSource[] {
+  const collected = collectWebSourcesFromMessages(messages);
+  if (!session?.webSourcesCleared) return collected;
+  const retainedUrls = new Set(collected.map((source) => source.url).filter(Boolean));
+  return (session.webSources || []).filter((source) => retainedUrls.has(source.url));
 }
 
 /** Rebuild Material sources from every completed search in the chat (deduped by URL). */

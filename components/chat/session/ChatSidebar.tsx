@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Plus,
@@ -86,6 +87,12 @@ export type ChatSidebarProps = {
   onOpenMemoriesModal: () => void;
   onOpenLoginModal: () => void;
   onSetAutoReview: (enabled: boolean) => void;
+  paperSearchEnabled: boolean;
+  bookSearchEnabled: boolean;
+  generateImageEnabled: boolean;
+  onSetPaperSearch: (enabled: boolean) => void;
+  onSetBookSearch: (enabled: boolean) => void;
+  onSetGenerateImage: (enabled: boolean) => void;
   onDisconnectAccount: () => void | Promise<void>;
 };
 
@@ -125,6 +132,12 @@ export function ChatSidebar({
   onOpenMemoriesModal,
   onOpenLoginModal,
   onSetAutoReview,
+  paperSearchEnabled,
+  bookSearchEnabled,
+  generateImageEnabled,
+  onSetPaperSearch,
+  onSetBookSearch,
+  onSetGenerateImage,
   onDisconnectAccount,
 }: ChatSidebarProps) {
   const { t, locale, setLocale } = useLocale();
@@ -136,14 +149,51 @@ export function ChatSidebar({
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [pastDayOpen, setPastDayOpen] = useState<Record<string, boolean>>({});
   const [sessionMenuOpenId, setSessionMenuOpenId] = useState<string | null>(null);
+  const [sessionMenuAnchor, setSessionMenuAnchor] = useState<{
+    top: number | null;
+    bottom: number | null;
+    right: number;
+  } | null>(null);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  const closeSessionMenu = () => {
+    setSessionMenuOpenId(null);
+    setSessionMenuAnchor(null);
+  };
+
+  const openSessionMenu = (sessionId: string, trigger: HTMLElement) => {
+    if (sessionMenuOpenId === sessionId) {
+      closeSessionMenu();
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const menuHeight = 168;
+    const gap = 4;
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const openUp = spaceBelow < menuHeight;
+    setSessionMenuOpenId(sessionId);
+    setSessionMenuAnchor({
+      right: Math.max(8, window.innerWidth - rect.right),
+      top: openUp ? null : rect.bottom + gap,
+      bottom: openUp ? Math.max(8, window.innerHeight - rect.top + gap) : null,
+    });
+  };
 
   const todayKey = dayKeyOf(Date.now());
   const dayGroups = useMemo(
     () => buildSidebarDayGroups(sessionsForSidebar(sessions), todayKey),
     [sessions, todayKey],
   );
+
+  const sessionMenuSession = useMemo(() => {
+    if (!sessionMenuOpenId) return null;
+    for (const group of dayGroups) {
+      const hit = group.sessions.find((s) => s.id === sessionMenuOpenId);
+      if (hit) return hit;
+    }
+    return null;
+  }, [dayGroups, sessionMenuOpenId]);
 
   const dayLabel = (key: string) =>
     formatDayGroupLabel(key, {
@@ -185,18 +235,24 @@ export function ChatSidebar({
       ) {
         return;
       }
-      setSessionMenuOpenId(null);
+      closeSessionMenu();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSessionMenuOpenId(null);
+      if (event.key === 'Escape') closeSessionMenu();
     };
+    const onRepositionClose = () => closeSessionMenu();
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('touchstart', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
+    // ScrollArea / window move the trigger — close rather than leave a floating orphan.
+    document.addEventListener('scroll', onRepositionClose, true);
+    window.addEventListener('resize', onRepositionClose);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('touchstart', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('scroll', onRepositionClose, true);
+      window.removeEventListener('resize', onRepositionClose);
     };
   }, [sessionMenuOpenId]);
 
@@ -633,44 +689,56 @@ export function ChatSidebar({
                           </div>
                         </div>
                       </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <GraduationCap className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                        <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate">{t('paperSearchTool')}</div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
+                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                            {t('paperSearchTool')}
+                          </div>
+                          <div className="truncate text-[10px] text-stone-400">
+                            {t('paperSearchToolHint')}
                           </div>
                         </div>
+                        <Switch
+                          size="sm"
+                          checked={paperSearchEnabled}
+                          onCheckedChange={onSetPaperSearch}
+                          aria-label={t('paperSearchTool')}
+                        />
                       </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                        <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate">{t('bookSearchTool')}</div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
+                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                            {t('bookSearchTool')}
+                          </div>
+                          <div className="truncate text-[10px] text-stone-400">
+                            {t('bookSearchToolHint')}
                           </div>
                         </div>
+                        <Switch
+                          size="sm"
+                          checked={bookSearchEnabled}
+                          onCheckedChange={onSetBookSearch}
+                          aria-label={t('bookSearchTool')}
+                        />
                       </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                        <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate">{t('generateImageTool')}</div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
+                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                            {t('generateImageTool')}
+                          </div>
+                          <div className="truncate text-[10px] text-stone-400">
+                            {t('generateImageToolHint')}
                           </div>
                         </div>
+                        <Switch
+                          size="sm"
+                          checked={generateImageEnabled}
+                          onCheckedChange={onSetGenerateImage}
+                          aria-label={t('generateImageTool')}
+                        />
                       </div>
                       <div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
@@ -769,7 +837,7 @@ export function ChatSidebar({
                           <div
                             onClick={() => {
                               onSelectSession(session.id);
-                              setSessionMenuOpenId(null);
+                              closeSessionMenu();
                             }}
                             className={cn(
                               'flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
@@ -794,9 +862,7 @@ export function ChatSidebar({
                             data-session-menu-trigger={session.id}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSessionMenuOpenId(
-                                sessionMenuOpenId === session.id ? null : session.id,
-                              );
+                              openSessionMenu(session.id, e.currentTarget);
                             }}
                             className={cn(
                               'absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-transparent hover:bg-stone-200 dark:hover:bg-stone-700 transition-opacity',
@@ -807,58 +873,6 @@ export function ChatSidebar({
                           >
                             <MoreHorizontal className="h-3.5 w-3.5 text-stone-500" />
                           </button>
-
-                          <AnimatePresence>
-                            {sessionMenuOpenId === session.id && (
-                              <motion.div
-                                data-session-menu={session.id}
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.95 }}
-                                className="absolute right-0 top-full mt-1 z-50 w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
-                              >
-                                <div className="px-2 py-1.5 border-b border-stone-100 dark:border-stone-800/50 mb-1 flex items-center gap-2 text-xs text-stone-400">
-                                  <Clock className="h-3 w-3" />
-                                  {new Date(session.updatedAt).toLocaleString(undefined, {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                  })}
-                                </div>
-
-                                <div className="px-2 py-1 text-xs text-stone-500">
-                                  {session.messages.length} messages
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onExportSession(session.id, e);
-                                    setSessionMenuOpenId(null);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 rounded-md dark:text-stone-300 dark:hover:bg-stone-800"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                  {t('exportMarkdown')}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSessionMenuOpenId(null);
-                                    onRequestDeleteSession(session.id, session.title);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-md dark:text-red-400 dark:hover:bg-red-900/20"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  {t('deleteChat')}
-                                </button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
                         </div>
                       ))}
                   </div>
@@ -980,6 +994,71 @@ export function ChatSidebar({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {typeof document !== 'undefined' &&
+        sessionMenuSession &&
+        sessionMenuAnchor &&
+        createPortal(
+          <AnimatePresence>
+            <motion.div
+              key={sessionMenuSession.id}
+              data-session-menu={sessionMenuSession.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              style={{
+                position: 'fixed',
+                right: sessionMenuAnchor.right,
+                top: sessionMenuAnchor.top ?? undefined,
+                bottom: sessionMenuAnchor.bottom ?? undefined,
+                zIndex: 80,
+              }}
+              className="w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl dark:border-stone-700 dark:bg-stone-900"
+            >
+              <div className="mb-1 flex items-center gap-2 border-b border-stone-100 px-2 py-1.5 text-xs text-stone-400 dark:border-stone-800/50">
+                <Clock className="h-3 w-3" />
+                {new Date(sessionMenuSession.updatedAt).toLocaleString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </div>
+
+              <div className="px-2 py-1 text-xs text-stone-500">
+                {sessionMenuSession.messages.length} messages
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExportSession(sessionMenuSession.id, e);
+                  closeSessionMenu();
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {t('exportMarkdown')}
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const { id, title } = sessionMenuSession;
+                  closeSessionMenu();
+                  onRequestDeleteSession(id, title);
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t('deleteChat')}
+              </button>
+            </motion.div>
+          </AnimatePresence>,
+          document.body,
+        )}
     </>
 
   );

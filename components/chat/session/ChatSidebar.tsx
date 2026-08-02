@@ -650,6 +650,57 @@ export function ChatSidebar({
                           aria-label={t('autoReview')}
                         />
                       </div>
+<div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                        <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                            {t('generateImageTool')}
+                          </div>
+                          <div className="truncate text-[10px] text-stone-400">
+                            {t('generateImageToolHint')}
+                          </div>
+                        </div>
+                        <Switch
+                          size="sm"
+                          checked={generateImageEnabled}
+                          onCheckedChange={onSetGenerateImage}
+                          aria-label={t('generateImageTool')}
+                        />
+                      </div>
+<div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                        <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                            {t('paperSearchTool')}
+                          </div>
+                          <div className="truncate text-[10px] text-stone-400">
+                            {t('paperSearchToolHint')}
+                          </div>
+                        </div>
+                        <Switch
+                          size="sm"
+                          checked={paperSearchEnabled}
+                          onCheckedChange={onSetPaperSearch}
+                          aria-label={t('paperSearchTool')}
+                        />
+                      </div>
+<div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                        <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                            {t('bookSearchTool')}
+                          </div>
+                          <div className="truncate text-[10px] text-stone-400">
+                            {t('bookSearchToolHint')}
+                          </div>
+                        </div>
+                        <Switch
+                          size="sm"
+                          checked={bookSearchEnabled}
+                          onCheckedChange={onSetBookSearch}
+                          aria-label={t('bookSearchTool')}
+                        />
+                      </div>
                       <div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
                         title={t('builtinToolAlwaysOn')}
@@ -689,57 +740,9 @@ export function ChatSidebar({
                           </div>
                         </div>
                       </div>
-                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
-                        <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                            {t('paperSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] text-stone-400">
-                            {t('paperSearchToolHint')}
-                          </div>
-                        </div>
-                        <Switch
-                          size="sm"
-                          checked={paperSearchEnabled}
-                          onCheckedChange={onSetPaperSearch}
-                          aria-label={t('paperSearchTool')}
-                        />
-                      </div>
-                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
-                        <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                            {t('bookSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] text-stone-400">
-                            {t('bookSearchToolHint')}
-                          </div>
-                        </div>
-                        <Switch
-                          size="sm"
-                          checked={bookSearchEnabled}
-                          onCheckedChange={onSetBookSearch}
-                          aria-label={t('bookSearchTool')}
-                        />
-                      </div>
-                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
-                        <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                            {t('generateImageTool')}
-                          </div>
-                          <div className="truncate text-[10px] text-stone-400">
-                            {t('generateImageToolHint')}
-                          </div>
-                        </div>
-                        <Switch
-                          size="sm"
-                          checked={generateImageEnabled}
-                          onCheckedChange={onSetGenerateImage}
-                          aria-label={t('generateImageTool')}
-                        />
-                      </div>
+                      
+                      
+                      
                       <div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
                         title={

@@ -10,6 +10,7 @@ import { titleForNewConversation } from '@/lib/chat/turn/attachments';
 export type ImageGenerationThread = {
   thread: Message[];
   assistantId: string;
+  toolRunId: string;
   newTitle?: string;
 };
 
@@ -32,12 +33,23 @@ export function buildImageGenerationThread(
   const { prompt, cleanedBase, skipDuplicateUser, currentTitle } = opts;
 
   const assistantId = genId();
+  const toolRunId = genId();
   const assistantMessage: Message = {
     id: assistantId,
     role: 'assistant',
-    content: 'Generating image…',
+    content: '',
     timestamp: now(),
     incomplete: true,
+    toolRuns: [
+      {
+        id: toolRunId,
+        name: 'generate_image',
+        status: 'start',
+        query: prompt,
+        provider: 'gpt-image',
+      },
+    ],
+    activity: [{ id: genId(), kind: 'tool', toolRunId }],
   };
 
   let newTitle = currentTitle;
@@ -58,7 +70,7 @@ export function buildImageGenerationThread(
         assistantMessage,
       ];
 
-  return { thread, assistantId, newTitle };
+  return { thread, assistantId, toolRunId, newTitle };
 }
 
 export type ImageGenerationRequest = {

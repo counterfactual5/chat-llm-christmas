@@ -398,6 +398,43 @@ export async function streamChatResponse(
             void deps.fetchSkills();
           }
         }
+        if (parsed.image_generated && typeof parsed.image_generated === 'object') {
+          const raw = parsed.image_generated as Record<string, unknown>;
+          const imageUrl = String(raw.url || '');
+          const prompt = String(raw.prompt || '');
+          const fileId = raw.fileId ? String(raw.fileId) : undefined;
+          if (imageUrl) {
+            deps.setSessions((prev) =>
+              prev.map((s) => {
+                if (s.id !== sessionId) return s;
+                return {
+                  ...s,
+                  messages: s.messages.map((m) => {
+                    if (m.id !== assistantId) return m;
+                    return {
+                      ...m,
+                      content: m.content || '',
+                      images: [
+                        ...(m.images || []),
+                        {
+                          url: imageUrl,
+                          name: 'generated.png',
+                          prompt,
+                          model: String(raw.model || 'GPT Image 1.5'),
+                          fileId,
+                        },
+                      ],
+                    };
+                  }),
+                  updatedAt: Date.now(),
+                };
+              }),
+            );
+            if (sessionId === deps.getActiveSessionId()) {
+              deps.onGeneratedFileForActiveSession();
+            }
+          }
+        }
         if (parsed.file_created && typeof parsed.file_created === 'object') {
           const raw = parsed.file_created as Record<string, unknown>;
           const file: GeneratedFileInput = {

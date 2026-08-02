@@ -75,7 +75,7 @@ export function hasSuccessfulRetrievalTools(
     (r) =>
       r.status === 'done' &&
       !r.error &&
-      /web_search|web_read|web-read|proactive_search|image_understand/i.test(
+      /web_search|web_read|web-read|proactive_search|image_understand|paper_search|book_search|book_download|generate_image/i.test(
         String(r.name || ''),
       ),
   );

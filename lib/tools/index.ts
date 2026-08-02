@@ -3,11 +3,16 @@ import { selectTools } from '@/lib/tools/registry';
 import { createWebSearchTool } from '@/lib/tools/search/tool';
 import { createWebReadTool } from '@/lib/tools/web-read/tool';
 import { createImageUnderstandTool } from '@/lib/tools/image-understand/tool';
+import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
+import { createCreateFileTool } from '@/lib/tools/create-file/tool';
+import {
+  createPaperSearchTool,
+  createBookSearchTool,
+} from '@/lib/tools/literature/tool';
+import { createGenerateImageTool } from '@/lib/tools/image-generate/tool';
 import { createNotionMcpTools } from '@/lib/mcp/notion/tools';
 import { createGitHubMcpTools } from '@/lib/mcp/github/tools';
 import { createGoogleTools } from '@/lib/mcp/google/tools';
-import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
-import { createCreateFileTool } from '@/lib/tools/create-file/tool';
 import { wantsGoogleToken, enabledGoogleServices } from '@/lib/integrations/google/services';
 
 /** Built-in tools shipped with the chat app. */
@@ -15,6 +20,9 @@ export function builtinToolRegistry(): ChatTool[] {
   return [
     createWebSearchTool(),
     createWebReadTool(),
+    createPaperSearchTool(),
+    createBookSearchTool(),
+    createGenerateImageTool(),
     createImageUnderstandTool(),
     createSaveSkillTool(),
     createCreateFileTool(),
@@ -98,6 +106,13 @@ export {
   sanitizeGeneratedFilename,
   mimeFromFilename,
 } from '@/lib/tools/create-file/tool';
+
+export {
+  createPaperSearchTool,
+  createBookSearchTool,
+} from '@/lib/tools/literature/tool';
+
+export { createGenerateImageTool } from '@/lib/tools/image-generate/tool';
 
 export { createNotionMcpTools } from '@/lib/mcp/notion/tools';
 export { createGitHubMcpTools } from '@/lib/mcp/github/tools';

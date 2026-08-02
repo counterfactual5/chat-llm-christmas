@@ -60,6 +60,7 @@ export type AuthorHit = {
 export type LiteratureThread = {
   thread: Message[];
   assistantId: string;
+  toolRunId: string;
   newTitle?: string;
 };
 
@@ -81,12 +82,24 @@ export function buildLiteratureSearchThread(opts: {
     action: opts.action,
   });
   const assistantId = genId();
+  const toolRunId = genId();
+  const toolName = opts.kind === 'books' ? 'book_search' : 'paper_search';
+  // Empty body — progress lives under Process via toolRuns (like web_search).
   const assistantMessage: Message = {
     id: assistantId,
     role: 'assistant',
-    content: opts.kind === 'books' ? 'Searching books…' : 'Searching papers…',
+    content: '',
     timestamp: now(),
     incomplete: true,
+    toolRuns: [
+      {
+        id: toolRunId,
+        name: toolName,
+        status: 'start',
+        query: opts.query,
+      },
+    ],
+    activity: [{ id: genId(), kind: 'tool', toolRunId }],
   };
 
   let newTitle = opts.currentTitle;
@@ -110,7 +123,7 @@ export function buildLiteratureSearchThread(opts: {
         assistantMessage,
       ];
 
-  return { thread, assistantId, newTitle };
+  return { thread, assistantId, toolRunId, newTitle };
 }
 
 export type BookDownloadResult =

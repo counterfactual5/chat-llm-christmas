@@ -9,6 +9,7 @@ import { formatBookDownloadCommand } from '@/lib/chat/turn/literature-command';
 export type BookDownloadThread = {
   thread: Message[];
   assistantId: string;
+  toolRunId: string;
   newTitle?: string;
 };
 
@@ -23,13 +24,23 @@ export function buildBookDownloadThread(opts: {
   const now = opts.now ?? Date.now;
   const genId = opts.genId ?? (() => crypto.randomUUID());
   const assistantId = genId();
+  const toolRunId = genId();
   const userContent = formatBookDownloadCommand(opts.identifier);
   const assistantMessage: Message = {
     id: assistantId,
     role: 'assistant',
-    content: 'Downloading book…',
+    content: '',
     timestamp: now(),
     incomplete: true,
+    toolRuns: [
+      {
+        id: toolRunId,
+        name: 'book_download',
+        status: 'start',
+        query: opts.identifier,
+      },
+    ],
+    activity: [{ id: genId(), kind: 'tool', toolRunId }],
   };
 
   let newTitle = opts.currentTitle;
@@ -53,7 +64,7 @@ export function buildBookDownloadThread(opts: {
         assistantMessage,
       ];
 
-  return { thread, assistantId, newTitle };
+  return { thread, assistantId, toolRunId, newTitle };
 }
 
 export function formatBookDownloadMarkdown(result: {

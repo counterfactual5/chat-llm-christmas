@@ -35,8 +35,9 @@ describe('productUsageGuideDetailPrompt', () => {
   it('expands command and UI details', () => {
     const text = productUsageGuideDetailPrompt();
     expect(text).toContain('detailed product guide');
-    expect(text).toContain('CLIENT command');
+    expect(text).toContain('generate_image chat tool');
     expect(text).toContain('Sidebar Tools lists built-in always-on tools');
+    expect(text).toContain('Paper Search / Book Search / Generate Image');
     expect(text).toContain('GitHub MCP is enabled for this chat, it is the primary path');
     expect(text).toContain('generic webpage reading is fallback only');
     expect(text).toContain('no first-class finance');

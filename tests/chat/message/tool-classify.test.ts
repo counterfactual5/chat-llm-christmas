@@ -39,13 +39,17 @@ describe('classifyToolRun', () => {
     expect(drive.isGoogleWrite).toBe(true);
   });
 
-  it('detects web read, file/skill writes, image-understand, and claim-reviewer runs', () => {
+  it('detects web read, file/skill writes, image-understand, literature, generate-image, and claim-reviewer runs', () => {
     expect(classifyToolRun({ name: 'web_read' }).isWebRead).toBe(true);
     expect(classifyToolRun({ name: 'web-read' }).isWebRead).toBe(true);
     expect(classifyToolRun({ name: 'create_file' }).isCreateFile).toBe(true);
     expect(classifyToolRun({ name: 'save_skill', provider: 'skills' }).isSaveSkill).toBe(true);
     expect(classifyToolRun({ name: 'image_understand' }).isImageUnderstand).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'glm-ocr' }).isImageUnderstand).toBe(true);
+    expect(classifyToolRun({ name: 'paper_search' }).isPaperSearch).toBe(true);
+    expect(classifyToolRun({ name: 'book_search' }).isBookSearch).toBe(true);
+    expect(classifyToolRun({ name: 'book_download' }).isBookDownload).toBe(true);
+    expect(classifyToolRun({ name: 'generate_image' }).isGenerateImage).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'claim-reviewer' }).isClaimReviewer).toBe(true);
   });
 });
@@ -89,7 +93,7 @@ describe('getToolRunLabelKey', () => {
     ).toBe('searchingDrive');
   });
 
-  it('falls back through Notion / GitHub / image / create-file / web-read / web-search', () => {
+  it('falls back through Notion / GitHub / image / literature / create-file / web-read / web-search', () => {
     const cases: Array<[Parameters<typeof classifyToolRun>[0], boolean, string]> = [
       [{ name: 'notion_create_page' }, true, 'writingNotion'],
       [{ name: 'notion_create_page' }, false, 'wroteNotion'],
@@ -101,6 +105,14 @@ describe('getToolRunLabelKey', () => {
       [{ name: 'github-search' }, false, 'searchedGitHub'],
       [{ name: 'image_understand' }, true, 'understandingImage'],
       [{ name: 'image_understand' }, false, 'understoodImage'],
+      [{ name: 'generate_image' }, true, 'generatingImageTool'],
+      [{ name: 'generate_image' }, false, 'generatedImageTool'],
+      [{ name: 'paper_search' }, true, 'searchingPapers'],
+      [{ name: 'paper_search' }, false, 'searchedPapers'],
+      [{ name: 'book_search' }, true, 'searchingBooks'],
+      [{ name: 'book_search' }, false, 'searchedBooks'],
+      [{ name: 'book_download' }, true, 'downloadingBook'],
+      [{ name: 'book_download' }, false, 'downloadedBook'],
       [{ name: 'create_file' }, true, 'creatingFile'],
       [{ name: 'create_file' }, false, 'createdFile'],
       [{ name: 'save_skill', provider: 'skills' }, true, 'savingSkill'],

@@ -173,7 +173,7 @@ describe('stream-error', () => {
     const base = msg({
       id: 'a',
       role: 'assistant',
-      content: 'Generating image…',
+      content: '',
       incomplete: true,
     });
     const ok = applyGeneratedImageToAssistant(base, {

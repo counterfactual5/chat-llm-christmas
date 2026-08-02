@@ -19,6 +19,7 @@ import {
   PenLine,
   Layers,
   BookOpen,
+  GraduationCap,
   X,
   Download,
 } from 'lucide-react';
@@ -452,6 +453,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isGitHub,
                     isGoogle,
                     isImageUnderstand,
+                    isPaperSearch,
+                    isBookSearch,
+                    isBookDownload,
+                    isGenerateImage,
                     isCreateFile,
                     isSaveSkill,
                     isClaimReviewer,
@@ -539,7 +544,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <GitHubLogo className="h-3 w-3 shrink-0" />
                         ) : isGoogle ? (
                           <GoogleLogo className="h-3 w-3 shrink-0" />
-                        ) : isImageUnderstand ? (
+                        ) : isPaperSearch ? (
+                          <GraduationCap className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isBookSearch || isBookDownload ? (
+                          <BookOpen className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isGenerateImage || isImageUnderstand ? (
                           <ImageIcon className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isCreateFile ? (
                           <FileText className="h-3 w-3 shrink-0 opacity-60" />
@@ -558,6 +567,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isGitHub &&
                           !isGoogle &&
                           !isImageUnderstand &&
+                          !isPaperSearch &&
+                          !isBookSearch &&
+                          !isBookDownload &&
+                          !isGenerateImage &&
                           !isCreateFile &&
                           !isSaveSkill &&
                           !isClaimReviewer &&

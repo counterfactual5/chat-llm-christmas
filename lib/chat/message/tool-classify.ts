@@ -15,6 +15,10 @@ export type ToolRunClassification = {
   isDrive: boolean;
   isGoogleWrite: boolean;
   isWebRead: boolean;
+  isPaperSearch: boolean;
+  isBookSearch: boolean;
+  isBookDownload: boolean;
+  isGenerateImage: boolean;
   isCreateFile: boolean;
   isSaveSkill: boolean;
   isImageUnderstand: boolean;
@@ -48,6 +52,10 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
       run.name,
     );
   const isWebRead = run.name === 'web_read' || run.name === 'web-read';
+  const isPaperSearch = run.name === 'paper_search';
+  const isBookSearch = run.name === 'book_search';
+  const isBookDownload = run.name === 'book_download';
+  const isGenerateImage = run.name === 'generate_image';
   const isCreateFile = run.name === 'create_file';
   const isSaveSkill = run.name === 'save_skill' || run.provider === 'skills';
   const isImageUnderstand =
@@ -74,6 +82,10 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isDrive,
     isGoogleWrite,
     isWebRead,
+    isPaperSearch,
+    isBookSearch,
+    isBookDownload,
+    isGenerateImage,
     isCreateFile,
     isSaveSkill,
     isImageUnderstand,
@@ -105,6 +117,10 @@ export function getToolRunLabelKey(
     isDrive,
     isGoogleWrite,
     isWebRead,
+    isPaperSearch,
+    isBookSearch,
+    isBookDownload,
+    isGenerateImage,
     isCreateFile,
     isSaveSkill,
     isImageUnderstand,
@@ -153,6 +169,10 @@ export function getToolRunLabelKey(
     if (isNotion) return 'searchingNotion';
     if (isGitHub) return 'searchingGitHub';
     if (isImageUnderstand) return 'understandingImage';
+    if (isGenerateImage) return 'generatingImageTool';
+    if (isPaperSearch) return 'searchingPapers';
+    if (isBookSearch) return 'searchingBooks';
+    if (isBookDownload) return 'downloadingBook';
     if (isCreateFile) return 'creatingFile';
     if (isSaveSkill) return 'savingSkill';
     if (isWebRead) return 'readingWeb';
@@ -164,6 +184,10 @@ export function getToolRunLabelKey(
   if (isNotion) return 'searchedNotion';
   if (isGitHub) return 'searchedGitHub';
   if (isImageUnderstand) return 'understoodImage';
+  if (isGenerateImage) return 'generatedImageTool';
+  if (isPaperSearch) return 'searchedPapers';
+  if (isBookSearch) return 'searchedBooks';
+  if (isBookDownload) return 'downloadedBook';
   if (isCreateFile) return 'createdFile';
   if (isSaveSkill) return 'savedSkill';
   if (isWebRead) return 'readWeb';

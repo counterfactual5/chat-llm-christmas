@@ -4,7 +4,11 @@ import {
   formatLiteratureCommand,
   parseLiteratureCommand,
 } from '@/lib/chat/turn/literature-command';
-import { formatLiteratureMarkdown } from '@/lib/chat/turn/literature-search';
+import {
+  buildLiteratureSearchThread,
+  formatLiteratureMarkdown,
+} from '@/lib/chat/turn/literature-search';
+import { buildBookDownloadThread } from '@/lib/chat/turn/book-download-turn';
 
 describe('parseLiteratureCommand', () => {
   it('parses /papers and aliases', () => {
@@ -200,5 +204,59 @@ describe('formatLiteratureMarkdown', () => {
     ]);
     expect(lg).toContain('/books download libgen:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     expect(lg).toContain('12.3 MB');
+  });
+});
+
+describe('literature/book Process toolRuns', () => {
+  const genId = (() => {
+    let n = 0;
+    return () => `id-${++n}`;
+  })();
+
+  it('seeds paper_search under Process (empty body + activity tool step)', () => {
+    const result = buildLiteratureSearchThread({
+      kind: 'papers',
+      query: 'attention',
+      cleanedBase: [],
+      now: () => 1,
+      genId,
+    });
+    const assistant = result.thread[result.thread.length - 1];
+    expect(assistant.role).toBe('assistant');
+    expect(assistant.content).toBe('');
+    expect(assistant.toolRuns?.[0]).toMatchObject({
+      id: result.toolRunId,
+      name: 'paper_search',
+      status: 'start',
+      query: 'attention',
+    });
+    expect(assistant.activity?.[0]).toMatchObject({
+      kind: 'tool',
+      toolRunId: result.toolRunId,
+    });
+  });
+
+  it('seeds book_search and book_download the same way', () => {
+    const search = buildLiteratureSearchThread({
+      kind: 'books',
+      query: 'calculus',
+      cleanedBase: [],
+      now: () => 1,
+      genId,
+    });
+    expect(search.thread.at(-1)?.toolRuns?.[0]?.name).toBe('book_search');
+
+    const dl = buildBookDownloadThread({
+      identifier: 'calculus',
+      cleanedBase: [],
+      now: () => 1,
+      genId,
+    });
+    expect(dl.thread.at(-1)?.toolRuns?.[0]).toMatchObject({
+      name: 'book_download',
+      status: 'start',
+      query: 'calculus',
+    });
+    expect(dl.thread.at(-1)?.activity?.[0]?.kind).toBe('tool');
   });
 });

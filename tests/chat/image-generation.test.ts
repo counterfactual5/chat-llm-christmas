@@ -31,7 +31,15 @@ describe('buildImageGenerationThread', () => {
     expect(result.thread.map((m) => m.role)).toEqual(['user', 'user', 'assistant']);
     expect(result.thread[1].content).toBe('/image a cat');
     expect(result.thread[2].id).toBe(result.assistantId);
+    expect(result.thread[2].content).toBe('');
     expect(result.thread[2].incomplete).toBe(true);
+    expect(result.thread[2].toolRuns?.[0]?.name).toBe('generate_image');
+    expect(result.thread[2].toolRuns?.[0]?.status).toBe('start');
+    expect(result.thread[2].activity?.[0]).toMatchObject({
+      kind: 'tool',
+      toolRunId: result.toolRunId,
+    });
+    expect(result.toolRunId).toBe(result.thread[2].toolRuns?.[0]?.id);
     expect(result.newTitle).toBeUndefined();
   });
 

@@ -363,7 +363,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
     const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
-    const { thread, assistantId, newTitle } = buildImageGenerationThread({
+    const { thread, assistantId, toolRunId, newTitle } = buildImageGenerationThread({
       prompt: trimmed,
       cleanedBase,
       skipDuplicateUser: opts?.skipDuplicateUser,
@@ -380,13 +380,32 @@ export function useChatLogic(props: UseChatLogicProps) {
           if (s.id !== sessionId) return s;
           return {
             ...s,
-            messages: mapAssistantById(s.messages, assistantId, (m) =>
-              applyGeneratedImageToAssistant(m, {
+            messages: mapAssistantById(s.messages, assistantId, (m) => {
+              const patched = applyGeneratedImageToAssistant(m, {
                 imageUrl: result.image,
                 prompt: trimmed,
                 fileId: result.fileId,
-              }),
-            ),
+              });
+              return {
+                ...patched,
+                toolRuns: (m.toolRuns || []).map((r) =>
+                  r.id === toolRunId
+                    ? {
+                        ...r,
+                        status: 'done' as const,
+                        provider: 'gpt-image',
+                        results: [
+                          {
+                            title: trimmed.slice(0, 80),
+                            url: result.image,
+                            snippet: result.fileId ? `file ${result.fileId}` : '',
+                          },
+                        ],
+                      }
+                    : r,
+                ),
+              };
+            }),
             updatedAt: Date.now(),
           };
         }),
@@ -397,14 +416,23 @@ export function useChatLogic(props: UseChatLogicProps) {
         setIsContextPanelOpen(true);
       }
     } catch (error: any) {
+      const errMsg = error?.message || 'Image generation failed';
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
           return {
             ...s,
-            messages: mapAssistantById(s.messages, assistantId, (m) =>
-              applyImageGenerationError(m, error?.message || 'Image generation failed'),
-            ),
+            messages: mapAssistantById(s.messages, assistantId, (m) => {
+              const patched = applyImageGenerationError(m, errMsg);
+              return {
+                ...patched,
+                toolRuns: (m.toolRuns || []).map((r) =>
+                  r.id === toolRunId
+                    ? { ...r, status: 'done' as const, error: errMsg }
+                    : r,
+                ),
+              };
+            }),
             updatedAt: Date.now(),
           };
         }),
@@ -444,7 +472,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
     const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
-    const { thread, assistantId, newTitle } = buildBookDownloadThread({
+    const { thread, assistantId, toolRunId, newTitle } = buildBookDownloadThread({
       identifier: id,
       cleanedBase,
       skipDuplicateUser: opts?.skipDuplicateUser,
@@ -456,7 +484,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       const result = await requestBookDownload(id);
       if (!result.ok) throw new Error(result.error);
       const content = formatBookDownloadMarkdown(result);
-      const toolRun = bookDownloadToolRun({
+      const doneRun = bookDownloadToolRun({
         identifier: result.identifier,
         title: result.title,
         filename: result.filename,
@@ -472,10 +500,18 @@ export function useChatLogic(props: UseChatLogicProps) {
               ...m,
               content,
               incomplete: false,
-              toolRuns: [...(m.toolRuns || []), toolRun],
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? {
+                      ...r,
+                      status: 'done' as const,
+                      provider: doneRun.provider,
+                      results: doneRun.results,
+                    }
+                  : r,
+              ),
               activity: [
                 ...(m.activity || []),
-                { id: crypto.randomUUID(), kind: 'tool', toolRunId: toolRun.id },
                 { id: crypto.randomUUID(), kind: 'file', fileId: result.fileId },
                 { id: crypto.randomUUID(), kind: 'content', text: content },
               ],
@@ -495,6 +531,11 @@ export function useChatLogic(props: UseChatLogicProps) {
               ...m,
               content: `Error: ${message}`,
               incomplete: false,
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? { ...r, status: 'done' as const, error: message }
+                  : r,
+              ),
             })),
             updatedAt: Date.now(),
           };
@@ -539,7 +580,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
     const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
-    const { thread, assistantId, newTitle } = buildLiteratureSearchThread({
+    const { thread, assistantId, toolRunId, newTitle } = buildLiteratureSearchThread({
       kind,
       query: trimmed,
       cleanedBase,
@@ -564,7 +605,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         result.results,
         { authors: result.authors, action: opts?.action },
       );
-      const toolRun = literatureToolRun(
+      const doneRun = literatureToolRun(
         kind,
         result.query,
         result.provider,
@@ -579,10 +620,18 @@ export function useChatLogic(props: UseChatLogicProps) {
               ...m,
               content,
               incomplete: false,
-              toolRuns: [...(m.toolRuns || []), toolRun],
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? {
+                      ...r,
+                      status: 'done' as const,
+                      provider: doneRun.provider,
+                      results: doneRun.results,
+                    }
+                  : r,
+              ),
               activity: [
                 ...(m.activity || []),
-                { id: crypto.randomUUID(), kind: 'tool', toolRunId: toolRun.id },
                 { id: crypto.randomUUID(), kind: 'content', text: content },
               ],
             })),
@@ -602,6 +651,11 @@ export function useChatLogic(props: UseChatLogicProps) {
               ...m,
               content: `Error: ${message}`,
               incomplete: false,
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? { ...r, status: 'done' as const, error: message }
+                  : r,
+              ),
             })),
             updatedAt: Date.now(),
           };

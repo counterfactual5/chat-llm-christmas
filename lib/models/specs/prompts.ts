@@ -48,7 +48,7 @@ export function activeIntegrationsPrompt(opts: {
   const lines: string[] = [
     'THIS-turn capability flags (authoritative for what is on right now; see product map for how Commands work):',
     `- save_skill: ${opts.skillCreatorOn ? 'ON (Skill Creator active)' : 'OFF'}`,
-    `- web_search/web_read: ${opts.searchEnabled ? 'ON' : 'OFF (sidebar Tools may disable search)'}`,
+    `- web_search/web_read: ${opts.searchEnabled ? 'ON (built-in)' : 'OFF'}`,
     '- create_file: usually ON when listed in API tools (Output panel downloads)',
   ];
   const set = new Set(

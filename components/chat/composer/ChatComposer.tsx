@@ -24,6 +24,7 @@ import {
   FlaskConical,
   BookOpen,
   GraduationCap,
+  Globe,
   Send,
   Square,
 } from 'lucide-react';
@@ -909,6 +910,51 @@ export function ChatComposer(props: ChatComposerProps) {
                           }}
                           className="absolute left-[calc(100%+6px)] top-[4.7rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
                         >
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('webSearchTool')}
+                              </div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('webReadTool')}
+                              </div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('createFileTool')}
+                              </div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
                           <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                             <div className="min-w-0 flex-1">

@@ -58,7 +58,7 @@ describe('parseLiteratureCommand', () => {
     expect(parseLiteratureCommand('/books 给我找找毛选')).toEqual({
       kind: 'books',
       action: 'search',
-      query: '毛泽东选集',
+      query: '毛选',
       source: 'auto',
     });
     expect(parseLiteratureCommand('/books 帮我找 Deep Learning')).toEqual({

@@ -87,7 +87,7 @@ function splitHead(rest: string): { head: string; tail: string } {
 export function normalizeLiteratureQuery(raw: string): string {
   const original = String(raw || '').trim();
   if (!original) return '';
-  let q = original
+  const q = original
     .replace(
       /^(请|麻烦)?(帮我|给我|帮|请帮我|请给我)?\s*(找找|找一下|找下|找一本|找|搜搜|搜一下|搜索一下|搜索|查一下|查下|查找|看看)\s*/u,
       '',
@@ -96,8 +96,6 @@ export function normalizeLiteratureQuery(raw: string): string {
     .replace(/^(a\s+book\s+(about|on|called)\s+)/i, '')
     .replace(/[？?！!。.]+$/u, '')
     .trim();
-  // Common Chinese short titles
-  if (q === '毛选') q = '毛泽东选集';
   return q || original;
 }
 

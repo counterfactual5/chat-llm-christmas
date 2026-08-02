@@ -15,11 +15,27 @@ export function dayKeyOf(ts: number): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Sessions with messages, newest activity first (empty drafts stay out of the sidebar). */
+/**
+ * Sidebar / day-group sort key: last user send time.
+ * Do not use updatedAt — streaming assistant tokens bump it and make concurrent
+ * chats jump in the list.
+ */
+export function sessionLastUserRequestAt(session: ChatSession): number {
+  const messages = session.messages || [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role !== 'user') continue;
+    const ts = Number(m.timestamp || 0);
+    if (ts > 0) return ts;
+  }
+  return Number(session.updatedAt || 0);
+}
+
+/** Sessions with messages, newest user request first (empty drafts stay out of the sidebar). */
 export function sessionsForSidebar(sessions: ChatSession[]): ChatSession[] {
   return [...sessions]
     .filter((session) => session.messages.length > 0)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+    .sort((a, b) => sessionLastUserRequestAt(b) - sessionLastUserRequestAt(a));
 }
 
 export function buildSidebarDayGroups(
@@ -28,7 +44,7 @@ export function buildSidebarDayGroups(
 ): SidebarDayGroup[] {
   const map = new Map<string, ChatSession[]>();
   for (const session of sessions) {
-    const key = dayKeyOf(session.updatedAt);
+    const key = dayKeyOf(sessionLastUserRequestAt(session));
     const list = map.get(key);
     if (list) list.push(session);
     else map.set(key, [session]);

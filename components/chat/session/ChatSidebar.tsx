@@ -16,6 +16,9 @@ import {
   FileText,
   SlidersHorizontal,
   ChevronDown,
+  FlaskConical,
+  BookOpen,
+  GraduationCap,
   Loader2,
   MoreHorizontal,
   Clock,
@@ -65,6 +68,9 @@ export type ChatSidebarProps = {
   onExportSession: (sessionId: string, e: React.MouseEvent) => void;
   onInsertImageCommand: () => void;
   onInsertSkillCommand: () => void;
+  onInsertResearchCommand: () => void;
+  onInsertPapersCommand: () => void;
+  onInsertBooksCommand: () => void;
   onRequestClaimReview: () => void;
   onContinueReply: () => void;
   onOpenNewSkillModal: () => void;
@@ -101,6 +107,9 @@ export function ChatSidebar({
   onExportSession,
   onInsertImageCommand,
   onInsertSkillCommand,
+  onInsertResearchCommand,
+  onInsertPapersCommand,
+  onInsertBooksCommand,
   onRequestClaimReview,
   onContinueReply,
   onOpenNewSkillModal,
@@ -268,6 +277,57 @@ export function ChatSidebar({
                           <span className="min-w-0 flex-1 truncate">{t('generateImage')}</span>
                           <span className="shrink-0 font-mono text-[10px] text-stone-400">
                             /image
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isAccountBound) {
+                              onOpenLoginModal();
+                              return;
+                            }
+                            onInsertResearchCommand();
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <span className="min-w-0 flex-1 truncate">{t('deepResearchCommand')}</span>
+                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                            /research
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isAccountBound) {
+                              onOpenLoginModal();
+                              return;
+                            }
+                            onInsertPapersCommand();
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <span className="min-w-0 flex-1 truncate">{t('papersCommand')}</span>
+                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                            /papers
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isAccountBound) {
+                              onOpenLoginModal();
+                              return;
+                            }
+                            onInsertBooksCommand();
+                          }}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                        >
+                          <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                          <span className="min-w-0 flex-1 truncate">{t('booksCommand')}</span>
+                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                            /books
                           </span>
                         </button>
                         <button

@@ -2062,6 +2062,18 @@ export default function ChatContainer() {
           setInput('/skill ');
           textareaRef.current?.focus();
         }}
+        onInsertResearchCommand={() => {
+          setInput('/research ');
+          textareaRef.current?.focus();
+        }}
+        onInsertPapersCommand={() => {
+          setInput('/papers ');
+          textareaRef.current?.focus();
+        }}
+        onInsertBooksCommand={() => {
+          setInput('/books ');
+          textareaRef.current?.focus();
+        }}
         onRequestClaimReview={() => {
           void requestClaimReview();
         }}

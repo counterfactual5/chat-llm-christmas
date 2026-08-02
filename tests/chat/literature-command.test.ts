@@ -54,6 +54,21 @@ describe('parseLiteratureCommand', () => {
     });
   });
 
+  it('strips conversational wrappers for book queries', () => {
+    expect(parseLiteratureCommand('/books 给我找找毛选')).toEqual({
+      kind: 'books',
+      action: 'search',
+      query: '毛泽东选集',
+      source: 'auto',
+    });
+    expect(parseLiteratureCommand('/books 帮我找 Deep Learning')).toEqual({
+      kind: 'books',
+      action: 'search',
+      query: 'Deep Learning',
+      source: 'auto',
+    });
+  });
+
   it('parses /books sources and download', () => {
     expect(parseLiteratureCommand('/books deep learning')).toEqual({
       kind: 'books',

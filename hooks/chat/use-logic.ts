@@ -568,7 +568,6 @@ export function useChatLogic(props: UseChatLogicProps) {
         result.query,
         result.provider,
         result.results,
-        result.results.length || result.authors?.length ? undefined : 'No results',
       );
       setSessions((prev) =>
         prev.map((s) => {

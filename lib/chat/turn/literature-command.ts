@@ -83,6 +83,24 @@ function splitHead(rest: string): { head: string; tail: string } {
   return { head: m[1], tail: m[2].trim() };
 }
 
+/** Strip conversational wrappers so "给我找找毛选" → "毛选". */
+export function normalizeLiteratureQuery(raw: string): string {
+  const original = String(raw || '').trim();
+  if (!original) return '';
+  let q = original
+    .replace(
+      /^(请|麻烦)?(帮我|给我|帮|请帮我|请给我)?\s*(找找|找一下|找下|找一本|找|搜搜|搜一下|搜索一下|搜索|查一下|查下|查找|看看)\s*/u,
+      '',
+    )
+    .replace(/^(please\s+)?(find|search(\s+for)?|look\s+up)\s+/i, '')
+    .replace(/^(a\s+book\s+(about|on|called)\s+)/i, '')
+    .replace(/[？?！!。.]+$/u, '')
+    .trim();
+  // Common Chinese short titles
+  if (q === '毛选') q = '毛泽东选集';
+  return q || original;
+}
+
 export function parseLiteratureCommand(text: string): LiteratureCommand | null {
   const raw = text.trim();
   const download = raw.match(BOOKS_DOWNLOAD_RE);
@@ -98,22 +116,36 @@ export function parseLiteratureCommand(text: string): LiteratureCommand | null {
 
     if (PAPER_ACTIONS.has(headLower) && tail) {
       if (headLower === 'author') {
-        return { kind: 'papers', action: 'author', query: tail };
+        return {
+          kind: 'papers',
+          action: 'author',
+          query: normalizeLiteratureQuery(tail),
+        };
       }
       return {
         kind: 'papers',
         action: headLower as PaperAction,
-        query: tail,
-        paperId: tail,
+        query: tail.trim(),
+        paperId: tail.trim(),
       };
     }
 
     const source = normalizePaperSource(headLower);
     if (source && source !== 'auto' && tail) {
-      return { kind: 'papers', action: 'search', query: tail, source };
+      return {
+        kind: 'papers',
+        action: 'search',
+        query: normalizeLiteratureQuery(tail),
+        source,
+      };
     }
 
-    return { kind: 'papers', action: 'search', query: rest, source: 'auto' };
+    return {
+      kind: 'papers',
+      action: 'search',
+      query: normalizeLiteratureQuery(rest),
+      source: 'auto',
+    };
   }
 
   const books = raw.match(BOOKS_CMD_RE);
@@ -122,9 +154,19 @@ export function parseLiteratureCommand(text: string): LiteratureCommand | null {
     const { head, tail } = splitHead(rest);
     const source = normalizeBookSource(head);
     if (source && source !== 'auto' && tail) {
-      return { kind: 'books', action: 'search', query: tail, source };
+      return {
+        kind: 'books',
+        action: 'search',
+        query: normalizeLiteratureQuery(tail),
+        source,
+      };
     }
-    return { kind: 'books', action: 'search', query: rest, source: 'auto' };
+    return {
+      kind: 'books',
+      action: 'search',
+      query: normalizeLiteratureQuery(rest),
+      source: 'auto',
+    };
   }
 
   return null;

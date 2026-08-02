@@ -193,3 +193,32 @@ export function getToolRunLabelKey(
   if (isWebRead) return 'readWeb';
   return 'searchedWeb';
 }
+
+/**
+ * "Fetching results…" belongs under search-like tools that return hit lists.
+ * Research plan/synth/verify/write (and reads/writes/image tools) only spin the
+ * status label — they must not show a perpetual "Fetching results…" subtitle.
+ */
+export function toolRunShowsFetchingResults(
+  classification: ToolRunClassification,
+): boolean {
+  if (
+    classification.isResearchPlan ||
+    classification.isResearchSynthesize ||
+    classification.isResearchVerify ||
+    classification.isResearchWrite ||
+    classification.isWebRead ||
+    classification.isGenerateImage ||
+    classification.isCreateFile ||
+    classification.isSaveSkill ||
+    classification.isImageUnderstand ||
+    classification.isClaimReviewer ||
+    classification.isBookDownload ||
+    classification.isNotionWrite ||
+    classification.isNotionFetch ||
+    classification.isGoogleWrite
+  ) {
+    return false;
+  }
+  return true;
+}

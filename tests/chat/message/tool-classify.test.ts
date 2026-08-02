@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { classifyToolRun, getToolRunLabelKey } from '@/lib/chat/message/tool-classify';
+import {
+  classifyToolRun,
+  getToolRunLabelKey,
+  toolRunShowsFetchingResults,
+} from '@/lib/chat/message/tool-classify';
 
 describe('classifyToolRun', () => {
   it('detects Notion runs by name prefix or provider', () => {
@@ -131,5 +135,37 @@ describe('getToolRunLabelKey', () => {
   it('reports toolFailed for a failed non-Google run once done', () => {
     const c = classifyToolRun({ name: 'web_search' });
     expect(getToolRunLabelKey(c, { searching: false, failed: true })).toBe('toolFailed');
+  });
+});
+
+describe('toolRunShowsFetchingResults', () => {
+  it('hides the subtitle for research plan / write stages', () => {
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_plan' })),
+    ).toBe(false);
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_synthesize' })),
+    ).toBe(false);
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_verify' })),
+    ).toBe(false);
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_write' })),
+    ).toBe(false);
+  });
+
+  it('keeps the subtitle for web / paper / book search', () => {
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'web_search' })),
+    ).toBe(true);
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'research_sources' })),
+    ).toBe(true);
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'paper_search' })),
+    ).toBe(true);
+    expect(
+      toolRunShowsFetchingResults(classifyToolRun({ name: 'book_search' })),
+    ).toBe(true);
   });
 });

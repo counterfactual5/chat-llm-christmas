@@ -46,7 +46,7 @@ import {
   type TimelineSegment,
   type ToolStep,
 } from '@/lib/chat/message/timeline';
-import { classifyToolRun, getToolRunLabelKey } from '@/lib/chat/message/tool-classify';
+import { classifyToolRun, getToolRunLabelKey, toolRunShowsFetchingResults } from '@/lib/chat/message/tool-classify';
 import { getReviewCheckTitleKey } from '@/lib/chat/message/review-labels';
 import { getReviewCheckIcon } from './helpers/review-check-icon';
 import { ReasoningBodyScroll } from '@/components/chat/message/ReasoningBodyScroll';
@@ -603,7 +603,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               {run.query}
                             </div>
                           ) : null}
-                          {searching && <div>{t('fetchingResults')}</div>}
+                          {searching && toolRunShowsFetchingResults(classification) && (
+                            <div>{t('fetchingResults')}</div>
+                          )}
                           {run.error && (
                             <div className="text-red-600 dark:text-red-400">
                               {run.error}

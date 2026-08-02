@@ -577,96 +577,6 @@ export function ChatSidebar({
                     className="overflow-hidden pl-2"
                   >
                     <div className="space-y-0.5 pb-1">
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-stone-700 dark:text-stone-200">
-                            {t('webSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-stone-700 dark:text-stone-200">
-                            {t('webReadTool')}
-                          </div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-stone-700 dark:text-stone-200">
-                            {t('createFileTool')}
-                          </div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <GraduationCap className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-stone-700 dark:text-stone-200">
-                            {t('paperSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-stone-700 dark:text-stone-200">
-                            {t('bookSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
-                          </div>
-                        </div>
-                      </div>
-                      <div
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
-                        title={t('builtinToolAlwaysOn')}
-                        aria-disabled
-                      >
-                        <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-stone-700 dark:text-stone-200">
-                            {t('generateImageTool')}
-                          </div>
-                          <div className="truncate text-[10px] opacity-80">
-                            {t('builtinToolAlwaysOn')}
-                          </div>
-                        </div>
-                      </div>
                       <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
                         <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
@@ -683,6 +593,84 @@ export function ChatSidebar({
                           onCheckedChange={onSetAutoReview}
                           aria-label={t('autoReview')}
                         />
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('webSearchTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('webReadTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('createFileTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <GraduationCap className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('paperSearchTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('bookSearchTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
+                        title={t('builtinToolAlwaysOn')}
+                        aria-disabled
+                      >
+                        <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{t('generateImageTool')}</div>
+                          <div className="truncate text-[10px] opacity-80">
+                            {t('builtinToolAlwaysOn')}
+                          </div>
+                        </div>
                       </div>
                       <div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"

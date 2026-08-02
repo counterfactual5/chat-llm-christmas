@@ -680,7 +680,7 @@ export function ChatComposer(props: ChatComposerProps) {
                             setPlusFlyout('commands');
                             setGoogleMcpMenuOpen(false);
                           }}
-                          className="absolute left-[calc(100%+6px)] top-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                          className="absolute bottom-0 left-[calc(100%+6px)] z-10 max-h-[min(22rem,calc(100dvh-5.5rem))] w-60 overflow-y-auto overflow-x-hidden rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md max-sm:bottom-[calc(100%+6px)] max-sm:left-0 dark:border-stone-700 dark:bg-stone-900/95"
                         >
                           <button
                             type="button"
@@ -842,7 +842,7 @@ export function ChatComposer(props: ChatComposerProps) {
                             setPlusFlyout('skills');
                             setGoogleMcpMenuOpen(false);
                           }}
-                          className="absolute left-[calc(100%+6px)] top-[2.35rem] z-10 max-h-72 w-60 overflow-y-auto rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                          className="absolute bottom-0 left-[calc(100%+6px)] z-10 max-h-[min(22rem,calc(100dvh-5.5rem))] w-60 overflow-y-auto overflow-x-hidden rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md max-sm:bottom-[calc(100%+6px)] max-sm:left-0 dark:border-stone-700 dark:bg-stone-900/95"
                         >
                         {!isAccountBound ? (
                           <button
@@ -903,98 +903,8 @@ export function ChatComposer(props: ChatComposerProps) {
                           onPointerEnter={() => {
                             setPlusFlyout('tools');
                           }}
-                          className="absolute left-[calc(100%+6px)] top-[4.7rem] z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                          className="absolute bottom-0 left-[calc(100%+6px)] z-10 max-h-[min(22rem,calc(100dvh-5.5rem))] w-60 overflow-y-auto overflow-x-hidden rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md max-sm:bottom-[calc(100%+6px)] max-sm:left-0 dark:border-stone-700 dark:bg-stone-900/95"
                         >
-                          <div
-                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                            title={t('builtinToolAlwaysOn')}
-                            aria-disabled
-                          >
-                            <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('webSearchTool')}
-                              </div>
-                              <div className="truncate text-[10px] opacity-80">
-                                {t('builtinToolAlwaysOn')}
-                              </div>
-                            </div>
-                          </div>
-                          <div
-                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                            title={t('builtinToolAlwaysOn')}
-                            aria-disabled
-                          >
-                            <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('webReadTool')}
-                              </div>
-                              <div className="truncate text-[10px] opacity-80">
-                                {t('builtinToolAlwaysOn')}
-                              </div>
-                            </div>
-                          </div>
-                          <div
-                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                            title={t('builtinToolAlwaysOn')}
-                            aria-disabled
-                          >
-                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('createFileTool')}
-                              </div>
-                              <div className="truncate text-[10px] opacity-80">
-                                {t('builtinToolAlwaysOn')}
-                              </div>
-                            </div>
-                          </div>
-                          <div
-                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                            title={t('builtinToolAlwaysOn')}
-                            aria-disabled
-                          >
-                            <GraduationCap className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('paperSearchTool')}
-                              </div>
-                              <div className="truncate text-[10px] opacity-80">
-                                {t('builtinToolAlwaysOn')}
-                              </div>
-                            </div>
-                          </div>
-                          <div
-                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                            title={t('builtinToolAlwaysOn')}
-                            aria-disabled
-                          >
-                            <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('bookSearchTool')}
-                              </div>
-                              <div className="truncate text-[10px] opacity-80">
-                                {t('builtinToolAlwaysOn')}
-                              </div>
-                            </div>
-                          </div>
-                          <div
-                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
-                            title={t('builtinToolAlwaysOn')}
-                            aria-disabled
-                          >
-                            <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('generateImageTool')}
-                              </div>
-                              <div className="truncate text-[10px] opacity-80">
-                                {t('builtinToolAlwaysOn')}
-                              </div>
-                            </div>
-                          </div>
                           <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                             <div className="min-w-0 flex-1">
@@ -1011,6 +921,84 @@ export function ChatComposer(props: ChatComposerProps) {
                               onCheckedChange={setActiveAutoReview}
                               aria-label={t('autoReview')}
                             />
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <Globe className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('webSearchTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('webReadTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('createFileTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <GraduationCap className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('paperSearchTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('bookSearchTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm">{t('generateImageTool')}</div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
                           </div>
                           <div
                             className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
@@ -1044,7 +1032,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           onPointerEnter={() => {
                             setPlusFlyout('mcp');
                           }}
-                          className="absolute left-[calc(100%+6px)] bottom-0 z-10 w-60 rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md dark:border-stone-700 dark:bg-stone-900/95"
+                          className="absolute bottom-0 left-[calc(100%+6px)] z-10 max-h-[min(22rem,calc(100dvh-5.5rem))] w-60 overflow-y-auto overflow-x-hidden rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md max-sm:bottom-[calc(100%+6px)] max-sm:left-0 dark:border-stone-700 dark:bg-stone-900/95"
                         >
                         <div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
                           <NotionLogo className="h-3.5 w-3.5 shrink-0" />

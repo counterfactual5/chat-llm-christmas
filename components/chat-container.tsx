@@ -2077,12 +2077,7 @@ export default function ChatContainer() {
             ? accountUsername || t('accountConnected')
             : t('connectAccount')
         }
-        canContinue={Boolean(
-          !isActiveLoading &&
-            lastMessage &&
-            lastMessage.role === 'assistant' &&
-            !isAssistantError(lastMessage),
-        )}
+        canContinue={canResumeIncomplete}
         onCreateSession={createNewSession}
         onSelectSession={(sessionId) => {
           setActiveSessionId(sessionId);

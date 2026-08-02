@@ -821,12 +821,7 @@ export function ChatComposer(props: ChatComposerProps) {
                               setPlusFlyout(null);
                               void resumeIncompleteReply({ force: true });
                             }}
-                            disabled={
-                              isActiveLoading ||
-                              !lastMessage ||
-                              lastMessage.role !== 'assistant' ||
-                              isAssistantError(lastMessage)
-                            }
+                            disabled={!canResumeIncomplete}
                             className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-200 dark:hover:bg-stone-800"
                             title={t('continueCommandHint')}
                           >
@@ -949,6 +944,51 @@ export function ChatComposer(props: ChatComposerProps) {
                             <div className="min-w-0 flex-1">
                               <div className="text-sm text-stone-800 dark:text-stone-100">
                                 {t('createFileTool')}
+                              </div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <GraduationCap className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('paperSearchTool')}
+                              </div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <BookOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('bookSearchTool')}
+                              </div>
+                              <div className="truncate text-[10px] opacity-80">
+                                {t('builtinToolAlwaysOn')}
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
+                            title={t('builtinToolAlwaysOn')}
+                            aria-disabled
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-stone-800 dark:text-stone-100">
+                                {t('generateImageTool')}
                               </div>
                               <div className="truncate text-[10px] opacity-80">
                                 {t('builtinToolAlwaysOn')}

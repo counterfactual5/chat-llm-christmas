@@ -1,6 +1,6 @@
 /**
  * Zhipu GLM Coding Plan credentials.
- * Shared by web search / web read MCP backends and image understand.
+ * Still used by image_understand on Christmas; web search/read MCP keys live on chat-api.
  */
 
 export function zhipuApiKey(): string | undefined {
@@ -11,11 +11,4 @@ export function zhipuApiKey(): string | undefined {
     process.env.BIGMODEL_API_KEY?.trim() ||
     undefined
   );
-}
-
-/** Prefer Coding Plan MCP unless explicitly disabled. */
-export function zhipuMcpEnabled(): boolean {
-  if (!zhipuApiKey()) return false;
-  const flag = (process.env.ZHIPU_MCP_ENABLED || '1').trim().toLowerCase();
-  return flag !== '0' && flag !== 'false' && flag !== 'off';
 }

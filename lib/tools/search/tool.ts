@@ -27,7 +27,10 @@ export async function runWebSearch(
   const q = String(query || '').trim().slice(0, 500);
   const freshness = freshnessForQuery(ctx.userAsk);
   ctx.send({ tool: { status: 'start', name: 'web_search', query: q } });
-  const outcome = await webSearch(q, { freshness });
+  const outcome = await webSearch(q, {
+    freshness,
+    apiKey: ctx.credentials?.skillsApiKey,
+  });
   ctx.send({
     tool: {
       status: 'done',

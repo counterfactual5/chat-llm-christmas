@@ -1,58 +1,86 @@
 /**
- * Multi-provider web search with fallback chain.
- * Order: Zhipu Coding Plan MCP → Tavily → Brave → Serper → …
- *
- *  types.ts      hit/outcome shapes
- *  freshness.ts  trim + stale year hints
- *  providers.ts  provider implementations + order
- *  format.ts     model-facing JSON serialization
- *  zhipu.ts      Zhipu MCP client
- *  tool.ts       registered chat tool wrapper
+ * Multi-provider web search — thin client to chat-api `/v1/tools/web_search`.
+ * Engines (Zhipu → Tavily → … → Wiki) live on the product backend.
  */
 
-import { PROVIDERS } from '@/lib/tools/search/providers';
+import { chatBackendToolsURL } from '@/lib/chat-backend';
 import type { SearchOutcome, WebSearchOptions } from '@/lib/tools/search/types';
-import { formatUnknownError } from '@/lib/tools/zhipu/mcp-helpers';
 
 export type { SearchHit, SearchOutcome, WebSearchOptions } from '@/lib/tools/search/types';
 export { annotateHitFreshness } from '@/lib/tools/search/freshness';
 export { formatSearchResultsForModel } from '@/lib/tools/search/format';
 
-/** Run the fallback chain until one provider returns results. */
+export type WebSearchClientOptions = WebSearchOptions & {
+  /** Main-site sk- key (Bearer) — required to call chat-api. */
+  apiKey?: string;
+  /** Abort / timeout for the backend hop. */
+  signal?: AbortSignal;
+};
+
+/** Run search via chat-api shared engine. */
 export async function webSearch(
   query: string,
-  options: WebSearchOptions = {},
+  options: WebSearchClientOptions = {},
 ): Promise<SearchOutcome> {
   const q = String(query || '').trim().slice(0, 500);
   if (!q) {
     return { provider: 'none', query: '', results: [], error: 'Empty query' };
   }
 
-  const freshness = options.freshness ?? null;
-
-  const errors: string[] = [];
-  for (const provider of PROVIDERS) {
-    if (!provider.available()) continue;
-    try {
-      const results = await provider.search(q, freshness);
-      if (results.length > 0) {
-        return { provider: provider.name, query: q, results };
-      }
-      errors.push(`${provider.name}: empty`);
-      console.warn(`[web_search] ${provider.name} returned empty, trying next`);
-    } catch (err: unknown) {
-      const message = formatUnknownError(err);
-      errors.push(`${provider.name}: ${message}`);
-      console.warn(`[web_search] ${provider.name} failed, trying next: ${message}`);
-    }
+  const apiKey = String(options.apiKey || '').trim();
+  if (!apiKey) {
+    return {
+      provider: 'none',
+      query: q,
+      results: [],
+      error: 'Web search requires a connected account',
+    };
   }
 
-  return {
-    provider: 'none',
-    query: q,
-    results: [],
-    error: errors.join(' | ') || 'All providers failed',
-  };
+  const freshness = options.freshness ?? null;
+  try {
+    const res = await fetch(chatBackendToolsURL('web_search'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ query: q, freshness }),
+      cache: 'no-store',
+      signal: options.signal ?? AbortSignal.timeout(35_000),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      provider?: string;
+      query?: string;
+      results?: SearchOutcome['results'];
+      error?: string;
+      message?: string;
+    };
+    if (!res.ok) {
+      return {
+        provider: 'none',
+        query: q,
+        results: [],
+        error: data.error || data.message || `HTTP ${res.status}`,
+      };
+    }
+    return {
+      provider: String(data.provider || 'none'),
+      query: String(data.query || q),
+      results: Array.isArray(data.results) ? data.results : [],
+      error: data.error || undefined,
+    };
+  } catch (err: unknown) {
+    const name = err instanceof Error ? err.name : '';
+    const message =
+      name === 'TimeoutError' || name === 'AbortError'
+        ? 'Search timed out'
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    return { provider: 'none', query: q, results: [], error: message };
+  }
 }
 
 export const WEB_SEARCH_TOOL = {

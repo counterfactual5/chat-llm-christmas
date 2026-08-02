@@ -95,7 +95,9 @@ export async function runWebRead(
       provider: 'web',
     },
   });
-  const outcome = await webRead(target);
+  const outcome = await webRead(target, {
+    apiKey: ctx.credentials?.skillsApiKey,
+  });
   // Persist a long extract for later Request review — snippet stays short for UI.
   const PERSIST_BODY_CHARS = 16_000;
   ctx.send({

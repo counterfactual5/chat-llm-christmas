@@ -1,24 +1,25 @@
 /**
- * Multi-provider web page reader with fallback chain.
- * Order: Zhipu Coding Plan MCP → Tavily Extract → Jina → bare fetch.
- *
- *  types.ts     shared outcome + limits
- *  url.ts       normalize + block blocklist
- *  extract.ts   HTML / JSON main-text extraction
- *  fetchers.ts  provider implementations
- *  zhipu.ts     Zhipu MCP client
+ * Multi-provider web page reader — thin client to chat-api `/v1/tools/web_read`.
+ * Engines (Zhipu → Tavily → Jina → Fetch MCP → bare) live on the product backend.
  */
 
-import { PROVIDERS } from '@/lib/tools/web-read/fetchers';
+import { chatBackendToolsURL } from '@/lib/chat-backend';
 import type { WebReadOutcome } from '@/lib/tools/web-read/types';
-import { normalizeUrl } from '@/lib/tools/web-read/url';
-import { formatUnknownError } from '@/lib/tools/zhipu/mcp-helpers';
 
 export type { WebReadOutcome } from '@/lib/tools/web-read/types';
 
-/** Run the fallback chain until one provider returns page content. */
-export async function webRead(urlInput: string): Promise<WebReadOutcome> {
-  const url = normalizeUrl(urlInput);
+export type WebReadClientOptions = {
+  apiKey?: string;
+  maxChars?: number;
+  signal?: AbortSignal;
+};
+
+/** Run the backend fallback chain until one provider returns page content. */
+export async function webRead(
+  urlInput: string,
+  options: WebReadClientOptions = {},
+): Promise<WebReadOutcome> {
+  const url = String(urlInput || '').trim();
   if (!url) {
     return {
       provider: 'none',
@@ -28,24 +29,65 @@ export async function webRead(urlInput: string): Promise<WebReadOutcome> {
     };
   }
 
-  const errors: string[] = [];
-  for (const provider of PROVIDERS) {
-    if (!provider.available()) continue;
-    try {
-      return await provider.read(url);
-    } catch (err: unknown) {
-      const message = formatUnknownError(err);
-      errors.push(`${provider.name}: ${message}`);
-      console.warn(`[web_read] ${provider.name} failed, trying next: ${message}`);
-    }
+  const apiKey = String(options.apiKey || '').trim();
+  if (!apiKey) {
+    return {
+      provider: 'none',
+      url,
+      content: '',
+      error: 'Web read requires a connected account',
+    };
   }
 
-  return {
-    provider: 'none',
-    url,
-    content: '',
-    error: errors.join(' | ') || 'All readers failed',
-  };
+  try {
+    const body: Record<string, unknown> = { url };
+    if (options.maxChars) body.maxChars = options.maxChars;
+    const res = await fetch(chatBackendToolsURL('web_read'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      signal: options.signal ?? AbortSignal.timeout(45_000),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      provider?: string;
+      url?: string;
+      title?: string | null;
+      description?: string | null;
+      content?: string;
+      error?: string;
+      message?: string;
+    };
+    if (!res.ok) {
+      return {
+        provider: 'none',
+        url,
+        content: '',
+        error: data.error || data.message || `HTTP ${res.status}`,
+      };
+    }
+    return {
+      provider: String(data.provider || 'none'),
+      url: String(data.url || url),
+      title: data.title || undefined,
+      description: data.description || undefined,
+      content: String(data.content || ''),
+      error: data.error || undefined,
+    };
+  } catch (err: unknown) {
+    const name = err instanceof Error ? err.name : '';
+    const message =
+      name === 'TimeoutError' || name === 'AbortError'
+        ? 'Read timed out'
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    return { provider: 'none', url, content: '', error: message };
+  }
 }
 
 export function formatWebReadForModel(outcome: WebReadOutcome): string {

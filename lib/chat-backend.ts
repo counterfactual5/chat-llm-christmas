@@ -36,3 +36,9 @@ export function chatBackendLiteratureURL(path = ''): string {
   const suffix = String(path || '').replace(/^\/+/, '');
   return suffix ? `${base}/${suffix}` : base;
 }
+
+export function chatBackendToolsURL(path = ''): string {
+  const base = `${chatBackendV1()}/tools`;
+  const suffix = String(path || '').replace(/^\/+/, '');
+  return suffix ? `${base}/${suffix}` : base;
+}

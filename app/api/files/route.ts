@@ -40,7 +40,18 @@ export async function POST(req: NextRequest) {
         apiKey,
         bytes,
         filename: file.name || 'upload.bin',
-        mime: file.type || 'application/octet-stream',
+        mime:
+          file.type && file.type !== 'application/octet-stream'
+            ? file.type
+            : /\.(jpe?g)$/i.test(file.name || '')
+              ? 'image/jpeg'
+              : /\.png$/i.test(file.name || '')
+                ? 'image/png'
+                : /\.webp$/i.test(file.name || '')
+                  ? 'image/webp'
+                  : /\.gif$/i.test(file.name || '')
+                    ? 'image/gif'
+                    : file.type || 'application/octet-stream',
       });
     } else {
       const body = await req.json();

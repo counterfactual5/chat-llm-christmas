@@ -1,12 +1,14 @@
 /** Client-side image downscale/compress before upload (Vercel request body ~4.5MB). */
 
-/** Soft ceiling for the upload hop after compress. Leave headroom under Vercel's ~4.5MB. */
-export const MAX_UPLOAD_BYTES = 3.5 * 1024 * 1024;
+/** Soft ceiling after compress — small enough for Vercel upload (~4.5MB) and
+ *  for Edge→LLM vision inlining (base64 ≈ 4/3 size). */
+export const MAX_UPLOAD_BYTES = 1.5 * 1024 * 1024;
 
 /** Hard reject before we even try to read (phone RAW / huge PNG). */
 export const MAX_INGEST_BYTES = 20 * 1024 * 1024;
 
-const MAX_EDGE = 2048;
+/** Longest edge for vision-friendly downscale (common multimodal API sweet spot). */
+const MAX_EDGE = 1568;
 
 function readAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

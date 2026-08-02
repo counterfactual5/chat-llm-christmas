@@ -77,7 +77,7 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
               `${data?.error || ''} ${rawText}`,
             );
           const detail = payloadTooLarge
-            ? 'Image too large for upload (max ~3.5MB after compress)'
+            ? 'Image too large for upload (max ~1.5MB after compress)'
             : typeof data?.error === 'string'
               ? data.error
               : `Upload failed (HTTP ${res.status})`;

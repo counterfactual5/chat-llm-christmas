@@ -72,6 +72,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 function bytesToBase64(buf: Uint8Array): string {
+  // Prefer Buffer when available (Node / many Edge polyfills) — avoids giant
+  // string spreads that can throw on larger phone photos.
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(buf).toString('base64');
+  }
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < buf.length; i += chunk) {
@@ -118,9 +123,12 @@ export async function resolveImageUrlForVision(
   if (!res.ok) {
     throw new Error(`Gateway file fetch failed: HTTP ${res.status}`);
   }
-  const mime = (res.headers.get('content-type') || 'image/png').split(';')[0].trim();
+  // Upstream VLMs ignore non-image data: URLs (e.g. application/octet-stream).
+  let mime = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+  if (!/^image\//i.test(mime)) mime = 'image/jpeg';
   const buf = new Uint8Array(await res.arrayBuffer());
-  return `data:${mime || 'image/png'};base64,${bytesToBase64(buf)}`;
+  if (!buf.byteLength) throw new Error('Gateway file was empty');
+  return `data:${mime};base64,${bytesToBase64(buf)}`;
 }
 
 function toVisionImagePart(imageUrl: string): Record<string, unknown> | null {

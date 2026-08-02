@@ -26,7 +26,7 @@ import {
   upsertGoogleConnection,
 } from '@/lib/integrations';
 import {
-  gatewayBaseURL as filesBaseURL,
+  filesGatewayBaseURL,
   generatedImageAssistantSummary,
   toImageContentPart,
   uploadGatewayDataUrl,
@@ -244,7 +244,7 @@ export async function handleChatRequest(req: NextRequest) {
         try {
           const uploaded = await uploadGatewayDataUrl({
             apiKey,
-            baseURL: filesBaseURL(),
+            baseURL: filesGatewayBaseURL(),
             dataUrl: url,
             filename: `chat-${Date.now()}.png`,
           });
@@ -260,7 +260,9 @@ export async function handleChatRequest(req: NextRequest) {
       return { url, prompt };
     };
 
-    // Portal Files ids are opaque to upstream VLMs — expand to data URLs first.
+    // Portal / chat-api file ids are opaque to upstream VLMs — expand to data URLs.
+    // Never silently drop the last-turn pixels: that makes vision models claim they
+    // "cannot see" an image the UI clearly shows.
     const toVisionPart = async (img: ImageRef) => {
       const part = toImageContentPart(img);
       if (!part) return null;
@@ -272,6 +274,7 @@ export async function handleChatRequest(req: NextRequest) {
       } catch (err) {
         console.warn(
           '[chat] resolve portal file for vision failed:',
+          ref,
           err instanceof Error ? err.message : err,
         );
         return null;
@@ -536,6 +539,24 @@ export async function handleChatRequest(req: NextRequest) {
     // No following user turn yet — keep a text stub only (can't put images on assistant).
     pendingAssistantImages = [];
 
+    if (modelIsVision) {
+      const lastClientUser = [...chatMessages].reverse().find((m) => m?.role === 'user');
+      const expectedImages = Array.isArray(lastClientUser?.images)
+        ? lastClientUser.images.length
+        : 0;
+      if (expectedImages > 0) {
+        const lastNormUser = [...normalizedMessages].reverse().find((m) => m?.role === 'user');
+        const gotImageParts = Array.isArray(lastNormUser?.content)
+          ? lastNormUser.content.filter((p: any) => p?.type === 'image_url').length
+          : 0;
+        if (gotImageParts === 0) {
+          return jsonError(
+            'Failed to load attached image(s) for the vision model. Re-attach the image and try again.',
+            502,
+          );
+        }
+      }
+    }
 
     const userAsk = lastUserText(normalizedMessages);
     const zhipuVisionOn = authorizedIntegrations.includes('zhipu-vision');

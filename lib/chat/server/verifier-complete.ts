@@ -18,6 +18,10 @@ export function createStreamingVerifierComplete(opts: {
   onDelta?: (chunk: string) => void;
 }): LlmCompleteFn {
   return async (messages) => {
+    // Many models emit overlapping audit prose on BOTH reasoning and content.
+    // Forwarding both into Thought doubles / stutters the panel. Prefer the
+    // reasoning channel when present; only mirror content when reasoning is empty.
+    let reasoningChars = 0;
     const result = await withTimeout(
       runPlainCompletionStream({
         apiKey: opts.apiKey,
@@ -27,8 +31,13 @@ export function createStreamingVerifierComplete(opts: {
         temperature: 0,
         messages,
         checkAbortedEachChunk: true,
-        onContent: (text) => opts.onDelta?.(text),
-        onReasoning: (text) => opts.onDelta?.(text),
+        onReasoning: (text) => {
+          reasoningChars += text.length;
+          opts.onDelta?.(text);
+        },
+        onContent: (text) => {
+          if (reasoningChars === 0) opts.onDelta?.(text);
+        },
       }),
       opts.timeoutMs,
       'claim verifier',

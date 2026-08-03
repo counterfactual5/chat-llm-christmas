@@ -865,6 +865,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                 isActiveLoading &&
                                 message.id === lastMessage?.id &&
                                 message.role === 'assistant',
+                              // Don't reflow smashed answer tables inside Thought —
+                              // verifier CoT is English prose and gets shredded.
+                              reflowBlocks: false,
                             })}
                           </ReactMarkdown>
                         </ReasoningBodyScroll>

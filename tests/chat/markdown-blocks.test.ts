@@ -99,4 +99,20 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toContain('https://eleduck.com\n- 特点：');
     expect(out).toContain('建立人脉\n\n需要我帮你：');
   });
+
+  it('keeps **/command** - description on one list item', () => {
+    const src = [
+      '📋 可用命令（在输入框输入 `/` 查看）',
+      '',
+      '- **/image** - 生成图片',
+      '- **/research** - 深度研究（快速/标准/严谨）',
+      '- **/news** - 搜索新闻',
+      '- **/wiki** - 查百科（中/英文）',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toContain('- **/image** - 生成图片');
+    expect(out).toContain('- **/research** - 深度研究（快速/标准/严谨）');
+    expect(out).not.toMatch(/\*\*\n\n- 生成图片/);
+    expect(out).not.toMatch(/\*\*\n\n- 深度研究/);
+  });
 });

@@ -1852,13 +1852,26 @@ export default function ChatContainer() {
   }, [messages, isActiveLoading]);
 
   // Switching conversations should land at the latest message.
-  // Clear the previewed file (it belongs to the previous session) but keep the
-  // Preview panel open/closed as a layout preference — same as Context.
+  // Clear the previewed file only when the session id actually changes — same-session
+  // sends / session array identity churn must not wipe an open Preview.
+  // Keep the Preview panel open/closed as a layout preference (same as Context).
+  const lastPreviewSessionIdRef = useRef(activeSessionId);
   useEffect(() => {
     stickToBottomRef.current = true;
     scrollToBottom(true);
+    if (lastPreviewSessionIdRef.current === activeSessionId) return;
+    lastPreviewSessionIdRef.current = activeSessionId;
     setPreviewFileEntry(null);
   }, [activeSessionId]);
+
+  // If the previewed file is deleted from the active thread, drop the stale entry.
+  useEffect(() => {
+    if (!previewFileEntry) return;
+    const stillThere = generatedFileHistory.some(
+      (f) => f.id === previewFileEntry.id && f.messageId === previewFileEntry.messageId,
+    );
+    if (!stillThere) setPreviewFileEntry(null);
+  }, [generatedFileHistory, previewFileEntry]);
 
   // While the assistant turn is still open but the stream has gone idle (no new
   // content / thought / tool), show a textless spinner under the bubble — including

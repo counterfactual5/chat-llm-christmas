@@ -2,18 +2,9 @@
 
 import { useEffect, useMemo } from 'react';
 import { Download, FileText, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { CodeBlock } from '@/components/markdown/code/code-block';
-import { prepareChatMarkdown } from '@/lib/markdown/math';
 import { cn } from '@/lib/utils';
-
-const KATEX_OPTIONS = {
-  throwOnError: false,
-  errorColor: 'var(--chat-math-error, #a8a29e)',
-} as const;
 
 export type FilePreviewPayload = {
   id: string;
@@ -97,56 +88,9 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   const language = useMemo(() => languageFromFilename(file.name), [file]);
 
   return markdown ? (
-    <div
-      className={cn(
-        'chat-markdown mx-auto w-full min-w-0 max-w-3xl break-words text-[15px] leading-relaxed text-stone-800 dark:text-stone-200',
-        '[&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-bold',
-        '[&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold',
-        '[&_p]:mb-4 [&_p]:leading-7 [&_p:last-child]:mb-0',
-        '[&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-6',
-        '[&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-6',
-        '[&_blockquote]:border-l-2 [&_blockquote]:border-stone-300 [&_blockquote]:pl-3 [&_blockquote]:text-stone-500',
-        '[&_a]:text-sky-700 [&_a]:underline dark:[&_a]:text-sky-400',
-        '[&_pre]:max-w-full [&_pre]:overflow-x-hidden',
-        '[&_img]:max-w-full',
-      )}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkGfm]}
-        rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-        components={{
-          table({ children }: any) {
-            return (
-              <div className="my-4 w-full max-w-full overflow-x-auto">
-                <table className="w-full border-collapse text-left text-sm [&_th]:border [&_th]:border-stone-200 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-stone-200 [&_td]:px-2 [&_td]:py-1">
-                  {children}
-                </table>
-              </div>
-            );
-          },
-          code({ className, children, ...props }: any) {
-            const match = /language-(\w+)/.exec(className || '');
-            const value = String(children ?? '').replace(/\n$/, '');
-            const inline = !match && !String(children ?? '').includes('\n');
-            if (!inline && match) {
-              return <CodeBlock language={match[1]} value={value} wrap />;
-            }
-            return (
-              <code
-                className="break-all rounded bg-stone-100 px-1 py-0.5 font-mono text-[0.9em] dark:bg-stone-800"
-                {...props}
-              >
-                {children}
-              </code>
-            );
-          },
-          pre({ children }: any) {
-            return <>{children}</>;
-          },
-        }}
-      >
-        {prepareChatMarkdown(file.content)}
-      </ReactMarkdown>
+    <div className={cn('mx-auto w-full min-w-0 max-w-3xl')}>
+      {/* Same Markdown path as chat answers — ASCII reflow, fenced text blocks, tables. */}
+      <AnswerMarkdown text={file.content} streaming={false} />
     </div>
   ) : (
     <div className="min-w-0 max-w-full">

@@ -66,4 +66,15 @@ describe('ASCII art Markdown recovery', () => {
     expect(out).toContain('├─ a');
     expect(out).toContain('└─ b');
   });
+
+  it('reflows flattened ASCII already inside a ```text fence', () => {
+    const flatBox = '┌────┐ │ App │ └────┘';
+    const md = `## 盒模型\n\n\`\`\`text\n${flatBox}\n\`\`\`\n`;
+    const out = normalizeAsciiArtMarkdown(md);
+    expect(out).toContain('```text');
+    expect(out).toContain('\n│ App │\n');
+    // Real code fences must stay untouched.
+    const code = '```js\nconst x = "┌────┐ │ App │ └────┘";\n```';
+    expect(normalizeAsciiArtMarkdown(code)).toBe(code);
+  });
 });

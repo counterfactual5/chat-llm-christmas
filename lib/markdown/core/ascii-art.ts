@@ -57,12 +57,15 @@ function reflowUnicodeBox(text: string): string {
 export function reflowCollapsedAsciiArt(text: string): string {
   const raw = String(text || '');
   if (!raw.trim()) return raw;
-  if (raw.includes('\n')) {
-    return raw.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  // Trim first: fenced bodies often end with a trailing newline that is not a
+  // real row break — that used to skip Unicode-box reflow entirely.
+  const trimmed = raw.trim();
+  if (trimmed.includes('\n')) {
+    return trimmed.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
-  if (looksLikeUnicodeBox(raw)) return reflowUnicodeBox(raw);
+  if (looksLikeUnicodeBox(trimmed)) return reflowUnicodeBox(trimmed);
 
-  let out = raw;
+  let out = trimmed;
   // Unicode branches.
   out = out.replace(/[ \t]+([├└](?:[─━-]{1,3}))/g, '\n$1');
   // Portable ASCII branches (+--, |--, \--, `--).
@@ -141,7 +144,39 @@ export function promotePlainAsciiArtBlocks(markdown: string): string {
   );
 }
 
-/** Apply plain-block recovery first, then inline-code recovery. */
+/** Apply plain-block recovery first, then inline-code recovery, then reflow
+ *  already-fenced diagrams that models flattened onto one line. */
 export function normalizeAsciiArtMarkdown(markdown: string): string {
-  return promoteInlineAsciiArtToFences(promotePlainAsciiArtBlocks(markdown));
+  return reflowFencedAsciiArtBlocks(
+    promoteInlineAsciiArtToFences(promotePlainAsciiArtBlocks(markdown)),
+  );
+}
+
+/**
+ * Models often put ASCII diagrams in ```text fences but flatten newlines
+ * inside the fence. prepareChatMarkdown previously skipped those segments;
+ * reflow them so every consumer (chat + file preview) sees real line breaks.
+ */
+export function reflowFencedAsciiArtBlocks(markdown: string): string {
+  return String(markdown || '').replace(
+    /```([^\n`]*)\n([\s\S]*?)```/g,
+    (full, info: string, body: string) => {
+      const lang = String(info || '')
+        .trim()
+        .split(/\s+/)[0]
+        ?.toLowerCase();
+      // Only touch diagram-ish fences — leave real code alone.
+      const diagramLang =
+        !lang ||
+        lang === 'text' ||
+        lang === 'plaintext' ||
+        lang === 'ascii' ||
+        lang === 'txt';
+      if (!diagramLang) return full;
+      if (!looksLikeAsciiArt(body)) return full;
+      const next = reflowCollapsedAsciiArt(body);
+      if (next === body.trim() && body.includes('\n')) return full;
+      return `\`\`\`${info}\n${next}\n\`\`\``;
+    },
+  );
 }

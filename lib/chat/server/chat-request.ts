@@ -73,7 +73,7 @@ import {
   MAX_TOOL_ROUNDS_INTEGRATIONS,
   runToolRounds,
 } from '@/lib/chat/server/run-tool-rounds';
-import { completeOnce, withTimeout } from '@/lib/chat/server/upstream';
+import { createStreamingVerifierComplete } from '@/lib/chat/server/verifier-complete';
 import {
 
   lastUserMessageHasImageParts,
@@ -628,12 +628,10 @@ export async function handleChatRequest(req: NextRequest) {
         };
 
         if (requestReview) {
-          // Manual /review spends up to VERIFIER_TIMEOUT_MS on a non-streaming
-          // verifier before any answer text — emit progress immediately so the
-          // UI is not a blank spinner (and so proxies keep the SSE alive).
+          // Stream the verifier into Thought, then stream the written summary as content.
           send({
             reasoning:
-              'Claim review started: checking the previous answer against tool receipts. A written summary follows when the audit finishes…\n',
+              'Claim review — streaming independent verifier against tool receipts…\n',
           });
           const auditOpts = {
             searchEnabled,
@@ -641,21 +639,14 @@ export async function handleChatRequest(req: NextRequest) {
             skillCreator: skillCreatorOn,
           };
           const priorText = String(reviewContext?.assistantText || '').trim();
-          const verifierComplete = async (
-            msgs: Array<{ role: string; content: string }>,
-          ) =>
-            withTimeout(
-              completeOnce({
-                apiKey,
-                baseURL,
-                model: requestedModel,
-                messages: msgs,
-                temperature: 0,
-                signal: clientSignal,
-              }),
-              VERIFIER_TIMEOUT_MS,
-              'claim verifier',
-            );
+          const verifierComplete = createStreamingVerifierComplete({
+            apiKey,
+            baseURL,
+            model: requestedModel,
+            signal: clientSignal,
+            timeoutMs: VERIFIER_TIMEOUT_MS,
+            onDelta: (text) => send({ reasoning: text }),
+          });
 
           const turns = collectReviewTurns(reviewContext, priorText);
 
@@ -735,21 +726,14 @@ export async function handleChatRequest(req: NextRequest) {
         // Snapshot before this turn's tool rounds so Auto-review ignores
         // historically replayed receipts from earlier assistant turns.
         const autoReviewTurnBoundary = lastUserMessageIndex(workingMessages);
-        const verifierComplete = async (
-          msgs: Array<{ role: string; content: string }>,
-        ) =>
-          withTimeout(
-            completeOnce({
-              apiKey,
-              baseURL,
-              model: requestedModel,
-              messages: msgs,
-              temperature: 0,
-              signal: clientSignal,
-            }),
-            VERIFIER_TIMEOUT_MS,
-            'claim verifier',
-          );
+        const verifierComplete = createStreamingVerifierComplete({
+          apiKey,
+          baseURL,
+          model: requestedModel,
+          signal: clientSignal,
+          timeoutMs: VERIFIER_TIMEOUT_MS,
+          onDelta: (text) => send({ reasoning: text }),
+        });
 
         const emptyAudit = (): ClaimAuditResult => ({
           findings: [],

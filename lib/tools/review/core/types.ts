@@ -203,7 +203,10 @@ export type VerifierResult = {
   lens: LensFinding[];
 };
 
-export type LlmCompleteFn = (messages: Array<{ role: string; content: string }>) => Promise<string>;
+/** Prefer createStreamingVerifierComplete so the audit phase streams into Thought. */
+export type LlmCompleteFn = (
+  messages: Array<{ role: string; content: string }>,
+) => Promise<string>;
 
 export type ReviewIssue = {
   kind: ReviewCheckKind;

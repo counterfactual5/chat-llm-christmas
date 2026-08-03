@@ -203,14 +203,14 @@ describe('auditReviewTurns', () => {
     expect(forceLlmFlags).toEqual([true, false, true]);
 
     expect(result.findings).toEqual([
-      { id: 'finding-turn-with-error' },
-      { id: 'finding-turn-clean' },
-      { id: 'finding-turn-focus' },
+      { id: 'finding-turn-with-error', claim: '[m1]' },
+      { id: 'finding-turn-clean', claim: '[m2]' },
+      { id: 'finding-turn-focus', claim: '[m3]' },
     ]);
     expect(result.issues).toEqual([
-      { kind: 'issue-turn-with-error' },
-      { kind: 'issue-turn-clean' },
-      { kind: 'issue-turn-focus' },
+      { kind: 'issue-turn-with-error', sourceMessageId: 'm1', title: '[m1]' },
+      { kind: 'issue-turn-clean', sourceMessageId: 'm2', title: '[m2]' },
+      { kind: 'issue-turn-focus', sourceMessageId: 'm3', title: '[m3]' },
     ]);
 
     // Deep-Research-style Process card per audited turn: one start + one done.

@@ -42,6 +42,7 @@ export function buildStalenessCheck(
           severity: gap >= 2 ? 'error' : 'warn',
           title: `Dated "${asOf[0]}" but now is ${currentYear}`,
           detail: `The claim is ${gap} year(s) behind — re-check it or state the cutoff explicitly.`,
+          ruleId: 'staleness:dated_cutoff',
         });
       }
     }
@@ -58,6 +59,7 @@ export function buildStalenessCheck(
       severity: 'warn',
       title: `Newest source is from ${newest}`,
       detail: `Answer speaks about the present but sources stop at ${newest}.`,
+      ruleId: 'staleness:newest_source',
     });
   }
 

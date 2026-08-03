@@ -141,7 +141,12 @@ export function buildCodeQualityCheck(assistantText: string): ReviewCheck | null
   const add = (rule: { id: string; title: string; detail: string; severity: 'error' | 'warn' }) => {
     if (seen.has(rule.id) || items.length >= 10) return;
     seen.add(rule.id);
-    items.push({ severity: rule.severity, title: rule.title, detail: rule.detail });
+    items.push({
+      severity: rule.severity,
+      title: rule.title,
+      detail: rule.detail,
+      ruleId: rule.id,
+    });
   };
 
   for (const block of blocks) {

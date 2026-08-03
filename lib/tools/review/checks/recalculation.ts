@@ -274,6 +274,7 @@ export function buildRecalculationCheck(assistantText: string): ReviewCheck | nu
       severity: 'error',
       title: m.expression,
       detail: `Verified as ${formatNumber(m.actual)} (answer said ${formatNumber(m.claimed)})`,
+      ruleId: 'recalculation:inline_mismatch',
     });
   }
   for (const m of tables.mismatches.slice(0, 8)) {
@@ -281,6 +282,7 @@ export function buildRecalculationCheck(assistantText: string): ReviewCheck | nu
       severity: 'error',
       title: `${m.label} · ${m.column}`,
       detail: `Column verifies as ${formatNumber(m.actual)} (table said ${formatNumber(m.claimed)})`,
+      ruleId: 'recalculation:table_mismatch',
     });
   }
 

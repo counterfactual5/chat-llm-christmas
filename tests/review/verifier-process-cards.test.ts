@@ -76,4 +76,23 @@ describe('runFullClaimAudit — claim_verifier Process card', () => {
     );
     expect(failed?.error).toBe('Review aborted');
   });
+
+  it('skips the LLM verifier when forceLlm=false on phase=requested', async () => {
+    const send = vi.fn();
+    const complete = vi.fn().mockResolvedValue('{"findings":[],"summary":"clean"}');
+
+    await runFullClaimAudit(
+      send,
+      'The assistant answer text.',
+      [],
+      { searchEnabled: false, integrations: [] },
+      'requested',
+      complete,
+      { forceLlm: false, emitEmpty: true },
+    );
+
+    expect(complete).not.toHaveBeenCalled();
+    const toolSends = send.mock.calls.map((call) => call[0]?.tool).filter(Boolean);
+    expect(toolSends.some((tool) => tool.name === 'claim_verifier')).toBe(false);
+  });
 });

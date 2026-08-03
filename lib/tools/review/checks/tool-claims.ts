@@ -575,12 +575,13 @@ export function buildMidTurnCheck(
         ? 'Announced tools without tool_calls — retry injected'
         : 'Narrated tool success without receipts — correction injected',
     items: labels.map((label) => ({
-      severity: 'error',
+      severity: 'error' as const,
       title: label,
       detail:
         kind === 'intent'
           ? 'Stopped after announcing intent; reviewer forced another tool round.'
           : 'Claimed success with no matching tool_calls; reviewer injected corrective prompt.',
+      ruleId: `mid_turn:${kind}`,
     })),
   };
 }
@@ -609,6 +610,9 @@ export function buildToolReceiptCheck(
     severity: f.severity,
     title: f.claim,
     detail: f.evidence,
+    ruleId: `tool_receipt:${f.verdict}`,
+    verdict: f.verdict,
+    surface: f.surface,
   }));
 
   const clean = items.length === 0;

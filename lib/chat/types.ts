@@ -88,7 +88,15 @@ export type Message = {
       status: 'running' | 'done' | 'skipped';
       summary: string;
       clean?: boolean;
-      items?: Array<{ severity: 'error' | 'warn'; title: string; detail: string }>;
+      items?: Array<{
+        severity: 'error' | 'warn';
+        title: string;
+        detail: string;
+        ruleId?: string;
+        verdict?: string;
+        evidenceStrength?: 'strong' | 'moderate' | 'weak';
+        surface?: string;
+      }>;
       body?: string;
     }>;
   };

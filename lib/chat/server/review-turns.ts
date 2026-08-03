@@ -61,8 +61,10 @@ export type ReviewAuditOpts = {
 /**
  * Run the full claim audit over each reviewed turn (spending the LLM
  * verifier on the focused turn, or any earlier turn whose local heuristics
- * already found an error), merging findings/issues across turns. Emits an
- * empty report when there is nothing to review.
+ * already found an error; other turns stay local-only even though
+ * phase=requested would otherwise deep-pass every turn). Merges
+ * findings/issues across turns. Emits an empty report when there is nothing
+ * to review.
  */
 export async function auditReviewTurns(opts: {
   turns: ReviewTurn[];
@@ -130,8 +132,27 @@ export async function auditReviewTurns(opts: {
           },
         ],
       });
-      findings = findings.concat(audit.findings);
-      issues = issues.concat(audit.issues);
+      findings = findings.concat(
+        audit.findings.map((f) => {
+          if (total <= 1) return f;
+          const claim = String(f.claim || '').trim();
+          return {
+            ...f,
+            claim: claim ? `[${turn.messageId}] ${claim}` : `[${turn.messageId}]`,
+          };
+        }),
+      );
+      issues = issues.concat(
+        audit.issues.map((issue) => {
+          const tagged = { ...issue, sourceMessageId: turn.messageId };
+          if (total <= 1) return tagged;
+          const title = String(issue.title || '').trim();
+          return {
+            ...tagged,
+            title: title ? `[${turn.messageId}] ${title}` : `[${turn.messageId}]`,
+          };
+        }),
+      );
     } catch (err) {
       emitReviewProcessCard(opts.send, {
         name: 'claim_audit',

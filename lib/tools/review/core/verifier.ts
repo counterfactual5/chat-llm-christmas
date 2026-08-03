@@ -289,7 +289,16 @@ export async function runFullClaimAudit(
   let llmFindings: ReviewFinding[] = [];
   let lensFindings: LensFinding[] = [];
 
-  const spendLlm = Boolean(complete) && (plan.llm || Boolean(options?.forceLlm));
+  // `forceLlm: true` always spends. For phase=requested, `forceLlm: false`
+  // throttles non-focus turns (local checks only) even though the plan would
+  // otherwise always deep-pass. For auto-review (phase=audit), `forceLlm: false`
+  // means "don't force" — the plan still decides.
+  const spendLlm =
+    Boolean(complete) &&
+    (options?.forceLlm === true ||
+      (options?.forceLlm === false && phase === 'requested'
+        ? false
+        : plan.llm));
   if (spendLlm && complete) {
     throwIfAborted();
     const lenses = plan.lenses.length
@@ -376,43 +385,70 @@ export async function runFullClaimAudit(
   return { findings, report, issues: collectReviewIssues(report) };
 }
 
+/** Tool-receipt verdicts that may drive a bounded auto-correction. */
+const ACTIONABLE_TOOL_VERDICTS = new Set([
+  'pending_intent',
+  'no_receipt',
+  'tool_failed',
+]);
+
+/** Local code-quality rule ids that may drive a bounded auto-correction. */
+const ACTIONABLE_CODE_QUALITY_RULES = new Set([
+  'off-by-one',
+  'mutable-default-arg',
+]);
+
+/**
+ * Automatic rewriting is narrower than the review panel. Gate on stable
+ * `ruleId` / `verdict` / `evidenceStrength` from local checks — never on
+ * free-text titles (LLM lenses can invent those).
+ */
 export function actionableReviewIssues(issues: ReviewIssue[]): ReviewIssue[] {
   if (getReviewGateLevel() === 0) return [];
   return issues.filter((issue) => {
     if (issue.severity !== 'error') return false;
-    const text = `${issue.title} ${issue.detail}`;
 
-    // Automatic rewriting is intentionally narrower than the review panel.
-    // Semantic/heuristic checks remain visible, but should not interrupt a
-    // useful answer unless they establish a concrete, high-confidence failure.
-    if (issue.kind === 'mid_turn' || issue.kind === 'tool_receipt') {
-      return /no matching|without.*receipt|tool failed|claimed.*succeeded|forced another tool round/i.test(
-        text,
+    // Mid-turn already injected a corrective round + live panel. Never stream
+    // a second correction from the sticky flag on the final audit.
+    if (issue.kind === 'mid_turn') return false;
+
+    if (issue.kind === 'tool_receipt') {
+      const verdict =
+        issue.verdict ||
+        (issue.ruleId?.startsWith('tool_receipt:')
+          ? issue.ruleId.slice('tool_receipt:'.length)
+          : '');
+      return ACTIONABLE_TOOL_VERDICTS.has(verdict);
+    }
+    if (issue.kind === 'recalculation') {
+      return (
+        issue.ruleId === 'recalculation:inline_mismatch' ||
+        issue.ruleId === 'recalculation:table_mismatch'
       );
     }
-    if (issue.kind === 'recalculation') return /Verified as|Column verifies as/i.test(text);
     if (issue.kind === 'completeness') {
-      return /cut off|Unclosed code block|collapsed into garbage|long repeated/i.test(text);
+      return (
+        issue.ruleId === 'completeness:cutoff' ||
+        issue.ruleId === 'completeness:unclosed_fence' ||
+        issue.ruleId === 'completeness:degenerate'
+      );
     }
     if (issue.kind === 'citation') {
-      // A missing URL or search-blurb miss is only advisory. A strong body read
-      // that still lacks the cited fact is concrete enough for a bounded retraction.
-      return /\[(?:unsupported|contradicted)\/strong\]/i.test(text);
+      // Missing URL / blurb miss stay advisory. Strong body gaps may retract.
+      return (
+        (issue.verdict === 'unsupported' || issue.verdict === 'contradicted') &&
+        issue.evidenceStrength === 'strong'
+      );
     }
     if (issue.kind === 'staleness') {
-      // Only explicit stale cutoffs become corrections; "newest source" and
-      // general freshness heuristics remain panel-only.
-      return /^Dated .+ but now is \d{4}/i.test(issue.title);
+      return issue.ruleId === 'staleness:dated_cutoff';
     }
     if (issue.kind === 'code_quality') {
-      // These local rules are deterministic likely bugs. Warn-level style smells
-      // (empty catch, radix, loose equality, etc.) stay advisory.
-      return /Off-by-one loop bound|Mutable default argument/i.test(issue.title);
+      return Boolean(issue.ruleId && ACTIONABLE_CODE_QUALITY_RULES.has(issue.ruleId));
     }
     if (issue.kind === 'vulnerability') {
-      // Vulnerability errors are deliberately narrow patterns after placeholder
-      // and negative-example filtering. Warn-level sinks never reach this gate.
-      return true;
+      // Local vuln errors only — require ruleId so lens prose cannot forge one.
+      return Boolean(issue.ruleId);
     }
 
     // Consistency findings are heuristic warnings and remain panel-only.
@@ -507,6 +543,9 @@ export function collectReviewIssues(report: ReviewReport): ReviewIssue[] {
         severity: item.severity,
         title: item.title,
         detail: item.detail,
+        ruleId: item.ruleId,
+        verdict: item.verdict,
+        evidenceStrength: item.evidenceStrength,
       });
     }
   }
@@ -710,10 +749,10 @@ export function buildManualReviewResponsePrompt(opts: {
   const findings = opts.findings || [];
   const focus = extractManualReviewFocus(opts.userAsk || '') || '';
   const issueList = issues
-    .map(
-      (issue, i) =>
-        `${i + 1}. [${issue.severity}/${issue.kind}] ${issue.title}\n   ${issue.detail}`,
-    )
+    .map((issue, i) => {
+      const where = issue.sourceMessageId ? ` @${issue.sourceMessageId}` : '';
+      return `${i + 1}. [${issue.severity}/${issue.kind}${where}] ${issue.title}\n   ${issue.detail}`;
+    })
     .join('\n');
   const findingList = findings
     .map(

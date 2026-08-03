@@ -109,14 +109,19 @@ export async function streamChatResponse(
   });
 
   const sessionForReview = deps.getSessions().find((s) => s.id === sessionId);
+  // `/review` audits the latest assistant reply by default (not the whole thread).
+  // Server still accepts a `turns` array if a future client wants multi-turn.
   const assistantTurnsForReview = requestReview
-    ? (sessionForReview?.messages || [])
-        .filter((m) => m.role === 'assistant' && String(m.content || '').trim())
-        .map((m) => ({
-          messageId: m.id,
-          assistantText: m.content,
-          toolRuns: serializeReviewToolRuns(m.toolRuns),
-        }))
+    ? (() => {
+        const turns = (sessionForReview?.messages || [])
+          .filter((m) => m.role === 'assistant' && String(m.content || '').trim())
+          .map((m) => ({
+            messageId: m.id,
+            assistantText: m.content,
+            toolRuns: serializeReviewToolRuns(m.toolRuns),
+          }));
+        return turns.length ? [turns[turns.length - 1]!] : [];
+      })()
     : [];
   const lastAssistantForReview = assistantTurnsForReview.length
     ? assistantTurnsForReview[assistantTurnsForReview.length - 1]

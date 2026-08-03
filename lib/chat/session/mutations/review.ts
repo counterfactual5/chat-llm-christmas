@@ -31,10 +31,10 @@ export function withUpsertedReviewReport(
         const toolReceipt = merged.checks.find((c) => c.kind === 'tool_receipt');
         const legacyFindings =
           toolReceipt?.items?.map((item, i) => ({
-            id: `tool_receipt:${i}`,
+            id: item.ruleId || `tool_receipt:${i}`,
             severity: item.severity,
-            surface: 'tool',
-            verdict: 'no_receipt',
+            surface: item.surface || 'tool',
+            verdict: item.verdict || 'no_receipt',
             claim: item.title,
             evidence: item.detail,
           })) || [];

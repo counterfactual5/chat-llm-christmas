@@ -21,7 +21,10 @@ export type ChatReviewContext = {
   targetMessageId?: string;
   assistantText?: string;
   toolRuns?: ChatReviewToolRun[];
-  /** Full-thread Request Review: each assistant turn + its own receipts. */
+  /**
+   * Assistant turn(s) to audit. Default clients send only the latest reply;
+   * a multi-entry array is still accepted for full-thread review.
+   */
   turns?: Array<{
     messageId: string;
     assistantText: string;

@@ -211,6 +211,7 @@ export function buildCitationCheck(
       title: `Link not in tool results: ${url}`,
       detail:
         'This URL never appeared in any retrieval payload — unverifiable (no evidence unit). Verify it or remove it.',
+      ruleId: 'citation:missing_url',
     });
   }
   for (const row of audit.unsupportedClaims.slice(0, 8)) {
@@ -223,6 +224,9 @@ export function buildCitationCheck(
       detail: isStrong
         ? `[${row.verdict}/${row.strength}] Cited ${row.url}, but full-page evidence does not contain: ${row.missing.join(', ')}. Evidence: ${evidenceNote}.`
         : `[${row.verdict}/${row.strength}] Cited ${row.url}; available evidence (${evidenceNote}) does not contain: ${row.missing.join(', ')}. Absence from a search blurb is not proof the article is wrong — treat as unverified.`,
+      ruleId: `citation:${row.verdict}:${row.strength}`,
+      verdict: row.verdict,
+      evidenceStrength: row.strength,
     });
   }
 

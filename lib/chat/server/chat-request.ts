@@ -1020,7 +1020,9 @@ export async function handleChatRequest(req: NextRequest) {
           });
           usedTools = toolRoundsState.usedTools;
           lastToolRoundHadFailure = toolRoundsState.lastToolRoundHadFailure;
-          midTurnCorrection = toolRoundsState.midTurnCorrection;
+          // Mid-turn already emitted a live panel + injected a corrective prompt.
+          // Drop the sticky flag so the final audit cannot re-open / re-correct it.
+          midTurnCorrection = null;
           if (toolRoundsOutcome.status === 'stream_closed') return;
 
           const finalMessages = usedTools

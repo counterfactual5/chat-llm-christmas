@@ -85,6 +85,17 @@ export type ReviewCheckItem = {
   severity: 'error' | 'warn';
   title: string;
   detail: string;
+  /**
+   * Stable correction-gate id (e.g. `tool_receipt:pending_intent`, `off-by-one`).
+   * Prefer this over matching free-text titles — LLM lenses must not invent it.
+   */
+  ruleId?: string;
+  /** Tool-receipt / citation verdict when the check carries one. */
+  verdict?: string;
+  /** Citation evidence strength when the check carries one. */
+  evidenceStrength?: 'strong' | 'moderate' | 'weak';
+  /** Tool-receipt surface (notion / web_search / …) when known. */
+  surface?: string;
 };
 
 export type ReviewCheck = {
@@ -213,6 +224,11 @@ export type ReviewIssue = {
   severity: 'error' | 'warn';
   title: string;
   detail: string;
+  ruleId?: string;
+  verdict?: string;
+  evidenceStrength?: 'strong' | 'moderate' | 'weak';
+  /** Assistant message this issue was audited against (manual multi-turn). */
+  sourceMessageId?: string;
 };
 
 export type CorrectionVerifyResult = {

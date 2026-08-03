@@ -72,6 +72,7 @@ export function buildCompletenessCheck(input: ReviewInput): ReviewCheck | null {
         input.finishReason === 'length'
           ? 'Generation hit the token limit — continue the reply to finish it.'
           : 'The stream ended before the reply was complete.',
+      ruleId: 'completeness:cutoff',
     });
   }
 
@@ -80,6 +81,7 @@ export function buildCompletenessCheck(input: ReviewInput): ReviewCheck | null {
       severity: 'error',
       title: 'Unclosed code block',
       detail: 'A ``` fence was opened and never closed — the code block is incomplete.',
+      ruleId: 'completeness:unclosed_fence',
     });
   }
 
@@ -89,6 +91,7 @@ export function buildCompletenessCheck(input: ReviewInput): ReviewCheck | null {
       severity: 'error',
       title: 'Answer collapsed into garbage',
       detail: degenerate,
+      ruleId: 'completeness:degenerate',
     });
   }
 

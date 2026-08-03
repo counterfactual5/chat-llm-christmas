@@ -22,7 +22,7 @@ const SMASHED = [
   '---',
   '## 🎯 针对你的情况（Solidity 开发）的求职路径建议',
   '**我的建议：既然很多老平台都关了，不要再花时间找"赏金任务"了。**',
-  '### 路径 1: 进入核心开发者社区',
+  '### 路径 1: 进入核心开发者社区：',
   '1. 加入 DeJob Telegram',
   '2. 加入 Solidity Developers',
   '找 `good first issue`。',
@@ -114,5 +114,24 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toContain('- **/research** - 深度研究（快速/标准/严谨）');
     expect(out).not.toMatch(/\*\*\n\n- 生成图片/);
     expect(out).not.toMatch(/\*\*\n\n- 深度研究/);
+  });
+
+  it('does not turn normal Chinese prose dashes or figure numbers into lists', () => {
+    expect(reflowCollapsedMarkdownBlocks('从技术角度 - 这并不复杂，价格 - 约一百。')).toBe(
+      '从技术角度 - 这并不复杂，价格 - 约一百。',
+    );
+    expect(
+      reflowCollapsedMarkdownBlocks('详见下图 1. 整体架构，以及表 2. 对比结果。'),
+    ).toBe('详见下图 1. 整体架构，以及表 2. 对比结果。');
+    expect(
+      reflowCollapsedMarkdownBlocks('本次更新包括版本 2. 性能优化与版本 3. 文档。'),
+    ).toBe('本次更新包括版本 2. 性能优化与版本 3. 文档。');
+  });
+
+  it('splits consecutive ordered items after a hard-punct break only', () => {
+    const out = reflowCollapsedMarkdownBlocks(
+      '你现在的策略应该是： 1. 本周内投简历 2. 同时逛 GitHub 3. 长期加人脉',
+    );
+    expect(out).toMatch(/应该是：\n1\. 本周内投简历\n2\. 同时逛 GitHub\n3\. 长期加人脉/);
   });
 });

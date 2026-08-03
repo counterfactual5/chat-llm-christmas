@@ -2,6 +2,9 @@
  * Restore block-level Markdown when models (esp. GLM) collapse newlines into
  * spaces. Without line starts, remark leaves `##`, `-`, `---`, and tables as
  * literal text inside one giant paragraph.
+ *
+ * Rules stay narrow on purpose: a broad “any CJK + `- ` / `1. `” break turns
+ * normal prose (`价格 - 约一百`, `见图 1. 架构`) into fake lists.
  */
 
 import { reflowCollapsedMarkdownTables } from '@/lib/markdown/core/tables';
@@ -9,12 +12,20 @@ import { reflowCollapsedMarkdownTables } from '@/lib/markdown/core/tables';
 const FENCE_SPLIT = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
 /**
- * End-of-prose markers before a new block.
- * Deliberately excludes A-Za-z0-9 — Latin letters as break points shred English
- * Thought/CoT (`Daddy. 3.` is fine via `.`, but `e - list` is not).
- * Use a normal template so `\u4e00-\u9fff` is a real CJK range (String.raw would not).
+ * Sentence / closing markers for list/HR breaks — NOT the full CJK range.
+ * Keep ASCII `]` out of interpolated classes (it would terminate `[...]` early).
  */
-const BREAK_BEFORE = `。，、！？；：…\u4e00-\u9fff)）\\]】」》"'\u201c\u201d\u2018\u2019`;
+const BREAK_HARD = `。！？；：.!?)）】」》"'”’“”‘’`;
+
+/** CJK + hard breaks — safe to embed inside `[...]`. */
+const BREAK_TEXT = `\u4e00-\u9fff${BREAK_HARD}`;
+
+/**
+ * Unordered markers we are willing to re-break onto their own line after prose.
+ * Field labels cover GLM “- 状态：” cards; `/cmd` and `**` cover catalogs.
+ */
+const UL_ITEM =
+  String.raw`-\s+(?:(?:状态|网址|特点|链接|注意|路径|直接)[:：]|/[A-Za-z*]|\*\*)`;
 
 function reflowOutsideFences(
   markdown: string,
@@ -32,34 +43,46 @@ function reflowOutsideFences(
 function reflowHeadingsListsHrs(chunk: string): string {
   let out = chunk;
 
-  // `…文案 ## 标题` / `… ### 1. …`
+  // Headings: allow CJK lead-in — `渠道 ### 1.` is common in smashed replies.
   out = out.replace(
-    new RegExp(String.raw`([${BREAK_BEFORE}])\s+(#{1,6}\s+\S)`, 'g'),
+    new RegExp(`([${BREAK_TEXT}])\\s+(#{1,6}\\s+\\S)`, 'g'),
     '$1\n\n$2',
   );
   out = out.replace(/([.!?])\s+(#{1,6}\s+\S)/g, '$1\n\n$2');
 
-  // Thematic breaks jammed into prose. Blank line BEFORE `---` is required so
-  // CommonMark does not treat it as a setext underline for the prior paragraph.
+  // Thematic breaks jammed into prose. Blank line BEFORE `---` so CommonMark
+  // does not treat it as a setext underline.
   out = out.replace(
-    new RegExp(String.raw`([${BREAK_BEFORE}.!?])\s+(---+)(?=\s|#{1,6}\s|$)`, 'g'),
+    new RegExp(`([${BREAK_TEXT}])\\s+(---+)(?=\\s|#{1,6}\\s|$)`, 'g'),
     '$1\n\n$2',
   );
   out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
 
-  // Unordered lists: `运营 - 状态：` / `） - 网址`
+  // Unordered: only field labels / slash commands / bold-leading items —
+  // never bare `汉字 - 散文`.
   out = out.replace(
-    new RegExp(String.raw`([${BREAK_BEFORE}])\s+(-\s+\S)`, 'g'),
+    new RegExp(`([${BREAK_TEXT}])\\s+(${UL_ITEM})`, 'g'),
     '$1\n$2',
   );
 
-  // Ordered lists: `推荐） 1. 电鸭` / `。 2. 同时`
+  // Ordered: only after hard sentence/closing punct (not any CJK), so
+  // `见图 1. 架构` / `版本 2. 文档` stay intact.
   out = out.replace(
-    new RegExp(String.raw`([${BREAK_BEFORE}.!?])\s+(\d{1,2}\.\s+\S)`, 'g'),
+    new RegExp(`([${BREAK_HARD}])\\s+(\\d{1,2}\\.\\s+\\S)`, 'g'),
     '$1\n$2',
   );
-  // After a Latin token when the item itself starts with CJK (`Telegram 2. 加入`)
+  // After Latin when the item starts with CJK (`Telegram 2. 加入`)
   out = out.replace(/([A-Za-z0-9])\s+(\d{1,2}\.\s+[\u4e00-\u9fff])/g, '$1\n$2');
+  // Continue splitting `1. foo 2. bar` once an item already starts a line —
+  // does not fire on mid-prose `图 1. …表 2.`.
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(
+      /(^|\n)(\d{1,2}\.\s+[^\n]*?)\s+(\d{1,2}\.\s+\S)/g,
+      '$1$2\n$3',
+    );
+    if (next === out) break;
+    out = next;
+  }
 
   // URL then another field bullet: `https://eleduck.com - 特点：…`
   out = out.replace(
@@ -70,17 +93,14 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // CTA after list prose: `建立人脉 需要我帮你：`
   out = out.replace(/([^\n])\s+(需要我(?:帮你|协助)[:：])/g, '$1\n\n$2');
 
-  // Closed emphasis then a heading / ordered list. Do NOT break before `- ` —
-  // command catalogs use `**/image** - 生成图片` on one line; inserting a
-  // newline turns the description into its own bullet.
+  // Closed emphasis then a heading / ordered list. Do NOT break before `- `
+  // (`**/image** - 生成图片` must stay one catalog line).
   out = out.replace(
     /(\*\*)\s+(?=(?:#{1,6}\s|\d{1,2}\.\s+\S))/g,
     '$1\n\n',
   );
 
-  // Table row ended, prose resumes — ONLY when the next token is clearly a new
-  // block (`**`, heading, list). A bare `(?=[^|])` falsely splits the last
-  // cell (`| 已售 | 已被 GoDaddy 挂售 |` → breaks before `已被`).
+  // Table row ended, prose resumes — only clear new-block tokens.
   out = out.replace(
     /((?:\|[^|\n]*){2,}\|)\s+(?=(?:\*\*|#{1,6}\s|-\s+\S|\d{1,2}\.\s+\S))/g,
     '$1\n\n',
@@ -89,11 +109,7 @@ function reflowHeadingsListsHrs(chunk: string): string {
   return out;
 }
 
-/**
- * Full structural repair: headings / lists / hrs, then GFM table repair
- * (title peel + smashed rows). Table/prose splits belong in tables.ts so we
- * do not shred real data rows that start with CJK (`中文版 | ⚠️ | …`).
- */
+/** Full structural repair: headings / lists / hrs, then GFM table repair. */
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   const src = String(markdown || '');
   if (!src) return src;

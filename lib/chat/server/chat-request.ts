@@ -1010,6 +1010,8 @@ export async function handleChatRequest(req: NextRequest) {
             sourceLane === 'news' || sourceLane === 'wiki'
               ? sourceLane
               : laneCmd?.kind || null;
+          /** Lane path already nudged once — skip the generic final nudge below. */
+          let sourceLaneFinalNudge = false;
           if (lane) {
             const laneQuery = laneCmd?.query || userAsk;
             const wikiLang =
@@ -1023,9 +1025,11 @@ export async function handleChatRequest(req: NextRequest) {
                 lane === 'news'
                   ? 'Using the news search tool results above, write a readable Markdown news briefing for the user.'
                   : 'Using the Wikipedia/search tool results above, write a readable Markdown answer for the user.',
-                'Cite markdown links. Do not dump raw JSON, HTML, or tool envelopes. Do not call tools unless a specific URL needs web_read.',
+                'Match the user language. Cite markdown links. Do not dump raw JSON, HTML, or tool envelopes.',
+                'Output only the briefing. Do not call tools unless a specific URL needs web_read.',
               ].join(' '),
             });
+            sourceLaneFinalNudge = true;
           } else if (cursorProactiveSearch) {
             // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
             // When the ask clearly needs lookup, search server-side first.
@@ -1085,29 +1089,30 @@ export async function handleChatRequest(req: NextRequest) {
           midTurnCorrection = null;
           if (toolRoundsOutcome.status === 'stream_closed') return;
 
-          const finalMessages = usedTools
-            ? [
-                ...workingMessages,
-                {
-                  role: 'user',
-                  content: lastToolRoundHadFailure
-                    ? [
-                        'Write the final answer now.',
-                        'One or more tools FAILED — acknowledge the error from the tool payloads honestly.',
-                        'Do not claim Notion/GitHub/Google writes succeeded. Do not invent page URLs.',
-                        'If you can tell the user how to fix the args (e.g. missing page_id), do so briefly.',
-                        'Do not leave half-written outlines or empty section headings. Do not call tools.',
-                      ].join(' ')
-                    : [
-                        'Write the final answer now using ONLY the tool results above.',
-                        'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
-                        'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
-                        'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
-                        'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
-                      ].join(' '),
-                },
-              ]
-            : workingMessages;
+          const finalMessages =
+            usedTools && !sourceLaneFinalNudge
+              ? [
+                  ...workingMessages,
+                  {
+                    role: 'user',
+                    content: lastToolRoundHadFailure
+                      ? [
+                          'Write the final answer now.',
+                          'One or more tools FAILED — acknowledge the error from the tool payloads honestly.',
+                          'Do not claim Notion/GitHub/Google writes succeeded. Do not invent page URLs.',
+                          'If you can tell the user how to fix the args (e.g. missing page_id), do so briefly.',
+                          'Do not leave half-written outlines or empty section headings. Do not call tools.',
+                        ].join(' ')
+                      : [
+                          'Write the final answer now using ONLY the tool results above.',
+                          'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
+                          'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
+                          'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
+                          'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
+                        ].join(' '),
+                  },
+                ]
+              : workingMessages;
 
           const runFinalCompletion = async (opts: {
             enableThinking: boolean;

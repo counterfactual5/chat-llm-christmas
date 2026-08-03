@@ -93,6 +93,10 @@ export async function* streamChatCompletionsRaw(opts: {
  * Split a chat-completions delta into visible answer vs chain-of-thought.
  * Some gateways (notably GLM-4.7) put the whole reply in reasoning_* even when
  * we did not request thinking — treat those as content in that case.
+ *
+ * Gateways often mirror the same thinking tokens onto several fields in one
+ * chunk (`reasoning_content` + `reasoning`, etc.). Concatenating them produces
+ * stutter like "TheThe user wants…". Prefer the first non-empty channel.
  */
 export function splitCompletionDelta(
   delta: any,
@@ -116,11 +120,20 @@ export function splitCompletionDelta(
     }
   }
 
-  reasoning +=
-    String(delta?.reasoning_content || '') +
-    String(delta?.reasoning || '') +
-    String(delta?.thinking || '') +
-    String(delta?.thinking_content || '');
+  if (!reasoning) {
+    for (const key of [
+      'reasoning_content',
+      'reasoning',
+      'thinking',
+      'thinking_content',
+    ] as const) {
+      const text = String(delta?.[key] || '');
+      if (text) {
+        reasoning = text;
+        break;
+      }
+    }
+  }
 
   if (opts.reasoningAsContent && reasoning) {
     content += reasoning;

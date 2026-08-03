@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   serializeReviewToolRuns,
+  settleEmptyBodyAction,
   withEmptyReplyFallback,
   withMarkedAssistantIncomplete,
   withPromotedOrphanReasoning,
@@ -69,6 +70,27 @@ describe('session/mutations', () => {
     const fallback = withEmptyReplyFallback(sessions, 's1', 'a', '(empty)');
     expect(fallback[0].messages[0].content).toBe('(empty)');
     expect(fallback[0].messages[0].incomplete).toBe(false);
+  });
+
+  it('does not promote reasoning that was rewound by orphan </think>', () => {
+    expect(
+      settleEmptyBodyAction({
+        suppressedOrphanPromote: true,
+        reasoning: 'draft before close tag',
+      }),
+    ).toBe('thought_only');
+    expect(
+      settleEmptyBodyAction({
+        suppressedOrphanPromote: false,
+        reasoning: 'gateway put answer in reasoning',
+      }),
+    ).toBe('promote');
+    expect(
+      settleEmptyBodyAction({
+        suppressedOrphanPromote: false,
+        reasoning: '',
+      }),
+    ).toBe('empty_error');
   });
 
   it('serializes review tool runs with body cap', () => {

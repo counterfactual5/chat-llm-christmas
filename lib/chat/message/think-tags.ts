@@ -21,9 +21,14 @@ function incompleteTagHold(text: string): number {
 }
 
 export type ThinkStreamParser = {
-  push: (chunk: string) => { content: string; reasoning: string };
+  push: (chunk: string) => {
+    content: string;
+    reasoning: string;
+    /** True when an orphan </think> was consumed — prior content should move to Thought. */
+    orphanClose: boolean;
+  };
   /** Flush any held partial tag text (e.g. stream ended mid-tag). */
-  flush: () => { content: string; reasoning: string };
+  flush: () => { content: string; reasoning: string; orphanClose: boolean };
   readonly inThink: boolean;
 };
 
@@ -32,14 +37,35 @@ export function createThinkStreamParser(): ThinkStreamParser {
   let buffer = '';
   let inThink = false;
 
-  const consume = (final: boolean): { content: string; reasoning: string } => {
+  const consume = (
+    final: boolean,
+  ): { content: string; reasoning: string; orphanClose: boolean } => {
     let content = '';
     let reasoning = '';
+    let orphanClose = false;
 
     while (buffer.length > 0) {
       if (!inThink) {
         const openMatch = buffer.match(OPEN_RE);
-        if (!openMatch || openMatch.index == null) {
+        const closeMatch = buffer.match(CLOSE_RE);
+        const openIdx = openMatch?.index ?? -1;
+        const closeIdx = closeMatch?.index ?? -1;
+
+        // Orphan </think>: some models omit the opening tag and only emit the
+        // close marker between a hidden draft and the real answer. Treat the
+        // text before the close as reasoning.
+        if (
+          closeMatch &&
+          closeIdx >= 0 &&
+          (openIdx < 0 || closeIdx < openIdx)
+        ) {
+          reasoning += buffer.slice(0, closeIdx);
+          buffer = buffer.slice(closeIdx + closeMatch[0].length);
+          orphanClose = true;
+          continue;
+        }
+
+        if (!openMatch || openIdx < 0) {
           if (!final) {
             const holdAt = incompleteTagHold(buffer);
             if (holdAt >= 0) {
@@ -52,8 +78,8 @@ export function createThinkStreamParser(): ThinkStreamParser {
           buffer = '';
           break;
         }
-        content += buffer.slice(0, openMatch.index);
-        buffer = buffer.slice(openMatch.index + openMatch[0].length);
+        content += buffer.slice(0, openIdx);
+        buffer = buffer.slice(openIdx + openMatch[0].length);
         inThink = true;
       } else {
         const closeMatch = buffer.match(CLOSE_RE);
@@ -76,7 +102,7 @@ export function createThinkStreamParser(): ThinkStreamParser {
       }
     }
 
-    return { content, reasoning };
+    return { content, reasoning, orphanClose };
   };
 
   return {

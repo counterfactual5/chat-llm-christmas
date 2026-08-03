@@ -22,12 +22,14 @@ import {
   withEmptyReplyFallback,
   withMarkedAssistantIncomplete,
   withPromotedOrphanReasoning,
+  withRewoundAssistantContentToReasoning,
   withSeededAssistantCleanup,
   withSettledOpenToolRuns,
   withUpsertedAssistantToolRun,
   withUpsertedReviewFindings,
   withUpsertedReviewReport,
   serializeReviewToolRuns,
+  settleEmptyBodyAction,
   type GeneratedFileInput,
 } from '@/lib/chat/session/mutations';
 
@@ -191,6 +193,8 @@ export async function streamChatResponse(
   const seededThink = extractThinkBlocks(initialContent);
   const seededContent = stripFakeToolMarkup(seededThink.content);
   let streamed = seededContent;
+  /** Orphan `</think>` rewound bubble → Thought; do not promote that draft back. */
+  let suppressedOrphanPromote = false;
   if (contentHasThinkMarkup(initialContent) || contentHasToolMarkup(initialContent)) {
     deps.setSessions((prev) =>
       withSeededAssistantCleanup(
@@ -239,6 +243,14 @@ export async function streamChatResponse(
 
   const applyThinkSplit = (raw: string) => {
     const split = thinkParser.push(raw);
+    if (split.orphanClose) {
+      // Content before the orphan </think> may already be in the bubble.
+      deps.setSessions((prev) =>
+        withRewoundAssistantContentToReasoning(prev, sessionId, assistantId),
+      );
+      streamed = '';
+      suppressedOrphanPromote = true;
+    }
     if (split.reasoning) {
       appendToAssistantReasoning(split.reasoning);
     }
@@ -257,6 +269,13 @@ export async function streamChatResponse(
     deps.setSessions((prev) => withSettledOpenToolRuns(prev, sessionId, assistantId));
 
     const flushed = thinkParser.flush();
+    if (flushed.orphanClose) {
+      deps.setSessions((prev) =>
+        withRewoundAssistantContentToReasoning(prev, sessionId, assistantId),
+      );
+      streamed = '';
+      suppressedOrphanPromote = true;
+    }
     if (flushed.reasoning) appendToAssistantReasoning(flushed.reasoning);
     if (flushed.content) {
       const cleaned = toolStripper.push(flushed.content) + toolStripper.flush();
@@ -274,34 +293,41 @@ export async function streamChatResponse(
 
     // Safety net: some gateways put the whole answer in reasoning with empty
     // content. Promote it to the bubble body so the UI is not "Thought only".
+    // Skip when an orphan </think> already moved draft prose into Thought —
+    // promoting would undo that separation.
     if (!streamed.trim()) {
       const live = deps
         .getSessions()
         .find((s) => s.id === sessionId)
         ?.messages.find((m) => m.id === assistantId);
-      const orphan = String(live?.reasoning || '').trim();
-      if (orphan) {
-        streamed = orphan;
-        deps.setSessions((prev) =>
-          withPromotedOrphanReasoning(prev, sessionId, assistantId, orphan),
-        );
-      }
-    }
-
-    // Truly empty reply (no content, no reasoning): never leave a blank bubble.
-    // Treat as a failed request so the user sees Retry instead of empty space.
-    if (!streamed.trim()) {
-      const fallback =
-        'Error: The model returned an empty reply. Please try again, or switch to another model.';
-      streamed = fallback;
-      deps.setSessions((prev) =>
-        withEmptyReplyFallback(prev, sessionId, assistantId, fallback),
-      );
-      markAssistantIncomplete(false, {
-        finishReason: finishReason || 'error',
-        truncationReason: actionFromStreamCode('empty_reply')?.reason,
+      const reasoning = String(live?.reasoning || '').trim();
+      const action = settleEmptyBodyAction({
+        suppressedOrphanPromote,
+        reasoning,
       });
-      return;
+      if (action === 'promote' && reasoning) {
+        streamed = reasoning;
+        deps.setSessions((prev) =>
+          withPromotedOrphanReasoning(prev, sessionId, assistantId, reasoning),
+        );
+      } else if (action === 'thought_only') {
+        markAssistantIncomplete(false, {
+          finishReason: finishReason || 'stop',
+        });
+        return;
+      } else if (action === 'empty_error') {
+        const fallback =
+          'Error: The model returned an empty reply. Please try again, or switch to another model.';
+        streamed = fallback;
+        deps.setSessions((prev) =>
+          withEmptyReplyFallback(prev, sessionId, assistantId, fallback),
+        );
+        markAssistantIncomplete(false, {
+          finishReason: finishReason || 'error',
+          truncationReason: actionFromStreamCode('empty_reply')?.reason,
+        });
+        return;
+      }
     }
 
     const fromCode = actionFromStreamCode(serverCode);

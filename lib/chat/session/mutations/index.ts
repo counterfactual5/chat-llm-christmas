@@ -21,6 +21,7 @@ export {
   withAppendedAssistantContent,
   withAppendedAssistantReviewFix,
   withAppendedAssistantReasoning,
+  withRewoundAssistantContentToReasoning,
 } from '@/lib/chat/session/mutations/content';
 
 export {
@@ -35,6 +36,7 @@ export {
 } from '@/lib/chat/session/mutations/review';
 
 export {
+  settleEmptyBodyAction,
   withPromotedOrphanReasoning,
   withEmptyReplyFallback,
   withSeededAssistantCleanup,

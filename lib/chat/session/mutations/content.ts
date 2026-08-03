@@ -184,3 +184,46 @@ export function withAppendedAssistantReasoning(
   });
 }
 
+/**
+ * Orphan </think> arrived after content was already streamed into the bubble.
+ * Move that bubble text into Thought and clear the answer body so the real
+ * reply can follow.
+ */
+export function withRewoundAssistantContentToReasoning(
+  sessions: ChatSession[],
+  sessionId: string,
+  assistantId: string,
+): ChatSession[] {
+  return sessions.map((s) => {
+    if (s.id !== sessionId) return s;
+    return touchSession(s, {
+      messages: s.messages.map((m) => {
+        if (m.id !== assistantId) return m;
+        const leaked = String(m.content || '').trim();
+        if (!leaked) return m;
+        const activity = [...(m.activity || [])].filter((step) => step.kind !== 'content');
+        const last = activity[activity.length - 1];
+        if (last?.kind === 'reasoning') {
+          activity[activity.length - 1] = {
+            ...last,
+            text: `${last.text}${last.text ? '\n\n' : ''}${leaked}`,
+          };
+        } else {
+          activity.push({
+            id: crypto.randomUUID(),
+            kind: 'reasoning',
+            text: leaked,
+          });
+        }
+        return {
+          ...m,
+          content: '',
+          reasoning: [m.reasoning, leaked].filter(Boolean).join('\n\n'),
+          activity,
+          incomplete: true,
+        };
+      }),
+    });
+  });
+}
+

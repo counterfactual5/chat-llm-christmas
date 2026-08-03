@@ -59,13 +59,18 @@ export function reflowCollapsedAsciiArt(text: string): string {
   if (!raw.trim()) return raw;
   // Trim first: fenced bodies often end with a trailing newline that is not a
   // real row break — that used to skip Unicode-box reflow entirely.
-  const trimmed = raw.trim();
-  if (trimmed.includes('\n')) {
-    return trimmed.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  }
-  if (looksLikeUnicodeBox(trimmed)) return reflowUnicodeBox(trimmed);
+  let out = raw
+    .trim()
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
-  let out = trimmed;
+  // Even when some newlines already exist, keep running structural reflow —
+  // models often leave boxes/trees half-flattened (e.g. top row broken, body glued).
+  if (looksLikeUnicodeBox(out)) {
+    return reflowUnicodeBox(out).replace(/\n{3,}/g, '\n\n').trim();
+  }
+
   // Unicode branches.
   out = out.replace(/[ \t]+([├└](?:[─━-]{1,3}))/g, '\n$1');
   // Portable ASCII branches (+--, |--, \--, `--).
@@ -165,17 +170,25 @@ export function reflowFencedAsciiArtBlocks(markdown: string): string {
         .trim()
         .split(/\s+/)[0]
         ?.toLowerCase();
-      // Only touch diagram-ish fences — leave real code alone.
-      const diagramLang =
-        !lang ||
+      const explicitDiagram =
         lang === 'text' ||
         lang === 'plaintext' ||
         lang === 'ascii' ||
         lang === 'txt';
-      if (!diagramLang) return full;
+      // Bare ``` (no language): only reflow when the body is a strong diagram signal —
+      // avoids rewriting casual prose examples that happen to use a few box chars.
+      const bareFence = !lang;
+      if (!explicitDiagram && !bareFence) return full;
       if (!looksLikeAsciiArt(body)) return full;
+      if (
+        bareFence &&
+        !looksLikeUnicodeBox(body) &&
+        structuralMarkCount(body) < 4
+      ) {
+        return full;
+      }
       const next = reflowCollapsedAsciiArt(body);
-      if (next === body.trim() && body.includes('\n')) return full;
+      if (next === body.trim()) return full;
       return `\`\`\`${info}\n${next}\n\`\`\``;
     },
   );

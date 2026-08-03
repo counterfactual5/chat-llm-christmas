@@ -1864,13 +1864,26 @@ export default function ChatContainer() {
     setPreviewFileEntry(null);
   }, [activeSessionId]);
 
-  // If the previewed file is deleted from the active thread, drop the stale entry.
+  // Keep / drop the side-panel preview against the live Output file list:
+  // deleted → clear; same id with updated content/name/size → refresh snapshot.
   useEffect(() => {
     if (!previewFileEntry) return;
-    const stillThere = generatedFileHistory.some(
+    const latest = generatedFileHistory.find(
       (f) => f.id === previewFileEntry.id && f.messageId === previewFileEntry.messageId,
     );
-    if (!stillThere) setPreviewFileEntry(null);
+    if (!latest) {
+      setPreviewFileEntry(null);
+      return;
+    }
+    if (
+      latest.content !== previewFileEntry.content ||
+      latest.name !== previewFileEntry.name ||
+      latest.size !== previewFileEntry.size ||
+      latest.url !== previewFileEntry.url ||
+      latest.mimeType !== previewFileEntry.mimeType
+    ) {
+      setPreviewFileEntry(latest);
+    }
   }, [generatedFileHistory, previewFileEntry]);
 
   // While the assistant turn is still open but the stream has gone idle (no new

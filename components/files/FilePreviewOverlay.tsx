@@ -67,6 +67,21 @@ export function isMarkdownPreview(file: Pick<FilePreviewPayload, 'name' | 'mimeT
   return ext === 'md' || ext === 'markdown';
 }
 
+/**
+ * Prefer the chat AnswerMarkdown path (ASCII reflow, GFM, math) for prose-like
+ * generated files — not only `.md`. Plain `.txt` / text/plain often carries the
+ * same diagrams models put in chat answers.
+ */
+export function prefersAnswerMarkdownPreview(
+  file: Pick<FilePreviewPayload, 'name' | 'mimeType'>,
+): boolean {
+  if (isMarkdownPreview(file)) return true;
+  const mime = String(file.mimeType || '').toLowerCase();
+  if (mime === 'text/plain' || mime.startsWith('text/plain;')) return true;
+  const ext = fileExt(file.name);
+  return ext === 'txt' || ext === 'text';
+}
+
 export function languageFromFilename(name: string): string {
   return EXT_LANG[fileExt(name)] || 'plaintext';
 }
@@ -84,10 +99,10 @@ type FilePreviewOverlayProps = {
 
 /** Pure content renderer (markdown / code) — reused by the fullscreen overlay and the side-panel preview. */
 export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
-  const markdown = useMemo(() => isMarkdownPreview(file), [file]);
+  const richText = useMemo(() => prefersAnswerMarkdownPreview(file), [file]);
   const language = useMemo(() => languageFromFilename(file.name), [file]);
 
-  return markdown ? (
+  return richText ? (
     <div className={cn('mx-auto w-full min-w-0 max-w-3xl')}>
       {/* Same Markdown path as chat answers — ASCII reflow, fenced text blocks, tables. */}
       <AnswerMarkdown text={file.content} streaming={false} />

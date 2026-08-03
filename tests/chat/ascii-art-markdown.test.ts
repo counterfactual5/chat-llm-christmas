@@ -77,4 +77,22 @@ describe('ASCII art Markdown recovery', () => {
     const code = '```js\nconst x = "┌────┐ │ App │ └────┘";\n```';
     expect(normalizeAsciiArtMarkdown(code)).toBe(code);
   });
+
+  it('reflows half-flattened Unicode boxes that already contain some newlines', () => {
+    const half = '┌────┐\n│ App │ └────┘';
+    const out = reflowCollapsedAsciiArt(half);
+    expect(out).toContain('\n│ App │\n');
+    expect(out).toContain('└────┘');
+  });
+
+  it('does not reflow weak bare fences that only mention a few box chars', () => {
+    const md = 'Example glyph: ```\nsee ┌ here\n```\n';
+    expect(normalizeAsciiArtMarkdown(md)).toBe(md);
+  });
+
+  it('still reflows a strong Unicode box inside a bare fence', () => {
+    const md = '```\n┌────┐ │ App │ └────┘\n```';
+    const out = normalizeAsciiArtMarkdown(md);
+    expect(out).toContain('\n│ App │\n');
+  });
 });

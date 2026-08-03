@@ -24,7 +24,7 @@
 | `code/` | 代码块渲染、复制和语法高亮；识别 `mermaid` 后转交图表组件。 |
 | `diagrams/` | Mermaid 图表渲染、主题适配、源码回退和复制。 |
 
-聊天答案与 Output 文件预览共用 `components/chat/message/AnswerMarkdown.tsx`（含 ASCII 重排），避免同一份 Markdown 在两处渲染不一致。
+聊天答案与 Output 文件预览共用 `components/chat/message/AnswerMarkdown.tsx`（含 ASCII 重排），避免同一份 Markdown 在两处渲染不一致。`.md` / `.txt` / `text/plain` 预览走该路径；其它源码扩展名仍用 `CodeBlock`。
 
 ```text
 ReactMarkdown

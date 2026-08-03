@@ -2231,6 +2231,14 @@ export default function ChatContainer() {
           setInput('/research ');
           textareaRef.current?.focus();
         }}
+        onInsertNewsCommand={() => {
+          setInput('/news ');
+          textareaRef.current?.focus();
+        }}
+        onInsertWikiCommand={() => {
+          setInput('/wiki ');
+          textareaRef.current?.focus();
+        }}
         onInsertPapersCommand={() => {
           setInput('/papers ');
           textareaRef.current?.focus();

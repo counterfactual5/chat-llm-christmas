@@ -80,6 +80,7 @@ import {
   bookDownloadToolRun,
   buildBookDownloadThread,
   formatBookDownloadMarkdown,
+  mimeForDownloadedBook,
 } from '@/lib/chat/turn/book-download-turn';
 
 export type { QueuedTask };
@@ -495,37 +496,60 @@ export function useChatLogic(props: UseChatLogicProps) {
         title: result.title,
         filename: result.filename,
         sourceUrl: result.sourceUrl,
+        fileId: result.fileId,
         provider: result.provider,
       });
+      const fileEntry = {
+        id: result.fileId,
+        name: result.filename || result.title || 'book',
+        mimeType: mimeForDownloadedBook(result.filename || ''),
+        size: result.bytes || 0,
+        url: `/api/files/${encodeURIComponent(result.fileId)}`,
+        createdAt: Date.now(),
+      };
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
           return {
             ...s,
-            messages: mapAssistantById(s.messages, assistantId, (m) => ({
-              ...m,
-              content,
-              incomplete: false,
-              toolRuns: (m.toolRuns || []).map((r) =>
-                r.id === toolRunId
-                  ? {
-                      ...r,
-                      status: 'done' as const,
-                      provider: doneRun.provider,
-                      results: doneRun.results,
-                    }
-                  : r,
-              ),
-              activity: [
+            messages: mapAssistantById(s.messages, assistantId, (m) => {
+              const activity = [
                 ...(m.activity || []),
-                { id: crypto.randomUUID(), kind: 'file', fileId: result.fileId },
-                { id: crypto.randomUUID(), kind: 'content', text: content },
-              ],
-            })),
+                { id: crypto.randomUUID(), kind: 'file' as const, fileId: result.fileId },
+              ];
+              if (content.trim()) {
+                activity.push({
+                  id: crypto.randomUUID(),
+                  kind: 'content' as const,
+                  text: content,
+                });
+              }
+              return {
+                ...m,
+                content,
+                incomplete: false,
+                files: [...(m.files || []).filter((f) => f.id !== fileEntry.id), fileEntry],
+                toolRuns: (m.toolRuns || []).map((r) =>
+                  r.id === toolRunId
+                    ? {
+                        ...r,
+                        status: 'done' as const,
+                        provider: doneRun.provider,
+                        results: doneRun.results,
+                      }
+                    : r,
+                ),
+                activity,
+              };
+            }),
             updatedAt: Date.now(),
           };
         }),
       );
+      if (sessionId === activeSessionIdRef.current) {
+        setOutputGroupsOpen((prev) => ({ ...prev, files: true }));
+        setIsContextPanelOpen(true);
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Book download failed';
       setSessions((prev) =>

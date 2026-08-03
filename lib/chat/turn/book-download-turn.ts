@@ -67,7 +67,21 @@ export function buildBookDownloadThread(opts: {
   return { thread, assistantId, toolRunId, newTitle };
 }
 
-export function formatBookDownloadMarkdown(result: {
+/** Guess MIME for downloaded books (create_file's map is text-oriented). */
+export function mimeForDownloadedBook(filename: string): string {
+  const name = String(filename || '').toLowerCase();
+  if (name.endsWith('.pdf')) return 'application/pdf';
+  if (name.endsWith('.epub')) return 'application/epub+zip';
+  if (name.endsWith('.mobi')) return 'application/x-mobipocket-ebook';
+  if (name.endsWith('.azw3') || name.endsWith('.azw')) return 'application/vnd.amazon.ebook';
+  if (name.endsWith('.djvu')) return 'image/vnd.djvu';
+  if (name.endsWith('.txt')) return 'text/plain';
+  if (name.endsWith('.fb2')) return 'application/xml';
+  return 'application/octet-stream';
+}
+
+/** No prose dump — the in-chat file card is the deliverable. */
+export function formatBookDownloadMarkdown(_result: {
   title: string;
   filename: string;
   bytes: number;
@@ -75,19 +89,7 @@ export function formatBookDownloadMarkdown(result: {
   fileId: string;
   provider?: string;
 }): string {
-  const source =
-    result.sourceUrl ||
-    (result.provider === 'libgen' ? 'Library Genesis' : 'Internet Archive');
-  return [
-    '### Book downloaded',
-    '',
-    `**${result.title}**`,
-    `- File: \`${result.filename}\` (${result.bytes} bytes)`,
-    `- Saved to your Files as \`${result.fileId}\` — open the Files panel (or Output) to download a stable copy.`,
-    result.sourceUrl
-      ? `- Temporary source link (may expire): ${result.sourceUrl}`
-      : `- Source: ${source}`,
-  ].join('\n');
+  return '';
 }
 
 export function bookDownloadToolRun(opts: {
@@ -95,6 +97,7 @@ export function bookDownloadToolRun(opts: {
   title: string;
   filename: string;
   sourceUrl: string;
+  fileId?: string;
   provider?: string;
 }): MessageToolRun {
   const provider =
@@ -102,10 +105,9 @@ export function bookDownloadToolRun(opts: {
     (/^libgen:/i.test(opts.identifier) || /^[a-f0-9]{32}$/i.test(opts.identifier)
       ? 'libgen'
       : 'internet-archive');
-  const fallbackUrl =
-    provider === 'libgen'
-      ? `https://libgen.li/ads.php?md5=${opts.identifier.replace(/^libgen:/i, '')}`
-      : `https://archive.org/details/${opts.identifier}`;
+  const fileUrl = opts.fileId
+    ? `/api/files/${encodeURIComponent(opts.fileId)}`
+    : '';
   return {
     id: crypto.randomUUID(),
     name: 'book_download',
@@ -115,7 +117,7 @@ export function bookDownloadToolRun(opts: {
     results: [
       {
         title: opts.title,
-        url: opts.sourceUrl || fallbackUrl,
+        url: fileUrl || opts.sourceUrl || '',
         snippet: opts.filename,
       },
     ],

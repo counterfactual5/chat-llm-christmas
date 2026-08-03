@@ -26,6 +26,7 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('do not contradict yourself');
     expect(text).toContain('/papers and /books are command-only');
     expect(text).toContain('never put /papers|/books|/image under');
+    expect(text).toContain('There is NO /news or /wiki slash command');
     expect(text).toContain('not a dedicated finance/market data feed');
     expect(text).toContain('NOT product features');
     expect(text).toContain('[ACTIVE]');
@@ -47,6 +48,7 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('image_understand');
     expect(text).toContain('/skill not /skills');
     expect(text).toContain('always-available slash commands only');
+    expect(text).toContain('never invent or recommend /news or /wiki');
     expect(text).toContain('Prefer /papers or /books for dedicated literature search/download');
     expect(text).toContain('sources=news or sources=wiki');
     expect(text).toContain('mixed = web + papers/books + news + wiki');

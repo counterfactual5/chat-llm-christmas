@@ -1,19 +1,12 @@
 /**
- * Cap image payloads before inlining for vision / multimodal LLM calls.
- * Upload keeps originals or client-compressed copies; Edge→LLM hop is capped.
+ * Prepare image bytes for vision / multimodal LLM inlining.
+ * Prefer a smaller JPEG when the runtime can downscale; otherwise passthrough
+ * the gateway bytes as-is (upload already enforced MAX_INGEST_BYTES).
  */
 
-import {
-  MAX_VISION_EDGE,
-  MAX_VISION_INLINE_BYTES,
-  MAX_VISION_PASSTHROUGH_BYTES,
-} from '@/lib/files/image-budget';
+import { MAX_VISION_EDGE, MAX_VISION_INLINE_BYTES } from '@/lib/files/image-budget';
 
-export {
-  MAX_VISION_EDGE,
-  MAX_VISION_INLINE_BYTES,
-  MAX_VISION_PASSTHROUGH_BYTES,
-} from '@/lib/files/image-budget';
+export { MAX_VISION_EDGE, MAX_VISION_INLINE_BYTES } from '@/lib/files/image-budget';
 
 function bytesToBase64(buf: Uint8Array): string {
   if (typeof Buffer !== 'undefined') {
@@ -50,12 +43,6 @@ async function canvasToJpegBlob(
   return canvas.convertToBlob({ type: 'image/jpeg', quality });
 }
 
-function visionInlineTooLargeError(byteLength: number, reason: string): Error {
-  return new Error(
-    `Image is ${byteLength} bytes (vision inline limit ${MAX_VISION_INLINE_BYTES}): ${reason}`,
-  );
-}
-
 function canDownscaleImages(): boolean {
   return (
     typeof createImageBitmap === 'function' && typeof OffscreenCanvas !== 'undefined'
@@ -63,83 +50,50 @@ function canDownscaleImages(): boolean {
 }
 
 /**
- * If decoded image bytes exceed the vision budget, downscale + JPEG recompress.
- * On Edge (no canvas), passthrough up to MAX_VISION_PASSTHROUGH_BYTES so the
- * turn does not silently drop pixels; only throw above that hard cap.
+ * Optionally downscale large images when canvas APIs exist.
+ * Never rejects on size — gateway fetch already passed ingest limits.
  */
 export async function fitImageBytesForVision(
   buf: Uint8Array,
   mime: string,
 ): Promise<{ bytes: Uint8Array; mime: string }> {
-  if (buf.byteLength <= MAX_VISION_INLINE_BYTES) {
+  if (buf.byteLength <= MAX_VISION_INLINE_BYTES || !canDownscaleImages()) {
     return { bytes: buf, mime };
-  }
-  if (!canDownscaleImages()) {
-    if (buf.byteLength <= MAX_VISION_PASSTHROUGH_BYTES) {
-      console.warn(
-        '[vision] Edge cannot downscale; passthrough',
-        buf.byteLength,
-        'bytes',
-      );
-      return { bytes: buf, mime };
-    }
-    throw visionInlineTooLargeError(
-      buf.byteLength,
-      'runtime cannot downscale images (missing createImageBitmap/OffscreenCanvas). Re-attach a smaller image.',
-    );
   }
 
   const blob = new Blob(
     [buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer],
-    {
-      type: mime || 'image/jpeg',
-    },
+    { type: mime || 'image/jpeg' },
   );
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(blob);
   } catch {
-    if (buf.byteLength <= MAX_VISION_PASSTHROUGH_BYTES) {
-      console.warn('[vision] decode failed; passthrough', buf.byteLength, 'bytes');
-      return { bytes: buf, mime };
-    }
-    throw visionInlineTooLargeError(buf.byteLength, 'image decode failed before downscale');
+    return { bytes: buf, mime };
   }
 
   try {
     const qualities = [0.82, 0.7, 0.58, 0.45];
     const edges = [MAX_VISION_EDGE, 1280, 1024, 768];
-    let best: Uint8Array | null = null;
 
     for (const edge of edges) {
       for (const q of qualities) {
         const out = await canvasToJpegBlob(bitmap, edge, q);
         if (!out) continue;
         const bytes = new Uint8Array(await out.arrayBuffer());
-        best = bytes;
         if (bytes.byteLength <= MAX_VISION_INLINE_BYTES) {
           return { bytes, mime: 'image/jpeg' };
         }
       }
     }
-    if (best && best.byteLength <= MAX_VISION_PASSTHROUGH_BYTES) {
-      console.warn(
-        '[vision] compress still over soft budget; passthrough',
-        best.byteLength,
-        'bytes',
-      );
-      return { bytes: best, mime: 'image/jpeg' };
-    }
-    throw visionInlineTooLargeError(
-      best?.byteLength ?? buf.byteLength,
-      'could not compress image under the vision inline budget',
-    );
+    // Could not shrink under soft target — still send original pixels.
+    return { bytes: buf, mime };
   } finally {
     bitmap.close();
   }
 }
 
-/** Shrink an already-built data URL when over budget. */
+/** Shrink an already-built data URL when over soft budget; else passthrough. */
 export async function fitDataUrlForVision(dataUrl: string): Promise<string> {
   if (!dataUrl.startsWith('data:') || dataUrlByteLength(dataUrl) <= MAX_VISION_INLINE_BYTES) {
     return dataUrl;

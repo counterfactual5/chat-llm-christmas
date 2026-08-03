@@ -1,19 +1,15 @@
 /**
- * Shared image size budgets: client upload compress + Edge vision inlining.
- * Keep these in one place so ingest and vision-inline cannot drift apart.
+ * Shared image size budgets.
+ * Upload/ingest hard cap is MAX_INGEST_BYTES (20MB). Vision inlining
+ * passthroughs whatever the gateway already stored — no second hard reject.
+ * MAX_VISION_INLINE_* is only a soft target when the runtime can downscale.
  */
 
-/** Soft ceiling for a single vision data-URL (decoded bytes) before LLM inline. */
+/** Soft target when createImageBitmap/OffscreenCanvas can recompress. */
 export const MAX_VISION_INLINE_BYTES = 1_500_000;
 
-/**
- * When Edge cannot downscale (no OffscreenCanvas), allow passthrough up to this
- * instead of dropping the image and failing the whole turn.
- */
-export const MAX_VISION_PASSTHROUGH_BYTES = 4_000_000;
-
-/** Longest edge after downscale (multimodal sweet spot). */
+/** Longest edge after optional downscale. */
 export const MAX_VISION_EDGE = 1568;
 
-/** Hard reject before we even try to read (aligned with chat-api FILE_UPLOAD_MAX_BYTES). */
+/** Hard reject at ingest/upload (aligned with chat-api FILE_UPLOAD_MAX_BYTES). */
 export const MAX_INGEST_BYTES = 20 * 1024 * 1024;

@@ -2,7 +2,7 @@
 const RESEARCH_CMD_RE = /^(?:\/research|\/研究)\s+([\s\S]+)$/i;
 
 export type ResearchModeHint = 'quick' | 'standard' | 'rigorous';
-export type ResearchSourcesHint = 'web' | 'literature' | 'news' | 'wiki' | 'mixed';
+export type ResearchSourcesHint = 'web' | 'literature' | 'mixed';
 
 /** Optional leading mode keyword, e.g. `/research quick <query>` or `/research 深度 <query>`. */
 const MODE_ALIASES: Record<string, ResearchModeHint> = {
@@ -29,12 +29,13 @@ const SOURCE_ALIASES: Record<string, ResearchSourcesHint> = {
   books: 'literature',
   学术: 'literature',
   文献: 'literature',
-  news: 'news',
-  新闻: 'news',
-  wiki: 'wiki',
-  wikipedia: 'wiki',
-  百科: 'wiki',
-  维基: 'wiki',
+  // news/wiki are not standalone research lanes — fold into mixed.
+  news: 'mixed',
+  新闻: 'mixed',
+  wiki: 'mixed',
+  wikipedia: 'mixed',
+  百科: 'mixed',
+  维基: 'mixed',
   mixed: 'mixed',
   all: 'mixed',
   混合: 'mixed',

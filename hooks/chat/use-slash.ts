@@ -11,7 +11,7 @@ import { SKILL_CREATOR_ID, skillSlashName } from '@/lib/skills/creator';
 import type { SlashMenuItem } from '@/components/chat/composer/ChatComposer';
 
 const MODE_TOKENS = new Set(['quick', 'standard', 'rigorous']);
-const SOURCE_TOKENS = new Set(['web', 'literature', 'news', 'wiki', 'mixed']);
+const SOURCE_TOKENS = new Set(['web', 'literature', 'mixed']);
 
 export function useChatSlash(opts: {
   input: string;
@@ -120,18 +120,6 @@ export function useChatSlash(opts: {
             token: 'literature',
             titleKey: 'researchSourceLiterature' as MessageKey,
             hintKey: 'researchSourceLiteratureHint' as MessageKey,
-          },
-          {
-            id: 'research-source-news',
-            token: 'news',
-            titleKey: 'researchSourceNews' as MessageKey,
-            hintKey: 'researchSourceNewsHint' as MessageKey,
-          },
-          {
-            id: 'research-source-wiki',
-            token: 'wiki',
-            titleKey: 'researchSourceWiki' as MessageKey,
-            hintKey: 'researchSourceWikiHint' as MessageKey,
           },
           {
             id: 'research-source-mixed',

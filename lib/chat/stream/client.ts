@@ -79,9 +79,6 @@ export type StreamChatRequestOpts = {
   /** Override session MCP/tool integrations (e.g. [] for tools-off polish). */
   integrations?: string[];
   autoReview?: boolean;
-  /** `/news` / `/wiki` — server injects that search lane as a real tool receipt. */
-  sourceLane?: 'news' | 'wiki' | null;
-  sourceLaneLang?: 'en' | 'zh' | null;
 };
 
 export async function streamChatResponse(
@@ -162,14 +159,6 @@ export async function streamChatResponse(
         requestOpts?.autoReview ??
         deps.getSessions().find((s) => s.id === sessionId)?.autoReview ??
         true,
-      ...(requestOpts?.sourceLane === 'news' || requestOpts?.sourceLane === 'wiki'
-        ? {
-            sourceLane: requestOpts.sourceLane,
-            ...(requestOpts.sourceLaneLang
-              ? { sourceLaneLang: requestOpts.sourceLaneLang }
-              : {}),
-          }
-        : {}),
       ...(requestReview && lastAssistantForReview
         ? {
             requestReview: true,

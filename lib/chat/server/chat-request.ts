@@ -21,8 +21,6 @@ import {
 } from '@/lib/tools';
 import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand';
 import { streamCompletionPayload } from '@/lib/chat/stream/truncation';
-import { parseSourceSearchCommand } from '@/lib/chat/turn/source-search-command';
-import { formatSourceSearchMarkdown } from '@/lib/chat/turn/source-search';
 import {
   upsertNotionConnection,
   upsertGoogleConnection,
@@ -119,14 +117,13 @@ export async function handleChatRequest(req: NextRequest) {
       autoReview,
       requestReview,
       reviewContext,
-      sourceLane,
-      sourceLaneLang,
       fileExtracts: requestFileExtracts,
     } = parseChatRequestBody(await req.json());
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
     const isBoundAccount = Boolean(boundUserKey);
     const requestedModel = String(model || '').trim();
     const threadId = String(conversationId || '').trim();
+    const searchEnabled = enableSearch !== false;
 
     if (!isBoundAccount) {
       const freeModels = await fetchFreeModelNames();
@@ -157,13 +154,6 @@ export async function handleChatRequest(req: NextRequest) {
       return jsonError(messagesError, 400);
     }
     const chatMessages = messages as any[];
-    // `/news` / `/wiki` always need search, even if the session toggle is off.
-    const slashLane =
-      sourceLane ||
-      parseSourceSearchCommand(lastUserText(chatMessages))?.kind ||
-      null;
-    const searchEnabled =
-      enableSearch !== false || slashLane === 'news' || slashLane === 'wiki';
 
 
     const skillCreatorOn = skills.some((s) => isSkillCreatorId(String(s?.id || '')));
@@ -921,11 +911,7 @@ export async function handleChatRequest(req: NextRequest) {
           // If only reasoning arrives (no content), the client promotes it at settle.
           const reasoningAsContent = false;
 
-          const injectSearchOutcome = async (
-            outcome: SearchOutcome,
-            sources: 'web' | 'news' | 'wiki' = 'web',
-            lang?: 'en' | 'zh' | null,
-          ) => {
+          const injectSearchOutcome = async (outcome: SearchOutcome) => {
             const callId = `proactive_search_${Date.now()}`;
             workingMessages.push({
               role: 'assistant',
@@ -936,11 +922,7 @@ export async function handleChatRequest(req: NextRequest) {
                   type: 'function',
                   function: {
                     name: 'web_search',
-                    arguments: JSON.stringify({
-                      query: outcome.query,
-                      ...(sources !== 'web' ? { sources } : {}),
-                      ...(sources === 'wiki' && lang ? { lang } : {}),
-                    }),
+                    arguments: JSON.stringify({ query: outcome.query }),
                   },
                 },
               ],
@@ -953,21 +935,12 @@ export async function handleChatRequest(req: NextRequest) {
             usedTools = true;
           };
 
-          const runProactiveSearch = async (
-            sources: 'web' | 'news' | 'wiki' = 'web',
-            queryOverride?: string,
-            lang?: 'en' | 'zh' | null,
-          ): Promise<boolean> => {
-            const seed = String(queryOverride || userAsk).trim().slice(0, 240);
-            let outcome = await runWebSearch(enrichSearchQuery(seed), toolCtx, {
-              sources,
-              ...(sources === 'wiki' && lang ? { lang } : {}),
-            });
-            if (
-              sources === 'web' &&
-              !outcome.results.length &&
-              /加密|币|项目|融资|最近|最新/.test(userAsk)
-            ) {
+          const runProactiveSearch = async (): Promise<boolean> => {
+            let outcome = await runWebSearch(
+              enrichSearchQuery(userAsk.slice(0, 240)),
+              toolCtx,
+            );
+            if (!outcome.results.length && /加密|币|项目|融资|最近|最新/.test(userAsk)) {
               outcome = await runWebSearch(
                 englishRecencyQuery(
                   'cryptocurrency crypto funding rounds startups',
@@ -978,62 +951,28 @@ export async function handleChatRequest(req: NextRequest) {
               );
             }
             if (!outcome.results.length) {
-              const laneKind = sources === 'news' || sources === 'wiki' ? sources : null;
               const detail = outcome.error || 'All search providers failed';
               send({
-                content: laneKind
-                  ? formatSourceSearchMarkdown(
-                      laneKind,
-                      outcome,
-                      queryOverride || userAsk,
-                    )
-                  : [
-                      '联网搜索没有返回可用结果，所以我不能编造项目名单或假装查到了资料。',
-                      '',
-                      `查询：${outcome.query || userAsk}`,
-                      `原因：${detail}`,
-                    ].join('\n'),
+                content: [
+                  '联网搜索没有返回可用结果，所以我不能编造项目名单或假装查到了资料。',
+                  '',
+                  `查询：${outcome.query || userAsk}`,
+                  `原因：${detail}`,
+                ].join('\n'),
                 ...streamCompletionPayload('stop'),
               });
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
               return false;
             }
-            await injectSearchOutcome(outcome, sources, lang);
+            await injectSearchOutcome(outcome);
             return true;
           };
 
-          // Slash `/news` / `/wiki`: inject that lane as a real tool receipt, then
-          // let the model write from it (standard tool loop — not client polish).
-          const laneCmd = parseSourceSearchCommand(userAsk);
-          const lane =
-            sourceLane === 'news' || sourceLane === 'wiki'
-              ? sourceLane
-              : laneCmd?.kind || null;
-          /** Lane path already nudged once — skip the generic final nudge below. */
-          let sourceLaneFinalNudge = false;
-          if (lane) {
-            const laneQuery = laneCmd?.query || userAsk;
-            const wikiLang =
-              lane === 'wiki'
-                ? sourceLaneLang || laneCmd?.lang || null
-                : null;
-            if (!(await runProactiveSearch(lane, laneQuery, wikiLang))) return;
-            workingMessages.push({
-              role: 'user',
-              content: [
-                lane === 'news'
-                  ? 'Using the news search tool results above, write a readable Markdown news briefing for the user.'
-                  : 'Using the Wikipedia/search tool results above, write a readable Markdown answer for the user.',
-                'Match the user language. Cite markdown links. Do not dump raw JSON, HTML, or tool envelopes.',
-                'Output only the briefing. Do not call tools unless a specific URL needs web_read.',
-              ].join(' '),
-            });
-            sourceLaneFinalNudge = true;
-          } else if (cursorProactiveSearch) {
+          if (cursorProactiveSearch) {
             // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
             // When the ask clearly needs lookup, search server-side first.
-            if (!(await runProactiveSearch('web'))) return;
+            if (!(await runProactiveSearch())) return;
           }
 
           // Generic tool loop — stream each round so content arrives
@@ -1055,27 +994,17 @@ export async function handleChatRequest(req: NextRequest) {
             enableThinking: thinking,
             reasoningAsContent,
             idleMs: STREAM_IDLE_TIMEOUT_MS,
-            maxTotalMs: STREAM_MAX_TOTAL_MS,
-            resolveMaxTotalMs: passBudgetMs,
-            maxRounds: authorizedIntegrations.some((id) =>
-              /^(gmail|calendar|drive|notion|github|google)$/i.test(id),
-            )
-              ? MAX_TOOL_ROUNDS_INTEGRATIONS
-              : MAX_TOOL_ROUNDS,
-            cursorModel,
-            searchEnabled,
-            autoReview,
-            authorizedIntegrations,
-            skillCreatorOn,
-            autoReviewTurnBoundary,
+            maxTotalMs: TOOLS_HARD_CAP_MS,
+            maxRounds:
+              authorizedIntegrations.length > 0
+                ? MAX_TOOL_ROUNDS_INTEGRATIONS
+                : MAX_TOOL_ROUNDS,
             userAsk,
-            enabledTools,
             toolCtx,
             send,
-            closeStreamDone: () => {
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-              controller.close();
-            },
+            encoder,
+            controller,
+            detectPendingToolSurfaces,
             runProactiveSearch,
             postAudit,
             streamReviewCorrection,
@@ -1089,30 +1018,29 @@ export async function handleChatRequest(req: NextRequest) {
           midTurnCorrection = null;
           if (toolRoundsOutcome.status === 'stream_closed') return;
 
-          const finalMessages =
-            usedTools && !sourceLaneFinalNudge
-              ? [
-                  ...workingMessages,
-                  {
-                    role: 'user',
-                    content: lastToolRoundHadFailure
-                      ? [
-                          'Write the final answer now.',
-                          'One or more tools FAILED — acknowledge the error from the tool payloads honestly.',
-                          'Do not claim Notion/GitHub/Google writes succeeded. Do not invent page URLs.',
-                          'If you can tell the user how to fix the args (e.g. missing page_id), do so briefly.',
-                          'Do not leave half-written outlines or empty section headings. Do not call tools.',
-                        ].join(' ')
-                      : [
-                          'Write the final answer now using ONLY the tool results above.',
-                          'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
-                          'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
-                          'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
-                          'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
-                        ].join(' '),
-                  },
-                ]
-              : workingMessages;
+          const finalMessages = usedTools
+            ? [
+                ...workingMessages,
+                {
+                  role: 'user',
+                  content: lastToolRoundHadFailure
+                    ? [
+                        'Write the final answer now.',
+                        'One or more tools FAILED — acknowledge the error from the tool payloads honestly.',
+                        'Do not claim Notion/GitHub/Google writes succeeded. Do not invent page URLs.',
+                        'If you can tell the user how to fix the args (e.g. missing page_id), do so briefly.',
+                        'Do not leave half-written outlines or empty section headings. Do not call tools.',
+                      ].join(' ')
+                    : [
+                        'Write the final answer now using ONLY the tool results above.',
+                        'Use the tool message payloads (web search and/or MCP integrations such as Notion, GitHub, Gmail, Google Calendar, and Google Drive). Do not invent facts the tools did not return.',
+                        'If a web search payload includes strictWeek / requestedWindow / staleHint, follow those constraints.',
+                        'Do NOT claim a “7-day / 本周” window unless userAsk explicitly asked for 一周/本周/this week.',
+                        'Cite markdown links / Notion page URLs from tool results. Do not call tools. Do not say you are still searching.',
+                      ].join(' '),
+                },
+              ]
+            : workingMessages;
 
           const runFinalCompletion = async (opts: {
             enableThinking: boolean;

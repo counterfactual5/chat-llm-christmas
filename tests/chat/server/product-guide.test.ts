@@ -20,8 +20,6 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('create_file');
     expect(text).toContain('/research [quick|standard|rigorous]');
     expect(text).toContain('web|literature|mixed');
-    expect(text).toContain('/news');
-    expect(text).toContain('/wiki');
     expect(text).toContain('image_understand');
     expect(text).toContain('Notion');
     expect(text).toContain('OPT-IN Tools toggles');
@@ -49,9 +47,8 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('image_understand');
     expect(text).toContain('/skill not /skills');
     expect(text).toContain('available via slash command OR by enabling the matching Tools switch');
-    expect(text).toContain('prefer /papers or /books for dedicated literature search/download');
-    expect(text).toContain('/news <query>');
-    expect(text).toContain('Not separate /research lanes');
+    expect(text).toContain('Prefer /papers or /books for dedicated literature search/download');
+    expect(text).toContain('web_search with sources=news|wiki');
     expect(text).toContain('mixed = web + papers/books + news + wiki');
     expect(text).toContain('Never upgrade inactive library blurbs');
   });

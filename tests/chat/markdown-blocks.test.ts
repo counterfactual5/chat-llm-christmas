@@ -106,8 +106,8 @@ describe('reflowCollapsedMarkdownBlocks', () => {
       '',
       '- **/image** - 生成图片',
       '- **/research** - 深度研究（快速/标准/严谨）',
-      '- **/news** - 搜索新闻',
-      '- **/wiki** - 查百科（中/英文）',
+      '- **/papers** - 搜论文',
+      '- **/books** - 搜书籍',
     ].join('\n');
     const out = reflowCollapsedMarkdownBlocks(src);
     expect(out).toContain('- **/image** - 生成图片');

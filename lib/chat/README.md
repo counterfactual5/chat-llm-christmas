@@ -25,7 +25,7 @@ Public session-mutation path: `session/mutations/`. Always import from `@/lib/ch
 | `session/` | Normalize/merge, persist; immutable SSE patches in `session/mutations/` (content, tool-runs, review, settle) |
 | `stream/` | Client SSE consumer; shared `truncation.ts` (client + server); reply heuristics in `reply-truncation.ts` |
 | `message/` | API message shaping, display, quotes, tags, timeline |
-| `turn/` | Client turn planning (hooks own React state + streaming): task queue, continue/claim-review, compact, slash commands (`/image`, `/research`, `/news`, `/wiki`, `/papers`, `/books`, `/skill`, `/review` — always available; opt-in Tools toggles only gate mid-reply tools), attachments, send estimate, stream errors |
+| `turn/` | Client turn planning (hooks own React state + streaming): task queue, continue/claim-review, compact, slash commands (`/image`, `/research`, `/papers`, `/books`, `/skill`, `/review` — always available; opt-in Tools toggles only gate mid-reply tools), attachments, send estimate, stream errors |
 | `context/` | References, time context, sidebar helpers |
 | `server/` | `/api/chat` pipeline (`chat-request.ts`) + request helpers (server-only) |
 | `types.ts` | Shared chat types |

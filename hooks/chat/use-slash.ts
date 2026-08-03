@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Composer slash-menu: `/image`, `/research`, `/news`, `/wiki`, `/papers`, `/books`, `/review`, `/skill`.
+ * Composer slash-menu: `/image`, `/research`, `/papers`, `/books`, `/review`, `/skill`.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -170,35 +170,6 @@ export function useChatSlash(opts: {
         title: t('deepResearchCommand'),
         insert: '/research ',
         hint: t('deepResearchCommandHint'),
-      });
-    }
-    const newsPrefix =
-      slashQuery === '' ||
-      ('news'.startsWith(slashQuery) && slashQuery !== 'news') ||
-      ('新闻'.startsWith(slashQuery) && slashQuery !== '新闻') ||
-      ('资讯'.startsWith(slashQuery) && slashQuery !== '资讯');
-    if (newsPrefix) {
-      items.push({
-        kind: 'command',
-        id: 'news',
-        title: t('newsCommand'),
-        insert: '/news ',
-        hint: t('newsCommandHint'),
-      });
-    }
-    const wikiPrefix =
-      slashQuery === '' ||
-      ('wiki'.startsWith(slashQuery) && slashQuery !== 'wiki') ||
-      ('wikipedia'.startsWith(slashQuery) && slashQuery !== 'wikipedia') ||
-      ('百科'.startsWith(slashQuery) && slashQuery !== '百科') ||
-      ('维基'.startsWith(slashQuery) && slashQuery !== '维基');
-    if (wikiPrefix) {
-      items.push({
-        kind: 'command',
-        id: 'wiki',
-        title: t('wikiCommand'),
-        insert: '/wiki ',
-        hint: t('wikiCommandHint'),
       });
     }
     const papersPrefix =

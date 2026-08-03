@@ -55,6 +55,18 @@ describe('parseResearchCommand', () => {
     expect(parseResearchCommand('/research')).toBeNull();
   });
 
+  it('folds news/wiki research tokens into mixed', () => {
+    expect(parseResearchCommand('/research news OpenAI')).toEqual({
+      query: 'OpenAI',
+      sources: 'mixed',
+    });
+    expect(parseResearchCommand('/research rigorous wiki 量子计算')).toEqual({
+      query: '量子计算',
+      mode: 'rigorous',
+      sources: 'mixed',
+    });
+  });
+
   it('detects bare prefix', () => {
     expect(isResearchCommandPrefix('/research')).toBe(true);
     expect(isResearchCommandPrefix('/research ')).toBe(true);

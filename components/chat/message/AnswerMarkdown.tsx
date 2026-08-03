@@ -16,7 +16,10 @@ const KATEX_OPTIONS = {
 
 /** Slash commands that should send when clicked in assistant markdown. */
 export function isClickableSlashCommand(text: string): boolean {
-  return /^\/books\s+download\s+\S+/i.test(String(text || '').trim());
+  const s = String(text || '').trim();
+  if (/^\/books\s+download\s+\S+/i.test(s)) return true;
+  if (/^\/papers\s+(details|citations|references)\s+\S+/i.test(s)) return true;
+  return false;
 }
 
 /** The standard answer/review-fix Markdown presentation used by the chat timeline. */
@@ -100,7 +103,7 @@ export function AnswerMarkdown({
                 <button
                   type="button"
                   onClick={() => onSendCommand(cmd)}
-                  title="Click to send this download command"
+                  title="Click to send this command"
                   className="inline-flex max-w-full items-center gap-1 rounded-md border border-orange-200/80 bg-orange-50 px-1.5 py-0.5 text-left font-mono text-xs text-orange-900 transition-colors hover:border-orange-300 hover:bg-orange-100 dark:border-orange-800/60 dark:bg-orange-950/40 dark:text-orange-100 dark:hover:bg-orange-950/70"
                 >
                   <span className="min-w-0 break-all">{cmd}</span>

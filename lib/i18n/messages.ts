@@ -74,6 +74,10 @@ export const dict = {
     imageUnderstandBuiltIn: 'Built-in · auto',
     imagesNeedVision: 'This conversation has images. Pick a Vision model to continue.',
     imagesPreferVision: 'Images will be processed via Image Understand. For best accuracy, use a Vision model.',
+    booksDownloadMissingId:
+      'Add a book id after /books download (e.g. libgen: followed by a 32-char MD5).',
+    booksDownloadInvalidId:
+      'Invalid download id. Use a real 32-char MD5 (libgen:…) or archive id — not a placeholder like <md5>.',
     searchingGoogle: 'Searching Google…',
     searchedGoogle: 'Searched Google',
     searchingGmail: 'Searching Gmail…',
@@ -263,10 +267,11 @@ export const dict = {
     researchSourceMixed: 'Mixed',
     researchSourceMixedHint: 'Web + papers + news + wiki',
     papersCommand: 'Papers',
-    papersCommandHint: 'Search papers — /papers [arxiv|semantic|openalex] <q>; details/citations/author',
+    papersCommandHint:
+      'Search papers — /papers [arxiv|semantic|openalex] <q>; click Details/Citations/References',
     booksCommand: 'Books',
     booksCommandHint:
-      'Books — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>; /books download <id|libgen:md5>',
+      'Books — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>; /books download <ia-id|libgen:md5|url>',
     writeMessage: 'Ask {model}…  (/image, /research, /papers, /books, /review, /skill)',
     quote: 'Quote',
     quoted: 'Quoted',
@@ -426,6 +431,9 @@ export const dict = {
     imageUnderstandBuiltIn: '内置 · 自动',
     imagesNeedVision: '对话中包含图片，请切换到 Vision 模型。',
     imagesPreferVision: '图片将通过视觉理解处理。为获得更好的效果，建议使用 Vision 模型。',
+    booksDownloadMissingId: '请在 /books download 后填写书籍标识（例如 libgen: + 32 位 MD5）。',
+    booksDownloadInvalidId:
+      '下载标识无效。请使用真实的 32 位 MD5（libgen:…）或归档 ID，不要使用 <md5> 这类占位符。',
     searchingGoogle: '正在搜索 Google…',
     searchedGoogle: '已搜索 Google',
     searchingGmail: '正在搜索 Gmail…',
@@ -612,10 +620,11 @@ export const dict = {
     researchSourceMixed: '混合',
     researchSourceMixedHint: '网页 + 论文 + 新闻 + 维基',
     papersCommand: '论文检索',
-    papersCommandHint: '论文检索 — /papers [arxiv|semantic|openalex] <q>；details/citations/author',
+    papersCommandHint:
+      '论文检索 — /papers [arxiv|semantic|openalex] <q>；可点 Details/Citations/References',
     booksCommand: '书籍检索',
     booksCommandHint:
-      '找书 — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>；/books download <id|libgen:md5>',
+      '找书 — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>；/books download <ia-id|libgen:md5|url>',
     writeMessage: '问 {model}…  (/image、/research、/papers、/books、/review、/skill)',
     quote: '引用',
     quoted: '引用',

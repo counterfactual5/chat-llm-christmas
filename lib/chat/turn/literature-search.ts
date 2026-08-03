@@ -5,8 +5,12 @@
 import type { Message, MessageToolRun } from '@/lib/chat/types';
 import { titleForNewConversation } from '@/lib/chat/turn/attachments';
 import {
+  bookDownloadCommandLabel,
   formatBookDownloadCommand,
   formatLiteratureCommand,
+  formatPaperActionCommand,
+  isValidBookDownloadIdentifier,
+  resolveBookDownloadIdentifier,
   type BookSource,
   type LiteratureKind,
   type PaperAction,
@@ -371,22 +375,26 @@ export function formatLiteratureMarkdown(
     if (meta) lines.push(`   - ${meta}`);
     if (hit.tldr) lines.push(`   - TLDR: ${hit.tldr.replace(/\s+/g, ' ').slice(0, 320)}`);
     else if (hit.snippet) lines.push(`   - ${hit.snippet.replace(/\s+/g, ' ').slice(0, 280)}`);
-    if (hit.paperId) lines.push(`   - ID: \`${hit.paperId}\``);
-    if (hit.pdfUrl) lines.push(`   - PDF: ${hit.pdfUrl}`);
-    if (kind === 'books' && hit.downloadable) {
-      const dlId =
-        hit.archiveId ||
-        (hit.md5 ? `libgen:${hit.md5}` : '') ||
-        hit.downloadUrl ||
-        '';
-      if (dlId && !String(dlId).startsWith('gutenberg:')) {
-        const label =
-          hit.sourceProvider === 'libgen' || String(dlId).startsWith('libgen:')
-            ? 'Download'
-            : String(dlId).startsWith('http')
-              ? 'Direct download'
-              : 'Download';
-        lines.push(`   - ${label}: \`${formatBookDownloadCommand(dlId)}\``);
+    if (hit.paperId) {
+      lines.push(`   - ID: \`${hit.paperId}\``);
+      if (kind === 'papers') {
+        lines.push(`   - Details: \`${formatPaperActionCommand('details', hit.paperId)}\``);
+        lines.push(`   - Citations: \`${formatPaperActionCommand('citations', hit.paperId)}\``);
+        lines.push(
+          `   - References: \`${formatPaperActionCommand('references', hit.paperId)}\``,
+        );
+      }
+    }
+    if (hit.pdfUrl) lines.push(`   - PDF: [Open PDF](${hit.pdfUrl})`);
+    if (kind === 'books') {
+      const dlId = hit.downloadable ? resolveBookDownloadIdentifier(hit) : '';
+      if (dlId && isValidBookDownloadIdentifier(dlId)) {
+        lines.push(
+          `   - ${bookDownloadCommandLabel(dlId)}: \`${formatBookDownloadCommand(dlId)}\``,
+        );
+      } else if (hit.url && /^https?:\/\//i.test(hit.url)) {
+        const label = hit.title?.trim() || 'Page';
+        lines.push(`   - Open: [${label}](${hit.url})`);
       }
     }
     if (kind === 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);

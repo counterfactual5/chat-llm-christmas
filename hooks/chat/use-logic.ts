@@ -723,6 +723,14 @@ export function useChatLogic(props: UseChatLogicProps) {
     if (literatureCmd) {
       if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
       if (literatureCmd.action === 'download') {
+        if (literatureCmd.error) {
+          setAttachError(
+            literatureCmd.error === 'missing_identifier'
+              ? t('booksDownloadMissingId')
+              : t('booksDownloadInvalidId'),
+          );
+          return false;
+        }
         return runBookDownload(literatureCmd.identifier, {
           sessionId,
           alreadyLoading: opts?.alreadyLoading,

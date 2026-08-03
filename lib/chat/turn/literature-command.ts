@@ -2,8 +2,9 @@
 
 const PAPERS_CMD_RE = /^(?:\/papers|\/paper|\/论文|\/学术)\s+([\s\S]+)$/i;
 const BOOKS_CMD_RE = /^(?:\/books|\/book|\/书籍|\/图书)\s+([\s\S]+)$/i;
-const BOOKS_DOWNLOAD_RE =
-  /^(?:\/books|\/book|\/书籍|\/图书)\s+download\s+((?:libgen:)?[A-Za-z0-9._%-]+|https?:\/\/\S+)\s*$/i;
+/** Match `/books download` even when the identifier is missing or a placeholder. */
+const BOOKS_DOWNLOAD_INTENT_RE =
+  /^(?:\/books|\/book|\/书籍|\/图书)\s+download(?:\s+([\s\S]*))?$/i;
 
 export type LiteratureKind = 'papers' | 'books';
 
@@ -53,7 +54,88 @@ export type LiteratureCommand =
       query: string;
       source?: BookSource;
     }
-  | { kind: 'books'; action: 'download'; identifier: string };
+  | {
+      kind: 'books';
+      action: 'download';
+      identifier: string;
+      /** Present when the user typed download but the id is missing/placeholder. */
+      error?: 'missing_identifier' | 'invalid_identifier';
+    };
+
+/**
+ * Valid download targets: http(s) URL, 32-char MD5, `libgen:`+MD5, or archive-style id.
+ * Rejects empty values, `gutenberg:` (use direct URL instead), and placeholders like `<md5>`.
+ */
+export function isValidBookDownloadIdentifier(identifier: string): boolean {
+  const id = String(identifier || '').trim();
+  if (!id) return false;
+  if (/[<>]/.test(id)) return false;
+  if (/^gutenberg:/i.test(id)) return false;
+  if (/^https?:\/\/\S+$/i.test(id)) return true;
+  const libgen = id.match(/^libgen:([A-Za-z0-9._%-]+)$/i);
+  if (libgen) return /^[a-f0-9]{32}$/i.test(libgen[1]);
+  if (/^[a-f0-9]{32}$/i.test(id)) return true;
+  return /^[A-Za-z0-9._%-]{3,}$/.test(id);
+}
+
+/** Fields needed to pick a `/books download` target from a search hit. */
+export type BookDownloadHitFields = {
+  md5?: string;
+  archiveId?: string;
+  downloadUrl?: string;
+  url?: string;
+};
+
+/** Extract Internet Archive identifier from an archive.org details URL. */
+export function archiveIdFromUrl(url: string): string {
+  const m = String(url || '').match(/archive\.org\/details\/([^/?#]+)/i);
+  if (!m?.[1]) return '';
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/** Extract LibGen MD5 from ads.php / get.php style URLs. */
+export function libgenMd5FromUrl(url: string): string {
+  const m = String(url || '').match(/(?:[?&]md5=|\/md5\/)([a-f0-9]{32})\b/i);
+  return m?.[1] ? m[1].toLowerCase() : '';
+}
+
+/**
+ * Prefer identifiers the download API can resolve:
+ * libgen MD5 → non-gutenberg archiveId → https downloadUrl → archive.org / libgen URL.
+ */
+export function resolveBookDownloadIdentifier(hit: BookDownloadHitFields): string {
+  const md5 = String(hit.md5 || '')
+    .trim()
+    .toLowerCase();
+  if (/^[a-f0-9]{32}$/.test(md5)) return `libgen:${md5}`;
+
+  const fromLibgenUrl = libgenMd5FromUrl(String(hit.url || ''));
+  if (fromLibgenUrl) return `libgen:${fromLibgenUrl}`;
+
+  const archiveId = String(hit.archiveId || '').trim();
+  const libgenArchive = archiveId.match(/^libgen:([a-f0-9]{32})$/i);
+  if (libgenArchive) return `libgen:${libgenArchive[1].toLowerCase()}`;
+  if (archiveId && !/^gutenberg:/i.test(archiveId)) return archiveId;
+
+  const downloadUrl = String(hit.downloadUrl || '').trim();
+  if (/^https?:\/\/\S+$/i.test(downloadUrl)) return downloadUrl;
+
+  const fromUrl = archiveIdFromUrl(String(hit.url || ''));
+  if (fromUrl) return fromUrl;
+
+  return '';
+}
+
+export function bookDownloadCommandLabel(identifier: string): string {
+  const id = String(identifier || '').trim();
+  if (/^libgen:/i.test(id) || /^[a-f0-9]{32}$/i.test(id)) return 'Download';
+  if (/^https?:\/\//i.test(id)) return 'Direct download';
+  return 'Download';
+}
 
 function normalizePaperSource(token: string): PaperSource | null {
   const t = token.toLowerCase();
@@ -105,9 +187,29 @@ export function parseLiteratureCommand(text: string): LiteratureCommand | null {
     .trim()
     .replace(/^[／⁄]/, '/')
     .replace(/^\s*\/\s*/, '/');
-  const download = raw.match(BOOKS_DOWNLOAD_RE);
-  if (download?.[1]?.trim()) {
-    return { kind: 'books', action: 'download', identifier: download[1].trim() };
+
+  // Prefer download intent over `/books <query>` so placeholders like
+  // `libgen:<md5>` never fall through as a book search query.
+  const downloadIntent = raw.match(BOOKS_DOWNLOAD_INTENT_RE);
+  if (downloadIntent) {
+    const identifier = String(downloadIntent[1] || '').trim();
+    if (!identifier) {
+      return {
+        kind: 'books',
+        action: 'download',
+        identifier: '',
+        error: 'missing_identifier',
+      };
+    }
+    if (!isValidBookDownloadIdentifier(identifier)) {
+      return {
+        kind: 'books',
+        action: 'download',
+        identifier,
+        error: 'invalid_identifier',
+      };
+    }
+    return { kind: 'books', action: 'download', identifier };
   }
 
   const papers = raw.match(PAPERS_CMD_RE);
@@ -192,4 +294,11 @@ export function formatLiteratureCommand(
 
 export function formatBookDownloadCommand(identifier: string): string {
   return `/books download ${String(identifier || '').trim()}`;
+}
+
+export function formatPaperActionCommand(
+  action: 'details' | 'citations' | 'references',
+  paperId: string,
+): string {
+  return `/papers ${action} ${String(paperId || '').trim()}`;
 }

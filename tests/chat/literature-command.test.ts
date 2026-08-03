@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { isClickableSlashCommand } from '@/components/chat/message/AnswerMarkdown';
 import {
   formatBookDownloadCommand,
   formatLiteratureCommand,
+  isValidBookDownloadIdentifier,
   parseLiteratureCommand,
+  resolveBookDownloadIdentifier,
 } from '@/lib/chat/turn/literature-command';
 import {
   buildLiteratureSearchThread,
   formatLiteratureMarkdown,
 } from '@/lib/chat/turn/literature-search';
 import { buildBookDownloadThread } from '@/lib/chat/turn/book-download-turn';
+import { formatHitsForModel } from '@/lib/tools/literature/tool';
 
 describe('parseLiteratureCommand', () => {
   it('parses /papers and aliases', () => {
@@ -123,6 +127,33 @@ describe('parseLiteratureCommand', () => {
     });
   });
 
+  it('rejects placeholder /books download ids instead of searching', () => {
+    expect(parseLiteratureCommand('/books download')).toEqual({
+      kind: 'books',
+      action: 'download',
+      identifier: '',
+      error: 'missing_identifier',
+    });
+    expect(parseLiteratureCommand('/books download libgen:<md5>')).toEqual({
+      kind: 'books',
+      action: 'download',
+      identifier: 'libgen:<md5>',
+      error: 'invalid_identifier',
+    });
+    expect(parseLiteratureCommand('/books download <md5>')).toEqual({
+      kind: 'books',
+      action: 'download',
+      identifier: '<md5>',
+      error: 'invalid_identifier',
+    });
+    expect(parseLiteratureCommand('/books download libgen:not-an-md5')).toEqual({
+      kind: 'books',
+      action: 'download',
+      identifier: 'libgen:not-an-md5',
+      error: 'invalid_identifier',
+    });
+  });
+
   it('formats commands', () => {
     expect(formatLiteratureCommand('papers', 'RLHF')).toBe('/papers RLHF');
     expect(formatLiteratureCommand('papers', 'RLHF', { source: 'arxiv' })).toBe(
@@ -142,7 +173,7 @@ describe('parseLiteratureCommand', () => {
 });
 
 describe('formatLiteratureMarkdown', () => {
-  it('renders paper hits with TLDR and citations', () => {
+  it('renders paper hits with TLDR, clickable actions, and PDF link', () => {
     const md = formatLiteratureMarkdown('papers', 'attention', 'arxiv', [
       {
         title: 'Attention Is All You Need',
@@ -153,12 +184,17 @@ describe('formatLiteratureMarkdown', () => {
         paperId: 'ARXIV:1706.03762',
         citationCount: 100000,
         tldr: 'Transformers use attention only.',
+        pdfUrl: 'https://arxiv.org/pdf/1706.03762.pdf',
       },
     ]);
     expect(md).toContain('Attention Is All You Need');
     expect(md).toContain('arxiv.org');
     expect(md).toContain('TLDR');
     expect(md).toContain('ARXIV:1706.03762');
+    expect(md).toContain('/papers details ARXIV:1706.03762');
+    expect(md).toContain('/papers citations ARXIV:1706.03762');
+    expect(md).toContain('/papers references ARXIV:1706.03762');
+    expect(md).toContain('[Open PDF](https://arxiv.org/pdf/1706.03762.pdf)');
   });
 
   it('renders author hits', () => {
@@ -204,6 +240,116 @@ describe('formatLiteratureMarkdown', () => {
     ]);
     expect(lg).toContain('/books download libgen:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     expect(lg).toContain('12.3 MB');
+  });
+
+  it('uses Gutenberg direct URL and Open link when not API-downloadable', () => {
+    const gut = formatLiteratureMarkdown('books', 'pride', 'gutenberg', [
+      {
+        title: 'Pride and Prejudice',
+        url: 'https://www.gutenberg.org/ebooks/1342',
+        archiveId: 'gutenberg:1342',
+        downloadUrl: 'https://www.gutenberg.org/ebooks/1342.epub.images',
+        downloadable: true,
+        sourceProvider: 'gutenberg',
+      },
+    ]);
+    expect(gut).toContain(
+      '/books download https://www.gutenberg.org/ebooks/1342.epub.images',
+    );
+    expect(gut).toContain('Direct download');
+    expect(gut).not.toContain('gutenberg:1342');
+
+    const ol = formatLiteratureMarkdown('books', 'mao', 'open-library', [
+      {
+        title: '毛泽东选集',
+        url: 'https://openlibrary.org/works/OL123W',
+        downloadable: false,
+        sourceProvider: 'open-library',
+      },
+    ]);
+    expect(ol).toContain('Open: [毛泽东选集](https://openlibrary.org/works/OL123W)');
+    expect(ol).not.toContain('/books download');
+  });
+});
+
+describe('resolveBookDownloadIdentifier', () => {
+  it('prefers md5, then archive id, then downloadUrl, then archive.org URL', () => {
+    expect(
+      resolveBookDownloadIdentifier({
+        md5: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        archiveId: 'other',
+      }),
+    ).toBe('libgen:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(resolveBookDownloadIdentifier({ archiveId: 'calculus' })).toBe('calculus');
+    expect(
+      resolveBookDownloadIdentifier({
+        archiveId: 'gutenberg:1',
+        downloadUrl: 'https://example.com/book.epub',
+      }),
+    ).toBe('https://example.com/book.epub');
+    expect(
+      resolveBookDownloadIdentifier({
+        url: 'https://archive.org/details/fanqienovel-123',
+      }),
+    ).toBe('fanqienovel-123');
+    expect(
+      resolveBookDownloadIdentifier({
+        url: 'https://libgen.li/ads.php?md5=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      }),
+    ).toBe('libgen:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(isValidBookDownloadIdentifier('gutenberg:1')).toBe(false);
+  });
+});
+
+describe('isClickableSlashCommand', () => {
+  it('accepts book download and paper action commands', () => {
+    expect(isClickableSlashCommand('/books download calculus')).toBe(true);
+    expect(isClickableSlashCommand('/papers details ARXIV:1')).toBe(true);
+    expect(isClickableSlashCommand('/papers citations DOI:10.1/x')).toBe(true);
+    expect(isClickableSlashCommand('/papers references ARXIV:1')).toBe(true);
+    expect(isClickableSlashCommand('/papers attention')).toBe(false);
+    expect(isClickableSlashCommand('/books calculus')).toBe(false);
+  });
+});
+
+describe('formatHitsForModel', () => {
+  it('includes downloadCommand for books and paper action commands', () => {
+    const books = JSON.parse(
+      formatHitsForModel('books', 'calculus', 'merged', [
+        {
+          title: 'Calculus',
+          url: 'https://archive.org/details/calculus',
+          archiveId: 'calculus',
+          downloadable: true,
+          sourceProvider: 'internet-archive',
+        },
+        {
+          title: 'OL only',
+          url: 'https://openlibrary.org/works/OL1W',
+          downloadable: false,
+          sourceProvider: 'open-library',
+        },
+      ]),
+    );
+    expect(books.results[0].downloadCommand).toBe('/books download calculus');
+    expect(books.results[1].downloadCommand).toBeUndefined();
+    expect(books.results[1].url).toContain('openlibrary.org');
+
+    const papers = JSON.parse(
+      formatHitsForModel('papers', 'attention', 'arxiv', [
+        {
+          title: 'Attention',
+          url: 'https://arxiv.org/abs/1706.03762',
+          paperId: 'ARXIV:1706.03762',
+          pdfUrl: 'https://arxiv.org/pdf/1706.03762.pdf',
+        },
+      ]),
+    );
+    expect(papers.results[0].detailsCommand).toBe('/papers details ARXIV:1706.03762');
+    expect(papers.results[0].citationsCommand).toBe('/papers citations ARXIV:1706.03762');
+    expect(papers.results[0].referencesCommand).toBe(
+      '/papers references ARXIV:1706.03762',
+    );
   });
 });
 

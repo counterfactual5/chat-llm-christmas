@@ -227,7 +227,6 @@ export function withUpsertedAssistantToolRun(
 }
 
 /** Close any tool runs still marked start when the stream settles. */
-
 export function withSettledOpenToolRuns(
   sessions: ChatSession[],
   sessionId: string,
@@ -240,7 +239,17 @@ export function withSettledOpenToolRuns(
       return {
         ...m,
         toolRuns: m.toolRuns.map((r) =>
-          r.status === 'start' ? { ...r, status: 'done' as const } : r,
+          r.status === 'start'
+            ? {
+                ...r,
+                status: 'done' as const,
+                // Manual `/review` Process cards must not look successful when
+                // the stream died before their matching done event arrived.
+                ...(r.provider === 'review' && !r.error
+                  ? { error: 'Interrupted' }
+                  : {}),
+              }
+            : r,
         ),
       };
     });

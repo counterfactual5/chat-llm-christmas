@@ -1,15 +1,26 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowUpRight,
   Download,
   FileText,
+  Loader2,
   Maximize2,
   PanelRightClose,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { FilePreviewContent } from '@/components/files/FilePreviewOverlay';
+import {
+  FilePreviewContent,
+  type FilePreviewPayload,
+} from '@/components/files/FilePreviewOverlay';
+import {
+  canPreviewGeneratedFile,
+  isPdfFile,
+  isPreviewableImageFile,
+  isPreviewableTextFile,
+} from '@/lib/files/preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GeneratedFileEntry } from './OutputPanel';
@@ -18,10 +29,18 @@ export type ChatPreviewPanelProps = {
   open: boolean;
   onClose: () => void;
   file: GeneratedFileEntry | null;
-  onExpandFullscreen: () => void;
+  onExpandFullscreen: (payload: FilePreviewPayload) => void;
   onJumpToMessage: () => void;
   onDownload: () => void;
 };
+
+function fileSourceUrl(file: GeneratedFileEntry): string {
+  const direct = String(file.url || '').trim();
+  if (direct) return direct;
+  const id = String(file.id || '').trim();
+  if (!id || id.startsWith('local:')) return '';
+  return `/api/files/${encodeURIComponent(id)}`;
+}
 
 export function ChatPreviewPanel({
   open,
@@ -32,16 +51,82 @@ export function ChatPreviewPanel({
   onDownload,
 }: ChatPreviewPanelProps) {
   const { t } = useLocale();
-  const canRender =
-    file && typeof file.content === 'string' && file.content.length >= 0
-      ? {
-          id: file.id,
-          name: file.name,
-          mimeType: file.mimeType,
-          content: file.content || '',
-          size: file.size,
+  const [fetchedContent, setFetchedContent] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState('');
+
+  const previewable = Boolean(file && canPreviewGeneratedFile(file));
+  const sourceUrl = file ? fileSourceUrl(file) : '';
+  const hasInlineContent = typeof file?.content === 'string';
+  const needsTextFetch =
+    Boolean(file) &&
+    !hasInlineContent &&
+    Boolean(sourceUrl) &&
+    isPreviewableTextFile(file!) &&
+    !isPdfFile(file!) &&
+    !isPreviewableImageFile(file!);
+
+  useEffect(() => {
+    if (!open || !file || !needsTextFetch) {
+      setFetchedContent(null);
+      setFetchError('');
+      return;
+    }
+
+    let cancelled = false;
+    setFetchedContent(null);
+    setFetchError('');
+
+    void (async () => {
+      try {
+        const response = await fetch(sourceUrl);
+        if (!response.ok) throw new Error(`Failed to load preview (${response.status})`);
+        const text = await response.text();
+        if (!cancelled) setFetchedContent(text);
+      } catch (cause) {
+        if (!cancelled) {
+          setFetchError(cause instanceof Error ? cause.message : t('requestFailed'));
         }
-      : null;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, file?.id, file?.url, needsTextFetch, sourceUrl, t]);
+
+  const resolved: FilePreviewPayload | null = (() => {
+    if (!file || !previewable) return null;
+    if (hasInlineContent) {
+      return {
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        content: file.content || '',
+        url: sourceUrl || undefined,
+        size: file.size,
+      };
+    }
+    if (sourceUrl && (isPdfFile(file) || isPreviewableImageFile(file))) {
+      return {
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        url: sourceUrl,
+        size: file.size,
+      };
+    }
+    if (needsTextFetch && typeof fetchedContent === 'string') {
+      return {
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        content: fetchedContent,
+        url: sourceUrl || undefined,
+        size: file.size,
+      };
+    }
+    return null;
+  })();
 
   return (
     <AnimatePresence>
@@ -74,12 +159,12 @@ export function ChatPreviewPanel({
                   >
                     <ArrowUpRight className="h-4 w-4" />
                   </Button>
-                  {canRender && (
+                  {resolved && (
                     <Button
                       variant="ghost"
                       size="icon"
                       title={t('expandFullscreen')}
-                      onClick={onExpandFullscreen}
+                      onClick={() => onExpandFullscreen(resolved)}
                       className="h-8 w-8 text-stone-500"
                     >
                       <Maximize2 className="h-4 w-4" />
@@ -114,14 +199,19 @@ export function ChatPreviewPanel({
                 <FileText className="h-8 w-8 opacity-40" />
                 <span>{t('previewPanelEmpty')}</span>
               </div>
-            ) : canRender ? (
+            ) : resolved ? (
               <div className="min-w-0 max-w-full px-4 py-4">
-                <FilePreviewContent file={canRender} />
+                <FilePreviewContent file={resolved} />
+              </div>
+            ) : needsTextFetch && !fetchError ? (
+              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
+                <Loader2 className="h-8 w-8 animate-spin opacity-60" />
+                <span>{t('loading')}</span>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-400">
                 <FileText className="h-8 w-8 opacity-40" />
-                <span>{t('noPreviewAvailable')}</span>
+                <span>{fetchError || t('noPreviewAvailable')}</span>
                 <button
                   type="button"
                   onClick={onDownload}

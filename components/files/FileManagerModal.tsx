@@ -10,6 +10,7 @@ import {
   FilePreviewOverlay,
   type FilePreviewPayload,
 } from '@/components/files/FilePreviewOverlay';
+import { isPreviewableImageFile, isPreviewableTextFile } from '@/lib/files/preview';
 import { useLocale } from '@/lib/i18n';
 
 export type AccountFile = {
@@ -38,16 +39,11 @@ function shortFileId(file: AccountFile): string {
 }
 
 function isImageFile(file: AccountFile): boolean {
-  return String(file.mime || '').startsWith('image/') || /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.filename || '');
+  return isPreviewableImageFile({ name: file.filename, mime: file.mime });
 }
 
 function isTextFile(file: AccountFile): boolean {
-  return (
-    String(file.mime || '').startsWith('text/') ||
-    /\.(?:md|markdown|txt|json|csv|tsv|ya?ml|js|jsx|ts|tsx|py|html?|css|sql|xml|toml|ini|sh)$/i.test(
-      file.filename || '',
-    )
-  );
+  return isPreviewableTextFile({ name: file.filename, mime: file.mime });
 }
 
 function formatDate(timestamp: number): string {

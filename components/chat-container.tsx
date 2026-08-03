@@ -2444,15 +2444,8 @@ export default function ChatContainer() {
             open={isPreviewPanelOpen}
             onClose={() => setIsPreviewPanelOpen(false)}
             file={previewFileEntry}
-            onExpandFullscreen={() => {
-              if (!previewFileEntry || typeof previewFileEntry.content !== 'string') return;
-              setFilePreview({
-                id: previewFileEntry.id,
-                name: previewFileEntry.name,
-                mimeType: previewFileEntry.mimeType,
-                content: previewFileEntry.content,
-                size: previewFileEntry.size,
-              });
+            onExpandFullscreen={(payload) => {
+              setFilePreview(payload);
             }}
             onJumpToMessage={() => {
               if (!previewFileEntry) return;

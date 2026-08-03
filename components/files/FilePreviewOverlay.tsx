@@ -1,16 +1,20 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { Download, FileText, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { CodeBlock } from '@/components/markdown/code/code-block';
+import { isPdfFile, isPreviewableImageFile } from '@/lib/files/preview';
 import { cn } from '@/lib/utils';
 
 export type FilePreviewPayload = {
   id: string;
   name: string;
   mimeType: string;
-  content: string;
+  /** Inline UTF-8 text (create_file / text extracts). */
+  content?: string;
+  /** Gateway /api/files/... URL for PDF / image binary preview. */
+  url?: string;
   size?: number;
 };
 
@@ -97,19 +101,40 @@ type FilePreviewOverlayProps = {
   };
 };
 
-/** Pure content renderer (markdown / code) — reused by the fullscreen overlay and the side-panel preview. */
+/** Pure content renderer (markdown / code / PDF / image) — overlay + side panel. */
 export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
-  const richText = useMemo(() => prefersAnswerMarkdownPreview(file), [file]);
-  const language = useMemo(() => languageFromFilename(file.name), [file]);
+  const url = String(file.url || '').trim();
+  if (!file.content && url && isPdfFile(file)) {
+    return (
+      <iframe
+        title={file.name}
+        src={url}
+        className="h-[min(80vh,900px)] w-full min-h-[24rem] rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+      />
+    );
+  }
+  if (!file.content && url && isPreviewableImageFile(file)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={file.name}
+        className="mx-auto max-h-[min(80vh,900px)] max-w-full object-contain"
+      />
+    );
+  }
+
+  const text = typeof file.content === 'string' ? file.content : '';
+  const richText = prefersAnswerMarkdownPreview(file);
+  const language = languageFromFilename(file.name);
 
   return richText ? (
     <div className={cn('mx-auto w-full min-w-0 max-w-3xl')}>
-      {/* Same Markdown path as chat answers — ASCII reflow, fenced text blocks, tables. */}
-      <AnswerMarkdown text={file.content} streaming={false} />
+      <AnswerMarkdown text={text} streaming={false} />
     </div>
   ) : (
     <div className="min-w-0 max-w-full">
-      <CodeBlock language={language} value={file.content} wrap />
+      <CodeBlock language={language} value={text} wrap />
     </div>
   );
 }

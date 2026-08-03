@@ -35,6 +35,7 @@ import {
   AttachmentImageThumb,
   isImageAttachment,
 } from '@/components/files/AttachmentImageThumb';
+import { canPreviewGeneratedFile } from '@/lib/files/preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
@@ -1236,7 +1237,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               const file =
                                 fileIndex >= 0 ? message.files?.[fileIndex] : undefined;
                               if (!file) return null;
-                              const canPreview = typeof file.content === 'string';
+                              const canPreview = canPreviewGeneratedFile(file);
                               return (
                                 <div
                                   key={seg.id}

@@ -88,4 +88,15 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toContain('| ⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 |');
     expect(out).not.toMatch(/不要浪费时间）\n\n\| 平台/);
   });
+
+  it('breaks CTA and URL-adjacent field bullets onto new lines', () => {
+    const out = reflowCollapsedMarkdownBlocks(
+      [
+        '- 网址：https://eleduck.com - 特点：国内最早的远程工作社区之一',
+        '3. 长期：保持 Telegram 群组活跃，建立人脉 需要我帮你：',
+      ].join('\n'),
+    );
+    expect(out).toContain('https://eleduck.com\n- 特点：');
+    expect(out).toContain('建立人脉\n\n需要我帮你：');
+  });
 });

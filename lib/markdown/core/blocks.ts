@@ -61,6 +61,15 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // After a Latin token when the item itself starts with CJK (`Telegram 2. 加入`)
   out = out.replace(/([A-Za-z0-9])\s+(\d{1,2}\.\s+[\u4e00-\u9fff])/g, '$1\n$2');
 
+  // URL then another field bullet: `https://eleduck.com - 特点：…`
+  out = out.replace(
+    /(https?:\/\/\S+)\s+(-\s+(?:状态|网址|特点|链接|注意|路径)[:：])/g,
+    '$1\n$2',
+  );
+
+  // CTA after list prose: `建立人脉 需要我帮你：`
+  out = out.replace(/([^\n])\s+(需要我(?:帮你|协助)[:：])/g, '$1\n\n$2');
+
   // Closed emphasis then a new block: `**建议** ##` / `**了。** 1. 加入`
   out = out.replace(
     /(\*\*)\s+(?=(?:#{1,6}\s|-\s+\S|\d{1,2}\.\s+\S))/g,

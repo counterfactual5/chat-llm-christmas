@@ -183,6 +183,8 @@ export async function handleChatRequest(req: NextRequest) {
       enabledTools = enabledTools.filter((t) => t.name !== 'image_understand');
     }
     // file_read is only useful when this thread has attached documents.
+    // Prefer extracts still present on the latest (uncollapsed) user turn;
+    // older turns rehydrate via chat-api extract sidecar inside the tool.
     const fromMessages = collectFileExtractsFromMessages(
       Array.isArray(messages) ? (messages as Array<{ role?: string; content?: unknown }>) : [],
     );

@@ -42,7 +42,7 @@ sequenceDiagram
 | 类型 | 会话 JSON | 发给模型时 |
 |------|-----------|------------|
 | 图片 | `message.images[]`：`fileId` / url / 可选转写块 | 见 §3 |
-| 文档 | 用户消息里 `[Attached File: name] (stored fileId: …)\\n<body>` | 见 §4 |
+| 文档 | 最新用户消息可含全文；更早轮次持久化为 `【历史文件引用】` + fileId | 见 §4 |
 
 **不是**把像素/全文永久塞进「每次请求的工具结果历史」；源文件在 chat-api 磁盘，会话只持引用（+ 首轮全文或转写）。
 
@@ -82,21 +82,22 @@ flowchart TD
   E --> Msg[用户消息写入全文 Attached File 块]
   Msg --> Turn1[本轮：模型直接看到全文]
   Turn1 --> Later[后续轮次请求]
-  Later --> Coll[collapseAttachedFileBlocksForHistory]
+  Later --> Persist[会话持久化：旧轮折叠为引用]
+  Persist --> Coll[collapseAttachedFileBlocksForHistory]
   Coll --> Ref[【历史文件引用】+ ~400 字预览 + fileId]
   Ref --> Need{模型还要全文?}
   Need -->|是| FR[file_read 工具]
-  FR --> Cache[优先：请求内 fileExtracts 缓存]
-  Cache -->|未命中| Sidecar[GET chat-api /v1/files/:id/extract]
+  FR --> Sidecar[GET chat-api /v1/files/:id/extract]
   Sidecar -->|仍无| TextOnly[仅当原文件是 text/* 时读 /content]
 ```
 
 要点：
 
 - **首轮不空转**：最新附件全文进用户消息；不要求模型先调工具再读。
-- **历史折叠**：旧轮压缩成引用 + 短 preview，省 token。
+- **会话也折叠**：下一轮发送时，旧用户消息里的全文（有 fileId）被压成引用；云同步 / 本地恢复同样处理。最新用户轮保留全文，方便 Retry。
+- **气泡不泄全文**：UI 展示用 `attachedFilesForUserBubbleDisplay`，即使本轮会话里还存着全文也不刷屏。
 - **`file_read` 懒注入**：本线程有附件文档时才进工具列表。
-- **缓存来源**：客户端从会话消息收集 `fileExtracts` 放进 `/api/chat` body；服务端也会从尚未折叠的消息块收集。sidecar 是跨会话/缓存丢失时的兜底。
+- **重读靠 sidecar**：不再每轮把 `fileExtracts` 塞进 `/api/chat` body；`file_read` 读 chat-api `GET /v1/files/:id/extract`。
 
 ---
 

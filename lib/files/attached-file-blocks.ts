@@ -1,9 +1,10 @@
 /**
  * Parse / collapse `[Attached File: …]` blocks in user message content.
  *
- * First-turn attaches keep full extracted text. Older turns are collapsed to a
- * short describing + fileId marker so follow-up prompts stay cheap; models can
- * re-read via `file_read`.
+ * First-turn attaches keep full extracted text (so the model can answer without
+ * an empty tool round). Older turns — both in the model prompt and in persisted
+ * session JSON — collapse to 【历史文件引用】 + short preview + fileId; models
+ * re-read via `file_read` → chat-api extract sidecar.
  */
 
 export const HISTORY_FILE_REF_MARKER = '【历史文件引用】';
@@ -103,24 +104,88 @@ export function formatAttachedFileHistoryRef(
 /**
  * Replace full attached-file bodies with describing + fileId refs.
  * Leaves the trailing user ask (after `---`) untouched when present.
+ *
+ * `onlyWithFileId`: keep full bodies that have no fileId (cannot re-read via
+ * sidecar / file_read) — used for session persistence.
  */
 export function collapseAttachedFileBlocksForHistory(
   content: string,
-  opts?: { previewChars?: number },
+  opts?: { previewChars?: number; onlyWithFileId?: boolean },
 ): string {
   const raw = String(content || '');
   const blocks = parseAttachedFileBlocks(raw);
   if (!blocks.length) return raw;
 
   const previewChars = opts?.previewChars ?? DEFAULT_PREVIEW_CHARS;
-  // Rebuild: everything before first block, then collapsed refs, then tail after last block.
-  const head = raw.slice(0, blocks[0].start).trimEnd();
-  const collapsed = blocks
-    .map((b) => formatAttachedFileHistoryRef(b, previewChars))
-    .join('\n\n');
-  const tail = raw.slice(blocks[blocks.length - 1].end).replace(/^\s*\n\n---\n\n/, '\n\n---\n\n');
-  const mid = [collapsed, tail.trimStart() ? tail : ''].filter(Boolean).join('\n\n');
-  return [head, mid].filter(Boolean).join('\n\n').trim();
+  const onlyWithFileId = Boolean(opts?.onlyWithFileId);
+  const toCollapse = onlyWithFileId ? blocks.filter((b) => Boolean(b.fileId)) : blocks;
+  if (!toCollapse.length) return raw;
+
+  // Replace from the end so earlier offsets stay valid when only some blocks collapse.
+  let result = raw;
+  for (let i = toCollapse.length - 1; i >= 0; i--) {
+    const b = toCollapse[i];
+    const replacement = formatAttachedFileHistoryRef(b, previewChars);
+    result = `${result.slice(0, b.start)}${replacement}${result.slice(b.end)}`;
+  }
+  return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function messageTextContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((p: any) => p?.type === 'text' && typeof p.text === 'string')
+      .map((p: any) => p.text)
+      .join('\n');
+  }
+  return '';
+}
+
+/**
+ * Persist/sync helper: collapse full attached-file extracts in user messages.
+ * Keeps the latest user turn intact when `keepLastUserFull` so Retry still has
+ * first-turn text; older turns become 【历史文件引用】 + fileId (sidecar re-read).
+ */
+export function collapseAttachedFileBodiesInMessages<
+  T extends { role?: string; content?: unknown },
+>(
+  messages: T[],
+  opts?: {
+    keepLastUserFull?: boolean;
+    onlyWithFileId?: boolean;
+    previewChars?: number;
+  },
+): T[] {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+
+  let lastUserIdx = -1;
+  if (opts?.keepLastUserFull) {
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].role === 'user') lastUserIdx = i;
+    }
+  }
+
+  let changed = false;
+  const next = messages.map((m, i) => {
+    if (m.role !== 'user') return m;
+    if (opts?.keepLastUserFull && i === lastUserIdx) return m;
+    const text = messageTextContent(m.content);
+    if (!text.includes('[Attached File:')) return m;
+    const collapsed = collapseAttachedFileBlocksForHistory(text, {
+      previewChars: opts?.previewChars,
+      onlyWithFileId: opts?.onlyWithFileId,
+    });
+    if (collapsed === text) return m;
+    changed = true;
+    return { ...m, content: collapsed };
+  });
+  return changed ? next : messages;
+}
+
+/** Bubble/UI: never dump full PDF/DOCX extract into the chat transcript. */
+export function attachedFilesForUserBubbleDisplay(content: string): string {
+  return collapseAttachedFileBlocksForHistory(String(content || ''));
 }
 
 export function contentHasAttachedFiles(content: string): boolean {

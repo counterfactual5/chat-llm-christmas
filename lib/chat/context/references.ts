@@ -145,8 +145,7 @@ export function collectUserUploadsFromMessages(messages: Message[]): WebSearchSo
     }
 
     const content = String(m.content || '');
-    // Matches both `[Attached File: name]\nbody` and `… (stored fileId: id)\nbody`,
-    // plus collapsed 【历史文件引用】 lines (snippet only).
+    // Full `[Attached File: name] (stored fileId: id)\nbody` blocks.
     const fileRe =
       /\[Attached File: ([^\]]+)\](?:\s*\(stored fileId:\s*([^)]+)\))?\n([\s\S]*?)(?=\n\n---\n\n|\n\n\[Attached File:|$)/g;
     let match: RegExpExecArray | null;
@@ -154,6 +153,9 @@ export function collectUserUploadsFromMessages(messages: Message[]): WebSearchSo
       const name = match[1].trim();
       const fileId = String(match[2] || '').trim();
       const text = match[3].trim();
+      // Already-collapsed history markers live under the same header in some
+      // legacy shapes; prefer the dedicated parser below.
+      if (text.startsWith('【历史文件引用】')) continue;
       const key = fileId ? `file:${fileId}` : `file:${m.id}:${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -166,6 +168,30 @@ export function collectUserUploadsFromMessages(messages: Message[]): WebSearchSo
         messageId: m.id,
         kind: 'file',
       });
+    }
+
+    // Collapsed 【历史文件引用】 lines: `- name (fileId: id): preview`
+    if (content.includes('【历史文件引用】')) {
+      const histRe = /^- (.+?)(?: \(fileId: ([^)]+)\))(?:: (.*))?$/gm;
+      let hm: RegExpExecArray | null;
+      while ((hm = histRe.exec(content)) !== null) {
+        const name = String(hm[1] || '').trim();
+        const fileId = String(hm[2] || '').trim();
+        const preview = String(hm[3] || '').trim();
+        if (!name) continue;
+        const key = fileId ? `file:${fileId}` : `file:${m.id}:${name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          title: name,
+          url: fileId ? `/api/files/${encodeURIComponent(fileId)}` : '',
+          snippet: preview.slice(0, 400),
+          provider: 'upload',
+          query: 'upload',
+          messageId: m.id,
+          kind: 'file',
+        });
+      }
     }
   }
 

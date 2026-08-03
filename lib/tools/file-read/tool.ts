@@ -2,9 +2,10 @@
  * file_read — re-read an earlier attached document by fileId.
  *
  * First-turn attaches inject full extracted text into the user message.
- * Older turns collapse to 【历史文件引用】 markers; the model calls this tool
- * when it needs the full body again. Prefers the per-request extract cache
- * (from the session message), then falls back to fetching text/* from chat-api.
+ * Older turns (prompt + persisted session) collapse to 【历史文件引用】 markers;
+ * the model calls this tool when it needs the full body again. Prefers any
+ * per-request extract cache, then chat-api `GET /v1/files/:id/extract` sidecar,
+ * then raw text/* content.
  */
 
 import { filesGatewayBaseURL } from '@/lib/files/gateway';

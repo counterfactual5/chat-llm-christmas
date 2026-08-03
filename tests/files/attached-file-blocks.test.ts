@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  attachedFilesForUserBubbleDisplay,
   collapseAttachedFileBlocksForHistory,
+  collapseAttachedFileBodiesInMessages,
   collectFileExtractsFromMessages,
   HISTORY_FILE_REF_MARKER,
   parseAttachedFileBlocks,
@@ -46,6 +48,61 @@ describe('attached-file-blocks', () => {
     expect(collapsed).toContain('file_read');
     expect(collapsed).toContain('what does it say?');
     expect(collapsed).not.toContain('alpha '.repeat(20));
+  });
+
+  it('onlyWithFileId keeps bodies without a stored id', () => {
+    const content = [
+      '[Attached File: local.txt]',
+      'keep me whole',
+      '',
+      '---',
+      '',
+      'ask',
+    ].join('\n');
+    const collapsed = collapseAttachedFileBlocksForHistory(content, {
+      onlyWithFileId: true,
+    });
+    expect(collapsed).toContain('[Attached File: local.txt]');
+    expect(collapsed).toContain('keep me whole');
+    expect(collapsed).not.toContain(HISTORY_FILE_REF_MARKER);
+  });
+
+  it('collapseAttachedFileBodiesInMessages keeps the latest user turn full', () => {
+    const messages = [
+      {
+        role: 'user',
+        content:
+          '[Attached File: a.txt] (stored fileId: f1)\n' +
+          'old body '.repeat(50) +
+          '\n\n---\n\nold ask',
+      },
+      { role: 'assistant', content: 'ok' },
+      {
+        role: 'user',
+        content:
+          '[Attached File: b.txt] (stored fileId: f2)\n' +
+          'new body full extract\n\n---\n\nnew ask',
+      },
+    ];
+    const next = collapseAttachedFileBodiesInMessages(messages, {
+      keepLastUserFull: true,
+      onlyWithFileId: true,
+    });
+    expect(String(next[0].content)).toContain(HISTORY_FILE_REF_MARKER);
+    expect(String(next[0].content)).not.toContain('old body '.repeat(45));
+    expect(String(next[2].content)).toContain('new body full extract');
+    expect(String(next[2].content)).toContain('[Attached File: b.txt]');
+  });
+
+  it('bubble display collapses full extracts', () => {
+    const content =
+      '[Attached File: a.pdf] (stored fileId: f)\n' +
+      'x'.repeat(500) +
+      '\n\n---\n\nsummarize';
+    const shown = attachedFilesForUserBubbleDisplay(content);
+    expect(shown).toContain(HISTORY_FILE_REF_MARKER);
+    expect(shown).toContain('summarize');
+    expect(shown).not.toContain('x'.repeat(450));
   });
 
   it('collects extracts keyed by fileId', () => {

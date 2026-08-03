@@ -51,6 +51,7 @@ import {
   resolvePendingAttachments,
   titleForNewConversation,
 } from '@/lib/chat/turn/attachments';
+import { collapseAttachedFileBodiesInMessages } from '@/lib/files/attached-file-blocks';
 import { webSourcesForThread } from '@/lib/chat/context/references';
 import {
   estimateTokensForSend,
@@ -745,7 +746,12 @@ export function useChatLogic(props: UseChatLogicProps) {
       baseMessagesOverride ??
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
-    let baseMessages = cleanBaseMessagesForSend(sessionMessages);
+    // Persist older turns as refs only (sidecar + file_read). Latest user message
+    // below still carries full extract so Retry / first answer stay intact.
+    let baseMessages = collapseAttachedFileBodiesInMessages(
+      cleanBaseMessagesForSend(sessionMessages),
+      { onlyWithFileId: true },
+    );
     let newTitle = sessionsRef.current.find((s) => s.id === sessionId)?.title;
     if (baseMessages.length === 0) {
       newTitle = titleForNewConversation(textToSend, pendingImages);

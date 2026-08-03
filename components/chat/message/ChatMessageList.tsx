@@ -53,6 +53,7 @@ import { ReasoningBodyScroll } from '@/components/chat/message/ReasoningBodyScro
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
+import { attachedFilesForUserBubbleDisplay } from '@/lib/files/attached-file-blocks';
 import {
   formatFileSize,
   type GeneratedFileEntry,
@@ -344,7 +345,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     {(() => {
                       const { quotes, body } = parseQuotedUserMessage(
                         message.content && message.content !== '(image)'
-                          ? stripUserMessageArtifactsForDisplay(message.content)
+                          ? attachedFilesForUserBubbleDisplay(
+                              stripUserMessageArtifactsForDisplay(message.content),
+                            )
                           : '',
                       );
                       return (

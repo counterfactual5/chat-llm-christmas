@@ -2,6 +2,7 @@ import type { ChatSession } from '@/lib/chat/types';
 import { displayAssistantParts } from '@/lib/chat/message/display';
 import { contentHasThinkMarkup } from '@/lib/chat/message/think-tags';
 import { contentHasToolMarkup } from '@/lib/chat/message/tool-tags';
+import { collapseAttachedFileBodiesInMessages } from '@/lib/files/attached-file-blocks';
 
 /** localStorage key recording which account owns the cached chats (anti cross-account bleed). */
 export const CHATS_OWNER_KEY = 'llm_christmas_chats_owner';
@@ -18,9 +19,13 @@ export function sessionsWorthPersisting(sessions: ChatSession[]): ChatSession[] 
 
 /** Normalize a session restored from localStorage or the cloud: close stale streams, fold think markup. */
 export function normalizeRestoredSession(session: ChatSession): ChatSession {
+  const messages = collapseAttachedFileBodiesInMessages(session.messages || [], {
+    keepLastUserFull: true,
+    onlyWithFileId: true,
+  });
   return {
     ...session,
-    messages: (session.messages || []).map((m) => {
+    messages: messages.map((m) => {
       let next = m;
       // Page refresh aborts in-flight streams. An incomplete flag without an
       // active request would leave Process spinning forever.
@@ -82,6 +87,15 @@ export function sessionsForCloudSync(sessions: ChatSession[]): ChatSession[] {
     }
     return value;
   };
-  return sessions.map((s) => scrub(s) as ChatSession);
+  return sessions.map((s) => {
+    const scrubbed = scrub({
+      ...s,
+      messages: collapseAttachedFileBodiesInMessages(s.messages || [], {
+        keepLastUserFull: true,
+        onlyWithFileId: true,
+      }),
+    }) as ChatSession;
+    return scrubbed;
+  });
 }
 

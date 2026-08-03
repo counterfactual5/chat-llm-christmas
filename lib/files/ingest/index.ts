@@ -4,22 +4,12 @@ import type { IngestedAttachment } from './types';
 import { extractDocxText, extractPdfText } from './extractors';
 import { isSupportedDropFile } from './support';
 import { truncateAttachmentText } from './text-limit';
-
-/** Hard reject before we even try to read (aligned with chat-api FILE_UPLOAD_MAX_BYTES). */
-export const MAX_INGEST_BYTES = 20 * 1024 * 1024;
+import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
 
 export type { IngestedAttachment } from './types';
 export { isSupportedDropFile } from './support';
+export { MAX_INGEST_BYTES, MAX_UPLOAD_BYTES } from './compress-image';
 export { MAX_ATTACHMENT_TEXT_CHARS, truncateAttachmentText } from './text-limit';
-
-function readAsDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
-    reader.readAsDataURL(blob);
-  });
-}
 
 function withUploadBlob(file: File, text: string): Pick<IngestedAttachment, 'text' | 'uploadBlob'> {
   const clipped = truncateAttachmentText(text, file.name || 'file');
@@ -41,14 +31,17 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
   const name = file.name.toLowerCase();
 
   if (file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(name)) {
-    const dataUrl = await readAsDataUrl(file);
+    // Browser canvas compress — Edge chat cannot reliably downscale for vision.
+    const prepared = await prepareImageForUpload(file);
     return {
       ...base,
-      type: file.type?.startsWith('image/') ? file.type : 'image/jpeg',
-      dataUrl,
-      previewUrl: URL.createObjectURL(file),
-      /** Original bytes for multipart upload (no client-side compress). */
-      uploadBlob: file,
+      name: prepared.filename,
+      type: prepared.mime.startsWith('image/') ? prepared.mime : 'image/jpeg',
+      size: prepared.size,
+      dataUrl: prepared.dataUrl,
+      previewUrl: URL.createObjectURL(prepared.blob),
+      /** Compressed bytes for multipart upload (vision-inline friendly). */
+      uploadBlob: prepared.blob,
     };
   }
 

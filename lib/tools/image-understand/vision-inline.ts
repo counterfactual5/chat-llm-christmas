@@ -1,13 +1,19 @@
 /**
  * Cap image payloads before inlining for vision / multimodal LLM calls.
- * Upload can keep originals; only the Edge→LLM hop is downscaled.
+ * Upload keeps originals or client-compressed copies; Edge→LLM hop is capped.
  */
 
-/** Soft ceiling for a single vision data-URL (decoded bytes). */
-export const MAX_VISION_INLINE_BYTES = 1_500_000;
+import {
+  MAX_VISION_EDGE,
+  MAX_VISION_INLINE_BYTES,
+  MAX_VISION_PASSTHROUGH_BYTES,
+} from '@/lib/files/image-budget';
 
-/** Longest edge after downscale. */
-export const MAX_VISION_EDGE = 1568;
+export {
+  MAX_VISION_EDGE,
+  MAX_VISION_INLINE_BYTES,
+  MAX_VISION_PASSTHROUGH_BYTES,
+} from '@/lib/files/image-budget';
 
 function bytesToBase64(buf: Uint8Array): string {
   if (typeof Buffer !== 'undefined') {
@@ -50,10 +56,16 @@ function visionInlineTooLargeError(byteLength: number, reason: string): Error {
   );
 }
 
+function canDownscaleImages(): boolean {
+  return (
+    typeof createImageBitmap === 'function' && typeof OffscreenCanvas !== 'undefined'
+  );
+}
+
 /**
  * If decoded image bytes exceed the vision budget, downscale + JPEG recompress.
- * Throws when the runtime cannot compress (typical on Edge) or the result still exceeds budget —
- * never pass oversized originals through to the LLM.
+ * On Edge (no canvas), passthrough up to MAX_VISION_PASSTHROUGH_BYTES so the
+ * turn does not silently drop pixels; only throw above that hard cap.
  */
 export async function fitImageBytesForVision(
   buf: Uint8Array,
@@ -62,20 +74,35 @@ export async function fitImageBytesForVision(
   if (buf.byteLength <= MAX_VISION_INLINE_BYTES) {
     return { bytes: buf, mime };
   }
-  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') {
+  if (!canDownscaleImages()) {
+    if (buf.byteLength <= MAX_VISION_PASSTHROUGH_BYTES) {
+      console.warn(
+        '[vision] Edge cannot downscale; passthrough',
+        buf.byteLength,
+        'bytes',
+      );
+      return { bytes: buf, mime };
+    }
     throw visionInlineTooLargeError(
       buf.byteLength,
-      'runtime cannot downscale images (missing createImageBitmap/OffscreenCanvas). Upload a smaller image.',
+      'runtime cannot downscale images (missing createImageBitmap/OffscreenCanvas). Re-attach a smaller image.',
     );
   }
 
-  const blob = new Blob([buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer], {
-    type: mime || 'image/jpeg',
-  });
+  const blob = new Blob(
+    [buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer],
+    {
+      type: mime || 'image/jpeg',
+    },
+  );
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(blob);
   } catch {
+    if (buf.byteLength <= MAX_VISION_PASSTHROUGH_BYTES) {
+      console.warn('[vision] decode failed; passthrough', buf.byteLength, 'bytes');
+      return { bytes: buf, mime };
+    }
     throw visionInlineTooLargeError(buf.byteLength, 'image decode failed before downscale');
   }
 
@@ -94,6 +121,14 @@ export async function fitImageBytesForVision(
           return { bytes, mime: 'image/jpeg' };
         }
       }
+    }
+    if (best && best.byteLength <= MAX_VISION_PASSTHROUGH_BYTES) {
+      console.warn(
+        '[vision] compress still over soft budget; passthrough',
+        best.byteLength,
+        'bytes',
+      );
+      return { bytes: best, mime: 'image/jpeg' };
     }
     throw visionInlineTooLargeError(
       best?.byteLength ?? buf.byteLength,
@@ -119,7 +154,8 @@ export async function fitDataUrlForVision(dataUrl: string): Promise<string> {
       raw = new Uint8Array(Buffer.from(b64, 'base64'));
     } else {
       const bin = atob(b64);
-      raw = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      raw = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
     }
   } catch {
     return dataUrl;

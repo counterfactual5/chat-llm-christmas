@@ -299,20 +299,22 @@ export async function handleChatRequest(req: NextRequest) {
     // Portal / chat-api file ids are opaque to upstream VLMs — expand to data URLs.
     // Never silently drop the last-turn pixels: that makes vision models claim they
     // "cannot see" an image the UI clearly shows.
+    const visionResolveErrors: string[] = [];
     const toVisionPart = async (img: ImageRef) => {
       const part = toImageContentPart(img);
-      if (!part) return null;
+      if (!part) {
+        visionResolveErrors.push('missing image url/fileId');
+        return null;
+      }
       const ref = String((part as { image_url?: { url?: string } })?.image_url?.url || '').trim();
       if (!ref || /^https?:\/\//i.test(ref) || ref.startsWith('data:')) return part;
       try {
         const dataUrl = await resolveImageUrlForVision(ref, { apiKey, baseURL });
         return toImageContentPart({ url: dataUrl });
       } catch (err) {
-        console.warn(
-          '[chat] resolve portal file for vision failed:',
-          ref,
-          err instanceof Error ? err.message : err,
-        );
+        const detail = err instanceof Error ? err.message : String(err || 'resolve failed');
+        visionResolveErrors.push(detail);
+        console.warn('[chat] resolve portal file for vision failed:', ref, detail);
         return null;
       }
     };
@@ -591,8 +593,12 @@ export async function handleChatRequest(req: NextRequest) {
           ? lastNormUser.content.filter((p: any) => p?.type === 'image_url').length
           : 0;
         if (gotImageParts === 0) {
+          const why =
+            visionResolveErrors.length > 0
+              ? visionResolveErrors.slice(0, 3).join('; ')
+              : 'image parts were empty after resolve';
           return jsonError(
-            'Failed to load attached image(s) for the vision model. Re-attach the image and try again.',
+            `Failed to load attached image(s) for the vision model (${why}). Re-attach a smaller image and try again.`,
             502,
           );
         }

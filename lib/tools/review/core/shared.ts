@@ -1,10 +1,19 @@
 import type { ExecutionRecordEntry, ExecutionSource } from '@/lib/tools/review/core/types';
 
-const URL_RE = /https?:\/\/[^\s"'`<>()\[\]{}\\|]+/gi;
+// Exclude markdown glue (`*`, fullwidth parens) so `**https://…**（搜索` does not
+// swallow `**` / `（` into the match — same class of bug as fixBoldWrappedUrls.
+const URL_RE = /https?:\/\/[^\s"'`<>()\[\]{}\\|*\uFF08\uFF09]+/gi;
 
-/** Drop trailing punctuation that markdown/prose glues onto a URL. */
+/** Drop trailing punctuation / markdown markers that prose glues onto a URL. */
 export function trimUrlTail(raw: string): string {
-  return String(raw || '').replace(/[.,;:!?)\]}'"”』」]+$/, '');
+  let out = String(raw || '');
+  // Stacked glue is common: `url**)` / `url**（` / `url),`
+  let prev = '';
+  while (out !== prev) {
+    prev = out;
+    out = out.replace(/[.,;:!?)\]}'"*_+”』」）】》›»]+$/u, '');
+  }
+  return out;
 }
 
 /** Host + path identity so tracking params / anchors don't cause false mismatches. */

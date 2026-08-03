@@ -6,7 +6,7 @@ import { normalizeAsciiArtMarkdown } from '@/lib/markdown/core/ascii-art';
 import { normalizeMermaidMarkdown } from '@/lib/markdown/core/mermaid';
 import { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
 import { hasUnclosedDisplayMath } from './detect';
-import { escapeCurrencyDollars, fixFlankingEmphasis } from './emphasis';
+import { escapeCurrencyDollars, fixBoldWrappedUrls, fixFlankingEmphasis } from './emphasis';
 import { liftQuotedMathBlocks, normalizeMathDelimiters } from './normalize';
 
 export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
@@ -14,6 +14,7 @@ export function prepareChatMarkdown(content: string, opts?: { streaming?: boolea
   out = liftQuotedMathBlocks(out);
   // Flanking first (while `$` is still raw), then escape currency for remark-math.
   out = fixFlankingEmphasis(out);
+  out = fixBoldWrappedUrls(out);
   out = escapeCurrencyDollars(out);
   // Before remark parses: inline diagram code loses newlines (CommonMark), and
   // language-less Mermaid fences cannot reach the Mermaid renderer.

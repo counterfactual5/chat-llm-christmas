@@ -13,6 +13,6 @@ export {
   looksLikeTruncatedMath,
 } from './detect';
 export { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
-export { fixFlankingEmphasis, escapeCurrencyDollars } from './emphasis';
+export { fixFlankingEmphasis, fixBoldWrappedUrls, escapeCurrencyDollars } from './emphasis';
 export { prepareChatMarkdown, compactQuoteMath } from './prepare';
 export { texFromKatexElement, markdownFromDomSelection } from './katex-dom';

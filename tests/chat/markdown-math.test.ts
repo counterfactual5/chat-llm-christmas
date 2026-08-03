@@ -5,6 +5,7 @@ import {
   escapeCurrencyDollars,
   escapeIncompleteBlockMath,
   escapeIncompleteInlineMath,
+  fixBoldWrappedUrls,
   fixFlankingEmphasis,
   hasUnclosedDisplayMath,
   liftQuotedMathBlocks,
@@ -12,6 +13,9 @@ import {
   normalizeMathDelimiters,
   prepareChatMarkdown,
 } from '@/lib/markdown/math';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkGfm from 'remark-gfm';
 
 describe('normalizeMathDelimiters', () => {
   it('converts \\[...\\] and \\(...\\) into $$ / $', () => {
@@ -101,6 +105,39 @@ describe('fixFlankingEmphasis', () => {
 
   it('moves a leading currency symbol before the opening **', () => {
     expect(fixFlankingEmphasis('约**$2,160**')).toBe('约$**2,160**');
+  });
+});
+
+describe('fixBoldWrappedUrls', () => {
+  it('rewrites **https://…** into an explicit bold markdown link', () => {
+    expect(fixBoldWrappedUrls('**https://t.me/DeJob_official**')).toBe(
+      '**[https://t.me/DeJob_official](https://t.me/DeJob_official)**',
+    );
+  });
+
+  it('keeps a bold link when the closer is flush against CJK punctuation', () => {
+    const input = `| 链接 |
+| --- |
+| **https://t.me/DeJob_official**（搜索 DeJob） |
+`;
+    const prepared = prepareChatMarkdown(input);
+    expect(prepared).toContain(
+      '**[https://t.me/DeJob_official](https://t.me/DeJob_official)**',
+    );
+    const tree: any = unified().use(remarkParse).use(remarkGfm).parse(prepared);
+    const cell = tree.children.find((c: any) => c.type === 'table').children[1].children[0];
+    expect(cell.children[0].type).toBe('strong');
+    expect(cell.children[0].children[0].type).toBe('link');
+    expect(cell.children[0].children[0].url).toBe('https://t.me/DeJob_official');
+    // Orphan literal ** must not remain.
+    expect(cell.children.some((n: any) => n.type === 'text' && n.value.includes('**'))).toBe(
+      false,
+    );
+  });
+
+  it('leaves fenced code untouched', () => {
+    const code = '```md\n**https://example.com**\n```';
+    expect(fixBoldWrappedUrls(code)).toBe(code);
   });
 });
 

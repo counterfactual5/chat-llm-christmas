@@ -30,6 +30,20 @@ export function fixFlankingEmphasis(content: string): string {
 }
 
 /**
+ * GFM autolink + `**https://…**` fight when the closer is flush against
+ * punctuation (`**url**(搜索` / `**url**（搜索`). Autolink swallows the trailing
+ * `**` into the href and leaves a leading orphan `**` — common in table cells.
+ * Rewrite to an explicit bold markdown link before remark parses.
+ */
+export function fixBoldWrappedUrls(content: string): string {
+  return mapOutsideFences(String(content || ''), (segment) =>
+    segment
+      .replace(/\*\*(https?:\/\/[^\s*<>\]]+)\*\*/gi, (_full, url: string) => `**[${url}](${url})**`)
+      .replace(/__(https?:\/\/[^\s_<>\]]+)__/gi, (_full, url: string) => `**[${url}](${url})**`),
+  );
+}
+
+/**
  * `$64,000` … `$64,400` is parsed as one giant inline-math span by remark-math,
  * which eats markdown (`**bold**` → KaTeX ∗) between the prices. Escape $-before-
  * digits (currency) outside fences / $$ blocks. Real math still uses `$x$` / `$$`.

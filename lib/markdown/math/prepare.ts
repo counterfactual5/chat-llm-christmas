@@ -10,7 +10,10 @@ import { hasUnclosedDisplayMath } from './detect';
 import { escapeCurrencyDollars, fixBoldWrappedUrls, fixFlankingEmphasis } from './emphasis';
 import { liftQuotedMathBlocks, normalizeMathDelimiters } from './normalize';
 
-export function prepareChatMarkdown(content: string, opts?: { streaming?: boolean }): string {
+export function prepareChatMarkdown(
+  content: string,
+  opts?: { streaming?: boolean; reflowBlocks?: boolean },
+): string {
   let out = normalizeMathDelimiters(String(content || ''));
   out = liftQuotedMathBlocks(out);
   // Flanking first (while `$` is still raw), then escape currency for remark-math.
@@ -23,7 +26,11 @@ export function prepareChatMarkdown(content: string, opts?: { streaming?: boolea
   out = normalizeMermaidMarkdown(out);
   // GLM often collapses block markdown (headings/lists/hrs/tables) into one
   // paragraph — restore line breaks so remark can parse structure.
-  out = reflowCollapsedMarkdownBlocks(out);
+  // Thought/CoT skips this: English verifier prose is easily shredded, and
+  // smashed answer tables belong in the reply bubble, not reasoning.
+  if (opts?.reflowBlocks !== false) {
+    out = reflowCollapsedMarkdownBlocks(out);
+  }
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
   // rest of the message into one giant math/“quote-looking” block (even after

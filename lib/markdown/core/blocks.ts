@@ -9,11 +9,11 @@ import { reflowCollapsedMarkdownTables } from '@/lib/markdown/core/tables';
 const FENCE_SPLIT = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
 /**
- * Characters that usually end a prose run before a new block.
- * Include CJK punctuation so `了，##` / `台 |` still break.
+ * End-of-prose markers before a new block.
+ * Deliberately excludes A-Za-z0-9 — Latin letters as break points shred English
+ * Thought/CoT (`Daddy. 3.` is fine via `.`, but `e - list` is not).
  */
-const BREAK_BEFORE =
-  String.raw`。，、！？；：…\u4e00-\u9fffA-Za-z0-9\)）\]】」》"'”’`;
+const BREAK_BEFORE = String.raw`。，、！？；：…\u4e00-\u9fff\)）\]】」》"'”’`;
 
 function reflowOutsideFences(
   markdown: string,
@@ -22,7 +22,6 @@ function reflowOutsideFences(
   const parts = String(markdown || '').split(FENCE_SPLIT);
   return parts
     .map((part, i) => {
-      // Odd indices are fence matches when the split pattern has a capturing group.
       if (i % 2 === 1) return part;
       return transform(part);
     })
@@ -47,10 +46,14 @@ function reflowHeadingsListsHrs(chunk: string): string {
   );
   out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
 
-  // Table starts after prose: `关停的平台 | 平台 | 状态 |`
+  // Table after prose — only when this line has no prior `|` (otherwise we
+  // split inside a cell that contains `）` / CJK, e.g. title jammed into col1).
   out = out.replace(
-    new RegExp(String.raw`([${BREAK_BEFORE}.!?])\s+(\|(?:[^|\n]+\|){2,})`, 'g'),
-    '$1\n\n$2',
+    new RegExp(
+      String.raw`(^|\n)([^|\n]*[${BREAK_BEFORE}.!?])\s+(\|(?:[^|\n]+\|){2,})`,
+      'g',
+    ),
+    '$1$2\n\n$3',
   );
 
   // Unordered lists: `运营 - 状态：` / `） - 网址`
@@ -64,6 +67,8 @@ function reflowHeadingsListsHrs(chunk: string): string {
     new RegExp(String.raw`([${BREAK_BEFORE}.!?])\s+(\d{1,2}\.\s+\S)`, 'g'),
     '$1\n$2',
   );
+  // After a Latin token when the item itself starts with CJK (`Telegram 2. 加入`)
+  out = out.replace(/([A-Za-z0-9])\s+(\d{1,2}\.\s+[\u4e00-\u9fff])/g, '$1\n$2');
 
   // Closed emphasis then a new block: `**建议** ##` / `**了。** 1. 加入`
   out = out.replace(
@@ -71,8 +76,13 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '$1\n\n',
   );
 
-  // Table row ended, prose resumes: `| 挂售 | **我的建议**` (not `| |` row gap)
-  out = out.replace(/((?:\|[^|\n]*){2,}\|)\s+(?=[^|\s\n])/g, '$1\n\n');
+  // Table row ended, prose resumes — ONLY when the next token is clearly a new
+  // block (`**`, heading, list). A bare `(?=[^|])` falsely splits the last
+  // cell (`| 已售 | 已被 GoDaddy 挂售 |` → breaks before `已被`).
+  out = out.replace(
+    /((?:\|[^|\n]*){2,}\|)\s+(?=(?:\*\*|#{1,6}\s|-\s+\S|\d{1,2}\.\s+\S))/g,
+    '$1\n\n',
+  );
 
   return out;
 }

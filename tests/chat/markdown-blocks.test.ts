@@ -70,4 +70,22 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/\*\*\s*\n\n1\. 加入 DeJob/);
     expect(out).toMatch(/\n2\. 加入群/);
   });
+
+  it('keeps the last table cell intact (no false split before CJK cell text)', () => {
+    const smashed =
+      '⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 | 说明 | |------|------|------| | 登链社区主站 (dengchain.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 | | Dework (dework.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 |';
+    const out = reflowCollapsedMarkdownBlocks(smashed);
+    expect(out).toMatch(/^⚠️ 已经失效\/关停的平台（不要浪费时间）\n\n\| 平台 \|/);
+    expect(out).toContain('| 登链社区主站 (dengchain.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 |');
+    expect(out).toContain('| Dework (dework.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 |');
+    expect(out).not.toMatch(/域名已售卖 \|\n\n已被/);
+  });
+
+  it('does not split inside a table row when the first cell has CJK punctuation', () => {
+    const smashed =
+      '| ⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 | |------|------|------| | 登链 | ❌ | 售 |';
+    const out = reflowCollapsedMarkdownBlocks(smashed);
+    expect(out).toContain('| ⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 |');
+    expect(out).not.toMatch(/不要浪费时间）\n\n\| 平台/);
+  });
 });

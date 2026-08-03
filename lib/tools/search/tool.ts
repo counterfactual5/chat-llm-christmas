@@ -5,6 +5,7 @@ import {
   type SearchOutcome,
 } from '@/lib/tools/search/engine';
 import { freshnessForQuery } from '@/lib/chat/context/time-context';
+import { normalizeWikiQuery } from '@/lib/tools/search/wiki-query';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 export function parseSearchQuery(rawArgs: string, fallback: string): string {
@@ -40,18 +41,43 @@ export async function runWebSearch(
   ctx: ToolRuntimeContext,
   opts?: { sources?: 'web' | 'news' | 'wiki'; lang?: 'en' | 'zh' | null },
 ): Promise<SearchOutcome> {
-  const q = String(query || '').trim().slice(0, 500);
-  const freshness = freshnessForQuery(ctx.userAsk);
   const sources = opts?.sources || 'web';
+  let q = String(query || '').trim().slice(0, 500);
+  let wikiLang = opts?.lang === 'en' || opts?.lang === 'zh' ? opts.lang : null;
+  if (sources === 'wiki') {
+    const normalized = normalizeWikiQuery(q, {
+      lang: wikiLang,
+      userAsk: ctx.userAsk,
+    });
+    q = normalized.query;
+    wikiLang = normalized.lang;
+  }
+  const freshness = freshnessForQuery(ctx.userAsk);
   const toolName =
     sources === 'news' ? 'news_search' : sources === 'wiki' ? 'wiki_search' : 'web_search';
   ctx.send({ tool: { status: 'start', name: toolName, query: q } });
-  const outcome = await webSearch(q, {
+  let outcome = await webSearch(q, {
     freshness,
     sources,
-    ...(sources === 'wiki' && opts?.lang ? { lang: opts.lang } : {}),
+    ...(sources === 'wiki' && wikiLang ? { lang: wikiLang } : {}),
     apiKey: ctx.credentials?.skillsApiKey,
   });
+  // Bilingual leftovers or wrong edition: retry the other script once.
+  if (sources === 'wiki' && !outcome.results.length) {
+    const alt = normalizeWikiQuery(String(query || '').trim(), {
+      lang: wikiLang === 'zh' ? 'en' : 'zh',
+      userAsk: ctx.userAsk,
+    });
+    if (alt.query && alt.query !== q) {
+      const retry = await webSearch(alt.query, {
+        freshness,
+        sources: 'wiki',
+        lang: alt.lang,
+        apiKey: ctx.credentials?.skillsApiKey,
+      });
+      if (retry.results.length) outcome = retry;
+    }
+  }
   ctx.send({
     tool: {
       status: 'done',
@@ -80,6 +106,7 @@ const WEB_SEARCH_SYSTEM_PROMPT = [
   'Skip search for stable knowledge you already know well: definitions, “belongs to which field”, classic formulas, textbook accounting/finance/math, settled history.',
   'Do search (without waiting for an explicit search request) when a good answer needs live or post-training facts: news, prices, product versions, “最新/最近/现在怎么样”, people/companies/events that change, docs that may have been updated, or anything you are unsure may be outdated.',
   'Pass sources=news for headlines/breaking news; sources=wiki for encyclopedia/entity verification; otherwise omit or use web.',
+  'For sources=wiki, pass a single-language entity name (e.g. 比特币 or Bitcoin — not both) and prefer lang=zh|en matching the user.',
   'There is NO /news or /wiki slash command. Never tell the user to run /news or /wiki — you call web_search yourself.',
   'If the user explicitly asks to search/look up, call web_search.',
   'After web_search, if you need full article/docs text from a result URL, call web_read on that URL (do not rely on snippets alone for deep details).',

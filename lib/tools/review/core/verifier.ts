@@ -290,9 +290,8 @@ export async function runFullClaimAudit(
   let lensFindings: LensFinding[] = [];
 
   // `forceLlm: true` always spends. For phase=requested, `forceLlm: false`
-  // throttles non-focus turns (local checks only) even though the plan would
-  // otherwise always deep-pass. For auto-review (phase=audit), `forceLlm: false`
-  // means "don't force" — the plan still decides.
+  // throttles (local checks only) even though the plan would deep-pass.
+  // Auto-review (phase=audit) never spends LLM — plan.llm is false there.
   const spendLlm =
     Boolean(complete) &&
     (options?.forceLlm === true ||

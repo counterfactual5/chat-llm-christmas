@@ -76,12 +76,20 @@ export function activeIntegrationsPrompt(opts: {
   if (set.has('drive')) {
     lines.push('- Drive MCP: ON');
   }
-  lines.push(
-    '- paper_search: command-only — use slash /papers (not a mid-reply Tools toggle)',
-  );
-  lines.push(
-    '- book_search: command-only — use slash /books (not a mid-reply Tools toggle)',
-  );
+  if (set.has('paper_search')) {
+    lines.push('- paper_search: ON (opt-in Tools toggle)');
+  } else {
+    lines.push(
+      '- paper_search: OFF — available via slash /papers OR enable Paper Search in Tools; do NOT call /papers unavailable',
+    );
+  }
+  if (set.has('book_search')) {
+    lines.push('- book_search: ON (opt-in Tools toggle)');
+  } else {
+    lines.push(
+      '- book_search: OFF — available via slash /books OR enable Book Search in Tools; do NOT call /books unavailable',
+    );
+  }
   if (set.has('generate_image')) {
     lines.push('- generate_image: ON (opt-in Tools toggle)');
   } else {

@@ -87,14 +87,11 @@ export async function resolveAuthorizedIntegrations(opts: {
   if (requestedIntegrations.includes('zhipu-vision') && isBoundAccount && boundUserKey) {
     authorizedIntegrations.push('zhipu-vision');
   }
-  // Optional built-in (Generate Image): bound account only.
-  // Paper/Book stay command-only (/papers|/books) — not mid-reply tools.
-  if (
-    requestedIntegrations.includes('generate_image') &&
-    isBoundAccount &&
-    boundUserKey
-  ) {
-    authorizedIntegrations.push('generate_image');
+  // Optional built-ins (Paper / Book / Generate Image): bound account only.
+  for (const id of ['paper_search', 'book_search', 'generate_image'] as const) {
+    if (requestedIntegrations.includes(id) && isBoundAccount && boundUserKey) {
+      authorizedIntegrations.push(id);
+    }
   }
 
   const googleRequestedButUnauthorized =

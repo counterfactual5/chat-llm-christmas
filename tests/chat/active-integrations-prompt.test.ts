@@ -13,26 +13,27 @@ describe('activeIntegrationsPrompt', () => {
     expect(text).toContain('generic web tools are fallback only');
   });
 
-  it('reports paper/book as command-only and image toggle OFF by default', () => {
+  it('reports opt-in paper/book/image tools as OFF by default', () => {
     const text = activeIntegrationsPrompt({
       searchEnabled: true,
       integrations: [],
     });
-    expect(text).toContain('paper_search: command-only');
-    expect(text).toContain('book_search: command-only');
+    expect(text).toContain('paper_search: OFF');
+    expect(text).toContain('book_search: OFF');
     expect(text).toContain('generate_image: OFF');
-    expect(text).toContain('slash /papers');
-    expect(text).toContain('slash /books');
+    expect(text).toContain('slash /papers OR enable Paper Search');
+    expect(text).toContain('slash /books OR enable Book Search');
     expect(text).toContain('slash /image OR enable Generate Image');
+    expect(text).toContain('do NOT call /papers unavailable');
   });
 
-  it('reports generate_image ON when enabled; paper/book stay command-only', () => {
+  it('reports opt-in paper/book/image tools as ON when enabled', () => {
     const text = activeIntegrationsPrompt({
       searchEnabled: true,
       integrations: ['paper_search', 'book_search', 'generate_image'],
     });
-    expect(text).toContain('paper_search: command-only');
-    expect(text).toContain('book_search: command-only');
+    expect(text).toContain('paper_search: ON');
+    expect(text).toContain('book_search: ON');
     expect(text).toContain('generate_image: ON');
   });
 

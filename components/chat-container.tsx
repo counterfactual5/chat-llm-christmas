@@ -522,20 +522,24 @@ export default function ChatContainer() {
       prev.map((s) => (s.id === activeSessionId ? { ...s, autoReview: v } : s)),
     );
   };
-  // Opt-in model tool (default OFF) — slash /image always works.
-  // /papers and /books are command-only (no mid-reply Tools toggle).
+  // Opt-in model tools (default OFF) — slash /papers|/books|/image always work.
+  const paperSearchEnabled = activeMcpIds.includes('paper_search');
+  const bookSearchEnabled = activeMcpIds.includes('book_search');
   const generateImageEnabled = activeMcpIds.includes('generate_image');
-  const setGenerateImageEnabled = (enabled: boolean) => {
+  const setOptionalBuiltinTool = (
+    id: 'paper_search' | 'book_search' | 'generate_image',
+    enabled: boolean,
+  ) => {
     if (enabled && !isAccountBound) {
       openLoginModal();
       return;
     }
     setActiveMcpIds((prev) =>
       enabled
-        ? prev.includes('generate_image')
+        ? prev.includes(id)
           ? prev
-          : [...prev, 'generate_image']
-        : prev.filter((x) => x !== 'generate_image'),
+          : [...prev, id]
+        : prev.filter((x) => x !== id),
     );
   };
   const webSources = activeSession?.webSources || [];
@@ -2232,8 +2236,12 @@ export default function ChatContainer() {
         onOpenMemoriesModal={openMemoriesModal}
         onOpenLoginModal={openLoginModal}
         onSetAutoReview={setActiveAutoReview}
+        paperSearchEnabled={paperSearchEnabled}
+        bookSearchEnabled={bookSearchEnabled}
         generateImageEnabled={generateImageEnabled}
-        onSetGenerateImage={setGenerateImageEnabled}
+        onSetPaperSearch={(v) => setOptionalBuiltinTool('paper_search', v)}
+        onSetBookSearch={(v) => setOptionalBuiltinTool('book_search', v)}
+        onSetGenerateImage={(v) => setOptionalBuiltinTool('generate_image', v)}
         onDisconnectAccount={disconnectAccount}
       />
 
@@ -2389,8 +2397,12 @@ export default function ChatContainer() {
                 isAssistantError={isAssistantError}
                 activeAutoReview={activeAutoReview}
                 setActiveAutoReview={setActiveAutoReview}
+                paperSearchEnabled={paperSearchEnabled}
+                bookSearchEnabled={bookSearchEnabled}
                 generateImageEnabled={generateImageEnabled}
-                setGenerateImageEnabled={setGenerateImageEnabled}
+                setPaperSearchEnabled={(v) => setOptionalBuiltinTool('paper_search', v)}
+                setBookSearchEnabled={(v) => setOptionalBuiltinTool('book_search', v)}
+                setGenerateImageEnabled={(v) => setOptionalBuiltinTool('generate_image', v)}
                 modelSupportsVision={Boolean(selectedSpec?.vision)}
                 notionStatus={notionStatus}
                 githubStatus={githubStatus}

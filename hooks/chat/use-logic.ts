@@ -698,12 +698,6 @@ export function useChatLogic(props: UseChatLogicProps) {
     const literatureCmd = parseLiteratureCommand(textToSend);
     if (literatureCmd) {
       if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
-      if (typeof window !== 'undefined' && !sessionStorage.getItem('tip:literature-tools')) {
-        sessionStorage.setItem('tip:literature-tools', '1');
-        setAttachError(
-          'Tip: enable Papers/Books under Tools to let the model call them mid-chat (slash commands still work anytime).',
-        );
-      }
       if (literatureCmd.action === 'download') {
         return runBookDownload(literatureCmd.identifier, {
           sessionId,

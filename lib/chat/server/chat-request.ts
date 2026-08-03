@@ -994,17 +994,26 @@ export async function handleChatRequest(req: NextRequest) {
             enableThinking: thinking,
             reasoningAsContent,
             idleMs: STREAM_IDLE_TIMEOUT_MS,
-            maxTotalMs: TOOLS_HARD_CAP_MS,
+            maxTotalMs: STREAM_MAX_TOTAL_MS,
+            resolveMaxTotalMs: passBudgetMs,
             maxRounds:
               authorizedIntegrations.length > 0
                 ? MAX_TOOL_ROUNDS_INTEGRATIONS
                 : MAX_TOOL_ROUNDS,
+            cursorModel,
+            searchEnabled,
+            autoReview,
+            authorizedIntegrations,
+            skillCreatorOn,
+            autoReviewTurnBoundary,
             userAsk,
+            enabledTools,
             toolCtx,
             send,
-            encoder,
-            controller,
-            detectPendingToolSurfaces,
+            closeStreamDone: () => {
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            },
             runProactiveSearch,
             postAudit,
             streamReviewCorrection,

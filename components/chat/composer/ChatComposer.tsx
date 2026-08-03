@@ -140,11 +140,7 @@ export type ChatComposerProps = {
   isAssistantError: (m?: Message) => boolean;
   activeAutoReview: boolean;
   setActiveAutoReview: (enabled: boolean) => void;
-  paperSearchEnabled: boolean;
-  bookSearchEnabled: boolean;
   generateImageEnabled: boolean;
-  setPaperSearchEnabled: (enabled: boolean) => void;
-  setBookSearchEnabled: (enabled: boolean) => void;
   setGenerateImageEnabled: (enabled: boolean) => void;
   modelSupportsVision: boolean;
   notionStatus: ComposerIntegrationStatus;
@@ -243,11 +239,7 @@ export function ChatComposer(props: ChatComposerProps) {
     isAssistantError,
     activeAutoReview,
     setActiveAutoReview,
-    paperSearchEnabled,
-    bookSearchEnabled,
     generateImageEnabled,
-    setPaperSearchEnabled,
-    setBookSearchEnabled,
     setGenerateImageEnabled,
     modelSupportsVision,
     notionStatus,
@@ -971,40 +963,6 @@ export function ChatComposer(props: ChatComposerProps) {
                               checked={generateImageEnabled}
                               onCheckedChange={setGenerateImageEnabled}
                               aria-label={t('generateImageTool')}
-                            />
-                          </div>
-<div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                            <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('paperSearchTool')}
-                              </div>
-                              <div className="truncate text-[10px] text-stone-400">
-                                {t('paperSearchToolHint')}
-                              </div>
-                            </div>
-                            <Switch
-                              size="sm"
-                              checked={paperSearchEnabled}
-                              onCheckedChange={setPaperSearchEnabled}
-                              aria-label={t('paperSearchTool')}
-                            />
-                          </div>
-<div className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                            <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm text-stone-800 dark:text-stone-100">
-                                {t('bookSearchTool')}
-                              </div>
-                              <div className="truncate text-[10px] text-stone-400">
-                                {t('bookSearchToolHint')}
-                              </div>
-                            </div>
-                            <Switch
-                              size="sm"
-                              checked={bookSearchEnabled}
-                              onCheckedChange={setBookSearchEnabled}
-                              aria-label={t('bookSearchTool')}
                             />
                           </div>
                           

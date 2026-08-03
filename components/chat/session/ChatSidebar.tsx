@@ -89,11 +89,7 @@ export type ChatSidebarProps = {
   onOpenMemoriesModal: () => void;
   onOpenLoginModal: () => void;
   onSetAutoReview: (enabled: boolean) => void;
-  paperSearchEnabled: boolean;
-  bookSearchEnabled: boolean;
   generateImageEnabled: boolean;
-  onSetPaperSearch: (enabled: boolean) => void;
-  onSetBookSearch: (enabled: boolean) => void;
   onSetGenerateImage: (enabled: boolean) => void;
   onDisconnectAccount: () => void | Promise<void>;
 };
@@ -134,11 +130,7 @@ export function ChatSidebar({
   onOpenMemoriesModal,
   onOpenLoginModal,
   onSetAutoReview,
-  paperSearchEnabled,
-  bookSearchEnabled,
   generateImageEnabled,
-  onSetPaperSearch,
-  onSetBookSearch,
   onSetGenerateImage,
   onDisconnectAccount,
 }: ChatSidebarProps) {
@@ -668,40 +660,6 @@ export function ChatSidebar({
                           checked={generateImageEnabled}
                           onCheckedChange={onSetGenerateImage}
                           aria-label={t('generateImageTool')}
-                        />
-                      </div>
-<div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
-                        <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                            {t('paperSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] text-stone-400">
-                            {t('paperSearchToolHint')}
-                          </div>
-                        </div>
-                        <Switch
-                          size="sm"
-                          checked={paperSearchEnabled}
-                          onCheckedChange={onSetPaperSearch}
-                          aria-label={t('paperSearchTool')}
-                        />
-                      </div>
-<div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
-                        <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
-                            {t('bookSearchTool')}
-                          </div>
-                          <div className="truncate text-[10px] text-stone-400">
-                            {t('bookSearchToolHint')}
-                          </div>
-                        </div>
-                        <Switch
-                          size="sm"
-                          checked={bookSearchEnabled}
-                          onCheckedChange={onSetBookSearch}
-                          aria-label={t('bookSearchTool')}
                         />
                       </div>
                       

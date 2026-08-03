@@ -1,14 +1,11 @@
 /**
- * Optional built-in chat tools (Paper / Book / Generate Image).
+ * Optional built-in chat tools (Generate Image).
  * Default OFF — enabled per conversation via session.mcpIds.
- * Slash commands (/papers|/books|/image) stay available either way.
+ * Slash `/image` stays available either way.
+ * Paper/Book are command-only (`/papers` `/books`) — not mid-reply tools.
  */
 
-export const OPTIONAL_BUILTIN_TOOL_IDS = [
-  'paper_search',
-  'book_search',
-  'generate_image',
-] as const;
+export const OPTIONAL_BUILTIN_TOOL_IDS = ['generate_image'] as const;
 
 export type OptionalBuiltinToolId = (typeof OPTIONAL_BUILTIN_TOOL_IDS)[number];
 

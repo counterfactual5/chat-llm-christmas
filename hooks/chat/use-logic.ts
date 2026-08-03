@@ -9,6 +9,7 @@
  *  Stream errors:   lib/chat/turn/stream-error.ts
  *  Image gen:       lib/chat/turn/image-generation.ts
  *  Literature:      lib/chat/turn/literature-command.ts, literature-search.ts
+ *  Source search:   lib/chat/turn/source-search-command.ts, source-search.ts
  *  Account:         hooks/chat/use-account.ts
  *  Integrations:    hooks/chat/use-integrations.ts
  *  Persist:         hooks/chat/use-session-persist.ts
@@ -19,6 +20,7 @@ import type { Message, ChatSession } from '@/lib/chat/types';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
 import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
+import { parseSourceSearchCommand } from '@/lib/chat/turn/source-search-command';
 import { parseSkillCommand } from '@/lib/chat/turn/skill-command';
 import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { useLocale } from '@/lib/i18n';
@@ -76,6 +78,12 @@ import {
   requestBookDownload,
   requestLiteratureSearch,
 } from '@/lib/chat/turn/literature-search';
+import {
+  buildSourceSearchThread,
+  formatSourceSearchMarkdown,
+  requestSourceSearch,
+  sourceSearchToolRun,
+} from '@/lib/chat/turn/source-search';
 import {
   bookDownloadToolRun,
   buildBookDownloadThread,
@@ -668,6 +676,109 @@ export function useChatLogic(props: UseChatLogicProps) {
     return true;
   };
 
+  const runSourceSearch = async (
+    kind: 'news' | 'wiki',
+    query: string,
+    opts?: {
+      baseMessages?: Message[];
+      skipDuplicateUser?: boolean;
+      sessionId?: string;
+      alreadyLoading?: boolean;
+      lang?: 'en' | 'zh';
+    },
+  ): Promise<boolean> => {
+    const trimmed = query.trim();
+    if (!trimmed) return false;
+    if (!isAccountBound) {
+      openLoginModal();
+      return false;
+    }
+    const sessionId = opts?.sessionId || activeSessionId;
+    if (isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+
+    stickToBottomRef.current = true;
+    if (sessionId === activeSessionId) scrollToBottom(true);
+    setIsSkillPickerOpen(false);
+    if (sessionId === activeSessionId) setInput('');
+    if (!opts?.alreadyLoading) beginLoading(sessionId);
+
+    const sessionMessages =
+      opts?.baseMessages ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
+      [];
+    const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
+    const { thread, assistantId, toolRunId, newTitle } = buildSourceSearchThread({
+      kind,
+      query: trimmed,
+      cleanedBase,
+      skipDuplicateUser: opts?.skipDuplicateUser,
+      currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
+      lang: opts?.lang,
+    });
+    updateSession(sessionId, thread, newTitle);
+
+    try {
+      const outcome = await requestSourceSearch(kind, trimmed, { lang: opts?.lang });
+      if (outcome.error && !outcome.results.length) throw new Error(outcome.error);
+      const content = formatSourceSearchMarkdown(kind, outcome, trimmed);
+      const doneRun = sourceSearchToolRun(
+        kind,
+        outcome.query,
+        outcome.provider,
+        outcome.results,
+      );
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content,
+              incomplete: false,
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? {
+                      ...r,
+                      status: 'done' as const,
+                      provider: doneRun.provider,
+                      results: doneRun.results,
+                    }
+                  : r,
+              ),
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Source search failed';
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content: `Error: ${message}`,
+              incomplete: false,
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? { ...r, status: 'done' as const, error: message }
+                  : r,
+              ),
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } finally {
+      endLoading(sessionId);
+    }
+    return true;
+  };
+
   const handleSubmit = async (
     overrideInput?: string,
     baseMessagesOverride?: Message[],
@@ -716,6 +827,17 @@ export function useChatLogic(props: UseChatLogicProps) {
           literatureCmd.kind === 'papers' && 'paperId' in literatureCmd
             ? literatureCmd.paperId
             : undefined,
+      });
+    }
+
+    const sourceCmd = parseSourceSearchCommand(textToSend);
+    if (sourceCmd) {
+      if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+      return runSourceSearch(sourceCmd.kind, sourceCmd.query, {
+        sessionId,
+        alreadyLoading: opts?.alreadyLoading,
+        baseMessages: baseMessagesOverride,
+        lang: sourceCmd.lang,
       });
     }
 
@@ -1071,6 +1193,17 @@ export function useChatLogic(props: UseChatLogicProps) {
       return;
     }
 
+    const sourceCmd = parseSourceSearchCommand(lastUser.content);
+    if (sourceCmd) {
+      await runSourceSearch(sourceCmd.kind, sourceCmd.query, {
+        baseMessages: prior,
+        skipDuplicateUser: true,
+        sessionId,
+        lang: sourceCmd.lang,
+      });
+      return;
+    }
+
     stickToBottomRef.current = true;
     scrollToBottom(true);
     beginLoading(sessionId);
@@ -1207,6 +1340,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     runCompact,
     generateImage,
     runLiteratureSearch,
+    runSourceSearch,
     runBookDownload,
     handleSubmit,
     resumeIncompleteReply,

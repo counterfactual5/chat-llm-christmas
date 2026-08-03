@@ -89,7 +89,9 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const provider = String(run.provider || '');
   const providerHasPaper = /openalex|arxiv|semantic|literature|\bs2\b/i.test(provider);
   const providerHasWeb =
-    /zhipu|tavily|brave|serper|duckduckgo|wikipedia|google_news|google-news/i.test(provider);
+    /zhipu|tavily|brave|serper|parallel|duckduckgo|wikipedia|google_news|google-news/i.test(
+      provider,
+    );
   // Research search tools are emitted as web_search; lane is encoded in provider.
   const isResearchMixedSearch =
     run.name === 'web_search' && providerHasPaper && providerHasWeb;

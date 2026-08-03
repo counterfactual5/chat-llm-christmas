@@ -2,7 +2,7 @@
 const RESEARCH_CMD_RE = /^(?:\/research|\/研究)\s+([\s\S]+)$/i;
 
 export type ResearchModeHint = 'quick' | 'standard' | 'rigorous';
-export type ResearchSourcesHint = 'web' | 'literature' | 'mixed';
+export type ResearchSourcesHint = 'web' | 'literature' | 'news' | 'wiki' | 'mixed';
 
 /** Optional leading mode keyword, e.g. `/research quick <query>` or `/research 深度 <query>`. */
 const MODE_ALIASES: Record<string, ResearchModeHint> = {
@@ -29,6 +29,12 @@ const SOURCE_ALIASES: Record<string, ResearchSourcesHint> = {
   books: 'literature',
   学术: 'literature',
   文献: 'literature',
+  news: 'news',
+  新闻: 'news',
+  wiki: 'wiki',
+  wikipedia: 'wiki',
+  百科: 'wiki',
+  维基: 'wiki',
   mixed: 'mixed',
   all: 'mixed',
   混合: 'mixed',

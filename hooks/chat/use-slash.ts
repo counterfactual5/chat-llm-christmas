@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Composer slash-menu: `/image`, `/research`, `/papers`, `/books`, `/review`, `/skill`.
+ * Composer slash-menu: `/image`, `/research`, `/news`, `/wiki`, `/papers`, `/books`, `/review`, `/skill`.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -11,7 +11,7 @@ import { SKILL_CREATOR_ID, skillSlashName } from '@/lib/skills/creator';
 import type { SlashMenuItem } from '@/components/chat/composer/ChatComposer';
 
 const MODE_TOKENS = new Set(['quick', 'standard', 'rigorous']);
-const SOURCE_TOKENS = new Set(['web', 'literature', 'mixed']);
+const SOURCE_TOKENS = new Set(['web', 'literature', 'news', 'wiki', 'mixed']);
 
 export function useChatSlash(opts: {
   input: string;
@@ -122,6 +122,18 @@ export function useChatSlash(opts: {
             hintKey: 'researchSourceLiteratureHint' as MessageKey,
           },
           {
+            id: 'research-source-news',
+            token: 'news',
+            titleKey: 'researchSourceNews' as MessageKey,
+            hintKey: 'researchSourceNewsHint' as MessageKey,
+          },
+          {
+            id: 'research-source-wiki',
+            token: 'wiki',
+            titleKey: 'researchSourceWiki' as MessageKey,
+            hintKey: 'researchSourceWikiHint' as MessageKey,
+          },
+          {
             id: 'research-source-mixed',
             token: 'mixed',
             titleKey: 'researchSourceMixed' as MessageKey,
@@ -170,6 +182,35 @@ export function useChatSlash(opts: {
         title: t('deepResearchCommand'),
         insert: '/research ',
         hint: t('deepResearchCommandHint'),
+      });
+    }
+    const newsPrefix =
+      slashQuery === '' ||
+      ('news'.startsWith(slashQuery) && slashQuery !== 'news') ||
+      ('新闻'.startsWith(slashQuery) && slashQuery !== '新闻') ||
+      ('资讯'.startsWith(slashQuery) && slashQuery !== '资讯');
+    if (newsPrefix) {
+      items.push({
+        kind: 'command',
+        id: 'news',
+        title: t('newsCommand'),
+        insert: '/news ',
+        hint: t('newsCommandHint'),
+      });
+    }
+    const wikiPrefix =
+      slashQuery === '' ||
+      ('wiki'.startsWith(slashQuery) && slashQuery !== 'wiki') ||
+      ('wikipedia'.startsWith(slashQuery) && slashQuery !== 'wikipedia') ||
+      ('百科'.startsWith(slashQuery) && slashQuery !== '百科') ||
+      ('维基'.startsWith(slashQuery) && slashQuery !== '维基');
+    if (wikiPrefix) {
+      items.push({
+        kind: 'command',
+        id: 'wiki',
+        title: t('wikiCommand'),
+        insert: '/wiki ',
+        hint: t('wikiCommandHint'),
       });
     }
     const papersPrefix =

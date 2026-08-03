@@ -16,16 +16,30 @@ export async function POST(req: NextRequest) {
     if (!query) {
       return Response.json({ error: 'Missing query' }, { status: 400 });
     }
-    const upstream = await fetch(chatBackendToolsURL('web_search'), {
+    const sourcesRaw = String(body?.sources || body?.source || 'web')
+      .trim()
+      .toLowerCase();
+    const sources =
+      sourcesRaw === 'news' || sourcesRaw === 'wiki' || sourcesRaw === 'wikipedia'
+        ? sourcesRaw === 'wikipedia'
+          ? 'wiki'
+          : sourcesRaw
+        : 'web';
+    const toolPath =
+      sources === 'news' ? 'news_search' : sources === 'wiki' ? 'wiki_search' : 'web_search';
+    const payload: Record<string, unknown> = {
+      query,
+      freshness: body?.freshness ?? null,
+    };
+    if (toolPath === 'web_search') payload.sources = 'web';
+    if (toolPath === 'wiki_search' && body?.lang) payload.lang = body.lang;
+    const upstream = await fetch(chatBackendToolsURL(toolPath), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({
-        query,
-        freshness: body?.freshness ?? null,
-      }),
+      body: JSON.stringify(payload),
       cache: 'no-store',
       signal: AbortSignal.timeout(35_000),
     });

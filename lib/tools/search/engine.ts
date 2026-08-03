@@ -1,6 +1,7 @@
 /**
  * Multi-provider web search — thin client to chat-api `/v1/tools/web_search`.
- * Engines (Zhipu → Tavily → … → Wiki) live on the product backend.
+ * Engines (Zhipu → Tavily → Brave → Parallel → … → DDG) live on the product backend.
+ * Use `sources: 'news'|'wiki'` for dedicated paths.
  */
 
 import { chatBackendToolsURL } from '@/lib/chat-backend';
@@ -38,6 +39,7 @@ export async function webSearch(
   }
 
   const freshness = options.freshness ?? null;
+  const sources = options.sources ?? 'web';
   try {
     const res = await fetch(chatBackendToolsURL('web_search'), {
       method: 'POST',
@@ -45,7 +47,7 @@ export async function webSearch(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ query: q, freshness }),
+      body: JSON.stringify({ query: q, freshness, sources }),
       cache: 'no-store',
       signal: options.signal ?? AbortSignal.timeout(35_000),
     });
@@ -88,7 +90,7 @@ export const WEB_SEARCH_TOOL = {
   function: {
     name: 'web_search',
     description:
-      'Live web search. Call when the answer needs current or uncertain facts (news, prices, recent events, changing docs) — even if the user did not say “search”. Do NOT call for stable textbook knowledge you already know (definitions, which field a concept belongs to, classic formulas). Do not narrate a fake search. For time-sensitive queries only, add a calendar anchor from the latest message timestamp (e.g. 2026-07); never bolt a year onto timeless questions.',
+      'Live web search. Call when the answer needs current or uncertain facts (news, prices, recent events, changing docs) — even if the user did not say “search”. Do NOT call for stable textbook knowledge you already know (definitions, which field a concept belongs to, classic formulas). For headlines/breaking news prefer sources=news; for encyclopedia/entity verification prefer sources=wiki. Do not narrate a fake search. For time-sensitive queries only, add a calendar anchor from the latest message timestamp (e.g. 2026-07); never bolt a year onto timeless questions.',
     parameters: {
       type: 'object',
       properties: {
@@ -96,6 +98,12 @@ export const WEB_SEARCH_TOOL = {
           type: 'string',
           description:
             'Full search query. Include year/month/ISO date ONLY when the user means recent/latest/this week — not for timeless definitions.',
+        },
+        sources: {
+          type: 'string',
+          enum: ['web', 'news', 'wiki'],
+          description:
+            'Search path. Default web. Use news for headlines/current events; wiki for encyclopedia/entity lookup.',
         },
       },
       required: ['query'],

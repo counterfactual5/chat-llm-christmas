@@ -73,6 +73,7 @@ import {
 } from '@/lib/chat/turn/research-command';
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
+import { parseSourceSearchCommand } from '@/lib/chat/turn/source-search-command';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   clearOAuthReturnQuery,
@@ -1395,6 +1396,7 @@ export default function ChatContainer() {
     cancelEditMessage,
     saveEditedMessage,
     runLiteratureSearch,
+    runSourceSearch,
     runBookDownload,
     stopGenerating,
     handleSubmit,
@@ -1754,6 +1756,28 @@ export default function ChatContainer() {
         return;
       }
 
+      const sourceCmd = parseSourceSearchCommand(content);
+      if (sourceCmd) {
+        if (isActiveLoading || deepResearch.busy) {
+          stopOrCancel();
+        }
+        const sessionMsgs =
+          sessionsRef.current.find((s) => s.id === activeSessionId)?.messages ||
+          messages;
+        const index = sessionMsgs.findIndex((m) => m.id === messageId);
+        if (index < 0) return;
+        const priorMessages = sessionMsgs.slice(0, index);
+        setEditingMessageId(null);
+        setEditingMessageContent('');
+        setEditingMessageAttachments([]);
+        await runSourceSearch(sourceCmd.kind, sourceCmd.query, {
+          sessionId: activeSessionId,
+          baseMessages: priorMessages,
+          lang: sourceCmd.lang,
+        });
+        return;
+      }
+
       await saveEditedMessage(messageId);
     },
     [
@@ -1767,6 +1791,7 @@ export default function ChatContainer() {
       saveEditedMessage,
       requestClaimReview,
       runLiteratureSearch,
+      runSourceSearch,
       runBookDownload,
       setSessions,
       setEditingMessageId,

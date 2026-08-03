@@ -19,7 +19,9 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('手动添加');
     expect(text).toContain('create_file');
     expect(text).toContain('/research [quick|standard|rigorous]');
-    expect(text).toContain('web|literature|mixed');
+    expect(text).toContain('web|literature|news|wiki|mixed');
+    expect(text).toContain('/news');
+    expect(text).toContain('/wiki');
     expect(text).toContain('image_understand');
     expect(text).toContain('Notion');
     expect(text).toContain('OPT-IN Tools toggles');
@@ -43,7 +45,8 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('no first-class finance');
     expect(text).toContain('image_understand');
     expect(text).toContain('/skill not /skills');
-    expect(text).toContain('prefer /papers or /books for dedicated literature');
+    expect(text).toContain('prefer /papers or /books for literature search/download');
+    expect(text).toContain('/news <query>');
     expect(text).toContain('Never upgrade inactive library blurbs');
   });
 });

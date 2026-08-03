@@ -24,6 +24,8 @@ export type SearchOutcome = {
 export type WebSearchOptions = {
   /** Prefer recent documents when the query is time-sensitive. */
   freshness?: Freshness | null;
+  /** Search path: web (default), news, or wiki. */
+  sources?: 'web' | 'news' | 'wiki' | null;
 };
 
 export const MAX_RESULTS = 8;

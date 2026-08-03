@@ -184,7 +184,7 @@ export type ChatComposerProps = {
 
 export function ChatComposer(props: ChatComposerProps) {
   const { t } = useLocale();
-  const [builtinsExpanded, setBuiltinsExpanded] = useState(false);
+  const [builtinsExpanded, setBuiltinsExpanded] = useState(true);
   const {
     activeQueue,
     queueExpanded,
@@ -285,7 +285,13 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <>
       {/* Floating Input Area */}
-      <div className="min-w-0 shrink-0 overflow-x-hidden px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
+      {/*
+        Avoid overflow-x-hidden on shells that contain the + menu: flyouts are
+        position:absolute and grow upward/right; overflow-x:hidden forces
+        overflow-y clipping and hides Tools rows (empty-looking Built-in panel).
+        Message-list overflow-x-hidden already stops page horizontal scroll.
+      */}
+      <div className="min-w-0 shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
   <div className="relative mx-auto w-full min-w-0 max-w-[960px] px-1 md:px-4">
     <ComposerQueuePanel
       activeQueue={activeQueue}

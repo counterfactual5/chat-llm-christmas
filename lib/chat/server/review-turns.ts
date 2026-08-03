@@ -7,13 +7,12 @@
 import type { ChatReviewContext, ChatReviewToolRun } from '@/lib/chat/server/request';
 import {
   buildExecutionRecordFromToolRuns,
-  buildFindingsResponsePrompt,
-  buildReviewIssuesResponsePrompt,
+  buildManualReviewResponsePrompt,
   buildReviewReport,
   emitReviewReport,
   runFullClaimAudit,
   synthesizeFindings,
-  FINDINGS_RESPONSE_SYSTEM,
+  MANUAL_REVIEW_RESPONSE_SYSTEM,
   type LlmCompleteFn,
   type ReviewFinding,
   type ReviewIssue,
@@ -111,21 +110,25 @@ export async function auditReviewTurns(opts: {
   return { findings, issues };
 }
 
-/** Build the system+user prompt for the dedicated (tools-off) review answer. */
+/** Build the system+user prompt for the dedicated (tools-off) manual review answer. */
 export function buildReviewAnswerMessages(opts: {
   findings: ReviewFinding[];
   issues: ReviewIssue[];
   priorText: string;
   turns: ReviewTurn[];
+  userAsk?: string;
 }): Array<{ role: string; content: string }> {
   const fallbackText = opts.priorText || opts.turns.map((t) => t.assistantText).join('\n\n');
   return [
-    { role: 'system', content: FINDINGS_RESPONSE_SYSTEM },
+    { role: 'system', content: MANUAL_REVIEW_RESPONSE_SYSTEM },
     {
       role: 'user',
-      content: opts.issues.length
-        ? buildReviewIssuesResponsePrompt(opts.issues, fallbackText)
-        : buildFindingsResponsePrompt(opts.findings, fallbackText),
+      content: buildManualReviewResponsePrompt({
+        issues: opts.issues,
+        findings: opts.findings,
+        assistantText: fallbackText,
+        userAsk: opts.userAsk,
+      }),
     },
   ];
 }

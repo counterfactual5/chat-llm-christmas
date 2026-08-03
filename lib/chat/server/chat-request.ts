@@ -165,6 +165,8 @@ export async function handleChatRequest(req: NextRequest) {
       notionVaultUpdate,
       googleVaultUpdate,
       googleRequestedButUnauthorized,
+      notionRequestedButUnauthorized,
+      githubRequestedButUnauthorized,
     } = await resolveAuthorizedIntegrations({
       req,
       integrations,
@@ -247,6 +249,8 @@ export async function handleChatRequest(req: NextRequest) {
       searchEnabled,
       authorizedIntegrations,
       googleRequestedButUnauthorized,
+      notionRequestedButUnauthorized,
+      githubRequestedButUnauthorized,
       toolsGuidance,
       skills,
       memories,
@@ -667,6 +671,7 @@ export async function handleChatRequest(req: NextRequest) {
               issues: reviewIssues,
               priorText,
               turns,
+              userAsk,
             });
             let sawText = false;
             const { lastFinishReason } = await runPlainCompletionStream({
@@ -709,7 +714,7 @@ export async function handleChatRequest(req: NextRequest) {
             }
             send({
               content: `\n\nError: ${err?.message || 'Claim review failed.'}`,
-              ...streamCompletionPayload('error'),
+              ...streamCompletionPayload('error', { code: 'upstream_error' }),
             });
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             controller.close();
@@ -1085,7 +1090,7 @@ export async function handleChatRequest(req: NextRequest) {
             send({
               content:
                 'Error: The model returned an empty reply. Please try again, or switch to another model.',
-              ...streamCompletionPayload('error'),
+              ...streamCompletionPayload('error', { code: 'upstream_error' }),
             });
           } else {
             send(streamCompletionPayload(finalResult.lastFinishReason || 'stop'));
@@ -1107,7 +1112,7 @@ export async function handleChatRequest(req: NextRequest) {
           try {
             send({
               content: `\n\nError: ${err?.message || 'Upstream model request failed.'}`,
-              ...streamCompletionPayload('error'),
+              ...streamCompletionPayload('error', { code: 'upstream_error' }),
             });
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             controller.close();
@@ -1126,6 +1131,12 @@ export async function handleChatRequest(req: NextRequest) {
       'X-Enabled-Integrations': authorizedIntegrations.join(',') || 'none',
       ...(googleRequestedButUnauthorized
         ? { 'X-Google-Auth': 'requested-but-unauthorized' }
+        : {}),
+      ...(notionRequestedButUnauthorized
+        ? { 'X-Notion-Auth': 'requested-but-unauthorized' }
+        : {}),
+      ...(githubRequestedButUnauthorized
+        ? { 'X-GitHub-Auth': 'requested-but-unauthorized' }
         : {}),
     };
 

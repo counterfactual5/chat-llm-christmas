@@ -628,3 +628,95 @@ export const FINDINGS_RESPONSE_SYSTEM = [
   'Be concise and honest. Prefer “未在检索摘要中核实 / 请谨慎采信” for unverifiable blurbs; use “全文摘录中未见” only when evidence was a full page read.',
   'Do not call tools. Do not invent URLs or tool payloads.',
 ].join(' ');
+
+/**
+ * Manual `/review` / Request review — fuller structured report.
+ * Auto-review keeps FINDINGS_RESPONSE_SYSTEM (short delta).
+ */
+export const MANUAL_REVIEW_RESPONSE_SYSTEM = [
+  'You are writing a manual Request Review report for Christmas Chat (user ran /review or Request review).',
+  'The prior assistant answer and the Review panel are already on screen — do not reprint the whole prior answer.',
+  'Unlike Auto-review (short delta only), THIS reply must be a thorough structured Markdown report.',
+  'Prefer this outline (adapt section titles to the user’s language; use Chinese if they wrote in Chinese):',
+  '## 结论 — overall trustworthiness in 2–4 sentences',
+  '## 引用与来源 — list problematic URLs/claims; distinguish unverifiable (search blurb only) vs unsupported (full page read)',
+  '## 时效性 — cutoff times, “latest/currently” claims vs retrieval timestamps; answer any user focus about time',
+  '## 工具回执 — actions claimed without receipts (if any)',
+  '## 其它问题 — arithmetic, consistency, completeness, etc. (omit empty sections)',
+  '## 采信建议 — what to keep, what to verify externally, what to ignore',
+  'Be specific and concrete. Use bullets or tables when listing many links.',
+  'Do not invent URLs, receipts, or tool results. Do not call tools. Do not claim you deleted on-screen text.',
+].join('\n');
+
+/** Pull optional focus text from buildClaimReviewUserPrompt payloads. */
+export function extractManualReviewFocus(userAsk: string): string {
+  const raw = String(userAsk || '');
+  const marker = 'Additional review focus from the user (prioritize these concerns):';
+  const idx = raw.indexOf(marker);
+  if (idx < 0) return '';
+  return raw.slice(idx + marker.length).trim();
+}
+
+export function buildManualReviewResponsePrompt(opts: {
+  issues: ReviewIssue[];
+  findings: ReviewFinding[];
+  assistantText?: string;
+  userAsk?: string;
+}): string {
+  const issues = opts.issues || [];
+  const findings = opts.findings || [];
+  const focus = extractManualReviewFocus(opts.userAsk || '') || '';
+  const issueList = issues
+    .map(
+      (issue, i) =>
+        `${i + 1}. [${issue.severity}/${issue.kind}] ${issue.title}\n   ${issue.detail}`,
+    )
+    .join('\n');
+  const findingList = findings
+    .map(
+      (f, i) =>
+        `${i + 1}. [${f.severity}/${f.verdict}/${f.surface}] claim: ${f.claim}\n   evidence: ${f.evidence}`,
+    )
+    .join('\n');
+  const excerpt = String(opts.assistantText || '').trim();
+  const excerptBlock =
+    excerpt.length <= 3500
+      ? excerpt
+      : `${excerpt.slice(0, 1600)}\n\n[…middle omitted…]\n\n${excerpt.slice(-1600)}`;
+
+  if (!issues.length && !findings.length) {
+    return [
+      'Manual claim review found no material issues against tool receipts.',
+      focus ? `User focus to address explicitly:\n${focus}` : '',
+      'Write a structured short report: 结论 + 采信建议 confirming the prior answer is consistent with receipts.',
+      'Do not invent tool actions. Do not call tools.',
+      excerptBlock ? `\n## Prior answer excerpt\n${excerptBlock}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  return [
+    'Manual Request Review — write the structured report described in the system prompt.',
+    'Cover every material issue below; do not collapse everything into one short paragraph.',
+    focus
+      ? [
+          '',
+          '## User focus (must answer explicitly)',
+          focus,
+          'If the focus is about timeliness/cutoff, compare claimed “now/latest” language against retrieval times and the message timestamps in context.',
+        ].join('\n')
+      : '',
+    issues.length ? `\n## Review issues\n${issueList}` : '',
+    findings.length ? `\n## Tool-claim findings\n${findingList}` : '',
+    excerptBlock ? `\n## Prior answer excerpt (context only — do not reprint in full)\n${excerptBlock}` : '',
+    '',
+    'Hard rules:',
+    '- Structured Markdown with the outline sections (skip empty ones).',
+    '- Prefer “未在检索摘要中核实” for unverifiable blurbs; “全文摘录中未见” only for full-page evidence.',
+    '- Do not invent replacement sources or claim the article body was read when only a search blurb existed.',
+    '- Do not call tools.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}

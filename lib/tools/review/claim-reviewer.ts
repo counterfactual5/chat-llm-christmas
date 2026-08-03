@@ -95,5 +95,8 @@ export {
   collectReviewIssues,
   buildFindingsResponsePrompt,
   buildReviewIssuesResponsePrompt,
+  buildManualReviewResponsePrompt,
+  extractManualReviewFocus,
   FINDINGS_RESPONSE_SYSTEM,
+  MANUAL_REVIEW_RESPONSE_SYSTEM,
 } from '@/lib/tools/review/core/verifier';

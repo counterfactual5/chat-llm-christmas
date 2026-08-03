@@ -4,17 +4,15 @@ const claimReviewerMocks = vi.hoisted(() => ({
   buildExecutionRecordFromToolRuns: vi.fn((toolRuns: any[]) =>
     (toolRuns || []).map((r) => ({ tool: r?.name })),
   ),
-  buildFindingsResponsePrompt: vi.fn(
-    (findings: any[], text?: string) => `findings:${findings.length}:${text}`,
-  ),
-  buildReviewIssuesResponsePrompt: vi.fn(
-    (issues: any[], text?: string) => `issues:${issues.length}:${text}`,
+  buildManualReviewResponsePrompt: vi.fn(
+    (opts: { issues?: any[]; findings?: any[]; assistantText?: string; userAsk?: string }) =>
+      `manual:${opts.issues?.length || 0}:${opts.findings?.length || 0}:${opts.assistantText || ''}:${opts.userAsk || ''}`,
   ),
   buildReviewReport: vi.fn((input: any) => ({ phase: input.phase, status: 'done', checks: [] })),
   emitReviewReport: vi.fn(),
   runFullClaimAudit: vi.fn(),
   synthesizeFindings: vi.fn((_text?: string) => [] as Array<{ severity: string }>),
-  FINDINGS_RESPONSE_SYSTEM: 'FINDINGS_RESPONSE_SYSTEM',
+  MANUAL_REVIEW_RESPONSE_SYSTEM: 'MANUAL_REVIEW_RESPONSE_SYSTEM',
 }));
 
 vi.mock('@/lib/tools/review/claim-reviewer', () => claimReviewerMocks);
@@ -74,21 +72,26 @@ describe('collectReviewTurns', () => {
 });
 
 describe('buildReviewAnswerMessages', () => {
-  it('uses the issues prompt (and prior text) when issues were found', () => {
+  it('uses the manual review prompt with prior text and userAsk', () => {
     const messages = buildReviewAnswerMessages({
       findings: [{ id: 'f1' } as any],
       issues: [{ kind: 'citation' } as any],
       priorText: 'the prior answer',
       turns: [{ messageId: 'm1', assistantText: 'turn text' }],
+      userAsk: 'Claim Review…\nAdditional review focus from the user (prioritize these concerns):\n时效性',
     });
 
     expect(messages).toEqual([
-      { role: 'system', content: 'FINDINGS_RESPONSE_SYSTEM' },
-      { role: 'user', content: 'issues:1:the prior answer' },
+      { role: 'system', content: 'MANUAL_REVIEW_RESPONSE_SYSTEM' },
+      {
+        role: 'user',
+        content:
+          'manual:1:1:the prior answer:Claim Review…\nAdditional review focus from the user (prioritize these concerns):\n时效性',
+      },
     ]);
   });
 
-  it('falls back to the findings prompt using joined turn text when priorText is empty', () => {
+  it('falls back to joined turn text when priorText is empty', () => {
     const messages = buildReviewAnswerMessages({
       findings: [{ id: 'f1' } as any],
       issues: [],
@@ -101,7 +104,7 @@ describe('buildReviewAnswerMessages', () => {
 
     expect(messages[1]).toEqual({
       role: 'user',
-      content: 'findings:1:turn one\n\nturn two',
+      content: 'manual:0:1:turn one\n\nturn two:',
     });
   });
 });

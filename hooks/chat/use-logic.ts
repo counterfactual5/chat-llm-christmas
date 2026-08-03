@@ -80,12 +80,8 @@ import {
 } from '@/lib/chat/turn/literature-search';
 import {
   buildSourceSearchThread,
-  formatSourceSearchMarkdown,
-  requestSourceSearch,
-  buildSourceSearchPolishPrompt,
-  sanitizeSourceSearchPolish,
-  sourceSearchToolRun,
 } from '@/lib/chat/turn/source-search';
+import { formatSourceSearchCommand } from '@/lib/chat/turn/source-search-command';
 import {
   bookDownloadToolRun,
   buildBookDownloadThread,
@@ -114,6 +110,8 @@ export type UseChatLogicProps = {
       enableSearch?: boolean;
       integrations?: string[];
       autoReview?: boolean;
+      sourceLane?: 'news' | 'wiki' | null;
+      sourceLaneLang?: 'en' | 'zh' | null;
     },
   ) => Promise<string | void>;
   
@@ -714,162 +712,50 @@ export function useChatLogic(props: UseChatLogicProps) {
       sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
       [];
     const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
-    const { thread, assistantId, toolRunId, newTitle } = buildSourceSearchThread({
+    // Visible slash stays in the thread. Server injects a real web_search
+    // (sources=news|wiki) tool receipt, then the model answers from it.
+    const { thread, assistantId, newTitle } = buildSourceSearchThread({
       kind,
       query: trimmed,
       cleanedBase,
       skipDuplicateUser: opts?.skipDuplicateUser,
       currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
       lang: opts?.lang,
+      withClientToolPlaceholder: false,
     });
     updateSession(sessionId, thread, newTitle);
 
     const controller = new AbortController();
     abortControllersRef.current.set(sessionId, controller);
 
+    const apiMessages: ReturnType<typeof toApiMessages> = [
+      ...toApiMessages(cleanedBase, { vision: selectedSpec.vision }),
+      {
+        role: 'user' as const,
+        content: formatSourceSearchCommand(kind, trimmed, { lang: opts?.lang }),
+        images: [],
+        timestamp: Date.now(),
+      },
+    ];
+
     try {
-      const outcome = await requestSourceSearch(kind, trimmed, { lang: opts?.lang });
-      const doneRun = sourceSearchToolRun(
-        kind,
-        outcome.query,
-        outcome.provider,
-        outcome.results,
-      );
-      const fallbackContent = formatSourceSearchMarkdown(kind, outcome, trimmed);
-
-      // Always put a human-readable list in the bubble first — never the tool JSON
-      // envelope. Weak models often echo that JSON when asked to "polish".
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== sessionId) return s;
-          return {
-            ...s,
-            messages: mapAssistantById(s.messages, assistantId, (m) => ({
-              ...m,
-              content: fallbackContent,
-              incomplete: !outcome.results.length ? false : true,
-              toolRuns: (m.toolRuns || []).map((r) =>
-                r.id === toolRunId
-                  ? {
-                      ...r,
-                      status: 'done' as const,
-                      provider: doneRun.provider,
-                      results: doneRun.results,
-                      ...(outcome.error && !outcome.results.length
-                        ? { error: outcome.error }
-                        : {}),
-                    }
-                  : r,
-              ),
-            })),
-            updatedAt: Date.now(),
-          };
-        }),
-      );
-
-      // Soft empty tip — no LLM pass.
-      if (!outcome.results.length) {
-        return true;
-      }
-
-      const apiMessages: ReturnType<typeof toApiMessages> = [
-        ...toApiMessages(cleanedBase, { vision: selectedSpec.vision }),
+      await streamChatResponse(
+        sessionId,
+        apiMessages,
+        assistantId,
+        controller.signal,
+        '',
+        '',
+        undefined,
+        false,
         {
-          role: 'user' as const,
-          content: buildSourceSearchPolishPrompt(kind, trimmed, outcome),
-          images: [],
-          timestamp: Date.now(),
+          enableSearch: true,
+          sourceLane: kind,
+          ...(opts?.lang ? { sourceLaneLang: opts.lang } : {}),
         },
-      ];
-
-      try {
-        // Clear the list while streaming the briefing so we do not append onto it.
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== sessionId) return s;
-            return {
-              ...s,
-              messages: mapAssistantById(s.messages, assistantId, (m) => ({
-                ...m,
-                content: '',
-                incomplete: true,
-              })),
-              updatedAt: Date.now(),
-            };
-          }),
-        );
-
-        const rawPolished = String(
-          (await streamChatResponse(
-            sessionId,
-            apiMessages,
-            assistantId,
-            controller.signal,
-            '',
-            '',
-            undefined,
-            false,
-            { enableSearch: false, integrations: [], autoReview: false },
-          )) || '',
-        );
-        const polished = sanitizeSourceSearchPolish(rawPolished);
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== sessionId) return s;
-            return {
-              ...s,
-              messages: mapAssistantById(s.messages, assistantId, (m) => ({
-                ...m,
-                // Prefer model briefing; if it dumped JSON/HTML, keep the readable list.
-                content: polished || fallbackContent,
-                incomplete: false,
-              })),
-              updatedAt: Date.now(),
-            };
-          }),
-        );
-      } catch (error: unknown) {
-        if (controller.signal.aborted) {
-          failAssistantStream(sessionId, assistantId, error, 'Stopped by you');
-          return true;
-        }
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== sessionId) return s;
-            return {
-              ...s,
-              messages: mapAssistantById(s.messages, assistantId, (m) => ({
-                ...m,
-                content: fallbackContent,
-                incomplete: false,
-              })),
-              updatedAt: Date.now(),
-            };
-          }),
-        );
-      }
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : 'Source search failed';
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== sessionId) return s;
-          return {
-            ...s,
-            messages: mapAssistantById(s.messages, assistantId, (m) => ({
-              ...m,
-              content: `Error: ${message}`,
-              incomplete: false,
-              toolRuns: (m.toolRuns || []).map((r) =>
-                r.id === toolRunId
-                  ? { ...r, status: 'done' as const, error: message }
-                  : r,
-              ),
-            })),
-            updatedAt: Date.now(),
-          };
-        }),
       );
+    } catch (error: unknown) {
+      failAssistantStream(sessionId, assistantId, error, 'Stopped by you');
     } finally {
       endLoadingIfController(sessionId, controller);
     }

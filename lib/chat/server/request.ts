@@ -60,6 +60,13 @@ export type ChatRequestBody = {
   requestReview: boolean;
   reviewContext: ChatReviewContext | null;
   /**
+   * Slash `/news` / `/wiki`: server runs that search lane as a real tool call,
+   * then the model answers from the receipt (normal tool loop — not client polish).
+   */
+  sourceLane: 'news' | 'wiki' | null;
+  /** Optional Wikipedia language for `/wiki zh|en …`. */
+  sourceLaneLang: 'en' | 'zh' | null;
+  /**
    * Optional map of attached-doc extracts (fileId → text) so file_read still
    * works after history collapse strips full bodies from older turns.
    */
@@ -100,6 +107,11 @@ export function parseChatRequestBody(raw: unknown): ChatRequestBody {
       }
     }
   }
+  const rawLane = String(body.sourceLane || '').trim().toLowerCase();
+  const sourceLane = rawLane === 'news' || rawLane === 'wiki' ? rawLane : null;
+  const rawLang = String(body.sourceLaneLang || '').trim().toLowerCase();
+  const sourceLaneLang = rawLang === 'en' || rawLang === 'zh' ? rawLang : null;
+
   return {
     // Preserve missing/non-array messages so the route can return the same 400 as before.
     messages: body.messages,
@@ -121,6 +133,8 @@ export function parseChatRequestBody(raw: unknown): ChatRequestBody {
       body.reviewContext && typeof body.reviewContext === 'object'
         ? (body.reviewContext as ChatReviewContext)
         : null,
+    sourceLane,
+    sourceLaneLang,
     fileExtracts,
   };
 }

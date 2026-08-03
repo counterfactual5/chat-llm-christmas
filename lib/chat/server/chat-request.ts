@@ -21,6 +21,8 @@ import {
 } from '@/lib/tools';
 import { hasPersistedImageTranscription, imageRefsFromMessageImages, mergePersistedImageRefs, parseImageArchiveRefs, resolveImageUrlForVision, rewriteMessagesWithImageDescriptions, stripImageArchiveBlock, stripPersistedImageTranscription } from '@/lib/tools/image-understand';
 import { streamCompletionPayload } from '@/lib/chat/stream/truncation';
+import { parseSourceSearchCommand } from '@/lib/chat/turn/source-search-command';
+import { formatSourceSearchMarkdown } from '@/lib/chat/turn/source-search';
 import {
   upsertNotionConnection,
   upsertGoogleConnection,
@@ -117,13 +119,14 @@ export async function handleChatRequest(req: NextRequest) {
       autoReview,
       requestReview,
       reviewContext,
+      sourceLane,
+      sourceLaneLang,
       fileExtracts: requestFileExtracts,
     } = parseChatRequestBody(await req.json());
     const boundUserKey = req.cookies.get('llm_chat_api_key')?.value || '';
     const isBoundAccount = Boolean(boundUserKey);
     const requestedModel = String(model || '').trim();
     const threadId = String(conversationId || '').trim();
-    const searchEnabled = enableSearch !== false;
 
     if (!isBoundAccount) {
       const freeModels = await fetchFreeModelNames();
@@ -154,6 +157,13 @@ export async function handleChatRequest(req: NextRequest) {
       return jsonError(messagesError, 400);
     }
     const chatMessages = messages as any[];
+    // `/news` / `/wiki` always need search, even if the session toggle is off.
+    const slashLane =
+      sourceLane ||
+      parseSourceSearchCommand(lastUserText(chatMessages))?.kind ||
+      null;
+    const searchEnabled =
+      enableSearch !== false || slashLane === 'news' || slashLane === 'wiki';
 
 
     const skillCreatorOn = skills.some((s) => isSkillCreatorId(String(s?.id || '')));
@@ -911,7 +921,11 @@ export async function handleChatRequest(req: NextRequest) {
           // If only reasoning arrives (no content), the client promotes it at settle.
           const reasoningAsContent = false;
 
-          const injectSearchOutcome = async (outcome: SearchOutcome) => {
+          const injectSearchOutcome = async (
+            outcome: SearchOutcome,
+            sources: 'web' | 'news' | 'wiki' = 'web',
+            lang?: 'en' | 'zh' | null,
+          ) => {
             const callId = `proactive_search_${Date.now()}`;
             workingMessages.push({
               role: 'assistant',
@@ -922,7 +936,11 @@ export async function handleChatRequest(req: NextRequest) {
                   type: 'function',
                   function: {
                     name: 'web_search',
-                    arguments: JSON.stringify({ query: outcome.query }),
+                    arguments: JSON.stringify({
+                      query: outcome.query,
+                      ...(sources !== 'web' ? { sources } : {}),
+                      ...(sources === 'wiki' && lang ? { lang } : {}),
+                    }),
                   },
                 },
               ],
@@ -935,9 +953,21 @@ export async function handleChatRequest(req: NextRequest) {
             usedTools = true;
           };
 
-          const runProactiveSearch = async (): Promise<boolean> => {
-            let outcome = await runWebSearch(enrichSearchQuery(userAsk.slice(0, 240)), toolCtx);
-            if (!outcome.results.length && /加密|币|项目|融资|最近|最新/.test(userAsk)) {
+          const runProactiveSearch = async (
+            sources: 'web' | 'news' | 'wiki' = 'web',
+            queryOverride?: string,
+            lang?: 'en' | 'zh' | null,
+          ): Promise<boolean> => {
+            const seed = String(queryOverride || userAsk).trim().slice(0, 240);
+            let outcome = await runWebSearch(enrichSearchQuery(seed), toolCtx, {
+              sources,
+              ...(sources === 'wiki' && lang ? { lang } : {}),
+            });
+            if (
+              sources === 'web' &&
+              !outcome.results.length &&
+              /加密|币|项目|融资|最近|最新/.test(userAsk)
+            ) {
               outcome = await runWebSearch(
                 englishRecencyQuery(
                   'cryptocurrency crypto funding rounds startups',
@@ -948,28 +978,58 @@ export async function handleChatRequest(req: NextRequest) {
               );
             }
             if (!outcome.results.length) {
+              const laneKind = sources === 'news' || sources === 'wiki' ? sources : null;
               const detail = outcome.error || 'All search providers failed';
               send({
-                content: [
-                  '联网搜索没有返回可用结果，所以我不能编造项目名单或假装查到了资料。',
-                  '',
-                  `查询：${outcome.query || userAsk}`,
-                  `原因：${detail}`,
-                ].join('\n'),
+                content: laneKind
+                  ? formatSourceSearchMarkdown(
+                      laneKind,
+                      outcome,
+                      queryOverride || userAsk,
+                    )
+                  : [
+                      '联网搜索没有返回可用结果，所以我不能编造项目名单或假装查到了资料。',
+                      '',
+                      `查询：${outcome.query || userAsk}`,
+                      `原因：${detail}`,
+                    ].join('\n'),
                 ...streamCompletionPayload('stop'),
               });
               controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               controller.close();
               return false;
             }
-            await injectSearchOutcome(outcome);
+            await injectSearchOutcome(outcome, sources, lang);
             return true;
           };
 
-          if (cursorProactiveSearch) {
+          // Slash `/news` / `/wiki`: inject that lane as a real tool receipt, then
+          // let the model write from it (standard tool loop — not client polish).
+          const laneCmd = parseSourceSearchCommand(userAsk);
+          const lane =
+            sourceLane === 'news' || sourceLane === 'wiki'
+              ? sourceLane
+              : laneCmd?.kind || null;
+          if (lane) {
+            const laneQuery = laneCmd?.query || userAsk;
+            const wikiLang =
+              lane === 'wiki'
+                ? sourceLaneLang || laneCmd?.lang || null
+                : null;
+            if (!(await runProactiveSearch(lane, laneQuery, wikiLang))) return;
+            workingMessages.push({
+              role: 'user',
+              content: [
+                lane === 'news'
+                  ? 'Using the news search tool results above, write a readable Markdown news briefing for the user.'
+                  : 'Using the Wikipedia/search tool results above, write a readable Markdown answer for the user.',
+                'Cite markdown links. Do not dump raw JSON, HTML, or tool envelopes. Do not call tools unless a specific URL needs web_read.',
+              ].join(' '),
+            });
+          } else if (cursorProactiveSearch) {
             // cursor-auto often ignores OpenAI `tools` and only narrates “searching”.
             // When the ask clearly needs lookup, search server-side first.
-            if (!(await runProactiveSearch())) return;
+            if (!(await runProactiveSearch('web'))) return;
           }
 
           // Generic tool loop — stream each round so content arrives

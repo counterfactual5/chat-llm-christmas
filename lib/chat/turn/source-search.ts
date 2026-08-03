@@ -38,6 +38,11 @@ export function buildSourceSearchThread(opts: {
   skipDuplicateUser?: boolean;
   currentTitle?: string;
   lang?: 'en' | 'zh';
+  /**
+   * When false (default for the chat tool-loop path), do not invent a client
+   * tool card — the server emits the real news_search / wiki_search SSE.
+   */
+  withClientToolPlaceholder?: boolean;
   now?: () => number;
   genId?: () => string;
 }): SourceSearchThread {
@@ -47,21 +52,26 @@ export function buildSourceSearchThread(opts: {
   const assistantId = genId();
   const toolRunId = genId();
   const toolName = opts.kind === 'news' ? 'news_search' : 'wiki_search';
+  const withPlaceholder = opts.withClientToolPlaceholder === true;
   const assistantMessage: Message = {
     id: assistantId,
     role: 'assistant',
     content: '',
     timestamp: now(),
     incomplete: true,
-    toolRuns: [
-      {
-        id: toolRunId,
-        name: toolName,
-        status: 'start',
-        query: opts.query,
-      },
-    ],
-    activity: [{ id: genId(), kind: 'tool', toolRunId }],
+    ...(withPlaceholder
+      ? {
+          toolRuns: [
+            {
+              id: toolRunId,
+              name: toolName,
+              status: 'start' as const,
+              query: opts.query,
+            },
+          ],
+          activity: [{ id: genId(), kind: 'tool' as const, toolRunId }],
+        }
+      : {}),
   };
 
   let newTitle = opts.currentTitle;

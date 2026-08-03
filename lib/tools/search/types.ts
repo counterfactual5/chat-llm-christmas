@@ -26,6 +26,8 @@ export type WebSearchOptions = {
   freshness?: Freshness | null;
   /** Search path: web (default), news, or wiki. */
   sources?: 'web' | 'news' | 'wiki' | null;
+  /** Wikipedia language for sources=wiki (chat-api wiki_search). */
+  lang?: 'en' | 'zh' | null;
 };
 
 export const MAX_RESULTS = 8;

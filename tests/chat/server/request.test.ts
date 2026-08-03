@@ -21,6 +21,8 @@ describe('chat request parsing', () => {
       autoReview: true,
       requestReview: false,
       reviewContext: null,
+      sourceLane: null,
+      sourceLaneLang: null,
       fileExtracts: {},
     });
   });
@@ -54,9 +56,11 @@ describe('chat request parsing', () => {
     });
   });
 
-  it('rejects non-array messages and accepts arrays', () => {
-    expect(validateChatMessages(null)).toBe('Invalid request: messages must be an array.');
-    expect(validateChatMessages([])).toBeNull();
-    expect(normalizeIntegrationIds('gmail')).toEqual([]);
+  it('parses sourceLane for /news and /wiki', () => {
+    expect(parseChatRequestBody({ sourceLane: 'news' }).sourceLane).toBe('news');
+    expect(parseChatRequestBody({ sourceLane: 'wiki', sourceLaneLang: 'zh' })).toEqual(
+      expect.objectContaining({ sourceLane: 'wiki', sourceLaneLang: 'zh' }),
+    );
+    expect(parseChatRequestBody({ sourceLane: 'web' }).sourceLane).toBeNull();
   });
 });

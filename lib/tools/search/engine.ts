@@ -40,14 +40,23 @@ export async function webSearch(
 
   const freshness = options.freshness ?? null;
   const sources = options.sources ?? 'web';
+  const lang = options.lang === 'en' || options.lang === 'zh' ? options.lang : undefined;
+  const toolPath =
+    sources === 'news' ? 'news_search' : sources === 'wiki' ? 'wiki_search' : 'web_search';
+  const payload: Record<string, unknown> = {
+    query: q,
+    freshness,
+  };
+  if (toolPath === 'web_search') payload.sources = 'web';
+  if (toolPath === 'wiki_search' && lang) payload.lang = lang;
   try {
-    const res = await fetch(chatBackendToolsURL('web_search'), {
+    const res = await fetch(chatBackendToolsURL(toolPath), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ query: q, freshness, sources }),
+      body: JSON.stringify(payload),
       cache: 'no-store',
       signal: options.signal ?? AbortSignal.timeout(35_000),
     });

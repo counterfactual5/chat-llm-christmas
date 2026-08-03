@@ -38,7 +38,7 @@ export function parseSearchSources(
 export async function runWebSearch(
   query: string,
   ctx: ToolRuntimeContext,
-  opts?: { sources?: 'web' | 'news' | 'wiki' },
+  opts?: { sources?: 'web' | 'news' | 'wiki'; lang?: 'en' | 'zh' | null },
 ): Promise<SearchOutcome> {
   const q = String(query || '').trim().slice(0, 500);
   const freshness = freshnessForQuery(ctx.userAsk);
@@ -49,6 +49,7 @@ export async function runWebSearch(
   const outcome = await webSearch(q, {
     freshness,
     sources,
+    ...(sources === 'wiki' && opts?.lang ? { lang: opts.lang } : {}),
     apiKey: ctx.credentials?.skillsApiKey,
   });
   ctx.send({

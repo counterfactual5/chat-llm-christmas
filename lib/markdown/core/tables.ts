@@ -1,6 +1,6 @@
 /**
  * Restore GFM tables that models (esp. GLM) emit with row newlines collapsed
- * into spaces, e.g. `| a | b | | --- | --- | | 1 | 2 |`.
+ * into spaces, or with a prose title jammed onto the header line.
  */
 
 const SEP_CELL = String.raw`:?-{3,}:?`;
@@ -12,6 +12,28 @@ function pipeCount(text: string): number {
   return (String(text || '').match(/\|/g) || []).length;
 }
 
+/** Split a table row into cell texts (no leading/trailing empty from edge pipes). */
+export function splitMarkdownTableCells(line: string): string[] {
+  let s = String(line || '').trim();
+  if (!s) return [];
+  // Drop a trailing thematic-break fragment jammed after the row.
+  s = s.replace(/\s*\|\s*-{3,}\s*$/u, ' |').replace(/\s+---+\s*$/u, '');
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map((c) => c.trim());
+}
+
+function formatMarkdownTableRow(cells: string[]): string {
+  return `| ${cells.map((c) => c.trim()).join(' | ')} |`;
+}
+
+function isSeparatorLine(line: string): boolean {
+  const t = String(line || '').trim();
+  if (!SEP_ROW.test(t)) return false;
+  // Must be mostly dashes/pipes/colons/spaces — not a data row.
+  return /^[\s|:\-]+$/.test(t) && pipeCount(t) >= 2;
+}
+
 /** True when a single line/paragraph looks like a smashed multi-row table. */
 export function looksLikeCollapsedMarkdownTable(text: string): boolean {
   const t = String(text || '').trim();
@@ -21,14 +43,171 @@ export function looksLikeCollapsedMarkdownTable(text: string): boolean {
 }
 
 /**
+ * Normalize fullwidth pipes and peel a prose title stuck on the header line
+ * when the following line is a GFM separator.
+ *
+ * Example (GFM fails when header has 4 cells and sep has 3):
+ * `⚠️ 标题 | 平台 | 状态 | 说明 |\n|------|------|------|`
+ */
+export function repairGfmTableStructure(markdown: string): string {
+  let src = String(markdown || '').replace(/\uFF5C/g, '|'); // fullwidth ｜
+  if (!src.includes('|')) return src;
+
+  const lines = src.split('\n');
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i]!;
+    const next = lines[i + 1] ?? '';
+
+    if (isSeparatorLine(next) && line.includes('|')) {
+      const peeled = peelTitleFromHeaderLine(line, next);
+      if (peeled) {
+        out.push(...peeled);
+        continue;
+      }
+    }
+
+    // Orphan data row: lost leading `|`, optional trailing `---`
+    // `**Web3.career** 中文版 | ⚠️ 不确定 | 主站还在… | ---`
+    const orphan = repairOrphanTableRow(line, out);
+    if (orphan !== null) {
+      out.push(...orphan);
+      continue;
+    }
+
+    // Trailing empty cell: `| … | |` → `| … |`
+    if (/\|[^|\n]+\|\s*\|\s*$/.test(line) && pipeCount(line) >= 4) {
+      line = line.replace(/\|\s*\|\s*$/, '|');
+    }
+
+    out.push(line);
+  }
+
+  return out.join('\n');
+}
+
+function peelTitleFromHeaderLine(
+  line: string,
+  sepLine: string,
+): string[] | null {
+  const sepCells = splitMarkdownTableCells(sepLine).filter((c) =>
+    /^:?-{3,}:?$/.test(c),
+  );
+  if (sepCells.length < 2) return null;
+
+  // `title | 平台 | 状态 | 说明 |` — title has no pipes.
+  const jammed = line.match(
+    /^(.*?)(?:\s*)(\|\s*[^|\n]+(?:\s*\|\s*[^|\n]*){1,}\|\s*)$/u,
+  );
+  if (jammed) {
+    const title = jammed[1]!.trim();
+    let header = jammed[2]!.trim();
+    if (
+      title &&
+      !title.includes('|') &&
+      !/^\s*\|/.test(title) &&
+      pipeCount(header) >= 2
+    ) {
+      const headerCells = splitMarkdownTableCells(header);
+      if (headerCells.length >= sepCells.length) {
+        // Prefer exactly sep column count from the right.
+        const cols = headerCells.slice(-sepCells.length);
+        return [title, '', formatMarkdownTableRow(cols)];
+      }
+    }
+  }
+
+  // `| ⚠️ long title | 平台 | 状态 | 说明 |` with sep shorter by one.
+  if (/^\s*\|/.test(line)) {
+    const cells = splitMarkdownTableCells(line);
+    if (
+      cells.length === sepCells.length + 1 &&
+      cells[0]!.replace(/\s+/g, '').length >= 8
+    ) {
+      return [cells[0]!.trim(), '', formatMarkdownTableRow(cells.slice(1))];
+    }
+  }
+
+  // No-space join: `时间）| 平台 | 状态 | 说明 |`
+  const noSpace = line.match(
+    /^(.*?(?:\)|）|。|！|？|…|】|」))(\|\s*[^|\n]+(?:\s*\|\s*[^|\n]*){1,}\|\s*)$/u,
+  );
+  if (noSpace) {
+    const title = noSpace[1]!.trim();
+    const header = noSpace[2]!.trim();
+    const headerCells = splitMarkdownTableCells(header);
+    if (title && !title.includes('|') && headerCells.length >= sepCells.length) {
+      return [
+        title,
+        '',
+        formatMarkdownTableRow(headerCells.slice(-sepCells.length)),
+      ];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * If the previous output ended a table and this line looks like another row
+ * without a leading pipe, restore it. Returns null when not applicable.
+ */
+function repairOrphanTableRow(
+  line: string,
+  prevLines: string[],
+): string[] | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('|') || !trimmed.includes('|')) return null;
+  if (isSeparatorLine(trimmed)) return null;
+
+  // Need a recent table context (separator or pipe row above).
+  let sawTable = false;
+  for (let j = prevLines.length - 1; j >= 0; j--) {
+    const p = prevLines[j]!.trim();
+    if (!p) continue;
+    if (isSeparatorLine(p) || /^\|/.test(p)) {
+      sawTable = true;
+      break;
+    }
+    // Hit non-table prose — stop.
+    break;
+  }
+  if (!sawTable) return null;
+
+  let working = trimmed;
+  let trailingHr = false;
+  if (/\s+---+\s*$/.test(working)) {
+    working = working.replace(/\s+---+\s*$/, '').trim();
+    trailingHr = true;
+  }
+  const cells = splitMarkdownTableCells(
+    working.startsWith('|') ? working : `| ${working}`,
+  );
+  // Need at least 2 cells to look like a row continuation.
+  if (cells.length < 2) return null;
+  // Avoid turning normal prose with a single pipe into a row.
+  if (cells.length === 2 && cells.join('').length < 12) return null;
+
+  const rows = [formatMarkdownTableRow(cells)];
+  if (trailingHr) {
+    rows.push('');
+    rows.push('---');
+    rows.push('');
+  }
+  return rows;
+}
+
+/**
  * Insert newlines between smashed table rows. Safe no-op when rows are already
  * separated or the text is not table-like.
  */
 export function reflowCollapsedMarkdownTables(markdown: string): string {
-  const src = String(markdown || '');
+  // Peel jammed titles / orphan rows first (works when sep/rows already have newlines).
+  let src = repairGfmTableStructure(String(markdown || ''));
   if (!src.includes('|') || !SEP_ROW.test(src)) return src;
 
-  return src.replace(
+  src = src.replace(
     /(^|\n)([^\n]*\|[^\n]*\|[^\n]*)(?=\n|$)/g,
     (full, lead: string, block: string) => {
       if (!looksLikeCollapsedMarkdownTable(block)) return full;
@@ -47,8 +226,11 @@ export function reflowCollapsedMarkdownTables(markdown: string): string {
           /(\|[^\n]+?\|)\s+\|(?=[^\n]*\|)/g,
           (m, left: string) => {
             if (pipeCount(left) < 2) return m;
-            // Don't split inside a separator row fragment.
-            if (new RegExp(String.raw`^\|\s*${SEP_CELL}`).test(`|${m.slice(m.indexOf('|') + 1)}`)) {
+            if (
+              new RegExp(String.raw`^\|\s*${SEP_CELL}`).test(
+                `|${m.slice(m.indexOf('|') + 1)}`,
+              )
+            ) {
               return m;
             }
             return `${left}\n|`;
@@ -60,4 +242,7 @@ export function reflowCollapsedMarkdownTables(markdown: string): string {
       return `${lead}${out}`;
     },
   );
+
+  // After splitting a one-line smash, peel titles and fix orphan rows again.
+  return repairGfmTableStructure(src);
 }

@@ -12,8 +12,9 @@ const FENCE_SPLIT = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
  * End-of-prose markers before a new block.
  * Deliberately excludes A-Za-z0-9 — Latin letters as break points shred English
  * Thought/CoT (`Daddy. 3.` is fine via `.`, but `e - list` is not).
+ * Use a normal template so `\u4e00-\u9fff` is a real CJK range (String.raw would not).
  */
-const BREAK_BEFORE = String.raw`。，、！？；：…\u4e00-\u9fff\)）\]】」》"'”’`;
+const BREAK_BEFORE = `。，、！？；：…\u4e00-\u9fff)）\\]】」》"'\u201c\u201d\u2018\u2019`;
 
 function reflowOutsideFences(
   markdown: string,
@@ -45,16 +46,6 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '$1\n\n$2',
   );
   out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
-
-  // Table after prose — only when this line has no prior `|` (otherwise we
-  // split inside a cell that contains `）` / CJK, e.g. title jammed into col1).
-  out = out.replace(
-    new RegExp(
-      String.raw`(^|\n)([^|\n]*[${BREAK_BEFORE}.!?])\s+(\|(?:[^|\n]+\|){2,})`,
-      'g',
-    ),
-    '$1$2\n\n$3',
-  );
 
   // Unordered lists: `运营 - 状态：` / `） - 网址`
   out = out.replace(
@@ -88,7 +79,9 @@ function reflowHeadingsListsHrs(chunk: string): string {
 }
 
 /**
- * Full structural repair: headings / lists / hrs / table lead-in, then smashed tables.
+ * Full structural repair: headings / lists / hrs, then GFM table repair
+ * (title peel + smashed rows). Table/prose splits belong in tables.ts so we
+ * do not shred real data rows that start with CJK (`中文版 | ⚠️ | …`).
  */
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   const src = String(markdown || '');

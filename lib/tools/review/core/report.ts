@@ -83,35 +83,16 @@ function runLocalChecks(input: ReviewInput): ReviewCheck[] {
 
 export function planReviewChecks(input: ReviewInput): ReviewPlan {
   const checks = runLocalChecks(input);
-  const localErrorIssues = checks.reduce(
-    (n, c) => n + (c.items?.filter((it) => it.severity === 'error').length || 0),
-    0,
-  );
-  const localWarnIssues = checks.reduce(
-    (n, c) => n + (c.items?.filter((it) => it.severity === 'warn').length || 0),
-    0,
-  );
   const fired = new Set(checks.map((c) => c.kind));
 
+  // Policy: spend the LLM verifier only on explicit manual /review.
+  // Auto-review (phase=audit) stays local-only — panel findings + gated
+  // short corrections from actionableReviewIssues, no second-opinion model call.
   const requested = input.phase === 'requested';
-  let reason = 'no local signal — local checks only';
-  let llm = false;
-  if (requested) {
-    llm = true;
-    reason = 'user requested review — deep pass';
-  } else if (input.findings.length) {
-    llm = true;
-    reason = `${input.findings.length} heuristic tool finding(s)`;
-  } else if (input.midTurn) {
-    llm = true;
-    reason = 'mid-turn correction fired this turn';
-  } else if (localErrorIssues) {
-    llm = true;
-    reason = `${localErrorIssues} local error(s) worth a second opinion`;
-  } else if (localWarnIssues >= 3) {
-    llm = true;
-    reason = `${localWarnIssues} local warn(s) accumulated — second opinion`;
-  }
+  let reason = requested
+    ? 'user requested review — deep pass'
+    : 'auto-review — local checks only';
+  let llm = requested;
 
   const lenses: ReviewLens[] = [];
   if (llm) {
@@ -120,12 +101,14 @@ export function planReviewChecks(input: ReviewInput): ReviewPlan {
         if (input.record.length || input.findings.length) lenses.push(lens);
         continue;
       }
-      // Deep pass considers any applicable lens; auto pass only deepens hits.
+      // Deep pass considers any applicable lens that local checks fired.
       if (!fired.has(lens)) continue;
       const check = checks.find((c) => c.kind === lens);
       if (requested || (check?.items?.length || 0) > 0) lenses.push(lens);
     }
     if (!lenses.length) {
+      // Manual review with no retrieval still gets a tool_receipt-free deep pass
+      // over the lenses that have local hits; if nothing applies, stay local.
       llm = false;
       reason = 'no lens applies — local checks only';
     }

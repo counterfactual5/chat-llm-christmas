@@ -6,7 +6,7 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `core/` | 通用 Markdown 处理：`document-fence.ts`（整篇文档代码围栏解包）、`ascii-art.ts`（Unicode/ASCII 树与框图恢复）、`mermaid.ts`（单反引号或无语言围栏 Mermaid 提升）。`breaks.tsx` 是消息 UI 用的 React `<br>` 展开——对本目录「无 React」约定的例外（理想归属是 `components/markdown/`）。 |
+| `core/` | 通用 Markdown 处理：`document-fence.ts`（整篇文档代码围栏解包）、`ascii-art.ts`（Unicode/ASCII 树与框图恢复）、`mermaid.ts`（单反引号或无语言围栏 Mermaid 提升）、`blocks.ts`（整段换行被压扁后恢复标题/列表/分隔线，并调用 `tables.ts`）、`tables.ts`（被压成一行的 GFM 表格行恢复）。`breaks.tsx` 是消息 UI 用的 React `<br>` 展开——对本目录「无 React」约定的例外（理想归属是 `components/markdown/`）。 |
 | `math/` | 数学公式：规范化、检测、流式截断保护、强调/`$` 修复、`**https://…**` 加粗链接与 GFM autolink 冲突修复、`prepareChatMarkdown`、KaTeX DOM 辅助。公共入口 `@/lib/markdown/math`（`index.ts` barrel）。 |
 
 ### 导入约定

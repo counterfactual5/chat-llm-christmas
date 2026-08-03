@@ -3,6 +3,7 @@
  * turn raw model markdown into something remark-math/KaTeX can render safely.
  */
 import { normalizeAsciiArtMarkdown } from '@/lib/markdown/core/ascii-art';
+import { reflowCollapsedMarkdownBlocks } from '@/lib/markdown/core/blocks';
 import { normalizeMermaidMarkdown } from '@/lib/markdown/core/mermaid';
 import { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
 import { hasUnclosedDisplayMath } from './detect';
@@ -20,6 +21,9 @@ export function prepareChatMarkdown(content: string, opts?: { streaming?: boolea
   // language-less Mermaid fences cannot reach the Mermaid renderer.
   out = normalizeAsciiArtMarkdown(out);
   out = normalizeMermaidMarkdown(out);
+  // GLM often collapses block markdown (headings/lists/hrs/tables) into one
+  // paragraph — restore line breaks so remark can parse structure.
+  out = reflowCollapsedMarkdownBlocks(out);
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
   // rest of the message into one giant math/“quote-looking” block (even after

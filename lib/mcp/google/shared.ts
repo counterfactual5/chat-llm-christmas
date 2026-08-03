@@ -5,9 +5,9 @@ export type GoogleService = 'gmail' | 'calendar' | 'drive';
 export const GMAIL_SYSTEM_PROMPT = [
   "You have Gmail MCP tools for the user's connected Google account.",
   'Profile; search/read messages (incl. batch get) & threads; attachments; labels CRUD; drafts; send/reply/forward; modify/batch-modify; trash/untrash.',
-  'Bulk hygiene (prefer these over paging gmail_search): gmail_batch_mark_read, gmail_batch_archive, gmail_batch_trash (query + confirm=true required), gmail_batch_star / gmail_batch_unstar, gmail_apply_label_by_query (label name or id), gmail_batch_modify_by_query, gmail_thread_mark_read / gmail_modify_thread.',
+  'Bulk hygiene (prefer these over paging gmail_search): gmail_batch_mark_read / gmail_batch_archive (explicit query required — no wide defaults), gmail_batch_trash (query + confirm=true), gmail_batch_star / gmail_batch_unstar, gmail_apply_label_by_query (label name or id), gmail_batch_modify_by_query (confirm=true required when adding TRASH), gmail_thread_mark_read / gmail_modify_thread.',
   'gmail_search returns ids[] plus messages[]. Use raw gmail_batch_modify only when you already have specific ids.',
-  'For send/reply/forward/trash/label changes, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true.',
+  'For send/reply/forward/trash/label changes, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true (including via gmail_batch_modify_by_query).',
   'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
 ].join(' ');
 
@@ -51,6 +51,25 @@ export function parseArgs(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/**
+ * Strict tool-arg parse for Google MCP execute. Incomplete/truncated JSON must not
+ * become `{}` (that would trigger wide default queries on write tools).
+ */
+export function requireObjectArgs(raw: string): Record<string, unknown> {
+  const text = String(raw ?? '').trim();
+  if (!text) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Incomplete or invalid tool arguments JSON (not executed)');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Tool arguments must be a JSON object');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function str(value: unknown): string {

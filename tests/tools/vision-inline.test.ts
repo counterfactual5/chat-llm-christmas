@@ -22,4 +22,11 @@ describe('vision inline guard', () => {
     expect(MAX_VISION_INLINE_BYTES).toBeLessThan(5 * 1024 * 1024);
     expect(MAX_VISION_INLINE_BYTES).toBeGreaterThan(500_000);
   });
+
+  it('rejects oversized images when the runtime cannot compress', async () => {
+    const bytes = new Uint8Array(MAX_VISION_INLINE_BYTES + 1);
+    await expect(fitImageBytesForVision(bytes, 'image/jpeg')).rejects.toThrow(
+      /cannot downscale|vision inline limit/i,
+    );
+  });
 });

@@ -31,6 +31,8 @@ export type BuildChatSystemPartsOpts = {
   searchEnabled: boolean;
   authorizedIntegrations: string[];
   googleRequestedButUnauthorized: boolean;
+  notionRequestedButUnauthorized?: boolean;
+  githubRequestedButUnauthorized?: boolean;
   toolsGuidance: string;
   skills: ChatSkillInput[];
   memories?: Array<{ kind?: string; content?: string }>;
@@ -80,6 +82,8 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
       searchEnabled: opts.searchEnabled,
       integrations: opts.authorizedIntegrations,
       googleRequestedButUnauthorized: opts.googleRequestedButUnauthorized,
+      notionRequestedButUnauthorized: opts.notionRequestedButUnauthorized,
+      githubRequestedButUnauthorized: opts.githubRequestedButUnauthorized,
       skillCreatorOn,
     }),
   );

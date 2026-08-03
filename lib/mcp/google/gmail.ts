@@ -382,7 +382,7 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_batch_modify_by_query',
     description:
-      'ONE-SHOT bulk label change: search with a Gmail query (paginated), then batch-modify all matching messages. Use for “mark all unread as read”, “archive everything from X”, etc. Do not manually page gmail_search first.',
+      'ONE-SHOT bulk label change: search with a Gmail query (paginated), then batch-modify all matching messages. Use for “mark all unread as read”, “archive everything from X”, etc. Do not manually page gmail_search first. When addLabelIds includes TRASH, confirm=true is required (same latch as gmail_batch_trash).',
     write: true,
     parameters: {
       type: 'object',
@@ -405,6 +405,10 @@ export const gmailToolDefs: GoogleToolDef[] = [
           type: 'integer',
           description: 'Max messages to modify (1-2000, default 500)',
         },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true when addLabelIds includes TRASH',
+        },
       },
       required: ['query'],
     },
@@ -419,6 +423,10 @@ export const gmailToolDefs: GoogleToolDef[] = [
         : [];
       if (!addLabelIds.length && !removeLabelIds.length) {
         throw new Error('addLabelIds or removeLabelIds is required');
+      }
+      const addsTrash = addLabelIds.some((id) => id.toUpperCase() === 'TRASH');
+      if (addsTrash && args.confirm !== true) {
+        throw new Error('confirm=true is required when addLabelIds includes TRASH');
       }
       const maxTotal =
         typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
@@ -435,23 +443,25 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_batch_mark_read',
     description:
-      'Mark matching messages as read (remove UNREAD). Default query is is:unread. Prefer this over looping gmail_search + gmail_batch_modify.',
+      'Mark matching messages as read (remove UNREAD). Requires an explicit Gmail query (e.g. is:unread newer_than:7d). Prefer this over looping gmail_search + gmail_batch_modify.',
     write: true,
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Gmail query (default: is:unread). Example: is:unread newer_than:7d',
+          description: 'Required Gmail query. Example: is:unread newer_than:7d',
         },
         maxTotal: {
           type: 'integer',
           description: 'Max messages (1-2000, default 500)',
         },
       },
+      required: ['query'],
     },
     run: async (token, args) => {
-      const query = str(args.query) || 'is:unread';
+      const query = str(args.query);
+      if (!query) throw new Error('query is required (refusing unbounded mark-read)');
       const maxTotal =
         typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
           ? args.maxTotal
@@ -466,23 +476,25 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_batch_archive',
     description:
-      'Archive matching messages (remove INBOX). Default query is in:inbox. Prefer this for bulk archive.',
+      'Archive matching messages (remove INBOX). Requires an explicit Gmail query (e.g. in:inbox older_than:1y). Prefer this for bulk archive.',
     write: true,
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Gmail query (default: in:inbox). Example: in:inbox older_than:1y',
+          description: 'Required Gmail query. Example: in:inbox older_than:1y',
         },
         maxTotal: {
           type: 'integer',
           description: 'Max messages (1-2000, default 500)',
         },
       },
+      required: ['query'],
     },
     run: async (token, args) => {
-      const query = str(args.query) || 'in:inbox';
+      const query = str(args.query);
+      if (!query) throw new Error('query is required (refusing unbounded archive)');
       const maxTotal =
         typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
           ? args.maxTotal

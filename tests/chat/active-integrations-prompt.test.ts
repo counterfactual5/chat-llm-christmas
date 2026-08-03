@@ -35,4 +35,17 @@ describe('activeIntegrationsPrompt', () => {
     expect(text).toContain('book_search: ON');
     expect(text).toContain('generate_image: ON');
   });
+
+  it('warns when Notion/GitHub/Google are toggled without OAuth', () => {
+    const text = activeIntegrationsPrompt({
+      searchEnabled: false,
+      integrations: [],
+      googleRequestedButUnauthorized: true,
+      notionRequestedButUnauthorized: true,
+      githubRequestedButUnauthorized: true,
+    });
+    expect(text).toMatch(/Google toggled but no usable OAuth/i);
+    expect(text).toMatch(/Notion toggled but no usable OAuth/i);
+    expect(text).toMatch(/GitHub toggled but no usable OAuth/i);
+  });
 });

@@ -34,6 +34,18 @@ export function buildToolFallbackQuery(opts: {
     .join('\n');
 }
 
+/** True when tool-call argument JSON is complete enough to execute. */
+export function toolArgumentsAreComplete(raw: string): boolean {
+  const text = String(raw ?? '').trim();
+  if (!text) return true;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Matches the structured and provider-specific failures emitted by tools. */
 export function toolResultIndicatesFailure(content: unknown): boolean {
   const payload = String(content || '');

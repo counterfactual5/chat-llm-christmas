@@ -26,6 +26,8 @@ export type AuthorizedIntegrationsResult = {
   notionVaultUpdate: NotionConnection | undefined;
   googleVaultUpdate: GoogleConnection | undefined;
   googleRequestedButUnauthorized: boolean;
+  notionRequestedButUnauthorized: boolean;
+  githubRequestedButUnauthorized: boolean;
 };
 
 export async function resolveAuthorizedIntegrations(opts: {
@@ -95,6 +97,12 @@ export async function resolveAuthorizedIntegrations(opts: {
   const googleRequestedButUnauthorized =
     wantsGoogleToken(requestedIntegrations) &&
     !enabledGoogleServices(authorizedIntegrations).length;
+  const notionRequestedButUnauthorized =
+    requestedIntegrations.includes('notion') &&
+    !authorizedIntegrations.includes('notion');
+  const githubRequestedButUnauthorized =
+    requestedIntegrations.includes('github') &&
+    !authorizedIntegrations.includes('github');
 
   return {
     requestedIntegrations,
@@ -107,5 +115,7 @@ export async function resolveAuthorizedIntegrations(opts: {
     notionVaultUpdate,
     googleVaultUpdate,
     googleRequestedButUnauthorized,
+    notionRequestedButUnauthorized,
+    githubRequestedButUnauthorized,
   };
 }

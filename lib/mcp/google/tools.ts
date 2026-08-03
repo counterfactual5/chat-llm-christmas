@@ -5,8 +5,8 @@ import { gmailToolDefs } from '@/lib/mcp/google/gmail';
 import {
   extractUiResults,
   googleToken,
-  parseArgs,
   queryHint,
+  requireObjectArgs,
   serviceSystemPrompt,
   toolService,
   type GoogleToolDef,
@@ -42,7 +42,14 @@ function makeTool(def: GoogleToolDef): ChatTool {
         };
       }
 
-      const args = parseArgs(rawArguments);
+      let args: Record<string, unknown>;
+      try {
+        args = requireObjectArgs(rawArguments);
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : 'Incomplete or invalid tool arguments JSON';
+        return { content: JSON.stringify({ ok: false, error: message }) };
+      }
       const fallback = String(fallbackQuery || ctx.userAsk || '').trim().slice(0, 200);
       const query = queryHint(def.name, args);
       const write = Boolean(def.write);

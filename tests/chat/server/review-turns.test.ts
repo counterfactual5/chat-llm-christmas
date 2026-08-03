@@ -10,6 +10,35 @@ const claimReviewerMocks = vi.hoisted(() => ({
   ),
   buildReviewReport: vi.fn((input: any) => ({ phase: input.phase, status: 'done', checks: [] })),
   emitReviewReport: vi.fn(),
+  emitReviewProcessCard: vi.fn(
+    (
+      send: (payload: Record<string, unknown>) => void,
+      opts: {
+        name: string;
+        status: 'start' | 'done';
+        query: string;
+        error?: string;
+        results?: Array<{ title: string; url: string; snippet: string }>;
+      },
+    ) => {
+      send({
+        tool: {
+          name: opts.name,
+          status: opts.status,
+          provider: 'review',
+          query: opts.query,
+          ...(opts.error ? { error: opts.error } : {}),
+          ...(opts.results ? { results: opts.results } : {}),
+        },
+      });
+    },
+  ),
+  reviewProcessErrorMessage: vi.fn((err: unknown, fallback = 'Review failed') => {
+    if (err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError') {
+      return 'Review aborted';
+    }
+    return err instanceof Error && err.message ? err.message : fallback;
+  }),
   runFullClaimAudit: vi.fn(),
   synthesizeFindings: vi.fn((_text?: string) => [] as Array<{ severity: string }>),
   MANUAL_REVIEW_RESPONSE_SYSTEM: 'MANUAL_REVIEW_RESPONSE_SYSTEM',
@@ -183,6 +212,16 @@ describe('auditReviewTurns', () => {
       { kind: 'issue-turn-clean' },
       { kind: 'issue-turn-focus' },
     ]);
+
+    // Deep-Research-style Process card per audited turn: one start + one done.
+    const toolSends = send.mock.calls.map((call) => call[0]?.tool).filter(Boolean);
+    expect(toolSends.filter((tool) => tool.name === 'claim_audit' && tool.status === 'start')).toHaveLength(
+      3,
+    );
+    expect(toolSends.filter((tool) => tool.name === 'claim_audit' && tool.status === 'done')).toHaveLength(
+      3,
+    );
+    expect(toolSends.every((tool) => tool.provider === 'review')).toBe(true);
   });
 
   it('defaults the focus turn to the last turn when no targetMessageId is given', async () => {
@@ -207,5 +246,39 @@ describe('auditReviewTurns', () => {
       (call) => call[6].forceLlm,
     );
     expect(forceLlmFlags).toEqual([false, true]);
+  });
+
+  it('closes claim_audit with error when the audit throws', async () => {
+    const abortErr = new Error('stopped');
+    abortErr.name = 'AbortError';
+    claimReviewerMocks.runFullClaimAudit.mockRejectedValue(abortErr);
+
+    const send = vi.fn();
+    await expect(
+      auditReviewTurns({
+        turns: [{ messageId: 'm1', assistantText: 'a' }],
+        auditOpts: { searchEnabled: false, integrations: [] },
+        userAsk: '',
+        send,
+        verifierComplete: vi.fn(),
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    const toolSends = send.mock.calls.map((call) => call[0]?.tool).filter(Boolean);
+    expect(toolSends).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'claim_audit',
+          status: 'start',
+          provider: 'review',
+        }),
+        expect.objectContaining({
+          name: 'claim_audit',
+          status: 'done',
+          provider: 'review',
+          error: 'Review aborted',
+        }),
+      ]),
+    );
   });
 });

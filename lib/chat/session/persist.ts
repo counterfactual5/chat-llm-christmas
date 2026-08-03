@@ -12,7 +12,7 @@ import {
   sessionsWorthPersisting,
 } from '@/lib/chat/session/store';
 
-const LOCAL_CHATS_KEY = 'llm_christmas_chats';
+export const LOCAL_CHATS_KEY = 'llm_christmas_chats';
 
 export function readLocalSessions(): ChatSession[] {
   try {
@@ -88,11 +88,14 @@ export async function putCloudSessions(
 ): Promise<void> {
   const persisted = sessionsWorthPersisting(sessions);
   if (persisted.length === 0) return;
-  await fetchImpl('/api/sync/sessions', {
+  const res = await fetchImpl('/api/sync/sessions', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessions: sessionsForCloudSync(persisted) }),
   });
+  if (!res.ok) {
+    throw new Error(`Cloud sync failed (HTTP ${res.status})`);
+  }
 }
 
 export type HydrateSessionsResult = {
@@ -132,4 +135,20 @@ export function mergeLocalWithCloud(
 ): ChatSession[] {
   if (!cloud.length) return local;
   return mergeSyncedSessions(local, cloud);
+}
+
+/**
+ * True when merge produced no object swaps (same session references in order).
+ * Uses referential equality so an updatedAt-tie that prefers the other tab’s
+ * copy is still treated as a real change.
+ */
+export function sameSessionRevision(
+  a: ChatSession[],
+  b: ChatSession[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }

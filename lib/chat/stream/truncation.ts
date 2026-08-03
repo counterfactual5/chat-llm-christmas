@@ -16,6 +16,48 @@ export const SOFT_TRUNCATION_REASONS = new Set([
   'Stopped before calling tools',
 ]);
 
+/** Known SSE completion codes — drive Retry vs Continue copy on the client. */
+export type StreamCompletionCode =
+  | 'tools_timeout'
+  | 'upstream_error'
+  | 'empty_reply'
+  | 'client_abort';
+
+export function actionFromStreamCode(code?: string | null): {
+  truncated: boolean;
+  reason: string;
+  preferRetry: boolean;
+} | null {
+  switch (String(code || '').trim()) {
+    case 'tools_timeout':
+      return {
+        truncated: true,
+        reason: 'Stream timed out during tool use',
+        preferRetry: false,
+      };
+    case 'upstream_error':
+      return {
+        truncated: false,
+        reason: 'Request failed',
+        preferRetry: true,
+      };
+    case 'empty_reply':
+      return {
+        truncated: false,
+        reason: 'Empty reply',
+        preferRetry: true,
+      };
+    case 'client_abort':
+      return {
+        truncated: true,
+        reason: 'Reply was interrupted',
+        preferRetry: false,
+      };
+    default:
+      return null;
+  }
+}
+
 export function truncationFromFinishReason(
   finishReason?: string | null,
 ): { truncated: boolean; reason: string } {
@@ -39,16 +81,25 @@ export function truncationFromFinishReason(
 }
 
 /** Payload fields sent on the last SSE event before [DONE]. */
-export function streamCompletionPayload(finishReason?: string | null): {
+export function streamCompletionPayload(
+  finishReason?: string | null,
+  opts?: { code?: StreamCompletionCode | string; truncationReason?: string },
+): {
   finish_reason: string | null;
   truncated: boolean;
   truncation_reason?: string;
+  code?: string;
 } {
   const fr = finishReason || 'stop';
-  const verdict = truncationFromFinishReason(fr);
+  const fromCode = actionFromStreamCode(opts?.code);
+  const verdict = fromCode
+    ? { truncated: fromCode.truncated, reason: fromCode.reason }
+    : truncationFromFinishReason(fr);
+  const reason = opts?.truncationReason || verdict.reason;
   return {
     finish_reason: fr,
     truncated: verdict.truncated,
-    ...(verdict.reason ? { truncation_reason: verdict.reason } : {}),
+    ...(reason ? { truncation_reason: reason } : {}),
+    ...(opts?.code ? { code: opts.code } : {}),
   };
 }

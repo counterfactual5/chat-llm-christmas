@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildToolFallbackQuery,
+  toolArgumentsAreComplete,
   toolResultIndicatesFailure,
 } from '@/lib/chat/server/tool-execution';
 
@@ -37,5 +38,11 @@ describe('tool execution helpers', () => {
     expect(toolResultIndicatesFailure('{"error":"missing page_id"}')).toBe(true);
     expect(toolResultIndicatesFailure('MCP error: unauthorized')).toBe(true);
     expect(toolResultIndicatesFailure('{"ok":true,"results":[]}')).toBe(false);
+  });
+
+  it('detects incomplete tool argument JSON', () => {
+    expect(toolArgumentsAreComplete('')).toBe(true);
+    expect(toolArgumentsAreComplete('{"query":"is:unread"}')).toBe(true);
+    expect(toolArgumentsAreComplete('{"query":"is:unre')).toBe(false);
   });
 });

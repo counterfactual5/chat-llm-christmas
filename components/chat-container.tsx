@@ -423,6 +423,8 @@ export default function ChatContainer() {
     setActiveSessionId,
     createNewSession,
     isAccountBound,
+    onCloudSyncError: (message) => setAttachError(message),
+    onCrossTabMerge: () => setAttachError('Chats updated from another tab.'),
   });
 
   const {
@@ -1130,6 +1132,19 @@ export default function ChatContainer() {
             'Google tools are enabled but not authorized — reconnect Google in Settings, then try again.',
           );
         },
+        onNotionAuthRequired: () => {
+          setAttachError(
+            'Notion is enabled but not authorized — reconnect Notion in Settings, then try again.',
+          );
+        },
+        onGitHubAuthRequired: () => {
+          setAttachError(
+            'GitHub is enabled but not authorized — reconnect GitHub in Settings, then try again.',
+          );
+        },
+        onMalformedSse: (message) => {
+          setAttachError(message);
+        },
       },
       sessionId,
       apiMessages,
@@ -1437,8 +1452,12 @@ export default function ChatContainer() {
     endLoading,
   });
 
-  const researchReattachedJobsRef = useRef(new Set<string>());
+  const researchReattachAttemptsRef = useRef(new Map<string, number>());
+  const researchReattachInFlightRef = useRef(new Set<string>());
+  const researchReattachRef = useRef(deepResearch.reattach);
+  researchReattachRef.current = deepResearch.reattach;
   // After refresh or switching sessions, reconnect SSE for in-flight Deep Research.
+  // Depend on busy/activeSessionId only — not the whole deepResearch object (new each render).
   useEffect(() => {
     if (!chatsHydrated) return;
     if (deepResearch.busy) return;
@@ -1452,16 +1471,24 @@ export default function ChatContainer() {
     });
     const jobId = running?.research?.jobId;
     if (!jobId || !running) return;
-    if (researchReattachedJobsRef.current.has(jobId)) return;
-    researchReattachedJobsRef.current.add(jobId);
-    void deepResearch.reattach({
-      jobId,
-      sessionId: session.id,
-      assistantId: running.id,
-      query: running.research?.query || '',
-      mode: (running.research?.mode as 'quick' | 'standard' | 'rigorous') || 'standard',
+    if (researchReattachInFlightRef.current.has(jobId)) return;
+    const MAX_PAGE_REATTACH = 3;
+    const attempts = researchReattachAttemptsRef.current.get(jobId) || 0;
+    if (attempts >= MAX_PAGE_REATTACH) return;
+    researchReattachInFlightRef.current.add(jobId);
+    researchReattachAttemptsRef.current.set(jobId, attempts + 1);
+    void Promise.resolve(
+      researchReattachRef.current({
+        jobId,
+        sessionId: session.id,
+        assistantId: running.id,
+        query: running.research?.query || '',
+        mode: (running.research?.mode as 'quick' | 'standard' | 'rigorous') || 'standard',
+      }),
+    ).finally(() => {
+      researchReattachInFlightRef.current.delete(jobId);
     });
-  }, [chatsHydrated, deepResearch, deepResearch.busy, activeSessionId]);
+  }, [chatsHydrated, deepResearch.busy, activeSessionId]);
 
   const startResearchTurn = useCallback(
     async (opts: {

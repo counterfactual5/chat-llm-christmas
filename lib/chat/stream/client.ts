@@ -1,6 +1,7 @@
 import type { ChatSession, WebSearchSource } from '@/lib/chat/types';
 import { formatWebSourcesForReference } from '@/lib/chat/context/references';
 import { analyzeTruncation } from '@/lib/chat/stream/reply-truncation';
+import { actionFromStreamCode } from '@/lib/chat/stream/truncation';
 import {
   contentHasThinkMarkup,
   createThinkStreamParser,
@@ -62,6 +63,12 @@ export type StreamChatDeps = {
   }) => void;
   /** Google toggle on but vault token missing / unauthorized for this request. */
   onGoogleAuthRequired?: () => void;
+  /** Notion toggle on but vault token missing / unauthorized for this request. */
+  onNotionAuthRequired?: () => void;
+  /** GitHub toggle on but vault token missing / unauthorized for this request. */
+  onGitHubAuthRequired?: () => void;
+  /** Unreadable SSE payloads were skipped during this stream. */
+  onMalformedSse?: (message: string) => void;
 };
 
 export async function streamChatResponse(
@@ -153,6 +160,12 @@ export async function streamChatResponse(
   if (response.headers.get('X-Google-Auth') === 'requested-but-unauthorized') {
     deps.onGoogleAuthRequired?.();
   }
+  if (response.headers.get('X-Notion-Auth') === 'requested-but-unauthorized') {
+    deps.onNotionAuthRequired?.();
+  }
+  if (response.headers.get('X-GitHub-Auth') === 'requested-but-unauthorized') {
+    deps.onGitHubAuthRequired?.();
+  }
 
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No response body');
@@ -162,6 +175,8 @@ export async function streamChatResponse(
   let finishReason: string | null = null;
   let serverTruncated: boolean | null = null;
   let serverTruncationReason: string | undefined;
+  let serverCode: string | undefined;
+  let malformedSse = 0;
   let seamPending = Boolean(seamPrefix);
   let sawDone = false;
   const thinkParser = createThinkStreamParser();
@@ -226,6 +241,14 @@ export async function streamChatResponse(
   };
 
   const settle = (unexpectedEnd = false) => {
+    if (malformedSse > 0) {
+      deps.onMalformedSse?.(
+        malformedSse === 1
+          ? 'Ignored 1 unreadable stream chunk.'
+          : `Ignored ${malformedSse} unreadable stream chunks.`,
+      );
+    }
+
     deps.setSessions((prev) => withSettledOpenToolRuns(prev, sessionId, assistantId));
 
     const flushed = thinkParser.flush();
@@ -271,27 +294,42 @@ export async function streamChatResponse(
       );
       markAssistantIncomplete(false, {
         finishReason: finishReason || 'error',
+        truncationReason: actionFromStreamCode('empty_reply')?.reason,
       });
       return;
     }
 
+    const fromCode = actionFromStreamCode(serverCode);
+
     // Connection dropped / function killed mid-stream: no [DONE] arrived.
     // Prefer Continue over silently treating the partial reply as finished.
-    if (unexpectedEnd && !finishReason && serverTruncated == null) {
+    if (unexpectedEnd && !finishReason && serverTruncated == null && !fromCode) {
       markAssistantIncomplete(true, {
         finishReason,
-        truncationReason: 'Stream ended unexpectedly',
+        truncationReason:
+          malformedSse > 0
+            ? 'Stream ended with unreadable chunks'
+            : 'Stream ended unexpectedly',
       });
       return;
     }
+
+    if (fromCode?.preferRetry) {
+      markAssistantIncomplete(false, {
+        finishReason: finishReason || 'error',
+        truncationReason: fromCode.reason,
+      });
+      return;
+    }
+
     const verdict = analyzeTruncation(
       streamed,
       finishReason,
       unexpectedEnd || thinkParser.inThink,
       undefined,
       {
-        serverTruncated,
-        serverReason: serverTruncationReason,
+        serverTruncated: fromCode ? fromCode.truncated : serverTruncated,
+        serverReason: fromCode?.reason || serverTruncationReason,
       },
     );
     markAssistantIncomplete(verdict.truncated, {
@@ -329,6 +367,9 @@ export async function streamChatResponse(
         }
         if (typeof parsed.truncation_reason === 'string' && parsed.truncation_reason) {
           serverTruncationReason = parsed.truncation_reason;
+        }
+        if (typeof parsed.code === 'string' && parsed.code) {
+          serverCode = parsed.code;
         }
         if (parsed.reasoning) {
           appendToAssistantReasoning(parsed.reasoning);
@@ -473,7 +514,8 @@ export async function streamChatResponse(
           applyThinkSplit(chunk);
         }
       } catch {
-        // Ignore malformed SSE payloads.
+        // Keep streaming; surface a count via onMalformedSse at settle.
+        malformedSse += 1;
       }
     }
   }

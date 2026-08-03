@@ -45,6 +45,8 @@ import {
   rejectedCorrectionNote,
   lastUserMessageIndex,
   FINDINGS_RESPONSE_SYSTEM,
+  emitReviewProcessCard,
+  reviewProcessErrorMessage,
   type ReviewIssue,
   type ClaimAuditResult,
   type MidTurnCorrection,
@@ -673,29 +675,62 @@ export async function handleChatRequest(req: NextRequest) {
               turns,
               userAsk,
             });
-            let sawText = false;
-            const { lastFinishReason } = await runPlainCompletionStream({
-              apiKey,
-              baseURL,
-              signal: clientSignal,
-              model: requestedModel,
-              temperature: 0.3,
-              messages: sanitizeChatMessages(reviewMessages),
-              onContent: (text) => {
-                sawText = true;
-                send({ content: text });
-              },
-              onReasoning: (text) => {
-                sawText = true;
-                send({ reasoning: text });
-              },
+            // Final Deep-Research-style stage: write the structured report.
+            const reportQuery = 'Writing structured review report';
+            emitReviewProcessCard(send, {
+              name: 'review_report',
+              status: 'start',
+              query: reportQuery,
             });
-            if (!sawText) {
-              send({
-                content: findings.length
-                  ? 'Review complete — see Findings above. Retract any unsupported claims listed there.'
-                  : 'Review complete — no unsupported tool claims found against the execution record.',
+            let sawText = false;
+            let lastFinishReason: string | null = null;
+            try {
+              const streamed = await runPlainCompletionStream({
+                apiKey,
+                baseURL,
+                signal: clientSignal,
+                model: requestedModel,
+                temperature: 0.3,
+                messages: sanitizeChatMessages(reviewMessages),
+                onContent: (text) => {
+                  sawText = true;
+                  send({ content: text });
+                },
+                onReasoning: (text) => {
+                  sawText = true;
+                  send({ reasoning: text });
+                },
               });
+              lastFinishReason = streamed.lastFinishReason;
+              if (!sawText) {
+                send({
+                  content: findings.length
+                    ? 'Review complete — see Findings above. Retract any unsupported claims listed there.'
+                    : 'Review complete — no unsupported tool claims found against the execution record.',
+                });
+              }
+              emitReviewProcessCard(send, {
+                name: 'review_report',
+                status: 'done',
+                query: reportQuery,
+                results: [
+                  {
+                    title: 'Review report',
+                    url: '',
+                    snippet: findings.length
+                      ? `${findings.length} tool-claim finding(s), ${reviewIssues.length} other issue(s)`
+                      : 'No unsupported claims found',
+                  },
+                ],
+              });
+            } catch (err) {
+              emitReviewProcessCard(send, {
+                name: 'review_report',
+                status: 'done',
+                query: reportQuery,
+                error: reviewProcessErrorMessage(err, 'Review report failed'),
+              });
+              throw err;
             }
             send(streamCompletionPayload(lastFinishReason || 'stop'));
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));

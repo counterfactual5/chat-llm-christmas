@@ -77,7 +77,11 @@ export {
   emitReviewerFindings,
   runClaimAudit,
   emitReviewerStep,
+  emitReviewProcessCard,
+  reviewProcessErrorMessage,
 } from '@/lib/tools/review/core/report';
+
+export type { ReviewProcessToolName } from '@/lib/tools/review/core/report';
 
 export {
   VERIFIER_SYSTEM_PROMPT,

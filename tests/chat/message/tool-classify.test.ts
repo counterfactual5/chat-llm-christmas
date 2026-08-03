@@ -58,6 +58,18 @@ describe('classifyToolRun', () => {
     expect(classifyToolRun({ name: 'generate_image' }).isGenerateImage).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'claim-reviewer' }).isClaimReviewer).toBe(true);
   });
+
+  it('detects manual /review Process-card steps (audit, verifier, report)', () => {
+    expect(classifyToolRun({ name: 'claim_audit', provider: 'review' }).isReviewAudit).toBe(true);
+    expect(classifyToolRun({ name: 'claim_verifier', provider: 'review' }).isReviewVerifier).toBe(
+      true,
+    );
+    expect(classifyToolRun({ name: 'review_report', provider: 'review' }).isReviewReport).toBe(
+      true,
+    );
+    // Wrong provider must not misclassify — only the manual /review flow uses these names.
+    expect(classifyToolRun({ name: 'claim_audit', provider: 'other' }).isReviewAudit).toBe(false);
+  });
 });
 
 describe('getToolRunLabelKey', () => {
@@ -65,6 +77,25 @@ describe('getToolRunLabelKey', () => {
     const c = classifyToolRun({ name: 'x', provider: 'claim-reviewer' });
     expect(getToolRunLabelKey(c, { searching: true, failed: false })).toBe('reviewingClaims');
     expect(getToolRunLabelKey(c, { searching: false, failed: false })).toBe('reviewedClaims');
+  });
+
+  it('labels manual /review Process-card steps', () => {
+    const audit = classifyToolRun({ name: 'claim_audit', provider: 'review' });
+    expect(getToolRunLabelKey(audit, { searching: true, failed: false })).toBe('reviewAuditing');
+    expect(getToolRunLabelKey(audit, { searching: false, failed: false })).toBe('reviewAudited');
+
+    const verifier = classifyToolRun({ name: 'claim_verifier', provider: 'review' });
+    expect(getToolRunLabelKey(verifier, { searching: true, failed: false })).toBe(
+      'reviewVerifying',
+    );
+    expect(getToolRunLabelKey(verifier, { searching: false, failed: false })).toBe(
+      'reviewVerified',
+    );
+
+    const report = classifyToolRun({ name: 'review_report', provider: 'review' });
+    expect(getToolRunLabelKey(report, { searching: true, failed: false })).toBe('reviewWriting');
+    expect(getToolRunLabelKey(report, { searching: false, failed: false })).toBe('reviewWrote');
+    expect(getToolRunLabelKey(report, { searching: false, failed: true })).toBe('toolFailed');
   });
 
   it('reports a failed Google run as toolFailed even while searching', () => {

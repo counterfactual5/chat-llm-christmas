@@ -44,6 +44,8 @@ export function activeIntegrationsPrompt(opts: {
   searchEnabled: boolean;
   integrations: string[];
   googleRequestedButUnauthorized?: boolean;
+  notionRequestedButUnauthorized?: boolean;
+  githubRequestedButUnauthorized?: boolean;
   skillCreatorOn?: boolean;
 }): string {
   const lines: string[] = [
@@ -98,6 +100,16 @@ export function activeIntegrationsPrompt(opts: {
   if (opts.googleRequestedButUnauthorized) {
     lines.push(
       '- Google toggled but no usable OAuth token — tell the user to reconnect Google in MCP settings.',
+    );
+  }
+  if (opts.notionRequestedButUnauthorized) {
+    lines.push(
+      '- Notion toggled but no usable OAuth token — tell the user to reconnect Notion in MCP settings.',
+    );
+  }
+  if (opts.githubRequestedButUnauthorized) {
+    lines.push(
+      '- GitHub toggled but no usable OAuth token — tell the user to reconnect GitHub in MCP settings.',
     );
   }
   const hasMcp =

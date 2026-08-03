@@ -316,6 +316,47 @@ export function runClaimAudit(
   return findings;
 }
 
+/** Manual `/review` Process-card tools (Deep Research style stages). */
+export type ReviewProcessToolName = 'claim_audit' | 'claim_verifier' | 'review_report';
+
+export function reviewProcessErrorMessage(err: unknown, fallback = 'Review failed'): string {
+  if (!err) return fallback;
+  if (typeof err === 'object' && err !== null && 'name' in err) {
+    const name = String((err as { name?: unknown }).name || '');
+    if (name === 'AbortError') return 'Review aborted';
+  }
+  if (err instanceof Error && err.message.trim()) return err.message.slice(0, 280);
+  const text = String(err || '').trim();
+  return text ? text.slice(0, 280) : fallback;
+}
+
+/**
+ * Emit a visible Process card for manual `/review` stages.
+ * Callers must pair every `start` with a `done` (success or `error`) —
+ * otherwise stream settle silently marks the card complete.
+ */
+export function emitReviewProcessCard(
+  send: (payload: Record<string, unknown>) => void,
+  opts: {
+    name: ReviewProcessToolName;
+    status: 'start' | 'done';
+    query: string;
+    error?: string;
+    results?: Array<{ title: string; url: string; snippet: string }>;
+  },
+): void {
+  send({
+    tool: {
+      name: opts.name,
+      status: opts.status,
+      provider: 'review',
+      query: opts.query,
+      ...(opts.error ? { error: opts.error } : {}),
+      ...(opts.results ? { results: opts.results } : {}),
+    },
+  });
+}
+
 export function emitReviewerStep(
   send: (payload: Record<string, unknown>) => void,
   opts: {

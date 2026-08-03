@@ -24,6 +24,12 @@ export type ToolRunClassification = {
   isSaveSkill: boolean;
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
+  /** Manual `/review` per-turn audit step (local checks + optional verifier). */
+  isReviewAudit: boolean;
+  /** Manual `/review` independent LLM verifier call. */
+  isReviewVerifier: boolean;
+  /** Manual `/review` structured report write-up. */
+  isReviewReport: boolean;
   isResearchPlan: boolean;
   isResearchSynthesize: boolean;
   isResearchVerify: boolean;
@@ -71,6 +77,9 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     run.provider === 'glm-ocr' ||
     run.provider === 'nemotron-omni';
   const isClaimReviewer = run.provider === 'claim-reviewer';
+  const isReviewAudit = run.provider === 'review' && run.name === 'claim_audit';
+  const isReviewVerifier = run.provider === 'review' && run.name === 'claim_verifier';
+  const isReviewReport = run.provider === 'review' && run.name === 'review_report';
   const isResearchPlan = run.name === 'research_plan';
   const isResearchSynthesize = run.name === 'research_synthesize';
   const isResearchVerify = run.name === 'research_verify';
@@ -108,6 +117,9 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
+    isReviewAudit,
+    isReviewVerifier,
+    isReviewReport,
     isResearchPlan,
     isResearchSynthesize,
     isResearchVerify,
@@ -147,6 +159,9 @@ export function getToolRunLabelKey(
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
+    isReviewAudit,
+    isReviewVerifier,
+    isReviewReport,
     isResearchPlan,
     isResearchSynthesize,
     isResearchVerify,
@@ -157,6 +172,19 @@ export function getToolRunLabelKey(
     isPaperRead,
   } = classification;
   const { searching, failed } = state;
+
+  if (isReviewAudit) {
+    if (failed) return 'toolFailed';
+    return searching ? 'reviewAuditing' : 'reviewAudited';
+  }
+  if (isReviewVerifier) {
+    if (failed) return 'toolFailed';
+    return searching ? 'reviewVerifying' : 'reviewVerified';
+  }
+  if (isReviewReport) {
+    if (failed) return 'toolFailed';
+    return searching ? 'reviewWriting' : 'reviewWrote';
+  }
 
   if (isResearchPlan) {
     if (failed) return 'toolFailed';
@@ -254,6 +282,9 @@ export function toolRunShowsFetchingResults(
     classification.isSaveSkill ||
     classification.isImageUnderstand ||
     classification.isClaimReviewer ||
+    classification.isReviewAudit ||
+    classification.isReviewVerifier ||
+    classification.isReviewReport ||
     classification.isBookDownload ||
     classification.isNotionWrite ||
     classification.isNotionFetch ||

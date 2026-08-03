@@ -373,7 +373,7 @@ export async function driveListChildren(
   opts: { folderId?: string; pageSize?: number; pageToken?: string } = {},
 ) {
   const folderId = String(opts.folderId || 'root').trim() || 'root';
-  const q = `'${folderId.replace(/'/g, "\\'")}' in parents and trashed=false`;
+  const q = `'${folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' in parents and trashed=false`;
   return driveSearchFiles(accessToken, {
     query: q,
     pageSize: opts.pageSize,
@@ -671,8 +671,12 @@ export async function driveShareByQuery(
 }
 
 function escapeDriveQueryLiteral(value: string): string {
-  return value.replace(/'/g, "\\'");
+  // Drive query literals: escape \ first, then single quotes.
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
+
+/** @internal exported for unit tests */
+export { escapeDriveQueryLiteral as escapeDriveQueryLiteralForTest };
 
 async function findChildFolder(
   accessToken: string,

@@ -479,6 +479,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isFileRead,
                     isSaveSkill,
                     isClaimReviewer,
+                    isReviewAudit,
+                    isReviewVerifier,
+                    isReviewReport,
                     isWebRead,
                     isResearchPlan,
                     isResearchSynthesize,
@@ -517,6 +520,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       isResearchSynthesize ||
                       isResearchVerify ||
                       isResearchWrite ||
+                      isReviewAudit ||
+                      isReviewVerifier ||
+                      isReviewReport ||
                       (!isNotion &&
                         !isGitHub &&
                         !isGoogle &&
@@ -561,6 +567,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <Globe className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isClaimReviewer ? (
                           <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isReviewAudit || isReviewVerifier ? (
+                          <ShieldCheck className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isReviewReport ? (
+                          <PenLine className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isNotion ? (
                           <NotionLogo className="h-3 w-3 shrink-0" />
                         ) : isGitHub ? (
@@ -600,6 +610,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isFileRead &&
                           !isSaveSkill &&
                           !isClaimReviewer &&
+                          !isReviewAudit &&
+                          !isReviewVerifier &&
+                          !isReviewReport &&
                           !isWebRead &&
                           !isPaperRead &&
                           !isResearchPlan &&

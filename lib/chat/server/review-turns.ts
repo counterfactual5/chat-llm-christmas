@@ -9,7 +9,9 @@ import {
   buildExecutionRecordFromToolRuns,
   buildManualReviewResponsePrompt,
   buildReviewReport,
+  emitReviewProcessCard,
   emitReviewReport,
+  reviewProcessErrorMessage,
   runFullClaimAudit,
   synthesizeFindings,
   MANUAL_REVIEW_RESPONSE_SYSTEM,
@@ -84,28 +86,61 @@ export async function auditReviewTurns(opts: {
   const focusId = String(opts.targetMessageId || '').trim() || turns[turns.length - 1]!.messageId;
   let findings: ReviewFinding[] = [];
   let issues: ReviewIssue[] = [];
-  for (const turn of turns) {
-    const priorRecord = buildExecutionRecordFromToolRuns(turn.toolRuns || []);
-    const earlyErrors = synthesizeFindings(turn.assistantText, priorRecord, opts.auditOpts).some(
-      (f) => f.severity === 'error',
-    );
-    const audit = await runFullClaimAudit(
-      opts.send,
-      turn.assistantText,
-      priorRecord,
-      opts.auditOpts,
-      'requested',
-      opts.verifierComplete,
-      {
-        forceLlm: turn.messageId === focusId || earlyErrors,
-        targetMessageId: turn.messageId,
-        emitEmpty: true,
-        userAsk: opts.userAsk,
-        signal: opts.signal,
-      },
-    );
-    findings = findings.concat(audit.findings);
-    issues = issues.concat(audit.issues);
+  const total = turns.length;
+  for (let i = 0; i < total; i++) {
+    const turn = turns[i]!;
+    // Multi-turn /review audits each reviewed turn in sequence — surface it as
+    // a Process card per turn (Deep Research style) so progress is visible
+    // instead of one silent wait behind the Thought panel.
+    const turnLabel = total > 1 ? `Turn ${i + 1}/${total} — ${turn.messageId}` : 'Audit target reply';
+    emitReviewProcessCard(opts.send, {
+      name: 'claim_audit',
+      status: 'start',
+      query: turnLabel,
+    });
+    try {
+      const priorRecord = buildExecutionRecordFromToolRuns(turn.toolRuns || []);
+      const earlyErrors = synthesizeFindings(turn.assistantText, priorRecord, opts.auditOpts).some(
+        (f) => f.severity === 'error',
+      );
+      const audit = await runFullClaimAudit(
+        opts.send,
+        turn.assistantText,
+        priorRecord,
+        opts.auditOpts,
+        'requested',
+        opts.verifierComplete,
+        {
+          forceLlm: turn.messageId === focusId || earlyErrors,
+          targetMessageId: turn.messageId,
+          emitEmpty: true,
+          userAsk: opts.userAsk,
+          signal: opts.signal,
+        },
+      );
+      emitReviewProcessCard(opts.send, {
+        name: 'claim_audit',
+        status: 'done',
+        query: turnLabel,
+        results: [
+          {
+            title: 'Audit result',
+            url: '',
+            snippet: `${audit.findings.length} tool-claim finding(s) · ${audit.issues.length} other issue(s)`,
+          },
+        ],
+      });
+      findings = findings.concat(audit.findings);
+      issues = issues.concat(audit.issues);
+    } catch (err) {
+      emitReviewProcessCard(opts.send, {
+        name: 'claim_audit',
+        status: 'done',
+        query: turnLabel,
+        error: reviewProcessErrorMessage(err, 'Claim audit failed'),
+      });
+      throw err;
+    }
   }
   return { findings, issues };
 }

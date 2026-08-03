@@ -44,9 +44,16 @@ async function canvasToJpegBlob(
   return canvas.convertToBlob({ type: 'image/jpeg', quality });
 }
 
+function visionInlineTooLargeError(byteLength: number, reason: string): Error {
+  return new Error(
+    `Image is ${byteLength} bytes (vision inline limit ${MAX_VISION_INLINE_BYTES}): ${reason}`,
+  );
+}
+
 /**
  * If decoded image bytes exceed the vision budget, downscale + JPEG recompress.
- * Falls back to the original when the runtime cannot decode/draw (rare on Edge).
+ * Throws when the runtime cannot compress (typical on Edge) or the result still exceeds budget —
+ * never pass oversized originals through to the LLM.
  */
 export async function fitImageBytesForVision(
   buf: Uint8Array,
@@ -56,8 +63,10 @@ export async function fitImageBytesForVision(
     return { bytes: buf, mime };
   }
   if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') {
-    // Last resort: truncate is unsafe for images — keep original and let upstream fail loudly.
-    return { bytes: buf, mime };
+    throw visionInlineTooLargeError(
+      buf.byteLength,
+      'runtime cannot downscale images (missing createImageBitmap/OffscreenCanvas). Upload a smaller image.',
+    );
   }
 
   const blob = new Blob([buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer], {
@@ -67,12 +76,12 @@ export async function fitImageBytesForVision(
   try {
     bitmap = await createImageBitmap(blob);
   } catch {
-    return { bytes: buf, mime };
+    throw visionInlineTooLargeError(buf.byteLength, 'image decode failed before downscale');
   }
 
   try {
     const qualities = [0.82, 0.7, 0.58, 0.45];
-    let edges = [MAX_VISION_EDGE, 1280, 1024, 768];
+    const edges = [MAX_VISION_EDGE, 1280, 1024, 768];
     let best: Uint8Array | null = null;
 
     for (const edge of edges) {
@@ -86,8 +95,10 @@ export async function fitImageBytesForVision(
         }
       }
     }
-    if (best) return { bytes: best, mime: 'image/jpeg' };
-    return { bytes: buf, mime };
+    throw visionInlineTooLargeError(
+      best?.byteLength ?? buf.byteLength,
+      'could not compress image under the vision inline budget',
+    );
   } finally {
     bitmap.close();
   }

@@ -351,4 +351,64 @@ describe('runToolRounds', () => {
     expect(state.midTurnCorrection?.surfaces).toContain('web_search');
     expect(workingMessages.length).toBe(2);
   });
+
+  it('does not execute truncated incomplete tool arguments on stream timeout', async () => {
+    const workingMessages: any[] = [{ role: 'user', content: 'mark unread' }];
+    const state = makeState();
+    const executeRegisteredTool = vi.fn();
+    const send = vi.fn();
+
+    const outcome = await runToolRounds({
+      state,
+      maxRounds: 1,
+      activeToolDefs: [{ type: 'function', function: { name: 'gmail_batch_mark_read' } }],
+      apiKey: 'k',
+      baseURL: 'https://example.test',
+      model: 'm',
+      workingMessages,
+      enableThinking: false,
+      reasoningAsContent: false,
+      idleMs: 1000,
+      maxTotalMs: 1000,
+      cursorModel: false,
+      searchEnabled: false,
+      autoReview: false,
+      authorizedIntegrations: ['gmail'],
+      skillCreatorOn: false,
+      autoReviewTurnBoundary: 0,
+      userAsk: 'mark unread',
+      enabledTools: [],
+      toolCtx: {},
+      send,
+      closeStreamDone: vi.fn(),
+      runProactiveSearch: vi.fn(),
+      postAudit: vi.fn(),
+      streamReviewCorrection: vi.fn(),
+      actionableReviewIssues: (issues) => issues,
+      executeRegisteredTool,
+      runRound: async () => ({
+        ok: false,
+        truncated: true,
+        skipReason: 'budget exceeded',
+        streamedContent: 'calling…',
+        streamedReasoning: '',
+        toolCalls: [
+          {
+            id: 'c1',
+            name: 'gmail_batch_mark_read',
+            arguments: '{"query":"is:unre',
+          },
+        ],
+      }),
+    });
+
+    expect(outcome).toEqual({ status: 'continue' });
+    expect(executeRegisteredTool).not.toHaveBeenCalled();
+    expect(state.lastToolRoundHadFailure).toBe(true);
+    const toolMsg = workingMessages.find((m) => m.role === 'tool');
+    expect(String(toolMsg?.content || '')).toMatch(/truncated/i);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'tools_timeout' }),
+    );
+  });
 });

@@ -4,9 +4,11 @@ import { detectDegenerateOutput } from '@/lib/tools/review/checks/completeness';
 import { buildRecalculationCheck } from '@/lib/tools/review/checks/recalculation';
 import {
   buildReviewReport,
+  emitReviewProcessCard,
   emitReviewReport,
   emitReviewerFindings,
   planReviewChecks,
+  reviewProcessErrorMessage,
 } from '@/lib/tools/review/core/report';
 import { findingId, synthesizeFindings } from '@/lib/tools/review/checks/tool-claims';
 import type {
@@ -234,6 +236,10 @@ export async function runLlmVerifier(
     ]);
     return parseVerifierResponse(raw, lenses);
   } catch (err) {
+    // Propagate aborts so Process cards can close as failed instead of "clean".
+    if (err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError') {
+      throw err;
+    }
     console.warn('claim verifier LLM failed', err);
     return { findings: [], lens: [] };
   }
@@ -304,16 +310,53 @@ export async function runFullClaimAudit(
         options?.targetMessageId,
       );
     }
-    const result = await runLlmVerifier(
-      assistantText,
-      record,
-      complete,
-      lenses,
-      options?.userAsk,
-    );
-    throwIfAborted();
-    llmFindings = result.findings;
-    lensFindings = result.lens;
+    // Manual `/review` gets a visible Process card for this step (mirrors Deep
+    // Research's Verify stage). Auto-review stays silent here — it already
+    // has its own short-correction UI and runs on every turn.
+    const verifierQuery = lenses.length ? lenses.join(' / ') : 'tool_receipt';
+    if (phase === 'requested') {
+      emitReviewProcessCard(send, {
+        name: 'claim_verifier',
+        status: 'start',
+        query: verifierQuery,
+      });
+    }
+    try {
+      const result = await runLlmVerifier(
+        assistantText,
+        record,
+        complete,
+        lenses,
+        options?.userAsk,
+      );
+      throwIfAborted();
+      llmFindings = result.findings;
+      lensFindings = result.lens;
+      if (phase === 'requested') {
+        emitReviewProcessCard(send, {
+          name: 'claim_verifier',
+          status: 'done',
+          query: verifierQuery,
+          results: [
+            {
+              title: 'Verifier result',
+              url: '',
+              snippet: `${llmFindings.length} claim finding(s) · ${lensFindings.length} lens finding(s)`,
+            },
+          ],
+        });
+      }
+    } catch (err) {
+      if (phase === 'requested') {
+        emitReviewProcessCard(send, {
+          name: 'claim_verifier',
+          status: 'done',
+          query: verifierQuery,
+          error: reviewProcessErrorMessage(err, 'Claim verifier failed'),
+        });
+      }
+      throw err;
+    }
   }
 
   const findings = mergeFindings(heuristic, llmFindings);

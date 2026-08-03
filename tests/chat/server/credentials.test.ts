@@ -53,6 +53,8 @@ describe('resolveAuthorizedIntegrations', () => {
       notionOwnerId: 'owner-1',
       googleOwnerId: 'owner-1',
       googleRequestedButUnauthorized: false,
+      notionRequestedButUnauthorized: false,
+      githubRequestedButUnauthorized: false,
     });
     expect(integrationMocks.resolveOwnerId).toHaveBeenCalledTimes(1);
   });
@@ -67,8 +69,24 @@ describe('resolveAuthorizedIntegrations', () => {
 
     expect(result.authorizedIntegrations).toEqual([]);
     expect(result.googleRequestedButUnauthorized).toBe(true);
+    expect(result.notionRequestedButUnauthorized).toBe(true);
+    expect(result.githubRequestedButUnauthorized).toBe(false);
     expect(integrationMocks.resolveOwnerId).not.toHaveBeenCalled();
     expect(integrationMocks.getNotionMcpAccessToken).not.toHaveBeenCalled();
     expect(integrationMocks.getGoogleAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('flags Notion/GitHub when toggled but vault has no token', async () => {
+    integrationMocks.getNotionMcpAccessToken.mockResolvedValue({ token: '' });
+    integrationMocks.getGitHubAccessToken.mockResolvedValue('');
+    const result = await resolveAuthorizedIntegrations({
+      req: {} as never,
+      integrations: ['notion', 'github'],
+      isBoundAccount: true,
+      boundUserKey: 'user-key',
+    });
+    expect(result.authorizedIntegrations).toEqual([]);
+    expect(result.notionRequestedButUnauthorized).toBe(true);
+    expect(result.githubRequestedButUnauthorized).toBe(true);
   });
 });

@@ -27,6 +27,7 @@ import {
 } from '@/lib/chat/server/tool-round';
 import {
   buildToolFallbackQuery,
+  toolArgumentsAreComplete,
   toolResultIndicatesFailure,
 } from '@/lib/chat/server/tool-execution';
 import { streamCompletionPayload } from '@/lib/chat/stream/truncation';
@@ -230,6 +231,20 @@ export async function runToolRounds(
           });
           let roundHadToolFailure = false;
           for (const tc of toolCalls) {
+            if (!toolArgumentsAreComplete(tc.arguments)) {
+              roundHadToolFailure = true;
+              deps.workingMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify({
+                  ok: false,
+                  error:
+                    'Tool call arguments were truncated mid-stream; not executed.',
+                  truncated: true,
+                }),
+              });
+              continue;
+            }
             const fallbackQuery = buildToolFallbackQuery({
               toolCall: tc,
               userAsk: deps.userAsk,
@@ -282,8 +297,7 @@ export async function runToolRounds(
         });
         deps.send({
           content: `\n\n[Stream timed out during tool use: ${roundResult.skipReason || 'budget exceeded'}]`,
-          ...streamCompletionPayload('length'),
-          code: 'tools_timeout',
+          ...streamCompletionPayload('length', { code: 'tools_timeout' }),
         });
       }
       break;

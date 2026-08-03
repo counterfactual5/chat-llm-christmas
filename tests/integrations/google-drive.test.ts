@@ -7,6 +7,7 @@ import {
   driveSearchFiles,
   driveTrashByQuery,
   driveUploadFile,
+  escapeDriveQueryLiteralForTest,
 } from '@/lib/integrations/google/drive';
 
 describe('Google Drive helpers', () => {
@@ -212,5 +213,11 @@ describe('Google Drive helpers', () => {
       path: 'Documents/Work',
     });
     expect(ensured.resolved.every((r) => r.created)).toBe(true);
+  });
+
+  it('escapes backslash and quotes in Drive query literals', () => {
+    expect(escapeDriveQueryLiteralForTest("O'Reilly")).toBe("O\\'Reilly");
+    expect(escapeDriveQueryLiteralForTest('a\\b')).toBe('a\\\\b');
+    expect(escapeDriveQueryLiteralForTest("a\\b'c")).toBe("a\\\\b\\'c");
   });
 });

@@ -378,10 +378,9 @@ export function formatLiteratureMarkdown(
     if (hit.paperId) {
       lines.push(`   - ID: \`${hit.paperId}\``);
       if (kind === 'papers') {
-        lines.push(`   - Details: \`${formatPaperActionCommand('details', hit.paperId)}\``);
-        lines.push(`   - Citations: \`${formatPaperActionCommand('citations', hit.paperId)}\``);
+        const id = hit.paperId;
         lines.push(
-          `   - References: \`${formatPaperActionCommand('references', hit.paperId)}\``,
+          `   - Actions: \`${formatPaperActionCommand('details', id)}\` · \`${formatPaperActionCommand('citations', id)}\` · \`${formatPaperActionCommand('references', id)}\``,
         );
       }
     }
@@ -394,7 +393,7 @@ export function formatLiteratureMarkdown(
         );
       } else if (hit.url && /^https?:\/\//i.test(hit.url)) {
         const label = hit.title?.trim() || 'Page';
-        lines.push(`   - Open: [${label}](${hit.url})`);
+        lines.push(`   - Manual download: [${label}](${hit.url})`);
       }
     }
     if (kind === 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);

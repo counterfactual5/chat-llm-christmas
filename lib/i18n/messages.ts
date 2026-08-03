@@ -271,7 +271,7 @@ export const dict = {
       'Search papers — /papers [arxiv|semantic|openalex] <q>; click Details/Citations/References',
     booksCommand: 'Books',
     booksCommandHint:
-      'Books — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>; /books download <ia-id|libgen:md5|url>',
+      'Books — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>; /books download <ia-id|libgen:md5|gutenberg:id|url>',
     writeMessage: 'Ask {model}…  (/image, /research, /papers, /books, /review, /skill)',
     quote: 'Quote',
     quoted: 'Quoted',
@@ -624,7 +624,7 @@ export const dict = {
       '论文检索 — /papers [arxiv|semantic|openalex] <q>；可点 Details/Citations/References',
     booksCommand: '书籍检索',
     booksCommandHint:
-      '找书 — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>；/books download <ia-id|libgen:md5|url>',
+      '找书 — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>；/books download <ia-id|libgen:md5|gutenberg:id|url>',
     writeMessage: '问 {model}…  (/image、/research、/papers、/books、/review、/skill)',
     quote: '引用',
     quoted: '引用',

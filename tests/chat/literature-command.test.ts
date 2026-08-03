@@ -194,7 +194,11 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('/papers details ARXIV:1706.03762');
     expect(md).toContain('/papers citations ARXIV:1706.03762');
     expect(md).toContain('/papers references ARXIV:1706.03762');
+    expect(md).toMatch(
+      /Actions: `\/papers details ARXIV:1706\.03762` · `\/papers citations ARXIV:1706\.03762` · `\/papers references ARXIV:1706\.03762`/,
+    );
     expect(md).toContain('[Open PDF](https://arxiv.org/pdf/1706.03762.pdf)');
+    expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);
   });
 
   it('renders author hits', () => {
@@ -242,7 +246,7 @@ describe('formatLiteratureMarkdown', () => {
     expect(lg).toContain('12.3 MB');
   });
 
-  it('uses Gutenberg direct URL and Open link when not API-downloadable', () => {
+  it('uses gutenberg: id and Manual download when not API-downloadable', () => {
     const gut = formatLiteratureMarkdown('books', 'pride', 'gutenberg', [
       {
         title: 'Pride and Prejudice',
@@ -253,11 +257,8 @@ describe('formatLiteratureMarkdown', () => {
         sourceProvider: 'gutenberg',
       },
     ]);
-    expect(gut).toContain(
-      '/books download https://www.gutenberg.org/ebooks/1342.epub.images',
-    );
-    expect(gut).toContain('Direct download');
-    expect(gut).not.toContain('gutenberg:1342');
+    expect(gut).toContain('/books download gutenberg:1342');
+    expect(gut).not.toContain('1342.epub.images');
 
     const ol = formatLiteratureMarkdown('books', 'mao', 'open-library', [
       {
@@ -267,7 +268,9 @@ describe('formatLiteratureMarkdown', () => {
         sourceProvider: 'open-library',
       },
     ]);
-    expect(ol).toContain('Open: [毛泽东选集](https://openlibrary.org/works/OL123W)');
+    expect(ol).toContain(
+      'Manual download: [毛泽东选集](https://openlibrary.org/works/OL123W)',
+    );
     expect(ol).not.toContain('/books download');
   });
 });
@@ -283,10 +286,10 @@ describe('resolveBookDownloadIdentifier', () => {
     expect(resolveBookDownloadIdentifier({ archiveId: 'calculus' })).toBe('calculus');
     expect(
       resolveBookDownloadIdentifier({
-        archiveId: 'gutenberg:1',
+        archiveId: 'gutenberg:1342',
         downloadUrl: 'https://example.com/book.epub',
       }),
-    ).toBe('https://example.com/book.epub');
+    ).toBe('gutenberg:1342');
     expect(
       resolveBookDownloadIdentifier({
         url: 'https://archive.org/details/fanqienovel-123',
@@ -297,7 +300,8 @@ describe('resolveBookDownloadIdentifier', () => {
         url: 'https://libgen.li/ads.php?md5=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       }),
     ).toBe('libgen:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
-    expect(isValidBookDownloadIdentifier('gutenberg:1')).toBe(false);
+    expect(isValidBookDownloadIdentifier('gutenberg:1342')).toBe(true);
+    expect(isValidBookDownloadIdentifier('gutenberg:abc')).toBe(false);
   });
 });
 

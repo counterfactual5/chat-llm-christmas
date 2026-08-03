@@ -63,15 +63,15 @@ export type LiteratureCommand =
     };
 
 /**
- * Valid download targets: http(s) URL, 32-char MD5, `libgen:`+MD5, or archive-style id.
- * Rejects empty values, `gutenberg:` (use direct URL instead), and placeholders like `<md5>`.
+ * Valid download targets: http(s) URL, 32-char MD5, `libgen:`+MD5, `gutenberg:`+id, or archive-style id.
+ * Rejects empty values and placeholders like `<md5>`.
  */
 export function isValidBookDownloadIdentifier(identifier: string): boolean {
   const id = String(identifier || '').trim();
   if (!id) return false;
   if (/[<>]/.test(id)) return false;
-  if (/^gutenberg:/i.test(id)) return false;
   if (/^https?:\/\/\S+$/i.test(id)) return true;
+  if (/^gutenberg:\d+$/i.test(id)) return true;
   const libgen = id.match(/^libgen:([A-Za-z0-9._%-]+)$/i);
   if (libgen) return /^[a-f0-9]{32}$/i.test(libgen[1]);
   if (/^[a-f0-9]{32}$/i.test(id)) return true;
@@ -105,7 +105,7 @@ export function libgenMd5FromUrl(url: string): string {
 
 /**
  * Prefer identifiers the download API can resolve:
- * libgen MD5 → non-gutenberg archiveId → https downloadUrl → archive.org / libgen URL.
+ * libgen MD5 → gutenberg:id / IA archiveId → https downloadUrl → archive.org / libgen URL.
  */
 export function resolveBookDownloadIdentifier(hit: BookDownloadHitFields): string {
   const md5 = String(hit.md5 || '')
@@ -119,7 +119,9 @@ export function resolveBookDownloadIdentifier(hit: BookDownloadHitFields): strin
   const archiveId = String(hit.archiveId || '').trim();
   const libgenArchive = archiveId.match(/^libgen:([a-f0-9]{32})$/i);
   if (libgenArchive) return `libgen:${libgenArchive[1].toLowerCase()}`;
-  if (archiveId && !/^gutenberg:/i.test(archiveId)) return archiveId;
+  const gutenberg = archiveId.match(/^gutenberg:(\d+)$/i);
+  if (gutenberg) return `gutenberg:${gutenberg[1]}`;
+  if (archiveId) return archiveId;
 
   const downloadUrl = String(hit.downloadUrl || '').trim();
   if (/^https?:\/\/\S+$/i.test(downloadUrl)) return downloadUrl;
@@ -133,6 +135,7 @@ export function resolveBookDownloadIdentifier(hit: BookDownloadHitFields): strin
 export function bookDownloadCommandLabel(identifier: string): string {
   const id = String(identifier || '').trim();
   if (/^libgen:/i.test(id) || /^[a-f0-9]{32}$/i.test(id)) return 'Download';
+  if (/^gutenberg:/i.test(id)) return 'Download';
   if (/^https?:\/\//i.test(id)) return 'Direct download';
   return 'Download';
 }

@@ -144,7 +144,7 @@ export function formatHitsForModel(
       }),
       hint:
         'Only show /books download commands that appear as downloadCommand on a hit. ' +
-        'If downloadCommand is missing, give the page url as a markdown link for manual open/download — never invent md5 or archive ids.',
+        'If downloadCommand is missing, give the page url as a markdown Manual download link — never invent md5 or archive ids.',
     });
   }
 
@@ -193,7 +193,7 @@ const BOOK_SYSTEM = [
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
   'If this tool is OFF, the user can still run the always-available slash command /books — never say /books is unavailable.',
   'For downloads: only cite downloadCommand from the tool receipt (libgen md5 / IA id / direct URL). Never invent identifiers or claim only LibGen works.',
-  'When downloadCommand is absent, give the hit url as a markdown link for the user to open and download manually.',
+  'When downloadCommand is absent, give the hit url as a markdown Manual download link for the user to open themselves.',
   'After results, cite title + URL; never invent catalog entries.',
 ].join(' ');
 

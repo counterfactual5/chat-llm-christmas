@@ -14,8 +14,22 @@ const KATEX_OPTIONS = {
   errorColor: 'var(--chat-math-error, #a8a29e)',
 } as const;
 
+/** Slash commands that should send when clicked in assistant markdown. */
+export function isClickableSlashCommand(text: string): boolean {
+  return /^\/books\s+download\s+\S+/i.test(String(text || '').trim());
+}
+
 /** The standard answer/review-fix Markdown presentation used by the chat timeline. */
-export function AnswerMarkdown({ text, streaming }: { text: string; streaming: boolean }) {
+export function AnswerMarkdown({
+  text,
+  streaming,
+  onSendCommand,
+}: {
+  text: string;
+  streaming: boolean;
+  /** Send a slash command as a new user turn (e.g. /books download …). */
+  onSendCommand?: (command: string) => void;
+}) {
   return (
     <div className="chat-markdown w-full min-w-0 max-w-full overflow-x-hidden text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3 [overflow-wrap:anywhere] [&_sup]:text-[0.7em] [&_sup_a]:text-orange-700 [&_sup_a]:no-underline dark:[&_sup_a]:text-orange-300 [&_section[data-footnotes]]:mt-6 [&_section[data-footnotes]]:border-t [&_section[data-footnotes]]:border-stone-200 [&_section[data-footnotes]]:pt-3 [&_section[data-footnotes]]:text-[13px] [&_section[data-footnotes]]:text-stone-500 dark:[&_section[data-footnotes]]:border-stone-700 dark:[&_section[data-footnotes]]:text-stone-400 [&_section[data-footnotes]_h2]:text-xs [&_section[data-footnotes]_h2]:font-semibold [&_section[data-footnotes]_h2]:uppercase [&_section[data-footnotes]_h2]:tracking-wider [&_section[data-footnotes]_h2]:text-stone-400">
       <ReactMarkdown
@@ -80,6 +94,19 @@ export function AnswerMarkdown({ text, streaming }: { text: string; streaming: b
             const isBlock = Boolean(match) || value.includes('\n') || (asciiArt && value.length >= 12);
             if (isBlock && match) return <CodeBlock language={match[1]} value={value} />;
             if (isBlock) return <pre className="my-4 max-w-full min-w-0 overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-4 font-mono text-[13px] leading-5 text-stone-800 dark:bg-stone-900/60 dark:text-stone-300"><code {...props}>{value}</code></pre>;
+            const cmd = value.trim();
+            if (onSendCommand && isClickableSlashCommand(cmd)) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => onSendCommand(cmd)}
+                  title="Click to send this download command"
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-orange-200/80 bg-orange-50 px-1.5 py-0.5 text-left font-mono text-xs text-orange-900 transition-colors hover:border-orange-300 hover:bg-orange-100 dark:border-orange-800/60 dark:bg-orange-950/40 dark:text-orange-100 dark:hover:bg-orange-950/70"
+                >
+                  <span className="min-w-0 break-all">{cmd}</span>
+                </button>
+              );
+            }
             return <code {...props} className="rounded bg-stone-200/60 px-1.5 py-0.5 text-xs font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100">{children}</code>;
           },
           pre({ children }: any) {

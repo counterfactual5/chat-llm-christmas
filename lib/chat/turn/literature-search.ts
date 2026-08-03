@@ -5,6 +5,7 @@
 import type { Message, MessageToolRun } from '@/lib/chat/types';
 import { titleForNewConversation } from '@/lib/chat/turn/attachments';
 import {
+  formatBookDownloadCommand,
   formatLiteratureCommand,
   type BookSource,
   type LiteratureKind,
@@ -385,7 +386,7 @@ export function formatLiteratureMarkdown(
             : String(dlId).startsWith('http')
               ? 'Direct download'
               : 'Download';
-        lines.push(`   - ${label}: \`/books download ${dlId}\``);
+        lines.push(`   - ${label}: \`${formatBookDownloadCommand(dlId)}\``);
       }
     }
     if (kind === 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);

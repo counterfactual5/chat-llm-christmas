@@ -83,8 +83,10 @@ export function formatBookDownloadMarkdown(result: {
     '',
     `**${result.title}**`,
     `- File: \`${result.filename}\` (${result.bytes} bytes)`,
-    `- Source: ${source}`,
-    `- Saved as file \`${result.fileId}\` — open Files panel to download.`,
+    `- Saved to your Files as \`${result.fileId}\` — open the Files panel (or Output) to download a stable copy.`,
+    result.sourceUrl
+      ? `- Temporary source link (may expire): ${result.sourceUrl}`
+      : `- Source: ${source}`,
   ].join('\n');
 }
 

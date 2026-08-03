@@ -766,7 +766,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
                 };
 
                 const renderAnswerMarkdown = (text: string, streaming: boolean) => (
-                  <AnswerMarkdown text={text} streaming={streaming} />
+                  <AnswerMarkdown
+                    text={text}
+                    streaming={streaming}
+                    onSendCommand={handleSubmit}
+                  />
                 );
 
                 const renderReasoningStep = (

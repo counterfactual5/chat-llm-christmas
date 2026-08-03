@@ -285,8 +285,8 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <>
       {/* Floating Input Area */}
-      <div className="shrink-0 px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
-  <div className="mx-auto w-full max-w-[960px] px-1 md:px-4 relative">
+      <div className="min-w-0 shrink-0 overflow-x-hidden px-4 pb-6 pt-2 bg-gradient-to-t from-[#F9F8F6] via-[#F9F8F6] to-transparent dark:from-stone-950 dark:via-stone-950">
+  <div className="relative mx-auto w-full min-w-0 max-w-[960px] px-1 md:px-4">
     <ComposerQueuePanel
       activeQueue={activeQueue}
       queueExpanded={queueExpanded}

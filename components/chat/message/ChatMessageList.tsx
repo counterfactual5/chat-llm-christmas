@@ -176,11 +176,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
     <>
     {/* Messages List */}
     <div
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
       ref={scrollRef}
       onScroll={handleMessagesScroll}
     >
-    <div ref={messagesContentRef} className="mx-auto w-full max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
+    <div ref={messagesContentRef} className="mx-auto w-full min-w-0 max-w-[960px] px-5 py-8 md:px-8 lg:px-10">
     {messages.length === 0 ? (
       <div className="mt-16 flex flex-col items-center text-center">
         <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm">
@@ -428,7 +428,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
             <div
               id={`message-${message.id}`}
               key={message.id}
-              className="w-full scroll-mt-8 space-y-3 pr-8 sm:pr-16"
+              className="w-full min-w-0 max-w-full scroll-mt-8 space-y-3 pr-8 sm:pr-16"
             >
               {(() => {
                 const parts = displayAssistantParts(message);

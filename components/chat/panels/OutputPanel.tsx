@@ -105,7 +105,7 @@ export function OutputPanel({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="max-h-72 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+            <div className="max-h-72 min-w-0 space-y-3 overflow-x-hidden overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
               {count === 0 ? (
                 <div className="py-2 text-xs text-stone-400">{t('noGeneratedOutput')}</div>
               ) : (

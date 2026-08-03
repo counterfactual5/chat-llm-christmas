@@ -48,7 +48,7 @@ export function ReasoningBodyScroll({
           el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
       }}
       className={cn(
-        'chat-markdown mt-0.5 max-h-72 overflow-y-auto pl-[18px] text-[12px] leading-5 text-stone-500 dark:text-stone-400',
+        'chat-markdown mt-0.5 max-h-72 min-w-0 max-w-full overflow-x-hidden overflow-y-auto pl-[18px] text-[12px] leading-5 text-stone-500 dark:text-stone-400 [overflow-wrap:anywhere]',
         className,
       )}
     >

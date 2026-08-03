@@ -92,7 +92,7 @@ export function ReferencePanel({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="max-h-64 space-y-3 overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
+            <div className="max-h-64 min-w-0 space-y-3 overflow-x-hidden overflow-y-auto border-t border-stone-200/70 px-3 py-2.5 dark:border-stone-800">
               {userUploadReferences.length > 0 && (
                 <div className="space-y-1.5">
                   <button

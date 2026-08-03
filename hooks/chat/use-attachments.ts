@@ -72,11 +72,7 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
           uploadErrors.push(
             `${a.name}: ${
-              payloadTooLarge
-                ? isImage
-                  ? 'File too large for upload (max ~8MB after compress / 20MB hard limit)'
-                  : 'File too large for upload (max 20MB)'
-                : msg
+              payloadTooLarge ? 'File too large for upload (max 20MB)' : msg
             }`,
           );
           // Images: hard fail (can't chat vision without bytes).

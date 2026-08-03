@@ -1,6 +1,10 @@
 import {
+  gmailApplyLabelByQuery,
   gmailBatchGetMessages,
+  gmailBatchModifyByQuery,
   gmailBatchModifyMessages,
+  gmailBatchStarByQuery,
+  gmailBatchTrashByQuery,
   gmailCreateDraft,
   gmailCreateLabel,
   gmailDeleteDraft,
@@ -14,10 +18,12 @@ import {
   gmailListLabels,
   gmailListThreads,
   gmailModifyMessage,
+  gmailModifyThread,
   gmailReplyMessage,
   gmailSearchMessages,
   gmailSendDraft,
   gmailSendMessage,
+  gmailThreadMarkRead,
   gmailTrashMessage,
   gmailUntrashMessage,
   gmailUpdateLabel,
@@ -34,7 +40,7 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_search',
     description:
-      'Search the user Gmail inbox. Use Gmail search syntax in query (e.g. newer_than:7d, from:, subject:).',
+      'Search the user Gmail inbox. Use Gmail search syntax in query (e.g. is:unread, newer_than:7d, from:, subject:). Returns messages (with id) plus a top-level ids[] for batch tools. For mark-all-read / archive-by-query prefer gmail_batch_mark_read or gmail_batch_modify_by_query instead of paging manually.',
     parameters: {
       type: 'object',
       properties: {
@@ -341,7 +347,7 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_batch_modify',
     description:
-      'Batch add/remove labels on many messages (e.g. mark all unread as read). Pass messageIds from gmail_search. removeLabelIds=["UNREAD"] marks read; removeLabelIds=["INBOX"] archives.',
+      'Batch add/remove labels on many known message ids (up to 1000). Prefer gmail_batch_modify_by_query or gmail_batch_mark_read when you only have a search query. removeLabelIds=["UNREAD"] marks read; removeLabelIds=["INBOX"] archives.',
     write: true,
     parameters: {
       type: 'object',
@@ -371,6 +377,295 @@ export const gmailToolDefs: GoogleToolDef[] = [
         throw new Error('addLabelIds or removeLabelIds is required');
       }
       return gmailBatchModifyMessages(token, { messageIds, addLabelIds, removeLabelIds });
+    },
+  },
+  {
+    name: 'gmail_batch_modify_by_query',
+    description:
+      'ONE-SHOT bulk label change: search with a Gmail query (paginated), then batch-modify all matching messages. Use for “mark all unread as read”, “archive everything from X”, etc. Do not manually page gmail_search first.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Gmail search query, e.g. is:unread, from:alerts@example.com newer_than:30d',
+        },
+        addLabelIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Label ids to add',
+        },
+        removeLabelIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Label ids to remove (e.g. ["UNREAD"], ["INBOX"])',
+        },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages to modify (1-2000, default 500)',
+        },
+      },
+      required: ['query'],
+    },
+    run: async (token, args) => {
+      const query = str(args.query);
+      if (!query) throw new Error('query is required');
+      const addLabelIds = Array.isArray(args.addLabelIds)
+        ? args.addLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      const removeLabelIds = Array.isArray(args.removeLabelIds)
+        ? args.removeLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      if (!addLabelIds.length && !removeLabelIds.length) {
+        throw new Error('addLabelIds or removeLabelIds is required');
+      }
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 500);
+      return gmailBatchModifyByQuery(token, {
+        query,
+        addLabelIds,
+        removeLabelIds,
+        maxTotal,
+      });
+    },
+  },
+  {
+    name: 'gmail_batch_mark_read',
+    description:
+      'Mark matching messages as read (remove UNREAD). Default query is is:unread. Prefer this over looping gmail_search + gmail_batch_modify.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Gmail query (default: is:unread). Example: is:unread newer_than:7d',
+        },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages (1-2000, default 500)',
+        },
+      },
+    },
+    run: async (token, args) => {
+      const query = str(args.query) || 'is:unread';
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 500);
+      return gmailBatchModifyByQuery(token, {
+        query,
+        removeLabelIds: ['UNREAD'],
+        maxTotal,
+      });
+    },
+  },
+  {
+    name: 'gmail_batch_archive',
+    description:
+      'Archive matching messages (remove INBOX). Default query is in:inbox. Prefer this for bulk archive.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Gmail query (default: in:inbox). Example: in:inbox older_than:1y',
+        },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages (1-2000, default 500)',
+        },
+      },
+    },
+    run: async (token, args) => {
+      const query = str(args.query) || 'in:inbox';
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 500);
+      return gmailBatchModifyByQuery(token, {
+        query,
+        removeLabelIds: ['INBOX'],
+        maxTotal,
+      });
+    },
+  },
+  {
+    name: 'gmail_batch_trash',
+    description:
+      'Move matching messages to Trash (add TRASH, remove INBOX). Requires an explicit query and confirm=true — never trash without both. Example: category:promotions older_than:1y',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Required Gmail query scoping what to trash',
+        },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages (1-2000, default 200)',
+        },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true to proceed (safety latch)',
+        },
+      },
+      required: ['query', 'confirm'],
+    },
+    run: async (token, args) => {
+      if (args.confirm !== true) {
+        throw new Error('confirm=true is required for gmail_batch_trash');
+      }
+      const query = str(args.query);
+      if (!query) throw new Error('query is required (refusing unbounded trash)');
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 200);
+      return gmailBatchTrashByQuery(token, { query, maxTotal });
+    },
+  },
+  {
+    name: 'gmail_batch_star',
+    description:
+      'Star matching messages (add STARRED). Requires an explicit query, e.g. from:boss@example.com newer_than:7d.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Gmail query (required)',
+        },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages (1-2000, default 200)',
+        },
+      },
+      required: ['query'],
+    },
+    run: async (token, args) => {
+      const query = str(args.query);
+      if (!query) throw new Error('query is required');
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 200);
+      return gmailBatchStarByQuery(token, { query, starred: true, maxTotal });
+    },
+  },
+  {
+    name: 'gmail_batch_unstar',
+    description: 'Remove stars from matching messages (remove STARRED). Requires query, e.g. is:starred older_than:1y.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Gmail query (required)' },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages (1-2000, default 200)',
+        },
+      },
+      required: ['query'],
+    },
+    run: async (token, args) => {
+      const query = str(args.query);
+      if (!query) throw new Error('query is required');
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 200);
+      return gmailBatchStarByQuery(token, { query, starred: false, maxTotal });
+    },
+  },
+  {
+    name: 'gmail_apply_label_by_query',
+    description:
+      'Add or remove a label on all messages matching a query. Accepts label display name (e.g. "Receipts") or label id — resolves via list_labels. Prefer this over list_labels + batch_modify_by_query.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Gmail search query' },
+        label: {
+          type: 'string',
+          description: 'Label name or id (e.g. Receipts, Label_12)',
+        },
+        action: {
+          type: 'string',
+          description: 'add (default) | remove',
+        },
+        maxTotal: {
+          type: 'integer',
+          description: 'Max messages (1-2000, default 500)',
+        },
+      },
+      required: ['query', 'label'],
+    },
+    run: async (token, args) => {
+      const query = str(args.query);
+      const label = str(args.label);
+      if (!query || !label) throw new Error('query and label are required');
+      const actionRaw = str(args.action).toLowerCase();
+      const action = actionRaw === 'remove' ? 'remove' : 'add';
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 500);
+      return gmailApplyLabelByQuery(token, { query, label, action, maxTotal });
+    },
+  },
+  {
+    name: 'gmail_thread_mark_read',
+    description:
+      'Mark an entire conversation thread as read (remove UNREAD from all messages in the thread). Pass threadId from gmail_list_threads / gmail_get_thread / message.threadId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string', description: 'Gmail thread id' },
+      },
+      required: ['threadId'],
+    },
+    run: async (token, args) => {
+      const threadId = str(args.threadId);
+      if (!threadId) throw new Error('threadId is required');
+      return gmailThreadMarkRead(token, threadId);
+    },
+  },
+  {
+    name: 'gmail_modify_thread',
+    description:
+      'Add/remove labels on every message in a thread (Gmail threads.modify). Example: archive a thread with removeLabelIds=["INBOX"].',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        addLabelIds: { type: 'array', items: { type: 'string' } },
+        removeLabelIds: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['threadId'],
+    },
+    run: async (token, args) => {
+      const threadId = str(args.threadId);
+      if (!threadId) throw new Error('threadId is required');
+      const addLabelIds = Array.isArray(args.addLabelIds)
+        ? args.addLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      const removeLabelIds = Array.isArray(args.removeLabelIds)
+        ? args.removeLabelIds.map((x) => str(x)).filter(Boolean)
+        : [];
+      if (!addLabelIds.length && !removeLabelIds.length) {
+        throw new Error('addLabelIds or removeLabelIds is required');
+      }
+      return gmailModifyThread(token, { threadId, addLabelIds, removeLabelIds });
     },
   },
   {

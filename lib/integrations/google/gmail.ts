@@ -136,9 +136,12 @@ export async function gmailSearchMessages(
     accessToken,
   );
   const ids = Array.isArray(list.messages)
-    ? (list.messages as Array<{ id?: string }>).map((m) => m.id).filter(Boolean)
+    ? (list.messages as Array<{ id?: string }>)
+        .map((m) => String(m.id || '').trim())
+        .filter(Boolean)
     : [];
   const messages = [];
+  // Enrich a subset for UI/snippets; always return full `ids` for batch tools.
   for (const id of ids.slice(0, 15)) {
     const meta = await googleGetJson(
       `${GMAIL_API}/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
@@ -160,7 +163,140 @@ export async function gmailSearchMessages(
   return {
     resultSizeEstimate: list.resultSizeEstimate,
     nextPageToken: list.nextPageToken,
+    /** All message ids on this page (use with gmail_batch_modify / mark_read). */
+    ids,
     messages,
+  };
+}
+
+/**
+ * List message ids only (no metadata). Paginates until maxTotal or no more pages.
+ * Prefer this for bulk label changes.
+ */
+export async function gmailListMessageIds(
+  accessToken: string,
+  opts: {
+    query?: string;
+    maxTotal?: number;
+    pageSize?: number;
+  } = {},
+) {
+  const maxTotal = Math.min(Math.max(opts.maxTotal || 500, 1), 2000);
+  const pageSize = Math.min(Math.max(opts.pageSize || 100, 1), 500);
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+  let resultSizeEstimate: number | undefined;
+  let truncated = false;
+
+  while (ids.length < maxTotal) {
+    const params = new URLSearchParams();
+    if (opts.query) params.set('q', opts.query);
+    params.set('maxResults', String(Math.min(pageSize, maxTotal - ids.length)));
+    if (pageToken) params.set('pageToken', pageToken);
+    const list = await googleGetJson(
+      `${GMAIL_API}/users/me/messages?${params.toString()}`,
+      accessToken,
+    );
+    pages += 1;
+    if (typeof list.resultSizeEstimate === 'number') {
+      resultSizeEstimate = list.resultSizeEstimate;
+    }
+    const batch = Array.isArray(list.messages)
+      ? (list.messages as Array<{ id?: string }>)
+          .map((m) => String(m.id || '').trim())
+          .filter(Boolean)
+      : [];
+    for (const id of batch) {
+      if (ids.length >= maxTotal) {
+        truncated = true;
+        break;
+      }
+      ids.push(id);
+    }
+    const next = String(list.nextPageToken || '').trim();
+    if (!next || !batch.length) break;
+    if (ids.length >= maxTotal) {
+      truncated = true;
+      break;
+    }
+    pageToken = next;
+    if (pages >= 40) {
+      truncated = true;
+      break;
+    }
+  }
+
+  return {
+    query: opts.query || '',
+    ids,
+    count: ids.length,
+    pages,
+    resultSizeEstimate,
+    truncated,
+  };
+}
+
+/**
+ * Search by Gmail query, then batch-modify labels (paginated).
+ * Example: query `is:unread`, removeLabelIds `["UNREAD"]` → mark all matching as read.
+ */
+export async function gmailBatchModifyByQuery(
+  accessToken: string,
+  opts: {
+    query: string;
+    addLabelIds?: string[];
+    removeLabelIds?: string[];
+    maxTotal?: number;
+  },
+) {
+  const query = String(opts.query || '').trim();
+  if (!query) throw new Error('query is required');
+  const addLabelIds = opts.addLabelIds || [];
+  const removeLabelIds = opts.removeLabelIds || [];
+  if (!addLabelIds.length && !removeLabelIds.length) {
+    throw new Error('addLabelIds or removeLabelIds is required');
+  }
+
+  const listed = await gmailListMessageIds(accessToken, {
+    query,
+    maxTotal: opts.maxTotal,
+  });
+  if (!listed.ids.length) {
+    return {
+      ok: true,
+      query,
+      modified: 0,
+      sampleIds: [] as string[],
+      pages: listed.pages,
+      resultSizeEstimate: listed.resultSizeEstimate,
+      truncated: false,
+      note: 'No messages matched the query',
+    };
+  }
+
+  // Gmail batchModify accepts ≤1000 ids per request.
+  let modified = 0;
+  for (let i = 0; i < listed.ids.length; i += 1000) {
+    const chunk = listed.ids.slice(i, i + 1000);
+    await gmailBatchModifyMessages(accessToken, {
+      messageIds: chunk,
+      addLabelIds,
+      removeLabelIds,
+    });
+    modified += chunk.length;
+  }
+
+  return {
+    ok: true,
+    query,
+    modified,
+    sampleIds: listed.ids.slice(0, 8),
+    pages: listed.pages,
+    resultSizeEstimate: listed.resultSizeEstimate,
+    truncated: listed.truncated,
+    addLabelIds,
+    removeLabelIds,
   };
 }
 
@@ -352,6 +488,122 @@ export async function gmailBatchModifyMessages(
     removeLabelIds: opts.removeLabelIds || [],
   });
   return { ok: true, modified: ids.length, ids };
+}
+
+/** Resolve a label name or id to a Gmail label id (case-insensitive name match). */
+export async function gmailResolveLabelId(
+  accessToken: string,
+  nameOrId: string,
+): Promise<{ id: string; name: string }> {
+  const want = String(nameOrId || '').trim();
+  if (!want) throw new Error('label name or id is required');
+  const listed = await gmailListLabels(accessToken);
+  const labels = Array.isArray(listed.labels)
+    ? (listed.labels as Array<{ id?: string; name?: string }>)
+    : [];
+  const byId = labels.find((l) => String(l.id || '') === want);
+  if (byId?.id) {
+    return { id: String(byId.id), name: String(byId.name || byId.id) };
+  }
+  const lower = want.toLowerCase();
+  const byName = labels.find((l) => String(l.name || '').toLowerCase() === lower);
+  if (byName?.id) {
+    return { id: String(byName.id), name: String(byName.name || byName.id) };
+  }
+  throw new Error(`Label not found: ${want}`);
+}
+
+/** Apply/remove a label (by name or id) on all messages matching a query. */
+export async function gmailApplyLabelByQuery(
+  accessToken: string,
+  opts: {
+    query: string;
+    label: string;
+    action?: 'add' | 'remove';
+    maxTotal?: number;
+  },
+) {
+  const query = String(opts.query || '').trim();
+  if (!query) throw new Error('query is required');
+  const resolved = await gmailResolveLabelId(accessToken, opts.label);
+  const action = opts.action === 'remove' ? 'remove' : 'add';
+  const result = await gmailBatchModifyByQuery(accessToken, {
+    query,
+    addLabelIds: action === 'add' ? [resolved.id] : [],
+    removeLabelIds: action === 'remove' ? [resolved.id] : [],
+    maxTotal: opts.maxTotal,
+  });
+  return {
+    ...result,
+    label: resolved,
+    action,
+  };
+}
+
+/** Move matching messages to Trash (add TRASH, drop INBOX). */
+export async function gmailBatchTrashByQuery(
+  accessToken: string,
+  opts: { query: string; maxTotal?: number },
+) {
+  const query = String(opts.query || '').trim();
+  if (!query) throw new Error('query is required');
+  return gmailBatchModifyByQuery(accessToken, {
+    query,
+    addLabelIds: ['TRASH'],
+    removeLabelIds: ['INBOX'],
+    maxTotal: opts.maxTotal,
+  });
+}
+
+/** Star / unstar messages matching a query. */
+export async function gmailBatchStarByQuery(
+  accessToken: string,
+  opts: { query: string; starred?: boolean; maxTotal?: number },
+) {
+  const query = String(opts.query || '').trim();
+  if (!query) throw new Error('query is required');
+  const starred = opts.starred !== false;
+  return gmailBatchModifyByQuery(accessToken, {
+    query,
+    addLabelIds: starred ? ['STARRED'] : [],
+    removeLabelIds: starred ? [] : ['STARRED'],
+    maxTotal: opts.maxTotal,
+  });
+}
+
+/** Modify labels on every message in a thread (Gmail threads.modify). */
+export async function gmailModifyThread(
+  accessToken: string,
+  opts: { threadId: string; addLabelIds?: string[]; removeLabelIds?: string[] },
+) {
+  const threadId = String(opts.threadId || '').trim();
+  if (!threadId) throw new Error('threadId is required');
+  const addLabelIds = opts.addLabelIds || [];
+  const removeLabelIds = opts.removeLabelIds || [];
+  if (!addLabelIds.length && !removeLabelIds.length) {
+    throw new Error('addLabelIds or removeLabelIds is required');
+  }
+  const result = await googleSendJson(
+    `${GMAIL_API}/users/me/threads/${encodeURIComponent(threadId)}/modify`,
+    accessToken,
+    'POST',
+    { addLabelIds, removeLabelIds },
+  );
+  return {
+    ok: true,
+    threadId,
+    addLabelIds,
+    removeLabelIds,
+    id: (result?.id as string | undefined) || threadId,
+  };
+}
+
+/** Mark every message in a thread as read. */
+export async function gmailThreadMarkRead(accessToken: string, threadId: string) {
+  return gmailModifyThread(accessToken, {
+    threadId,
+    removeLabelIds: ['UNREAD'],
+  });
 }
 
 export async function gmailTrashMessage(accessToken: string, messageId: string) {

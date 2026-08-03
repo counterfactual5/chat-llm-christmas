@@ -29,9 +29,9 @@ sequenceDiagram
 
 - **直传**：浏览器 → `api.chat.llm.christmas/v1/files`，不经过 Vercel body（约 4.5MB 限制）。
 - **回退**：ticket 失败时仍走同源 `/api/files`（小文件 / 旧部署）。
-- **图片**：客户端压缩后上传；会话里主要存 `fileId`，预览走 `/api/files/<id>`。
+- **图片**：原图直传（不压缩）；会话里主要存 `fileId`，预览走 `/api/files/<id>`。
 - **PDF/DOCX/文本**：客户端抽取正文；上传原文件时附带 `extract` 字段；chat-api 写 `{path}.extract.txt` sidecar。
-- 硬限制：chat-api `FILE_UPLOAD_MAX_BYTES`（默认 20MB）；nginx 更大。
+- 硬限制：chat-api `FILE_UPLOAD_MAX_BYTES`（默认 20MB）；客户端 `MAX_INGEST_BYTES` 同为 20MB；nginx 更大。
 
 `UPLOAD_TOKEN_SECRET` 在 **chat-api** `.env`，不是前端密钥。前端只拿短时 ticket。
 
@@ -120,7 +120,7 @@ ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上
 | 主题 | 路径 |
 |------|------|
 | 直传 | `lib/files/direct-upload.ts`，chat-api `routes/files.js` + `uploadToken.js` |
-| 抽取 / 压缩 | `lib/files/ingest/*` |
+| 抽取 / 直传准备 | `lib/files/ingest/*` |
 | 历史折叠 | `lib/files/attached-file-blocks.ts` |
 | 视觉组装 / 转写 | `lib/chat/server/chat-request.ts`，`lib/tools/image-understand/*` |
 | file_read | `lib/tools/file-read/tool.ts` |

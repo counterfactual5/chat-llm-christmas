@@ -11,6 +11,10 @@
 import OpenAI from 'openai';
 import { filesGatewayBaseURL, toImageContentPart } from '@/lib/files/gateway';
 import { zhipuApiKey } from '@/lib/tools/zhipu/credentials';
+import {
+  fitDataUrlForVision,
+  fitImageBytesForVision,
+} from '@/lib/tools/image-understand/vision-inline';
 
 export const IMAGE_UNDERSTAND_MODEL = 'glm-4.6v';
 /** Optional second understand backend on the CPA gateway (multimodal). */
@@ -110,7 +114,8 @@ export async function resolveImageUrlForVision(
 ): Promise<string> {
   const raw = String(imageUrl || '').trim();
   if (!raw) throw new Error('Empty image URL');
-  if (/^https?:\/\//i.test(raw) || raw.startsWith('data:')) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('data:')) return fitDataUrlForVision(raw);
 
   const fileId = gatewayFileIdFromRef(raw);
   if (!fileId) throw new Error('Invalid image reference');
@@ -128,7 +133,8 @@ export async function resolveImageUrlForVision(
   if (!/^image\//i.test(mime)) mime = 'image/jpeg';
   const buf = new Uint8Array(await res.arrayBuffer());
   if (!buf.byteLength) throw new Error('Gateway file was empty');
-  return `data:${mime};base64,${bytesToBase64(buf)}`;
+  const fitted = await fitImageBytesForVision(buf, mime);
+  return `data:${fitted.mime};base64,${bytesToBase64(fitted.bytes)}`;
 }
 
 function toVisionImagePart(imageUrl: string): Record<string, unknown> | null {

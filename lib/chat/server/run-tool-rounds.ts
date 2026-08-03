@@ -32,6 +32,8 @@ import {
 import { streamCompletionPayload } from '@/lib/chat/stream/truncation';
 
 export const MAX_TOOL_ROUNDS = 3;
+/** Extra rounds when Google / Notion / GitHub write tools are in play. */
+export const MAX_TOOL_ROUNDS_INTEGRATIONS = 5;
 
 /** Prompt pushed after a failed tool round when narration arrives without a retry. */
 export const TOOL_FAILURE_RECOVERY_PROMPT = [
@@ -136,6 +138,8 @@ export type RunToolRoundsDeps = {
   reasoningAsContent: boolean;
   idleMs: number;
   maxTotalMs: number;
+  /** Optional per-round budget (remaining request wall clock). */
+  resolveMaxTotalMs?: () => number;
 
   cursorModel: boolean;
   searchEnabled: boolean;
@@ -193,6 +197,7 @@ export async function runToolRounds(
   const runRound = deps.runRound || runToolCallStreamRound;
 
   for (let round = 0; round < maxRounds; round++) {
+    const roundBudget = deps.resolveMaxTotalMs?.() ?? deps.maxTotalMs;
     const roundResult = await runRound({
       apiKey: deps.apiKey,
       baseURL: deps.baseURL,
@@ -204,10 +209,85 @@ export async function runToolRounds(
       enableThinking: deps.enableThinking,
       reasoningAsContent: deps.reasoningAsContent,
       idleMs: deps.idleMs,
-      maxTotalMs: deps.maxTotalMs,
+      maxTotalMs: roundBudget,
       send: deps.send,
     });
-    if (!roundResult.ok) break;
+    if (!roundResult.ok) {
+      if (roundResult.truncated) {
+        const { streamedContent, toolCalls } = roundResult;
+        // Preserve what the user already saw / what tool deltas we collected so
+        // the final completion does not contradict the live stream.
+        if (toolCalls.length) {
+          deps.state.usedTools = true;
+          deps.workingMessages.push({
+            role: 'assistant',
+            content: streamedContent || null,
+            tool_calls: toolCalls.map((tc: ToolCallAccum) => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.name, arguments: tc.arguments },
+            })),
+          });
+          let roundHadToolFailure = false;
+          for (const tc of toolCalls) {
+            const fallbackQuery = buildToolFallbackQuery({
+              toolCall: tc,
+              userAsk: deps.userAsk,
+              streamedContent,
+              workingMessages: deps.workingMessages,
+            });
+            try {
+              const result = await deps.executeRegisteredTool(
+                deps.enabledTools,
+                {
+                  name: tc.name,
+                  callId: tc.id,
+                  rawArguments: tc.arguments,
+                  fallbackQuery,
+                },
+                deps.toolCtx,
+              );
+              const payload = String(result.content || '');
+              if (toolResultIndicatesFailure(payload)) roundHadToolFailure = true;
+              deps.workingMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: result.content,
+              });
+            } catch (err: unknown) {
+              roundHadToolFailure = true;
+              deps.workingMessages.push({
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: JSON.stringify({
+                  error: err instanceof Error ? err.message : String(err || 'tool failed'),
+                }),
+              });
+            }
+          }
+          if (roundHadToolFailure) deps.state.lastToolRoundHadFailure = true;
+        } else if (streamedContent) {
+          deps.workingMessages.push({
+            role: 'assistant',
+            content: streamedContent,
+          });
+        }
+        deps.workingMessages.push({
+          role: 'user',
+          content: [
+            'The previous tool-calling round timed out or hit the stream budget.',
+            'Finish the answer using ONLY content and tool results already above.',
+            'Do not claim unfinished tool calls succeeded. Do not call tools.',
+          ].join(' '),
+        });
+        deps.send({
+          content: `\n\n[Stream timed out during tool use: ${roundResult.skipReason || 'budget exceeded'}]`,
+          ...streamCompletionPayload('length'),
+          code: 'tools_timeout',
+        });
+      }
+      break;
+    }
     const { streamedContent, toolCalls, roundFinishReason, hasToolCallDeltas } =
       roundResult;
 

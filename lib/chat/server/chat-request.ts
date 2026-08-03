@@ -68,7 +68,11 @@ import {
   buildReviewAnswerMessages,
   collectReviewTurns,
 } from '@/lib/chat/server/review-turns';
-import { runToolRounds } from '@/lib/chat/server/run-tool-rounds';
+import {
+  MAX_TOOL_ROUNDS,
+  MAX_TOOL_ROUNDS_INTEGRATIONS,
+  runToolRounds,
+} from '@/lib/chat/server/run-tool-rounds';
 import { completeOnce, withTimeout } from '@/lib/chat/server/upstream';
 import {
 
@@ -87,8 +91,10 @@ import { wantsProductUsageHelp } from '@/lib/chat/server/product-guide';
 
 /** Stall budget: no upstream chunk for this long → timeout. */
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
-/** Hard cap for one streaming pass (under maxDuration). */
+/** Hard cap for one streaming pass (under request wall). */
 const STREAM_MAX_TOTAL_MS = 240_000;
+/** Leave headroom under route maxDuration=300s for all rounds + final. */
+const REQUEST_WALL_MS = 280_000;
 
 const VERIFIER_TIMEOUT_MS = 25_000;
 
@@ -600,6 +606,10 @@ export async function handleChatRequest(req: NextRequest) {
 
     const stream = new ReadableStream({
       async start(controller) {
+        const requestStartedAt = Date.now();
+        const remainingBudgetMs = () =>
+          Math.max(8_000, REQUEST_WALL_MS - (Date.now() - requestStartedAt));
+        const passBudgetMs = () => Math.min(STREAM_MAX_TOTAL_MS, remainingBudgetMs());
         const send = (payload: Record<string, unknown>) => {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         };
@@ -945,6 +955,12 @@ export async function handleChatRequest(req: NextRequest) {
             reasoningAsContent,
             idleMs: STREAM_IDLE_TIMEOUT_MS,
             maxTotalMs: STREAM_MAX_TOTAL_MS,
+            resolveMaxTotalMs: passBudgetMs,
+            maxRounds: authorizedIntegrations.some((id) =>
+              /^(gmail|calendar|drive|notion|github|google)$/i.test(id),
+            )
+              ? MAX_TOOL_ROUNDS_INTEGRATIONS
+              : MAX_TOOL_ROUNDS,
             cursorModel,
             searchEnabled,
             autoReview,
@@ -1009,7 +1025,7 @@ export async function handleChatRequest(req: NextRequest) {
               enableThinking: opts.enableThinking,
               foldReasoning: opts.foldReasoning,
               idleMs: STREAM_IDLE_TIMEOUT_MS,
-              maxTotalMs: STREAM_MAX_TOTAL_MS,
+              maxTotalMs: passBudgetMs(),
               send,
             });
             // Claim Reviewer post-audit: catch claims that slipped through to the

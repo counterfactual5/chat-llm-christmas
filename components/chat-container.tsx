@@ -1125,6 +1125,11 @@ export default function ChatContainer() {
           if (openContextPanel) queueMicrotask(() => setIsContextPanelOpen(true));
         },
         onReplySettled: onMemoryReplySettled,
+        onGoogleAuthRequired: () => {
+          setAttachError(
+            'Google tools are enabled but not authorized — reconnect Google in Settings, then try again.',
+          );
+        },
       },
       sessionId,
       apiMessages,
@@ -1431,6 +1436,32 @@ export default function ChatContainer() {
     beginLoading,
     endLoading,
   });
+
+  const researchReattachedJobsRef = useRef(new Set<string>());
+  // After refresh or switching sessions, reconnect SSE for in-flight Deep Research.
+  useEffect(() => {
+    if (!chatsHydrated) return;
+    if (deepResearch.busy) return;
+    const session = sessionsRef.current.find((s) => s.id === activeSessionId);
+    if (!session) return;
+    const running = session.messages.find((m) => {
+      if (m.role !== 'assistant' || !m.research?.jobId) return false;
+      return ['queued', 'planning', 'searching', 'synthesizing', 'verifying', 'writing'].includes(
+        String(m.research.status || ''),
+      );
+    });
+    const jobId = running?.research?.jobId;
+    if (!jobId || !running) return;
+    if (researchReattachedJobsRef.current.has(jobId)) return;
+    researchReattachedJobsRef.current.add(jobId);
+    void deepResearch.reattach({
+      jobId,
+      sessionId: session.id,
+      assistantId: running.id,
+      query: running.research?.query || '',
+      mode: (running.research?.mode as 'quick' | 'standard' | 'rigorous') || 'standard',
+    });
+  }, [chatsHydrated, deepResearch, deepResearch.busy, activeSessionId]);
 
   const startResearchTurn = useCallback(
     async (opts: {

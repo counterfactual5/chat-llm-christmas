@@ -43,6 +43,8 @@ export type ToolRoundResult = {
   /** false when the upstream stream could not even be created for this round. */
   ok: boolean;
   skipReason?: string;
+  /** true when the round hit idle/total budget (not client abort). */
+  truncated?: boolean;
   streamedContent: string;
   streamedReasoning: string;
   toolCalls: ToolCallAccum[];
@@ -140,10 +142,41 @@ export async function runToolCallStreamRound(opts: {
       }
     }
   } catch (toolStreamErr: any) {
-    // Timeout / upstream abort during streaming used to escape here and
-    // surface as a hard "Request failed". Soft-fail: keep any partial
-    // tool_calls / content and let the caller's post-round logic decide.
-    console.warn('tools round stream aborted:', toolStreamErr?.message || toolStreamErr);
+    // Client abort → soft-fail with whatever we captured.
+    // Idle/total budget stall → hard-fail so the caller can surface truncation.
+    const msg = toolStreamErr?.message || String(toolStreamErr || 'failed');
+    console.warn('tools round stream aborted:', msg);
+    const clientAbort =
+      Boolean(opts.signal?.aborted) ||
+      /aborted|AbortError/i.test(msg);
+    const budgetHit = /exceeded|stalled|timed out|budget/i.test(msg);
+    {
+      const rest = roundStampStripper.flush();
+      if (rest) {
+        streamedContent += rest;
+        opts.send({ content: rest });
+      }
+    }
+    if (!clientAbort && budgetHit) {
+      return {
+        ok: false,
+        skipReason: msg,
+        truncated: true,
+        streamedContent,
+        streamedReasoning,
+        toolCalls: collectToolCalls(toolCallDeltas),
+        roundFinishReason: roundFinishReason || 'length',
+        hasToolCallDeltas,
+      };
+    }
+    return {
+      ok: true,
+      streamedContent,
+      streamedReasoning,
+      toolCalls: collectToolCalls(toolCallDeltas),
+      roundFinishReason,
+      hasToolCallDeltas,
+    };
   }
   {
     const rest = roundStampStripper.flush();

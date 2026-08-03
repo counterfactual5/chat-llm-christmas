@@ -60,6 +60,8 @@ export type StreamChatDeps = {
     requestReview?: boolean;
     incomplete: boolean;
   }) => void;
+  /** Google toggle on but vault token missing / unauthorized for this request. */
+  onGoogleAuthRequired?: () => void;
 };
 
 export async function streamChatResponse(
@@ -146,6 +148,10 @@ export async function streamChatResponse(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(errText || 'Upstream error');
+  }
+
+  if (response.headers.get('X-Google-Auth') === 'requested-but-unauthorized') {
+    deps.onGoogleAuthRequired?.();
   }
 
   const reader = response.body?.getReader();

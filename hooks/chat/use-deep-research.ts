@@ -136,6 +136,10 @@ export function useDeepResearch(opts: {
          */
         deferUiUntilCatchUp?: boolean;
         seed?: { query: string; mode: ResearchMode };
+        /** Resume after this event seq (inclusive lower bound is exclusive on server). */
+        lastEventId?: number;
+        /** How many times we already reattached this job after a drop. */
+        reattachAttempt?: number;
       },
     ) => {
       stopStream();
@@ -143,6 +147,9 @@ export function useDeepResearch(opts: {
       abortRef.current = ac;
       activeRef.current = { jobId, sessionId, assistantId };
       const deferUi = Boolean(opts?.deferUiUntilCatchUp);
+      const lastEventId = Math.max(0, Number(opts?.lastEventId || 0) || 0);
+      const reattachAttempt = Math.max(0, Number(opts?.reattachAttempt || 0) || 0);
+      const MAX_REATTACH = 5;
       let rebuilt: Message = createResearchAssistantMessage({
         id: assistantId,
         jobId,
@@ -153,6 +160,7 @@ export function useDeepResearch(opts: {
       let sawEvent = false;
       let catchUpTimer: ReturnType<typeof setTimeout> | null = null;
       let reattachAfterDrop = false;
+      let latestEventId = lastEventId;
 
       const commitCatchUp = () => {
         if (uiLive) return;
@@ -198,7 +206,7 @@ export function useDeepResearch(opts: {
 
       try {
         const res = await fetch(
-          `/api/research/${encodeURIComponent(jobId)}/stream?last_event_id=0`,
+          `/api/research/${encodeURIComponent(jobId)}/stream?last_event_id=${encodeURIComponent(String(lastEventId))}`,
           { signal: ac.signal, cache: 'no-store' },
         );
         if (!res.ok || !res.body) {
@@ -209,11 +217,13 @@ export function useDeepResearch(opts: {
         const decoder = new TextDecoder();
         let buf = '';
         let eventKind = 'message';
+        let eventId = '';
         let dataLines: string[] = [];
 
         const flush = () => {
           if (!dataLines.length) {
             eventKind = 'message';
+            eventId = '';
             return;
           }
           const raw = dataLines.join('\n');
@@ -226,6 +236,9 @@ export function useDeepResearch(opts: {
           }
           const kind = eventKind || 'message';
           eventKind = 'message';
+          const seq = Number(eventId || 0);
+          eventId = '';
+          if (Number.isFinite(seq) && seq > latestEventId) latestEventId = seq;
 
           rebuilt = applyResearchEvent(rebuilt, { kind, payload });
           sawEvent = true;
@@ -282,6 +295,8 @@ export function useDeepResearch(opts: {
           for (const line of parts) {
             if (line.startsWith('event:')) {
               eventKind = line.slice(6).trim();
+            } else if (line.startsWith('id:')) {
+              eventId = line.slice(3).trim();
             } else if (line.startsWith('data:')) {
               dataLines.push(line.slice(5).trimStart());
             } else if (line === '') {
@@ -390,15 +405,29 @@ export function useDeepResearch(opts: {
       } finally {
         if (catchUpTimer) clearTimeout(catchUpTimer);
         if (reattachAfterDrop) {
+          if (reattachAttempt >= MAX_REATTACH) {
+            setError('Research is still running, but the live stream kept dropping. Tap Continue to reconnect.');
+            patchAssistant(setSessions, sessionId, assistantId, (m) => ({
+              ...m,
+              incomplete: true,
+              truncationReason:
+                'Research still running — stream reconnect limit reached. Tap Continue.',
+            }));
+            setBusy(false);
+            endLoading(sessionId);
+            if (activeRef.current?.jobId === jobId) activeRef.current = null;
+            return;
+          }
           // Job still running — reconnect SSE without clearing the busy state.
-          // Defer UI until catch-up: the replay starts from event 0, and applying
-          // it on top of the live timeline would duplicate stages/tool runs.
-          // Small delay avoids hammering a proxy that closes SSE immediately.
+          // Prefer last_event_id cursor when we have one; otherwise defer UI for full replay.
+          const nextId = latestEventId;
           setTimeout(() => {
             if (activeRef.current?.jobId !== jobId) return;
             void listen(jobId, sessionId, assistantId, {
-              deferUiUntilCatchUp: true,
+              deferUiUntilCatchUp: nextId <= 0,
               seed: opts?.seed,
+              lastEventId: nextId,
+              reattachAttempt: reattachAttempt + 1,
             });
           }, 800);
           return;

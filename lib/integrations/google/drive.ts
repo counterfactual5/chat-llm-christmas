@@ -423,3 +423,344 @@ export async function driveDeleteComment(
   return { ok: true, deleted: opts.commentId };
 }
 
+type DriveListedFile = {
+  id: string;
+  name?: string;
+  mimeType?: string;
+  webViewLink?: string;
+  parents?: string[];
+};
+
+/** Paginate Drive search and collect file ids (and light metadata). */
+export async function driveListFileIds(
+  accessToken: string,
+  opts: { query: string; maxTotal?: number; pageSize?: number },
+) {
+  const rawQuery = String(opts.query || '').trim();
+  if (!rawQuery) throw new Error('query is required');
+  // Drive includes trashed files by default; bulk mutators should not touch trash
+  // unless the caller explicitly filters on trashed=.
+  const query = /\btrashed\s*=/i.test(rawQuery) ? rawQuery : `(${rawQuery}) and trashed=false`;
+  const maxTotal = Math.min(Math.max(opts.maxTotal || 100, 1), 500);
+  const pageSize = Math.min(Math.max(opts.pageSize || 50, 1), 50);
+  const files: DriveListedFile[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+  let truncated = false;
+
+  while (files.length < maxTotal) {
+    const list = await driveSearchFiles(accessToken, {
+      query,
+      pageSize: Math.min(pageSize, maxTotal - files.length),
+      pageToken,
+    });
+    pages += 1;
+    const batch = Array.isArray(list.files)
+      ? (list.files as Array<GoogleRestJson>)
+          .map((f) => ({
+            id: String(f.id || '').trim(),
+            name: f.name != null ? String(f.name) : undefined,
+            mimeType: f.mimeType != null ? String(f.mimeType) : undefined,
+            webViewLink: f.webViewLink != null ? String(f.webViewLink) : undefined,
+            parents: Array.isArray(f.parents)
+              ? (f.parents as unknown[]).map((p) => String(p)).filter(Boolean)
+              : undefined,
+          }))
+          .filter((f) => f.id)
+      : [];
+    for (const file of batch) {
+      if (files.length >= maxTotal) {
+        truncated = true;
+        break;
+      }
+      files.push(file);
+    }
+    const next = String(list.nextPageToken || '').trim();
+    if (!next || !batch.length) break;
+    if (files.length >= maxTotal) {
+      truncated = true;
+      break;
+    }
+    pageToken = next;
+    if (pages >= 20) {
+      truncated = true;
+      break;
+    }
+  }
+
+  return {
+    query,
+    ids: files.map((f) => f.id),
+    count: files.length,
+    pages,
+    truncated,
+    sample: files.slice(0, 8),
+  };
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) || 0 }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function summarizeDriveBulkResults<T extends { ok: boolean }>(results: T[]) {
+  const failed = results.filter((r) => !r.ok);
+  return {
+    sample: results.slice(0, 8),
+    failedSample: failed.slice(0, 20),
+  };
+}
+
+/** Move matching files to trash. Requires an explicit Drive query. */
+export async function driveTrashByQuery(
+  accessToken: string,
+  opts: { query: string; maxTotal?: number },
+) {
+  const listed = await driveListFileIds(accessToken, {
+    query: opts.query,
+    maxTotal: opts.maxTotal ?? 100,
+  });
+  const results = await mapPool(listed.ids, 4, async (fileId) => {
+    try {
+      const out = await driveTrashFile(accessToken, fileId);
+      return { fileId, ok: true as const, name: out?.name };
+    } catch (error) {
+      return {
+        fileId,
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+  const trashed = results.filter((r) => r.ok).length;
+  const summary = summarizeDriveBulkResults(results);
+  return {
+    ok: true,
+    query: listed.query,
+    requested: listed.count,
+    trashed,
+    failed: results.length - trashed,
+    truncated: listed.truncated,
+    ...summary,
+  };
+}
+
+/** Move a file into destinationFolderId (removes previous parents). */
+export async function driveMoveFile(
+  accessToken: string,
+  opts: { fileId: string; destinationFolderId: string },
+) {
+  const fileId = String(opts.fileId || '').trim();
+  const destinationFolderId = String(opts.destinationFolderId || '').trim();
+  if (!fileId) throw new Error('fileId is required');
+  if (!destinationFolderId) throw new Error('destinationFolderId is required');
+  const meta = await driveGetFile(accessToken, fileId);
+  const parents = Array.isArray(meta.parents)
+    ? (meta.parents as unknown[]).map((p) => String(p)).filter(Boolean)
+    : [];
+  if (!parents.length) {
+    throw new Error(
+      'Cannot move file: current parents are unknown (missing parents on metadata). Use drive_update_file with explicit removeParents/addParents.',
+    );
+  }
+  const removeParents = parents.filter((p) => p !== destinationFolderId);
+  return driveUpdateFile(accessToken, {
+    fileId,
+    addParents: parents.includes(destinationFolderId) ? undefined : [destinationFolderId],
+    removeParents: removeParents.length ? removeParents : undefined,
+  });
+}
+
+/** Move all files matching a query into a destination folder. */
+export async function driveMoveByQuery(
+  accessToken: string,
+  opts: { query: string; destinationFolderId: string; maxTotal?: number },
+) {
+  const destinationFolderId = String(opts.destinationFolderId || '').trim();
+  if (!destinationFolderId) throw new Error('destinationFolderId is required');
+  const listed = await driveListFileIds(accessToken, {
+    query: opts.query,
+    maxTotal: opts.maxTotal ?? 100,
+  });
+  const results = await mapPool(listed.ids, 3, async (fileId) => {
+    try {
+      const out = await driveMoveFile(accessToken, { fileId, destinationFolderId });
+      return { fileId, ok: true as const, name: out?.name };
+    } catch (error) {
+      return {
+        fileId,
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+  const moved = results.filter((r) => r.ok).length;
+  const summary = summarizeDriveBulkResults(results);
+  return {
+    ok: true,
+    query: listed.query,
+    destinationFolderId,
+    requested: listed.count,
+    moved,
+    failed: results.length - moved,
+    truncated: listed.truncated,
+    ...summary,
+  };
+}
+
+/** Share all files matching a query. */
+export async function driveShareByQuery(
+  accessToken: string,
+  opts: {
+    query: string;
+    role: 'reader' | 'commenter' | 'writer' | 'owner';
+    type: 'user' | 'group' | 'domain' | 'anyone';
+    emailAddress?: string;
+    domain?: string;
+    sendNotificationEmail?: boolean;
+    maxTotal?: number;
+  },
+) {
+  const listed = await driveListFileIds(accessToken, {
+    query: opts.query,
+    maxTotal: opts.maxTotal ?? 50,
+  });
+  const results = await mapPool(listed.ids, 3, async (fileId) => {
+    try {
+      const out = await driveShareFile(accessToken, {
+        fileId,
+        role: opts.role,
+        type: opts.type,
+        emailAddress: opts.emailAddress,
+        domain: opts.domain,
+        sendNotificationEmail: opts.sendNotificationEmail,
+      });
+      return { fileId, ok: true as const, permissionId: out?.id };
+    } catch (error) {
+      return {
+        fileId,
+        ok: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+  const shared = results.filter((r) => r.ok).length;
+  const summary = summarizeDriveBulkResults(results);
+  return {
+    ok: true,
+    query: listed.query,
+    requested: listed.count,
+    shared,
+    failed: results.length - shared,
+    truncated: listed.truncated,
+    ...summary,
+  };
+}
+
+function escapeDriveQueryLiteral(value: string): string {
+  return value.replace(/'/g, "\\'");
+}
+
+async function findChildFolder(
+  accessToken: string,
+  parentId: string,
+  name: string,
+): Promise<DriveListedFile | null> {
+  const safeName = escapeDriveQueryLiteral(name);
+  const safeParent = escapeDriveQueryLiteral(parentId);
+  const q =
+    `'${safeParent}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder' and name='${safeName}'`;
+  const listed = await driveSearchFiles(accessToken, { query: q, pageSize: 10 });
+  const files = Array.isArray(listed.files) ? (listed.files as Array<GoogleRestJson>) : [];
+  const hit = files.find((f) => String(f.name || '') === name && f.id);
+  if (!hit?.id) return null;
+  return {
+    id: String(hit.id),
+    name: String(hit.name || name),
+    mimeType: String(hit.mimeType || 'application/vnd.google-apps.folder'),
+    webViewLink: hit.webViewLink != null ? String(hit.webViewLink) : undefined,
+  };
+}
+
+function splitDrivePath(path: string): string[] {
+  return String(path || '')
+    .split('/')
+    .map((s) => s.trim())
+    .filter((s) => s && s !== '.');
+}
+
+/** Resolve a folder path like "Documents/Work/Q3" under My Drive (or parentId). */
+export async function driveResolvePath(
+  accessToken: string,
+  opts: { path: string; parentId?: string },
+) {
+  const segments = splitDrivePath(opts.path);
+  if (!segments.length) throw new Error('path is required (e.g. Documents/Work)');
+  let parentId = String(opts.parentId || 'root').trim() || 'root';
+  const resolved: Array<{ id: string; name: string }> = [];
+  for (const name of segments) {
+    const folder = await findChildFolder(accessToken, parentId, name);
+    if (!folder) {
+      return {
+        ok: false as const,
+        path: segments.join('/'),
+        resolved,
+        missing: name,
+        parentId,
+        error: `Folder not found: ${[...resolved.map((r) => r.name), name].join('/')}`,
+      };
+    }
+    resolved.push({ id: folder.id, name: folder.name || name });
+    parentId = folder.id;
+  }
+  return {
+    ok: true as const,
+    path: segments.join('/'),
+    folderId: parentId,
+    resolved,
+  };
+}
+
+/** Ensure each folder in a path exists (create missing ones). */
+export async function driveEnsureFolder(
+  accessToken: string,
+  opts: { path: string; parentId?: string },
+) {
+  const segments = splitDrivePath(opts.path);
+  if (!segments.length) throw new Error('path is required (e.g. Documents/Work)');
+  let parentId = String(opts.parentId || 'root').trim() || 'root';
+  const resolved: Array<{ id: string; name: string; created: boolean }> = [];
+  for (const name of segments) {
+    const existing = await findChildFolder(accessToken, parentId, name);
+    if (existing) {
+      resolved.push({ id: existing.id, name: existing.name || name, created: false });
+      parentId = existing.id;
+      continue;
+    }
+    const created = await driveCreateFolder(accessToken, { name, parentId });
+    const id = String(created?.id || '').trim();
+    if (!id) throw new Error(`Failed to create folder: ${name}`);
+    resolved.push({ id, name, created: true });
+    parentId = id;
+  }
+  return {
+    ok: true,
+    path: segments.join('/'),
+    folderId: parentId,
+    resolved,
+  };
+}
+

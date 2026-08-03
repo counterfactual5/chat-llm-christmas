@@ -5,21 +5,25 @@ export type GoogleService = 'gmail' | 'calendar' | 'drive';
 export const GMAIL_SYSTEM_PROMPT = [
   "You have Gmail MCP tools for the user's connected Google account.",
   'Profile; search/read messages (incl. batch get) & threads; attachments; labels CRUD; drafts; send/reply/forward; modify/batch-modify; trash/untrash.',
-  'For send/reply/forward/trash/label changes, confirm intent from the user message before calling.',
+  'Bulk hygiene (prefer these over paging gmail_search): gmail_batch_mark_read, gmail_batch_archive, gmail_batch_trash (query + confirm=true required), gmail_batch_star / gmail_batch_unstar, gmail_apply_label_by_query (label name or id), gmail_batch_modify_by_query, gmail_thread_mark_read / gmail_modify_thread.',
+  'gmail_search returns ids[] plus messages[]. Use raw gmail_batch_modify only when you already have specific ids.',
+  'For send/reply/forward/trash/label changes, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true.',
   'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
 ].join(' ');
 
 export const CALENDAR_SYSTEM_PROMPT = [
   "You have Google Calendar MCP tools for the user's connected Google account.",
-  'List/create calendars; list/get/create/update/delete/move events; recurring instances; free/busy; list/add/remove calendar ACL sharing.',
-  'For create/update/delete/move/ACL, confirm intent from the user message before calling.',
+  'List/create calendars; list/get/create/update/delete/move events; recurring instances; free/busy; ACL sharing.',
+  'Convenience (prefer these): calendar_quick_add for natural-language create; calendar_create_event with attendees to invite people; calendar_delete_by_query (requires timeMin+timeMax + confirm=true; query recommended); calendar_find_free_slots; calendar_rsvp.',
+  'calendar_list_events supports pageToken and returns ids[]. For create/update/delete/move/ACL/rsvp, confirm intent from the user message before calling.',
   'Do not invent event IDs — only use tool results. Cite Calendar links when answering.',
 ].join(' ');
 
 export const DRIVE_SYSTEM_PROMPT = [
   "You have Google Drive MCP tools for the user's connected Google account.",
-  'Search/get/read/export/upload; list folder children; create text/folder/shortcut; shared drives; copy; rename/move; trash/delete; permissions; comments.',
-  'For share/trash/delete/create/upload/comments, confirm intent from the user message before calling.',
+  'Search/get/read/export/upload; list folder children; create text/folder/shortcut; shared drives; copy; rename; trash/delete; permissions; comments.',
+  'Convenience (prefer these over paging search): drive_move; drive_trash_by_query (query + confirm=true) / drive_move_by_query / drive_share_by_query (query required); drive_resolve_path / drive_ensure_folder for path-based folders.',
+  'For share/trash/delete/create/upload/comments/bulk ops, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true.',
   'Do not invent file IDs — only use tool results. Cite Drive links when answering.',
 ].join(' ');
 
@@ -76,6 +80,9 @@ export function queryHint(name: string, args: Record<string, unknown>): string {
     'fileId',
     'permissionId',
     'parentId',
+    'destinationFolderId',
+    'path',
+    'text',
     'commentId',
     'ruleId',
     'destinationCalendarId',
@@ -110,14 +117,20 @@ export function extractUiResults(
     if (rows) {
       return rows.slice(0, 8).map((item) => {
         const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+        const id = String(row.id || '').trim();
         const url = String(row.htmlLink || row.webViewLink || row.url || '');
+        const title = String(
+          row.subject || row.summary || row.name || row.title || (id ? `id:${id}` : '') || url || 'Result',
+        ).slice(0, 120);
+        const snippetParts = [
+          id ? `id=${id}` : '',
+          String(row.from || ''),
+          String(row.snippet || row.description || row.mimeType || ''),
+        ].filter(Boolean);
         return {
-          title: String(row.subject || row.summary || row.name || row.title || url || 'Result').slice(
-            0,
-            120,
-          ),
+          title,
           url,
-          snippet: String(row.snippet || row.description || row.from || row.mimeType || '').slice(0, 240),
+          snippet: snippetParts.join(' · ').slice(0, 240),
         };
       });
     }

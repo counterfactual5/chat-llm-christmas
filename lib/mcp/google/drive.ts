@@ -6,16 +6,22 @@ import {
   driveCreateTextFile,
   driveDeleteComment,
   driveDeleteFile,
+  driveEnsureFolder,
   driveExportFile,
   driveGetFile,
   driveListChildren,
   driveListComments,
   driveListPermissions,
   driveListSharedDrives,
+  driveMoveByQuery,
+  driveMoveFile,
   driveReadFileText,
+  driveResolvePath,
   driveRevokePermission,
   driveSearchFiles,
+  driveShareByQuery,
   driveShareFile,
+  driveTrashByQuery,
   driveTrashFile,
   driveUntrashFile,
   driveUpdateFile,
@@ -166,7 +172,7 @@ export const driveToolDefs: GoogleToolDef[] = [
   {
     name: 'drive_update_file',
     description:
-      'Rename a Drive file and/or move it (addParents / removeParents). Use removeParents of the current parent and addParents of the destination to move.',
+      'Rename a Drive file and/or change parents (addParents / removeParents). Prefer drive_move for simple moves.',
     write: true,
     parameters: {
       type: 'object',
@@ -204,6 +210,28 @@ export const driveToolDefs: GoogleToolDef[] = [
     },
   },
   {
+    name: 'drive_move',
+    description:
+      'Move a Drive file into destinationFolderId (automatically removes previous parents). Prefer this over drive_update_file for moves.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        fileId: { type: 'string' },
+        destinationFolderId: { type: 'string', description: 'Target folder id' },
+      },
+      required: ['fileId', 'destinationFolderId'],
+    },
+    run: async (token, args) => {
+      const fileId = str(args.fileId);
+      const destinationFolderId = str(args.destinationFolderId);
+      if (!fileId || !destinationFolderId) {
+        throw new Error('fileId and destinationFolderId are required');
+      }
+      return driveMoveFile(token, { fileId, destinationFolderId });
+    },
+  },
+  {
     name: 'drive_trash',
     description: 'Move a Drive file to trash.',
     write: true,
@@ -216,6 +244,153 @@ export const driveToolDefs: GoogleToolDef[] = [
       const fileId = str(args.fileId);
       if (!fileId) throw new Error('fileId is required');
       return driveTrashFile(token, fileId);
+    },
+  },
+  {
+    name: 'drive_trash_by_query',
+    description:
+      'Trash all Drive files matching a query (paginated). Requires an explicit query and confirm=true — never trash without both. Example: name contains "invoice" and modifiedTime < "2024-01-01T00:00:00"',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Required Drive search query' },
+        maxTotal: { type: 'integer', description: 'Max files (1-500, default 100)' },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true to proceed (safety latch)',
+        },
+      },
+      required: ['query', 'confirm'],
+    },
+    run: async (token, args) => {
+      if (args.confirm !== true) {
+        throw new Error('confirm=true is required for drive_trash_by_query');
+      }
+      const query = str(args.query);
+      if (!query) throw new Error('query is required (refusing unbounded trash)');
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 100);
+      return driveTrashByQuery(token, { query, maxTotal });
+    },
+  },
+  {
+    name: 'drive_move_by_query',
+    description:
+      'Move all Drive files matching a query into destinationFolderId. Requires query + destination folder id.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        destinationFolderId: { type: 'string' },
+        maxTotal: { type: 'integer', description: 'Max files (1-500, default 100)' },
+      },
+      required: ['query', 'destinationFolderId'],
+    },
+    run: async (token, args) => {
+      const query = str(args.query);
+      const destinationFolderId = str(args.destinationFolderId);
+      if (!query || !destinationFolderId) {
+        throw new Error('query and destinationFolderId are required');
+      }
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 100);
+      return driveMoveByQuery(token, { query, destinationFolderId, maxTotal });
+    },
+  },
+  {
+    name: 'drive_share_by_query',
+    description:
+      'Share all Drive files matching a query. Same role/type/emailAddress semantics as drive_share.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        role: { type: 'string', description: 'reader | commenter | writer | owner' },
+        type: { type: 'string', description: 'user | group | domain | anyone' },
+        emailAddress: { type: 'string' },
+        domain: { type: 'string' },
+        sendNotificationEmail: { type: 'boolean' },
+        maxTotal: { type: 'integer', description: 'Max files (1-500, default 50)' },
+      },
+      required: ['query', 'role', 'type'],
+    },
+    run: async (token, args) => {
+      const query = str(args.query);
+      const role = str(args.role) as 'reader' | 'commenter' | 'writer' | 'owner';
+      const type = str(args.type) as 'user' | 'group' | 'domain' | 'anyone';
+      if (!query || !role || !type) throw new Error('query, role, and type are required');
+      if (!['reader', 'commenter', 'writer', 'owner'].includes(role)) {
+        throw new Error('role must be reader, commenter, writer, or owner');
+      }
+      if (!['user', 'group', 'domain', 'anyone'].includes(type)) {
+        throw new Error('type must be user, group, domain, or anyone');
+      }
+      const maxTotal =
+        typeof args.maxTotal === 'number' && Number.isFinite(args.maxTotal)
+          ? args.maxTotal
+          : num(args.maxTotal, 50);
+      return driveShareByQuery(token, {
+        query,
+        role,
+        type,
+        emailAddress: str(args.emailAddress) || undefined,
+        domain: str(args.domain) || undefined,
+        sendNotificationEmail:
+          args.sendNotificationEmail === undefined
+            ? undefined
+            : Boolean(args.sendNotificationEmail),
+        maxTotal,
+      });
+    },
+  },
+  {
+    name: 'drive_resolve_path',
+    description:
+      'Resolve a folder path like "Documents/Work/Q3" under My Drive (or parentId). Returns folderId when found.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Slash-separated folder path' },
+        parentId: { type: 'string', description: 'Start folder id; default root' },
+      },
+      required: ['path'],
+    },
+    run: async (token, args) => {
+      const path = str(args.path);
+      if (!path) throw new Error('path is required');
+      return driveResolvePath(token, {
+        path,
+        parentId: str(args.parentId) || undefined,
+      });
+    },
+  },
+  {
+    name: 'drive_ensure_folder',
+    description:
+      'Ensure a folder path exists (create missing folders). Example path: Documents/Work/Q3. Returns final folderId.',
+    write: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        parentId: { type: 'string', description: 'Start folder id; default root' },
+      },
+      required: ['path'],
+    },
+    run: async (token, args) => {
+      const path = str(args.path);
+      if (!path) throw new Error('path is required');
+      return driveEnsureFolder(token, {
+        path,
+        parentId: str(args.parentId) || undefined,
+      });
     },
   },
   {

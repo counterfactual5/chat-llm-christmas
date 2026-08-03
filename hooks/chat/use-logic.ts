@@ -1081,6 +1081,14 @@ export function useChatLogic(props: UseChatLogicProps) {
     const literatureCmd = parseLiteratureCommand(lastUser.content);
     if (literatureCmd) {
       if (literatureCmd.action === 'download') {
+        if (literatureCmd.error) {
+          setAttachError(
+            literatureCmd.error === 'missing_identifier'
+              ? t('booksDownloadMissingId')
+              : t('booksDownloadInvalidId'),
+          );
+          return;
+        }
         await runBookDownload(literatureCmd.identifier, {
           baseMessages: prior,
           skipDuplicateUser: true,

@@ -3,7 +3,9 @@ import { isClickableSlashCommand } from '@/components/chat/message/AnswerMarkdow
 import {
   formatBookDownloadCommand,
   formatLiteratureCommand,
+  inferBookDownloadProvider,
   isValidBookDownloadIdentifier,
+  markdownLinkLabel,
   parseLiteratureCommand,
   resolveBookDownloadIdentifier,
 } from '@/lib/chat/turn/literature-command';
@@ -272,6 +274,31 @@ describe('formatLiteratureMarkdown', () => {
       'Manual download: [毛泽东选集](https://openlibrary.org/works/OL123W)',
     );
     expect(ol).not.toContain('/books download');
+
+    const bracketTitle = formatLiteratureMarkdown('books', 'x', 'open-library', [
+      {
+        title: 'Foo [bar] Baz',
+        url: 'https://openlibrary.org/works/OL9W',
+        downloadable: false,
+        sourceProvider: 'open-library',
+      },
+    ]);
+    expect(bracketTitle).toContain(
+      'Manual download: [Foo bar Baz](https://openlibrary.org/works/OL9W)',
+    );
+  });
+});
+
+describe('inferBookDownloadProvider / markdownLinkLabel', () => {
+  it('labels providers from identifiers', () => {
+    expect(inferBookDownloadProvider('libgen:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toBe(
+      'libgen',
+    );
+    expect(inferBookDownloadProvider('gutenberg:1342')).toBe('gutenberg');
+    expect(inferBookDownloadProvider('https://example.com/a.epub')).toBe('direct');
+    expect(inferBookDownloadProvider('calculus')).toBe('internet-archive');
+    expect(markdownLinkLabel('A [B] C')).toBe('A B C');
+    expect(markdownLinkLabel('')).toBe('Page');
   });
 });
 

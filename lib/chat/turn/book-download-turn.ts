@@ -4,7 +4,10 @@
 
 import type { Message, MessageToolRun } from '@/lib/chat/types';
 import { titleForNewConversation } from '@/lib/chat/turn/attachments';
-import { formatBookDownloadCommand } from '@/lib/chat/turn/literature-command';
+import {
+  formatBookDownloadCommand,
+  inferBookDownloadProvider,
+} from '@/lib/chat/turn/literature-command';
 
 export type BookDownloadThread = {
   thread: Message[];
@@ -101,10 +104,7 @@ export function bookDownloadToolRun(opts: {
   provider?: string;
 }): MessageToolRun {
   const provider =
-    opts.provider ||
-    (/^libgen:/i.test(opts.identifier) || /^[a-f0-9]{32}$/i.test(opts.identifier)
-      ? 'libgen'
-      : 'internet-archive');
+    String(opts.provider || '').trim() || inferBookDownloadProvider(opts.identifier);
   const fileUrl = opts.fileId
     ? `/api/files/${encodeURIComponent(opts.fileId)}`
     : '';

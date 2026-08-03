@@ -192,7 +192,7 @@ const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
   'If this tool is OFF, the user can still run the always-available slash command /books — never say /books is unavailable.',
-  'For downloads: only cite downloadCommand from the tool receipt (libgen md5 / IA id / direct URL). Never invent identifiers or claim only LibGen works.',
+  'For downloads: only cite downloadCommand from the tool receipt (libgen md5 / IA id / gutenberg:id / direct URL). Never invent identifiers or claim only LibGen works.',
   'When downloadCommand is absent, give the hit url as a markdown Manual download link for the user to open themselves.',
   'After results, cite title + URL; never invent catalog entries.',
 ].join(' ');

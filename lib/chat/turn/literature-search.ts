@@ -10,6 +10,7 @@ import {
   formatLiteratureCommand,
   formatPaperActionCommand,
   isValidBookDownloadIdentifier,
+  markdownLinkLabel,
   resolveBookDownloadIdentifier,
   type BookSource,
   type LiteratureKind,
@@ -392,7 +393,7 @@ export function formatLiteratureMarkdown(
           `   - ${bookDownloadCommandLabel(dlId)}: \`${formatBookDownloadCommand(dlId)}\``,
         );
       } else if (hit.url && /^https?:\/\//i.test(hit.url)) {
-        const label = hit.title?.trim() || 'Page';
+        const label = markdownLinkLabel(hit.title || '', 'Page');
         lines.push(`   - Manual download: [${label}](${hit.url})`);
       }
     }

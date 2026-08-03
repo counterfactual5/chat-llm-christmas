@@ -140,6 +140,24 @@ export function bookDownloadCommandLabel(identifier: string): string {
   return 'Download';
 }
 
+/** Infer Process provider label when the download API omits `provider`. */
+export function inferBookDownloadProvider(identifier: string): string {
+  const id = String(identifier || '').trim();
+  if (/^libgen:/i.test(id) || /^[a-f0-9]{32}$/i.test(id)) return 'libgen';
+  if (/^gutenberg:/i.test(id)) return 'gutenberg';
+  if (/^https?:\/\//i.test(id)) return 'direct';
+  return 'internet-archive';
+}
+
+/** Strip brackets so titles cannot break markdown link labels. */
+export function markdownLinkLabel(text: string, fallback = 'Page'): string {
+  const cleaned = String(text || '')
+    .replace(/[[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || fallback;
+}
+
 function normalizePaperSource(token: string): PaperSource | null {
   const t = token.toLowerCase();
   if (t === 's2' || t === 'semantic-scholar') return 'semantic';

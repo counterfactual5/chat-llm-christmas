@@ -48,7 +48,7 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('/skill not /skills');
     expect(text).toContain('available via slash command OR by enabling the matching Tools switch');
     expect(text).toContain('Prefer /papers or /books for dedicated literature search/download');
-    expect(text).toContain('web_search with sources=news|wiki');
+    expect(text).toContain('sources=news or sources=wiki');
     expect(text).toContain('mixed = web + papers/books + news + wiki');
     expect(text).toContain('Never upgrade inactive library blurbs');
   });

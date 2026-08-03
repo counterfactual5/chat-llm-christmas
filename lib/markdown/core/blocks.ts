@@ -70,9 +70,11 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // CTA after list prose: `建立人脉 需要我帮你：`
   out = out.replace(/([^\n])\s+(需要我(?:帮你|协助)[:：])/g, '$1\n\n$2');
 
-  // Closed emphasis then a new block: `**建议** ##` / `**了。** 1. 加入`
+  // Closed emphasis then a heading / ordered list. Do NOT break before `- ` —
+  // command catalogs use `**/image** - 生成图片` on one line; inserting a
+  // newline turns the description into its own bullet.
   out = out.replace(
-    /(\*\*)\s+(?=(?:#{1,6}\s|-\s+\S|\d{1,2}\.\s+\S))/g,
+    /(\*\*)\s+(?=(?:#{1,6}\s|\d{1,2}\.\s+\S))/g,
     '$1\n\n',
   );
 

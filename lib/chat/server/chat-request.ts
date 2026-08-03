@@ -628,6 +628,13 @@ export async function handleChatRequest(req: NextRequest) {
         };
 
         if (requestReview) {
+          // Manual /review spends up to VERIFIER_TIMEOUT_MS on a non-streaming
+          // verifier before any answer text — emit progress immediately so the
+          // UI is not a blank spinner (and so proxies keep the SSE alive).
+          send({
+            reasoning:
+              'Claim review started: checking the previous answer against tool receipts. A written summary follows when the audit finishes…\n',
+          });
           const auditOpts = {
             searchEnabled,
             integrations: authorizedIntegrations,

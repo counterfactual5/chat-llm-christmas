@@ -106,6 +106,13 @@ describe('fixFlankingEmphasis', () => {
   it('moves a leading currency symbol before the opening **', () => {
     expect(fixFlankingEmphasis('约**$2,160**')).toBe('约$**2,160**');
   });
+
+  it('does not steal a prior bold closer as the next opener', () => {
+    const input =
+      '**我的建议** 既然很多老平台都关了，**不要再花时间找"赏金任务"了**。';
+    expect(fixFlankingEmphasis(input)).toBe(input);
+    expect(fixFlankingEmphasis(input)).not.toContain('关了**，');
+  });
 });
 
 describe('fixBoldWrappedUrls', () => {

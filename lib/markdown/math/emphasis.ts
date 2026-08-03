@@ -22,9 +22,13 @@ export function fixFlankingEmphasis(content: string): string {
   // `**$2,160**` / `**€99**` after CJK/Latin letters — pull currency before opener.
   out = out.replace(/\*\*([￥$€£¥]+)(?=\d)/g, '$1**');
   // Trailing punct inside **…** that blocks the closer when the next char is prose.
+  // CRITICAL: only treat `**` as an opener when it is left-flanking (start of
+  // string / whitespace / opening punct). Otherwise the closer of a prior
+  // `**我的建议**` is stolen as the opener and we get
+  // `关了**，不要…了**` (literal asterisks).
   out = out.replace(
-    /\*\*((?:(?!\*\*).)+?)([：:。.，,、！!？?；;])\*\*(?=\S)/g,
-    '**$1**$2',
+    /(^|[\s\n([{（【「『"'“‘])\*\*((?:(?!\*\*).)+?)([：:。.，,、！!？?；;])\*\*(?=\S)/g,
+    '$1**$2**$3',
   );
   return out;
 }

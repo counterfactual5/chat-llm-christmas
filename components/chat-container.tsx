@@ -1103,6 +1103,7 @@ export default function ChatContainer() {
     webSourcesOverride?: WebSearchSource[],
     /** Command layer: one-off claim review of the latest assistant answer. */
     requestReview?: boolean,
+    requestOpts?: import('@/lib/chat/stream/client').StreamChatRequestOpts,
   ) =>
     runStreamChatResponse(
       {
@@ -1155,8 +1156,8 @@ export default function ChatContainer() {
       seamPrefix,
       webSourcesOverride,
       requestReview,
+      requestOpts,
     );
-
 
   const deleteSession = (id: string) => {
     const controller = abortControllersRef.current.get(id);

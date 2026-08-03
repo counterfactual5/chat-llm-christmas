@@ -9,7 +9,6 @@ import {
   type SourceSearchKind,
 } from '@/lib/chat/turn/source-search-command';
 import type { SearchHit, SearchOutcome } from '@/lib/tools/search/types';
-import { formatSearchResultsForModel } from '@/lib/tools/search/format';
 
 export type SourceSearchThread = {
   thread: Message[];
@@ -17,6 +16,20 @@ export type SourceSearchThread = {
   toolRunId: string;
   newTitle?: string;
 };
+
+/** Strip provider HTML (Google News snippets often wrap <a>/<font>). */
+export function stripSearchSnippetHtml(raw: string): string {
+  return String(raw || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function buildSourceSearchThread(opts: {
   kind: SourceSearchKind;
@@ -126,11 +139,16 @@ export async function requestSourceSearch(
   }
 }
 
+/**
+ * Human-facing markdown for the chat bubble (not the model tool JSON).
+ * Empty hits stay soft tips; hits become a linked list with HTML stripped.
+ */
 export function formatSourceSearchMarkdown(
   kind: SourceSearchKind,
   outcome: SearchOutcome,
   userAsk: string,
 ): string {
+  const ask = String(userAsk || outcome.query || '').trim();
   if (outcome.error && !outcome.results.length) {
     const label = kind === 'news' ? 'News' : 'Wiki';
     const tip =
@@ -138,7 +156,7 @@ export function formatSourceSearchMarkdown(
         ? '维基百科适合查实体词条（如「人工智能」「量子计算」）。试试更具体的主题，或用 `/wiki zh …` / `/wiki en …` 指定语言。'
         : '新闻检索适合具体话题（如「人工智能」「美联储」）。换一个更具体的关键词再试。';
     return [
-      `**${label}：** 没有找到与「${String(userAsk || outcome.query || '').trim()}」匹配的结果。`,
+      `**${label}：** 没有找到与「${ask}」匹配的结果。`,
       '',
       tip,
       outcome.error ? `\n_(${outcome.error})_` : '',
@@ -146,7 +164,99 @@ export function formatSourceSearchMarkdown(
       .filter(Boolean)
       .join('\n');
   }
-  return formatSearchResultsForModel(outcome, { userAsk });
+
+  const heading = kind === 'news' ? 'News' : 'Wikipedia';
+  const lines = [
+    `### ${heading}`,
+    '',
+    `Query: **${ask || outcome.query}** · via \`${outcome.provider}\``,
+    '',
+  ];
+  for (let i = 0; i < outcome.results.length; i++) {
+    const hit = outcome.results[i]!;
+    const title = stripSearchSnippetHtml(hit.title) || hit.url || `Result ${i + 1}`;
+    const url = String(hit.url || '').trim();
+    lines.push(url ? `${i + 1}. [${title}](${url})` : `${i + 1}. ${title}`);
+    const meta = [hit.publishedAt, hit.age].filter(Boolean).join(' · ');
+    if (meta) lines.push(`   - ${meta}`);
+    const snip = stripSearchSnippetHtml(hit.snippet);
+    if (snip) lines.push(`   - ${snip.slice(0, 280)}`);
+    lines.push('');
+  }
+  return lines.join('\n').trim();
+}
+
+/**
+ * Compact, HTML-free hit list for the polish model (never the tool JSON
+ * envelope — weak models echo `{"ok":true,...instructions}` into the bubble).
+ */
+export function formatSourceSearchHitsForPolish(
+  outcome: SearchOutcome,
+  limit = 8,
+): string {
+  const lines: string[] = [];
+  for (let i = 0; i < Math.min(outcome.results.length, limit); i++) {
+    const hit = outcome.results[i]!;
+    const title = stripSearchSnippetHtml(hit.title) || `Result ${i + 1}`;
+    const url = String(hit.url || '').trim();
+    const meta = [hit.publishedAt, hit.age].filter(Boolean).join(' · ');
+    const snip = stripSearchSnippetHtml(hit.snippet).slice(0, 220);
+    lines.push(`${i + 1}. ${title}`);
+    if (url) lines.push(`   URL: ${url}`);
+    if (meta) lines.push(`   When: ${meta}`);
+    if (snip) lines.push(`   Snippet: ${snip}`);
+  }
+  return lines.join('\n').trim();
+}
+
+/** Prompt for a tools-off LLM pass that turns hits into a readable briefing. */
+export function buildSourceSearchPolishPrompt(
+  kind: SourceSearchKind,
+  userAsk: string,
+  outcome: SearchOutcome,
+): string {
+  const ask = String(userAsk || outcome.query || '').trim();
+  const role =
+    kind === 'news'
+      ? 'Write a concise news briefing from the search hits below.'
+      : 'Write a concise encyclopedia-style answer from the Wikipedia/search hits below.';
+  return [
+    role,
+    'Match the user language. Use Markdown with clear headings and bullets.',
+    'Cite markdown links for every item you keep (use the URL lines). Prefer dated items when available.',
+    'Do not invent facts beyond the hits. Do not call tools.',
+    'CRITICAL: Output ONLY the briefing. Never reprint the hit list verbatim as a raw dump, never output JSON, never output HTML tags, never mention “tool payload” / instructions / asOf / strictWeek.',
+    '',
+    `User ask: ${ask}`,
+    `Provider: ${outcome.provider}`,
+    '',
+    '## Hits',
+    formatSourceSearchHitsForPolish(outcome),
+  ].join('\n');
+}
+
+/**
+ * Drop leaked tool JSON / HTML that weak models copy from the polish context.
+ * Returns null when the reply is unusable and the caller should use fallback.
+ */
+export function sanitizeSourceSearchPolish(text: string): string | null {
+  let out = String(text || '').trim();
+  if (!out) return null;
+
+  // Truncate at a dumped tool-envelope JSON object.
+  const jsonDump = out.search(/\{\s*"ok"\s*:/);
+  if (jsonDump >= 0) {
+    out = out.slice(0, jsonDump).trim();
+  }
+  // Or a fenced ```json block that is clearly the envelope.
+  out = out.replace(/```(?:json)?\s*\{\s*"ok"\s*:[\s\S]*?```/gi, '').trim();
+  out = out.replace(/```(?:json)?\s*\{\s*"ok"\s*:[\s\S]*$/gi, '').trim();
+
+  if (!out || /^Error:/i.test(out)) return null;
+  // Mostly machine dump still.
+  if (/"ok"\s*:\s*true/.test(out) && /"results"\s*:/.test(out)) return null;
+  if ((out.match(/<a\s+href=/gi) || []).length >= 2) return null;
+  return out;
 }
 
 export function sourceSearchToolRun(

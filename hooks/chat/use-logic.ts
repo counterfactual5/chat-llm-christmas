@@ -82,6 +82,8 @@ import {
   buildSourceSearchThread,
   formatSourceSearchMarkdown,
   requestSourceSearch,
+  buildSourceSearchPolishPrompt,
+  sanitizeSourceSearchPolish,
   sourceSearchToolRun,
 } from '@/lib/chat/turn/source-search';
 import {
@@ -108,7 +110,12 @@ export type UseChatLogicProps = {
     seamPrefix?: string,
     webSourcesOverride?: any[],
     requestReview?: boolean,
-  ) => Promise<void>;
+    requestOpts?: {
+      enableSearch?: boolean;
+      integrations?: string[];
+      autoReview?: boolean;
+    },
+  ) => Promise<string | void>;
   
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
@@ -717,16 +724,21 @@ export function useChatLogic(props: UseChatLogicProps) {
     });
     updateSession(sessionId, thread, newTitle);
 
+    const controller = new AbortController();
+    abortControllersRef.current.set(sessionId, controller);
+
     try {
       const outcome = await requestSourceSearch(kind, trimmed, { lang: opts?.lang });
-      // Empty hits are a soft outcome (show tips in the bubble) — not a red Request failed.
-      const content = formatSourceSearchMarkdown(kind, outcome, trimmed);
       const doneRun = sourceSearchToolRun(
         kind,
         outcome.query,
         outcome.provider,
         outcome.results,
       );
+      const fallbackContent = formatSourceSearchMarkdown(kind, outcome, trimmed);
+
+      // Always put a human-readable list in the bubble first — never the tool JSON
+      // envelope. Weak models often echo that JSON when asked to "polish".
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== sessionId) return s;
@@ -734,8 +746,8 @@ export function useChatLogic(props: UseChatLogicProps) {
             ...s,
             messages: mapAssistantById(s.messages, assistantId, (m) => ({
               ...m,
-              content,
-              incomplete: false,
+              content: fallbackContent,
+              incomplete: !outcome.results.length ? false : true,
               toolRuns: (m.toolRuns || []).map((r) =>
                 r.id === toolRunId
                   ? {
@@ -754,6 +766,88 @@ export function useChatLogic(props: UseChatLogicProps) {
           };
         }),
       );
+
+      // Soft empty tip — no LLM pass.
+      if (!outcome.results.length) {
+        return true;
+      }
+
+      const apiMessages: ReturnType<typeof toApiMessages> = [
+        ...toApiMessages(cleanedBase, { vision: selectedSpec.vision }),
+        {
+          role: 'user' as const,
+          content: buildSourceSearchPolishPrompt(kind, trimmed, outcome),
+          images: [],
+          timestamp: Date.now(),
+        },
+      ];
+
+      try {
+        // Clear the list while streaming the briefing so we do not append onto it.
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            return {
+              ...s,
+              messages: mapAssistantById(s.messages, assistantId, (m) => ({
+                ...m,
+                content: '',
+                incomplete: true,
+              })),
+              updatedAt: Date.now(),
+            };
+          }),
+        );
+
+        const rawPolished = String(
+          (await streamChatResponse(
+            sessionId,
+            apiMessages,
+            assistantId,
+            controller.signal,
+            '',
+            '',
+            undefined,
+            false,
+            { enableSearch: false, integrations: [], autoReview: false },
+          )) || '',
+        );
+        const polished = sanitizeSourceSearchPolish(rawPolished);
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            return {
+              ...s,
+              messages: mapAssistantById(s.messages, assistantId, (m) => ({
+                ...m,
+                // Prefer model briefing; if it dumped JSON/HTML, keep the readable list.
+                content: polished || fallbackContent,
+                incomplete: false,
+              })),
+              updatedAt: Date.now(),
+            };
+          }),
+        );
+      } catch (error: unknown) {
+        if (controller.signal.aborted) {
+          failAssistantStream(sessionId, assistantId, error, 'Stopped by you');
+          return true;
+        }
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id !== sessionId) return s;
+            return {
+              ...s,
+              messages: mapAssistantById(s.messages, assistantId, (m) => ({
+                ...m,
+                content: fallbackContent,
+                incomplete: false,
+              })),
+              updatedAt: Date.now(),
+            };
+          }),
+        );
+      }
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : 'Source search failed';
@@ -777,7 +871,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         }),
       );
     } finally {
-      endLoading(sessionId);
+      endLoadingIfController(sessionId, controller);
     }
     return true;
   };

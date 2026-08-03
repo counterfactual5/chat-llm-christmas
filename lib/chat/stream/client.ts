@@ -73,6 +73,14 @@ export type StreamChatDeps = {
   onMalformedSse?: (message: string) => void;
 };
 
+export type StreamChatRequestOpts = {
+  /** When false, server skips web_search tools for this turn. */
+  enableSearch?: boolean;
+  /** Override session MCP/tool integrations (e.g. [] for tools-off polish). */
+  integrations?: string[];
+  autoReview?: boolean;
+};
+
 export async function streamChatResponse(
   deps: StreamChatDeps,
   sessionId: string,
@@ -87,7 +95,9 @@ export async function streamChatResponse(
   webSourcesOverride?: WebSearchSource[],
   /** Command layer: one-off claim review of the latest assistant answer. */
   requestReview?: boolean,
-) {
+  /** Per-request overrides (tools-off polish, etc.). */
+  requestOpts?: StreamChatRequestOpts,
+): Promise<string> {
   const sessions = deps.getSessions();
   const session = sessions.find((s) => s.id === sessionId);
   const sessionSources = webSourcesOverride ?? session?.webSources ?? [];
@@ -98,7 +108,7 @@ export async function streamChatResponse(
   const notionConnected = deps.getNotionConnected();
   const githubConnected = deps.getGitHubConnected();
   const googleConnected = deps.getGoogleConnected();
-  const integrations = normalizeGoogleIntegrations(
+  const sessionIntegrations = normalizeGoogleIntegrations(
     deps.getSessions().find((s) => s.id === sessionId)?.mcpIds || [],
   ).filter((id) => {
     if (id === 'notion') return notionConnected;
@@ -109,7 +119,10 @@ export async function streamChatResponse(
     if (isOptionalBuiltinToolId(id)) return true;
     return false;
   });
-
+  const integrations =
+    requestOpts?.integrations !== undefined
+      ? requestOpts.integrations
+      : sessionIntegrations;
   const sessionForReview = deps.getSessions().find((s) => s.id === sessionId);
   // `/review` audits the latest assistant reply by default (not the whole thread).
   // Server still accepts a `turns` array if a future client wants multi-turn.
@@ -141,7 +154,11 @@ export async function streamChatResponse(
       memories: deps.memoriesPayload(),
       conversationId: sessionId,
       integrations,
-      autoReview: deps.getSessions().find((s) => s.id === sessionId)?.autoReview ?? true,
+      enableSearch: requestOpts?.enableSearch !== false,
+      autoReview:
+        requestOpts?.autoReview ??
+        deps.getSessions().find((s) => s.id === sessionId)?.autoReview ??
+        true,
       ...(requestReview && lastAssistantForReview
         ? {
             requestReview: true,
@@ -386,7 +403,7 @@ export async function streamChatResponse(
       if (data === '[DONE]') {
         sawDone = true;
         settle(false);
-        return;
+        return streamed;
       }
       try {
         const parsed = JSON.parse(data);
@@ -550,4 +567,5 @@ export async function streamChatResponse(
   }
 
   settle(!sawDone);
+  return streamed;
 }

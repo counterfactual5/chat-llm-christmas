@@ -22,6 +22,8 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  FilePlus,
+  FileSearch,
   FlaskConical,
   BookOpen,
   GraduationCap,
@@ -530,22 +532,20 @@ export function ChatComposer(props: ChatComposerProps) {
                     : 'text-stone-700 hover:bg-stone-50 dark:text-stone-300 dark:hover:bg-stone-800',
                 )}
               >
-                {item.kind === 'command' ? (
-                  item.id === 'skill-create' ? (
-                    <Sparkles className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                  ) : item.id === 'review' ? (
-                    <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                  ) : item.id === 'continue' ? (
-                    <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                  ) : item.id === 'research' ||
-                    item.id.startsWith('research-mode-') ||
-                    item.id.startsWith('research-source-') ? (
-                    <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                  ) : (
-                    <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                  )
-                ) : (
+                {item.kind === 'skill' ? (
                   <ScrollText className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                ) : item.id.startsWith('research-mode-') ||
+                  item.id.startsWith('research-source-') ? null : item.id ===
+                  'skill-create' ? (
+                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                ) : item.id === 'review' ? (
+                  <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                ) : item.id === 'continue' ? (
+                  <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                ) : item.id === 'research' ? (
+                  <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                 )}
                 <span className="min-w-0 flex-1 truncate font-medium">
                   {item.kind === 'command' ? item.title : item.skill.title}
@@ -1111,7 +1111,7 @@ export function ChatComposer(props: ChatComposerProps) {
                             title={t('builtinToolAlwaysOn')}
                             aria-disabled
                           >
-                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <FilePlus className="h-3.5 w-3.5 shrink-0 opacity-70" />
                             <div className="min-w-0 flex-1">
                               <div className="text-sm">{t('createFileTool')}</div>
                               <div className="truncate text-[10px] opacity-80">
@@ -1119,15 +1119,12 @@ export function ChatComposer(props: ChatComposerProps) {
                               </div>
                             </div>
                           </div>
-                          
-                          
-                          
                           <div
                             className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-stone-400 dark:text-stone-500"
                             title={t('fileReadToolHint')}
                             aria-disabled
                           >
-                            <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                            <FileSearch className="h-3.5 w-3.5 shrink-0 opacity-70" />
                             <div className="min-w-0 flex-1">
                               <div className="text-sm">{t('fileReadTool')}</div>
                               <div className="truncate text-[10px] opacity-80">

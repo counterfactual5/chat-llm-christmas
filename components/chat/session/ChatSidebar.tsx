@@ -15,6 +15,8 @@ import {
   X,
   Blocks,
   FileText,
+  FilePlus,
+  FileSearch,
   SlidersHorizontal,
   ChevronDown,
   FlaskConical,
@@ -800,7 +802,7 @@ export function ChatSidebar({
                         title={t('builtinToolAlwaysOn')}
                         aria-disabled
                       >
-                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <FilePlus className="h-3.5 w-3.5 shrink-0 opacity-70" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate">{t('createFileTool')}</div>
                           <div className="truncate text-[10px] opacity-80">
@@ -808,15 +810,12 @@ export function ChatSidebar({
                           </div>
                         </div>
                       </div>
-                      
-                      
-                      
                       <div
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-400 dark:text-stone-500"
                         title={t('fileReadToolHint')}
                         aria-disabled
                       >
-                        <FileText className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                        <FileSearch className="h-3.5 w-3.5 shrink-0 opacity-70" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate">{t('fileReadTool')}</div>
                           <div className="truncate text-[10px] opacity-80">

@@ -11,6 +11,8 @@ import {
   Sparkles,
   ChevronDown,
   FileText,
+  FilePlus,
+  FileSearch,
   ScrollText,
   Image as ImageIcon,
   Globe,
@@ -583,8 +585,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <BookOpen className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isGenerateImage || isImageUnderstand ? (
                           <ImageIcon className="h-3 w-3 shrink-0 opacity-60" />
-                        ) : isCreateFile || isFileRead ? (
-                          <FileText className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isCreateFile ? (
+                          <FilePlus className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isFileRead ? (
+                          <FileSearch className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isSaveSkill ? (
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isWebRead ? (

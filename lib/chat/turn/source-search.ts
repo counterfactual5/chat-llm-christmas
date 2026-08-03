@@ -132,7 +132,19 @@ export function formatSourceSearchMarkdown(
   userAsk: string,
 ): string {
   if (outcome.error && !outcome.results.length) {
-    return `**${kind === 'news' ? 'News' : 'Wiki'} search failed:** ${outcome.error}`;
+    const label = kind === 'news' ? 'News' : 'Wiki';
+    const tip =
+      kind === 'wiki'
+        ? '维基百科适合查实体词条（如「人工智能」「量子计算」）。试试更具体的主题，或用 `/wiki zh …` / `/wiki en …` 指定语言。'
+        : '新闻检索适合具体话题（如「人工智能」「美联储」）。换一个更具体的关键词再试。';
+    return [
+      `**${label}：** 没有找到与「${String(userAsk || outcome.query || '').trim()}」匹配的结果。`,
+      '',
+      tip,
+      outcome.error ? `\n_(${outcome.error})_` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
   return formatSearchResultsForModel(outcome, { userAsk });
 }

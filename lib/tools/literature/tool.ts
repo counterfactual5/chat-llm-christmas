@@ -141,14 +141,15 @@ function formatHitsForModel(
 const PAPER_SYSTEM = [
   'You have a paper_search tool for academic papers (arXiv / Semantic Scholar / OpenAlex).',
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
-  'Prefer paper_search over web_search for academic literature. Dedicated slash command /papers still works for the user.',
+  'Prefer paper_search over web_search for academic literature.',
+  'If this tool is OFF, the user can still run the always-available slash command /papers — never say /papers is unavailable.',
   'After results, cite title + URL; never fabricate papers.',
 ].join(' ');
 
 const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
-  'Dedicated slash command /books still works. For downloading, point users to /books download <archiveId|libgen:md5>.',
+  'If this tool is OFF, the user can still run the always-available slash command /books — never say /books is unavailable. For downloading, point users to /books download <archiveId|libgen:md5>.',
   'After results, cite title + URL; never invent catalog entries.',
 ].join(' ');
 

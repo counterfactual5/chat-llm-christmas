@@ -25,6 +25,9 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('image_understand');
     expect(text).toContain('Notion');
     expect(text).toContain('OPT-IN Tools toggles');
+    expect(text).toContain('do not contradict yourself');
+    expect(text).toContain('slash command OR by enabling');
+    expect(text).toContain('never put /papers|/books|/image under');
     expect(text).toContain('not a dedicated finance/market data feed');
     expect(text).toContain('NOT product features');
     expect(text).toContain('[ACTIVE]');
@@ -45,6 +48,7 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('no first-class finance');
     expect(text).toContain('image_understand');
     expect(text).toContain('/skill not /skills');
+    expect(text).toContain('available via slash command OR by enabling the matching Tools switch');
     expect(text).toContain('prefer /papers or /books for dedicated literature search/download');
     expect(text).toContain('/news <query>');
     expect(text).toContain('Not separate /research lanes');

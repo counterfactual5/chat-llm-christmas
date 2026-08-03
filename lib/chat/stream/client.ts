@@ -311,10 +311,8 @@ export async function streamChatResponse(
           withPromotedOrphanReasoning(prev, sessionId, assistantId, reasoning),
         );
       } else if (action === 'thought_only') {
-        markAssistantIncomplete(false, {
-          finishReason: finishReason || 'stop',
-        });
-        return;
+        // Keep Thought; do not return early — unexpectedEnd / onReplySettled below
+        // must still run (orphan </think> with a dropped connection needs Continue).
       } else if (action === 'empty_error') {
         const fallback =
           'Error: The model returned an empty reply. Please try again, or switch to another model.';

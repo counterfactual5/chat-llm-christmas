@@ -105,7 +105,7 @@ flowchart TD
 
 - **执行位置**：`chat-llm-christmas` 的 Next `/api/chat`（服务端），不是浏览器，也不是 chat-api。
 - **chat-api**：存文件、直传鉴权、可选 extract；不做 chat tool loop。
-- **UI**：可选工具（paper/book/generate_image）默认关；内置常开收在 Tools 折叠里；`file_read` / Image Understand 显示为「有附件/有图时自动」。
+- **UI**：可选工具（`paper_search` / `book_search` / `generate_image`）默认关，只影响模型能否在对话里直接调工具；斜杠 `/papers` `/books` `/image` **始终可用**（不依赖开关）。内置常开（web_search / web_read / create_file）收在 Tools 折叠里；`file_read` / Image Understand 显示为「有附件/有图时自动」。
 
 ---
 

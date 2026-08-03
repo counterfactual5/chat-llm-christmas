@@ -4,6 +4,7 @@ import {
   parseSourceSearchCommand,
 } from '@/lib/chat/turn/source-search-command';
 import { parseResearchCommand } from '@/lib/chat/turn/research-command';
+import { formatSourceSearchMarkdown } from '@/lib/chat/turn/source-search';
 
 describe('parseSourceSearchCommand', () => {
   it('parses /news and aliases', () => {
@@ -52,5 +53,23 @@ describe('research sources news/wiki', () => {
       mode: 'rigorous',
       sources: 'mixed',
     });
+  });
+});
+
+describe('formatSourceSearchMarkdown', () => {
+  it('soft-fails empty hits with tips instead of raw provider dump only', () => {
+    const text = formatSourceSearchMarkdown(
+      'wiki',
+      {
+        provider: 'none',
+        query: '能查询什么',
+        results: [],
+        error: 'wikipedia_zh: no results',
+      },
+      '能查询什么',
+    );
+    expect(text).toContain('没有找到');
+    expect(text).toContain('实体词条');
+    expect(text).not.toContain('search failed');
   });
 });

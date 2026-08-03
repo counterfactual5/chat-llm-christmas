@@ -719,7 +719,7 @@ export function useChatLogic(props: UseChatLogicProps) {
 
     try {
       const outcome = await requestSourceSearch(kind, trimmed, { lang: opts?.lang });
-      if (outcome.error && !outcome.results.length) throw new Error(outcome.error);
+      // Empty hits are a soft outcome (show tips in the bubble) — not a red Request failed.
       const content = formatSourceSearchMarkdown(kind, outcome, trimmed);
       const doneRun = sourceSearchToolRun(
         kind,
@@ -743,6 +743,9 @@ export function useChatLogic(props: UseChatLogicProps) {
                       status: 'done' as const,
                       provider: doneRun.provider,
                       results: doneRun.results,
+                      ...(outcome.error && !outcome.results.length
+                        ? { error: outcome.error }
+                        : {}),
                     }
                   : r,
               ),

@@ -13,7 +13,7 @@ Request pipeline: `chat-request.ts` (`handleChatRequest`).
 | `messages.ts` | Sanitize, timestamps, tool-call extract, search heuristics |
 | `credentials.ts` | Resolve requested integrations against authorized OAuth vault tokens |
 | `system-prompt.ts` | Assemble the chat system-prompt parts (pure string assembly) |
-| `product-guide.ts` | Detect product-usage questions that expand the in-app guide prompt |
+| `product-guide.ts` | Detect product-usage questions that expand the in-app guide prompt; always-on map must keep slash Commands (`/papers` `/books` `/image` …) available even when opt-in Tools toggles are OFF |
 | `domain-policy.ts` | Shared domain/risk classifier + chat/Research policy (SSOT for product; Research snapshot is injected at `/api/research`) |
 | `tool-execution.ts` | Fallback query + failure-detection helpers around a single tool call |
 | `upstream.ts` | OpenAI-compatible completions transport (stream + one-shot) |

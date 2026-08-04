@@ -43,6 +43,11 @@ function reflowOutsideFences(
 function reflowHeadingsListsHrs(chunk: string): string {
   let out = chunk;
 
+  // Models sometimes emit “thematic break dashes” using dash-like characters
+  // (em/en/minus/fullwidth) instead of ASCII hyphen. Normalize to `-` so
+  // Markdown treats it as `---` HR.
+  out = out.replace(/[—–−－]{3,}/g, '---');
+
   // Headings: allow CJK lead-in — `渠道 ### 1.` is common in smashed replies.
   out = out.replace(
     new RegExp(`([${BREAK_TEXT}])\\s+(#{1,6}\\s+\\S)`, 'g'),

@@ -89,6 +89,13 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/应用场景。\n\n---\n\n数据分析/);
   });
 
+  it('normalizes dash-like thematic breaks (non-ASCII) into HR', () => {
+    const out = reflowCollapsedMarkdownBlocks(
+      '每个库都有其特定的应用场景。———\n\n数据分析的基本流程如下。',
+    );
+    expect(out).toMatch(/应用场景。\n\n---\n\n数据分析/);
+  });
+
   it('keeps the last table cell intact (no false split before CJK cell text)', () => {
     const smashed =
       '⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 | 说明 | |------|------|------| | 登链社区主站 (dengchain.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 | | Dework (dework.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 |';

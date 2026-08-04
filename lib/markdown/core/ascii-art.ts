@@ -47,10 +47,45 @@ function reflowUnicodeBox(text: string): string {
     // Top border → first body row.
     .replace(/([┐╗╮])\s+(?=[│║┃])/g, '$1\n')
     // One body row → the next, or body → bottom border.
+    // NOTE: do NOT run this on already-nested multi-line diagrams — those
+    // legitimately contain `│  │` (outer + inner left borders) on one row.
     .replace(/([│║┃])\s+(?=[│║┃└╚╰])/g, '$1\n')
     // A flattened second box starts after the previous bottom border.
     .replace(/([┘╝╯])\s+(?=[┌╔╭])/g, '$1\n')
     .trim();
+}
+
+/**
+ * True when a Unicode box is still smashed (one line / half-glued) and needs
+ * row recovery. Nested CSS-style box models already have many lines with
+ * multiple `│` per row — reflow would shred them (`│  │` is outer+inner, not
+ * a row boundary).
+ */
+export function needsUnicodeBoxReflow(text: string): boolean {
+  const t = String(text || '');
+  if (!looksLikeUnicodeBox(t)) return false;
+  const lines = t.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length <= 1) return true;
+
+  // Half-flat glue. Nested rows like `│  ┌──┐  │` (inner top + outer right)
+  // must NOT count as glue — only true flats:
+  // - whole top+body on one line: `┌────┐ │ …`
+  // - body+bottom glued at EOL: `│ App │ └────┘`
+  const glued = lines.some((l) => {
+    const s = l.trimEnd();
+    return (
+      /[│║┃]\s+[└╚╰][─━═]*[┘╝╯]\s*$/.test(s) ||
+      /^[┌╔╭].*[┐╗╮]\s+[│║┃]/.test(s)
+    );
+  });
+  if (glued) return true;
+
+  // Multi-line nested layout (outer│ + inner│ on one row) — leave alone.
+  if (lines.length >= 3 && lines.some((l) => (l.match(/[│║┃]/g) || []).length >= 2)) {
+    return false;
+  }
+  if (lines.length >= 3) return false;
+  return true;
 }
 
 /** Recover branch/row line breaks after model or CommonMark flattening. */
@@ -65,9 +100,8 @@ export function reflowCollapsedAsciiArt(text: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  // Even when some newlines already exist, keep running structural reflow —
-  // models often leave boxes/trees half-flattened (e.g. top row broken, body glued).
   if (looksLikeUnicodeBox(out)) {
+    if (!needsUnicodeBoxReflow(out)) return out;
     return reflowUnicodeBox(out).replace(/\n{3,}/g, '\n\n').trim();
   }
 

@@ -127,19 +127,25 @@ export function commentsFromCommentsXml(xml: string): DocxCommentsViewData['comm
   const source = String(xml || '');
   if (!source.trim()) return [];
   const comments: DocxCommentsViewData['comments'] = [];
-  const re =
-    /<w:comment\b([^>]*)>([\s\S]*?)<\/w:comment>/gi;
+  const re = /<w:comment\b([^>]*)>([\s\S]*?)<\/w:comment>/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(source))) {
     const attrs = match[1] || '';
     const inner = match[2] || '';
-    const id = attrs.match(/\bw:id="([^"]*)"/i)?.[1];
-    const author = attrs.match(/\bw:author="([^"]*)"/i)?.[1];
-    const date = attrs.match(/\bw:date="([^"]*)"/i)?.[1];
-    const texts = [...inner.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/gi)].map((m) =>
-      decodeEntities(String(m[1] || '')),
-    );
-    const body = texts.join('').replace(/\s+/g, ' ').trim();
+    const attr = (name: string) => {
+      const m = attrs.match(new RegExp(`\\bw:${name}=(["'])(.*?)\\1`, 'i'));
+      return m?.[2];
+    };
+    const id = attr('id');
+    const author = attr('author');
+    const date = attr('date');
+    const texts = [...inner.matchAll(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/gi)].map((m) => {
+      const tAttrs = m[1] || '';
+      const preserve = /xml:space\s*=\s*(["'])preserve\1/i.test(tAttrs);
+      const raw = decodeEntities(String(m[2] || ''));
+      return preserve ? raw : raw.replace(/\s+/g, ' ');
+    });
+    const body = texts.join('').replace(/[ \t]+\n/g, '\n').trim();
     if (!body && !author && !id) continue;
     comments.push({
       id: id || undefined,
@@ -156,10 +162,16 @@ export async function extractDocxComments(
 ): Promise<DocxCommentsViewData['comments']> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(buffer);
-  const entry = zip.file('word/comments.xml');
-  if (!entry) return [];
-  const xml = await entry.async('string');
-  return commentsFromCommentsXml(xml);
+  const primary = zip.file('word/comments.xml');
+  const extended = zip.file('word/commentsExtended.xml');
+  const parts: string[] = [];
+  if (primary) parts.push(await primary.async('string'));
+  if (extended) parts.push(await extended.async('string'));
+  if (!parts.length) return [];
+  // Prefer primary comments.xml; extended may only have ids — still merge parse.
+  const fromPrimary = primary ? commentsFromCommentsXml(parts[0]) : [];
+  if (fromPrimary.length) return fromPrimary;
+  return commentsFromCommentsXml(parts.join('\n'));
 }
 
 async function fetchGatewayDocxBytes(
@@ -314,7 +326,7 @@ export function createDocxExtractTool(): ChatTool {
           previewText = comments
             .map((c) => [c.author, c.body].filter(Boolean).join(': '))
             .join('\n');
-          extra = { comment_count: comments.length };
+          extra = { comment_count: comments.length, empty: comments.length === 0 };
         } else if (mode === 'outline') {
           const mammoth = await import('mammoth');
           const result = await mammoth.convertToHtml({ arrayBuffer: fetched.buffer });
@@ -330,7 +342,7 @@ export function createDocxExtractTool(): ChatTool {
             data,
           };
           previewText = headings.map((h) => `${'#'.repeat(h.level)} ${h.text}`).join('\n');
-          extra = { heading_count: headings.length };
+          extra = { heading_count: headings.length, empty: headings.length === 0 };
         } else {
           const mammoth = await import('mammoth');
           const result = await mammoth.convertToHtml({ arrayBuffer: fetched.buffer });
@@ -354,7 +366,10 @@ export function createDocxExtractTool(): ChatTool {
           previewText = sections
             .map((s) => [s.title, s.markdown].filter(Boolean).join('\n'))
             .join('\n\n');
-          extra = { section_count: sections.length };
+          extra = {
+            section_count: sections.length,
+            empty: sections.length === 0 || sections.every((s) => !String(s.markdown || '').trim()),
+          };
         }
 
         ctx.send({ view_created: payload });
@@ -388,6 +403,12 @@ export function createDocxExtractTool(): ChatTool {
             ...extra,
             text: truncated ? previewText.slice(0, MAX_MODEL_CHARS) : previewText,
             truncated,
+            hint:
+              extra.empty && mode === 'comments'
+                ? 'No Word comments found. Try mode=extract or mode=outline.'
+                : extra.empty && mode === 'outline'
+                  ? 'No headings found. Try mode=extract.'
+                  : undefined,
           }),
           data: payload,
         };

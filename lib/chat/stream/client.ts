@@ -55,6 +55,8 @@ export type StreamChatDeps = {
   scrollToBottom: () => void;
   fetchSkills: () => void | Promise<void>;
   onGeneratedFileForActiveSession: () => void;
+  /** Open specialized tool view in the preview panel when SSE view_created arrives. */
+  onViewCreatedForActiveSession?: (view: ToolViewInput) => void;
   onWebSourcesUpdated: (opts: {
     openContextPanel: boolean;
     unsetWebSourcesCleared: boolean;
@@ -570,6 +572,7 @@ export async function streamChatResponse(
           );
           if (sessionId === deps.getActiveSessionId()) {
             deps.onGeneratedFileForActiveSession();
+            deps.onViewCreatedForActiveSession?.(view);
           }
         }
         if (parsed.content) {

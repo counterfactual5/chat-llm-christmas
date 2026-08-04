@@ -8,7 +8,7 @@ import { filesGatewayBaseURL } from '@/lib/files/gateway';
 import {
   VIEW_TABLE_MAX_COLS,
   VIEW_TABLE_MAX_ROWS,
-  workbookBytesToXlsxTableViewData,
+  workbookBytesToAllXlsxTables,
 } from '@/lib/files/spreadsheet';
 import { normalizeFileId } from '@/lib/tools/file-read/tool';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
@@ -184,16 +184,46 @@ export function createXlsxExtractTool(): ChatTool {
           return { content: JSON.stringify({ ok: false, error: fetched.error }) };
         }
 
-        const parsed = workbookBytesToXlsxTableViewData(fetched.buffer, {
+        const all = workbookBytesToAllXlsxTables(fetched.buffer, {
           sheet: sheet || undefined,
-          firstRowAsHeaders: true,
+          // Heuristic: ≥2 rows → first row as headers (do not force lone-row → empty body).
           maxRows: VIEW_TABLE_MAX_ROWS,
           maxCols: VIEW_TABLE_MAX_COLS,
         });
+
+        if (sheet && !all.sheetMatched) {
+          const message = `Sheet "${sheet}" not found. Available: ${all.sheetNames.join(', ') || '(none)'}`;
+          ctx.send({
+            tool: {
+              status: 'done',
+              name: 'xlsx_extract',
+              query,
+              provider: 'xlsx-extract',
+              results: [],
+              error: message,
+            },
+          });
+          return {
+            content: JSON.stringify({
+              ok: false,
+              error: message,
+              sheet_requested: sheet,
+              sheet_matched: false,
+              sheet_names: all.sheetNames,
+            }),
+          };
+        }
+
+        const active =
+          all.tables.find((t) => t.sheetName === all.activeSheetName) || all.tables[0];
+        const empty = !active || (!(active.headers && active.headers.length) && !active.rows.length);
         const tableData: XlsxTableViewData = {
-          sheetName: parsed.sheetName,
-          headers: parsed.headers,
-          rows: parsed.rows,
+          sheetName: active?.sheetName || all.activeSheetName,
+          headers: active?.headers,
+          rows: active?.rows || [],
+          sheetNames: all.sheetNames,
+          tables: all.tables,
+          empty,
         };
 
         const payload: ToolViewPayload = {
@@ -221,7 +251,7 @@ export function createXlsxExtractTool(): ChatTool {
               {
                 title: fetched.name,
                 url: `/api/files/${encodeURIComponent(fileId)}`,
-                snippet: previewText.slice(0, 240),
+                snippet: previewText.slice(0, 240) || '(empty sheet)',
               },
             ],
           },
@@ -230,12 +260,14 @@ export function createXlsxExtractTool(): ChatTool {
         return {
           content: JSON.stringify({
             ok: true,
+            empty,
             view_id: payload.id,
             view_type: payload.viewType,
             file_id: fileId,
             name: fetched.name,
             sheet: tableData.sheetName,
-            sheet_names: parsed.sheetNames,
+            sheet_matched: true,
+            sheet_names: all.sheetNames,
             row_count: tableData.rows.length,
             column_count: Math.max(
               tableData.headers?.length || 0,

@@ -21,10 +21,12 @@
 |------|------|----------|--------|
 | `docx_extract` | `file_id`, `mode=extract`（默认） | `docx.extract` | `{ sections: [{ title?, markdown }] }` |
 | `docx_extract` | `mode=outline` | `docx.outline` | `{ headings: [{ level, text }] }` |
-| `docx_extract` | `mode=comments` | `docx.comments` | `{ comments: [{ id?, author?, body, date? }] }` |
-| `xlsx_extract` | `file_id`, 可选 `sheet` | `xlsx.table` | `{ sheetName?, headers?, rows }` |
+| `docx_extract` | `mode=comments` | `docx.comments` | `{ comments: [{ id?, author?, body, date? }] }`；`empty` 时仍 `ok:true` |
+| `xlsx_extract` | `file_id`, 可选 `sheet` | `xlsx.table` | `{ sheetName?, headers?, rows, sheetNames?, tables? }`；错误 sheet → `ok:false` + `sheet_names` |
 
-无附件的会话会从可用工具中剥离 `file_read` / `docx_extract` / `xlsx_extract`。
+无附件的会话会从可用工具中剥离 `file_read` / `docx_extract` / `xlsx_extract`。创建视图后客户端会自动打开侧栏专项视图。
+
+专项视图 ≠ 文件预览 ≠ 完整 Office。
 
 ## 注册新 viewType
 

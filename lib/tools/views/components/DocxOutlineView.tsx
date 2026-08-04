@@ -1,5 +1,6 @@
 'use client';
 
+import { useLocale } from '@/lib/i18n';
 import type { ToolViewPayload, DocxOutlineViewData } from '@/lib/tools/views/types';
 
 function asOutlineData(data: unknown): DocxOutlineViewData {
@@ -15,9 +16,14 @@ function asOutlineData(data: unknown): DocxOutlineViewData {
 }
 
 export function DocxOutlineView({ view }: { view: ToolViewPayload }) {
+  const { t } = useLocale();
   const { headings } = asOutlineData(view.data);
   if (!headings.length) {
-    return <p className="px-4 py-6 text-xs text-stone-400">No headings.</p>;
+    return (
+      <p className="px-4 py-6 text-xs leading-relaxed text-stone-400">
+        {t('toolViewEmptyOutline')}
+      </p>
+    );
   }
   return (
     <ul className="space-y-1.5 px-4 py-4">

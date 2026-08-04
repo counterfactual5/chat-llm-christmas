@@ -1,68 +1,94 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+import { SpreadsheetTable } from '@/components/files/SpreadsheetTable';
+import { useLocale } from '@/lib/i18n';
 import type { ToolViewPayload, XlsxTableViewData } from '@/lib/tools/views/types';
+import { cn } from '@/lib/utils';
 
 function asTableData(data: unknown): XlsxTableViewData {
   if (!data || typeof data !== 'object') return { rows: [] };
   const raw = data as XlsxTableViewData;
+  const tables = Array.isArray(raw.tables)
+    ? raw.tables.map((t) => ({
+        sheetName: String(t?.sheetName || ''),
+        headers: Array.isArray(t?.headers)
+          ? t.headers.map((h) => String(h ?? ''))
+          : undefined,
+        rows: Array.isArray(t?.rows)
+          ? t.rows.map((row) => (Array.isArray(row) ? row.map((c) => String(c ?? '')) : []))
+          : [],
+      }))
+    : undefined;
   return {
     sheetName: typeof raw.sheetName === 'string' ? raw.sheetName : undefined,
     headers: Array.isArray(raw.headers) ? raw.headers.map((h) => String(h ?? '')) : undefined,
     rows: Array.isArray(raw.rows)
       ? raw.rows.map((row) => (Array.isArray(row) ? row.map((c) => String(c ?? '')) : []))
       : [],
+    sheetNames: Array.isArray(raw.sheetNames)
+      ? raw.sheetNames.map((n) => String(n ?? ''))
+      : undefined,
+    tables,
+    empty: Boolean(raw.empty),
   };
 }
 
 export function XlsxTableView({ view }: { view: ToolViewPayload }) {
-  const { sheetName, headers, rows } = asTableData(view.data);
-  if (!rows.length && !(headers && headers.length)) {
-    return <p className="px-4 py-6 text-xs text-stone-400">No table data.</p>;
-  }
-  const colCount = Math.max(
-    headers?.length || 0,
-    ...rows.map((r) => r.length),
-    1,
+  const { t } = useLocale();
+  const data = asTableData(view.data);
+  const sheetOptions = useMemo(() => {
+    if (data.tables?.length) return data.tables.map((t) => t.sheetName).filter(Boolean);
+    if (data.sheetNames?.length) return data.sheetNames;
+    return data.sheetName ? [data.sheetName] : [];
+  }, [data.tables, data.sheetNames, data.sheetName]);
+
+  const [activeSheet, setActiveSheet] = useState(
+    () => data.sheetName || sheetOptions[0] || '',
   );
+
+  const active = useMemo(() => {
+    if (data.tables?.length) {
+      return (
+        data.tables.find((t) => t.sheetName === activeSheet) ||
+        data.tables.find((t) => t.sheetName === data.sheetName) ||
+        data.tables[0]
+      );
+    }
+    return {
+      sheetName: data.sheetName,
+      headers: data.headers,
+      rows: data.rows,
+    };
+  }, [data, activeSheet]);
+
   return (
-    <div className="min-w-0 overflow-x-auto px-4 py-4">
-      {sheetName ? (
-        <div className="mb-2 text-xs font-medium text-stone-500">{sheetName}</div>
-      ) : null}
-      <table className="w-full min-w-[240px] border-collapse text-left text-xs">
-        {headers && headers.length > 0 ? (
-          <thead>
-            <tr className="border-b border-stone-200 dark:border-stone-700">
-              {Array.from({ length: colCount }, (_, i) => (
-                <th
-                  key={i}
-                  className="px-2 py-1.5 font-semibold text-stone-700 dark:text-stone-200"
-                >
-                  {headers[i] ?? ''}
-                </th>
-              ))}
-            </tr>
-          </thead>
-        ) : null}
-        <tbody>
-          {rows.map((row, ri) => (
-            <tr
-              key={ri}
-              className="border-b border-stone-100 dark:border-stone-800/80"
+    <div className="flex min-h-0 flex-col gap-2 px-4 py-4">
+      {sheetOptions.length > 1 ? (
+        <div className="flex flex-wrap gap-1">
+          {sheetOptions.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setActiveSheet(name)}
+              className={cn(
+                'rounded-md px-2 py-1 text-[11px] text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800',
+                (activeSheet || active?.sheetName) === name &&
+                  'bg-stone-200 font-medium text-stone-900 dark:bg-stone-700 dark:text-white',
+              )}
             >
-              {Array.from({ length: colCount }, (_, ci) => (
-                <td
-                  key={ci}
-                  className="max-w-[220px] truncate px-2 py-1.5 text-stone-600 dark:text-stone-300"
-                  title={row[ci] || ''}
-                >
-                  {row[ci] ?? ''}
-                </td>
-              ))}
-            </tr>
+              {name}
+            </button>
           ))}
-        </tbody>
-      </table>
+        </div>
+      ) : null}
+      <SpreadsheetTable
+        sheetName={active?.sheetName}
+        headers={active?.headers}
+        rows={active?.rows || []}
+        hideSheetName={sheetOptions.length > 1}
+        emptyLabel={t('toolViewEmptyTable')}
+      />
     </div>
   );
 }

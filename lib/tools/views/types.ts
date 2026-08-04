@@ -38,4 +38,10 @@ export type XlsxTableViewData = {
   sheetName?: string;
   headers?: string[];
   rows: string[][];
+  /** All sheet names in the workbook (for picker / model). */
+  sheetNames?: string[];
+  /** Preparsed tables so the UI can switch sheets without re-fetch. */
+  tables?: Array<{ sheetName: string; headers?: string[]; rows: string[][] }>;
+  /** True when the active sheet has no rows/headers. */
+  empty?: boolean;
 };

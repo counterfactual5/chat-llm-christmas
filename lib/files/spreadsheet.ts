@@ -175,7 +175,27 @@ export function parsedSectionToXlsxTableViewData(
 /**
  * Read one sheet from workbook bytes into `XlsxTableViewData`.
  * `sheet` may be a name or 0-based index string; default first sheet.
+ * When a non-empty `sheet` is requested but not found, `sheetMatched` is false
+ * (still returns the first sheet's data for inspection).
  */
+export function resolveWorkbookSheetName(
+  names: string[],
+  requested?: string,
+): { sheetName: string; sheetMatched: boolean } {
+  if (!names.length) return { sheetName: '', sheetMatched: false };
+  const req = String(requested || '').trim();
+  if (!req) return { sheetName: names[0], sheetMatched: true };
+  const byName = names.find((n) => n.toLowerCase() === req.toLowerCase());
+  if (byName) return { sheetName: byName, sheetMatched: true };
+  if (/^\d+$/.test(req)) {
+    const idx = Number(req);
+    if (idx >= 0 && idx < names.length) {
+      return { sheetName: names[idx], sheetMatched: true };
+    }
+  }
+  return { sheetName: names[0], sheetMatched: false };
+}
+
 export function workbookBytesToXlsxTableViewData(
   bytes: ArrayBuffer | Uint8Array,
   opts?: {
@@ -184,25 +204,14 @@ export function workbookBytesToXlsxTableViewData(
     maxRows?: number;
     maxCols?: number;
   },
-): XlsxTableViewDataLike & { sheetNames: string[] } {
+): XlsxTableViewDataLike & { sheetNames: string[]; sheetMatched: boolean } {
   const wb = XLSX.read(bytes, { type: 'array', cellDates: true });
   const names = Array.isArray(wb.SheetNames) ? wb.SheetNames : [];
   if (!names.length) {
-    return { rows: [], sheetNames: [] };
+    return { rows: [], sheetNames: [], sheetMatched: false };
   }
 
-  const requested = String(opts?.sheet || '').trim();
-  let sheetName = names[0];
-  if (requested) {
-    const byName = names.find((n) => n.toLowerCase() === requested.toLowerCase());
-    if (byName) {
-      sheetName = byName;
-    } else if (/^\d+$/.test(requested)) {
-      const idx = Number(requested);
-      if (idx >= 0 && idx < names.length) sheetName = names[idx];
-    }
-  }
-
+  const { sheetName, sheetMatched } = resolveWorkbookSheetName(names, opts?.sheet);
   const sheet = wb.Sheets[sheetName];
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
@@ -218,5 +227,59 @@ export function workbookBytesToXlsxTableViewData(
       maxCols: opts?.maxCols,
     }),
     sheetNames: names,
+    sheetMatched,
+  };
+}
+
+/** Parse every sheet (capped) for specialized-view sheet picker. */
+export function workbookBytesToAllXlsxTables(
+  bytes: ArrayBuffer | Uint8Array,
+  opts?: {
+    sheet?: string;
+    firstRowAsHeaders?: boolean;
+    maxRows?: number;
+    maxCols?: number;
+    maxSheets?: number;
+  },
+): {
+  sheetNames: string[];
+  sheetMatched: boolean;
+  activeSheetName: string;
+  tables: Array<{ sheetName: string; headers?: string[]; rows: string[][] }>;
+} {
+  const wb = XLSX.read(bytes, { type: 'array', cellDates: true });
+  const names = Array.isArray(wb.SheetNames) ? wb.SheetNames : [];
+  if (!names.length) {
+    return { sheetNames: [], sheetMatched: false, activeSheetName: '', tables: [] };
+  }
+  const maxSheets = opts?.maxSheets ?? 20;
+  const limited = names.slice(0, maxSheets);
+  const { sheetName: activeSheetName, sheetMatched } = resolveWorkbookSheetName(
+    names,
+    opts?.sheet,
+  );
+  const tables = limited.map((name) => {
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], {
+      header: 1,
+      defval: '',
+      raw: false,
+    }) as unknown[][];
+    const table = rowsToXlsxTableViewData(aoa, {
+      sheetName: name,
+      firstRowAsHeaders: opts?.firstRowAsHeaders,
+      maxRows: opts?.maxRows,
+      maxCols: opts?.maxCols,
+    });
+    return {
+      sheetName: name,
+      headers: table.headers,
+      rows: table.rows,
+    };
+  });
+  return {
+    sheetNames: names,
+    sheetMatched,
+    activeSheetName: limited.includes(activeSheetName) ? activeSheetName : limited[0],
+    tables,
   };
 }

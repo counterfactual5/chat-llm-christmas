@@ -1147,8 +1147,21 @@ export default function ChatContainer() {
         fetchSkills,
         onGeneratedFileForActiveSession: () => {
           setPicturesExpanded(true);
-          setOutputGroupsOpen((prev) => ({ ...prev, files: true }));
+          setOutputGroupsOpen((prev) => ({ ...prev, files: true, views: true }));
           setIsContextPanelOpen(true);
+        },
+        onViewCreatedForActiveSession: (view) => {
+          setOutputGroupsOpen((prev) => ({ ...prev, views: true }));
+          setIsContextPanelOpen(true);
+          openViewPreview({
+            id: view.id,
+            viewType: view.viewType,
+            title: view.title,
+            sourceFileId: view.sourceFileId,
+            sourceFileName: view.sourceFileName,
+            createdAt: view.createdAt ?? Date.now(),
+            data: view.data,
+          });
         },
         onWebSourcesUpdated: ({ openContextPanel, unsetWebSourcesCleared }) => {
           if (unsetWebSourcesCleared) setWebSourcesCleared(false);

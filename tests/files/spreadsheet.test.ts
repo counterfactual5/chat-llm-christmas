@@ -102,9 +102,14 @@ describe('rowsToXlsxTableViewData / workbookBytesToXlsxTableViewData', () => {
     ]);
     const table = workbookBytesToXlsxTableViewData(bytes, { sheet: 'Sales' });
     expect(table.sheetName).toBe('Sales');
+    expect(table.sheetMatched).toBe(true);
     expect(table.headers).toEqual(['Item', 'Qty']);
     expect(table.rows).toEqual([['Apple', '3']]);
     expect(table.sheetNames).toEqual(['Sales', 'Notes']);
+
+    const miss = workbookBytesToXlsxTableViewData(bytes, { sheet: 'Missing' });
+    expect(miss.sheetMatched).toBe(false);
+    expect(miss.sheetName).toBe('Sales');
   });
 });
 
@@ -149,12 +154,13 @@ describe('docx_extract helpers', () => {
 
     const xml = `
       <w:comments>
-        <w:comment w:id="0" w:author="Ada" w:date="2024-01-01T00:00:00Z">
+        <w:comment w:id='0' w:author='Ada' w:date='2024-01-01T00:00:00Z'>
           <w:p><w:r><w:t>Hello</w:t></w:r></w:p>
         </w:comment>
       </w:comments>`;
     expect(commentsFromCommentsXml(xml)).toEqual([
       { id: '0', author: 'Ada', date: '2024-01-01T00:00:00Z', body: 'Hello' },
     ]);
+    expect(commentsFromCommentsXml('')).toEqual([]);
   });
 });

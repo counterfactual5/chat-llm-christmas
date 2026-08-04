@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Download, FileText, Loader2, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { EpubReader } from '@/components/files/EpubReader';
+import { SpreadsheetTable } from '@/components/files/SpreadsheetTable';
 import { CodeBlock } from '@/components/markdown/code/code-block';
 import {
   isEpubFile,
@@ -11,10 +12,7 @@ import {
   isPreviewableImageFile,
   isSpreadsheetPreviewFile,
 } from '@/lib/files/preview';
-import {
-  parseSpreadsheetPreviewText,
-  type ParsedSpreadsheetSection,
-} from '@/lib/files/spreadsheet-text';
+import { parseSpreadsheetPreviewText } from '@/lib/files/spreadsheet-text';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { cn } from '@/lib/utils';
 
@@ -230,60 +228,27 @@ function PdfPreviewFrame({
   );
 }
 
-function SpreadsheetTablePreview({ sections }: { sections: ParsedSpreadsheetSection[] }) {
+function SpreadsheetTablePreview({
+  sections,
+}: {
+  sections: ReturnType<typeof parseSpreadsheetPreviewText>;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-6">
       {sections.map((section) => {
-        const colCount = Math.max(1, ...section.rows.map((r) => r.length));
         const [header, ...body] = section.rows;
-        // Only promote row 0 to <thead> when there is at least one data row.
         const hasHeader = Boolean(
           section.rows.length > 1 && header && header.some((c) => c.trim()),
         );
         return (
-          <div key={section.name} className="min-w-0">
-            {sections.length > 1 || section.name !== 'Sheet1' ? (
-              <div className="mb-2 text-xs font-medium text-stone-500 dark:text-stone-400">
-                {section.name}
-              </div>
-            ) : null}
-            <div className="min-w-0 overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
-              <table className="w-full min-w-[240px] border-collapse text-left text-xs">
-                {hasHeader ? (
-                  <thead>
-                    <tr className="border-b border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900/60">
-                      {Array.from({ length: colCount }, (_, i) => (
-                        <th
-                          key={i}
-                          className="px-2.5 py-1.5 font-semibold text-stone-700 dark:text-stone-200"
-                        >
-                          {header?.[i] ?? ''}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                ) : null}
-                <tbody>
-                  {(hasHeader ? body : section.rows).map((row, ri) => (
-                    <tr
-                      key={ri}
-                      className="border-b border-stone-100 last:border-0 dark:border-stone-800/80"
-                    >
-                      {Array.from({ length: colCount }, (_, ci) => (
-                        <td
-                          key={ci}
-                          className="max-w-[220px] truncate px-2.5 py-1.5 text-stone-600 dark:text-stone-300"
-                          title={row[ci] || ''}
-                        >
-                          {row[ci] ?? ''}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <SpreadsheetTable
+            key={section.name}
+            sheetName={
+              sections.length > 1 || section.name !== 'Sheet1' ? section.name : undefined
+            }
+            headers={hasHeader ? header : undefined}
+            rows={hasHeader ? body : section.rows}
+          />
         );
       })}
     </div>

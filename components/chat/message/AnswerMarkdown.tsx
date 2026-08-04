@@ -92,9 +92,16 @@ export function AnswerMarkdown({
           code({ className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             let value = String(children).replace(/\n$/, '');
-            const asciiArt = looksLikeAsciiArt(value);
-            if (asciiArt) value = reflowCollapsedAsciiArt(value);
-            const isBlock = Boolean(match) || value.includes('\n') || (asciiArt && value.length >= 12);
+            // Only rewrite when reflow detects a flat/half-glued diagram —
+            // well-formed nested boxes and indented trees are left alone.
+            if (looksLikeAsciiArt(value)) {
+              const next = reflowCollapsedAsciiArt(value);
+              if (next !== value) value = next;
+            }
+            const isBlock =
+              Boolean(match) ||
+              value.includes('\n') ||
+              (looksLikeAsciiArt(value) && value.length >= 12);
             if (isBlock && match) return <CodeBlock language={match[1]} value={value} />;
             if (isBlock) return <pre className="my-4 max-w-full min-w-0 overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-4 font-mono text-[13px] leading-5 text-stone-800 dark:bg-stone-900/60 dark:text-stone-300"><code {...props}>{value}</code></pre>;
             const cmd = value.trim();

@@ -2,11 +2,16 @@
  * Recover ASCII / Unicode diagrams that models emit as ordinary prose or wrap
  * in single backticks. CommonMark collapses code-span newlines into spaces, so
  * these structures must be promoted before ReactMarkdown parses them.
+ *
+ * Only rewrite when the diagram is still flat / half-glued. Well-formed
+ * multi-line trees and nested boxes must pass through unchanged.
  */
 
 const UNICODE_BRANCH_RE = /(?:^|\s)[├└](?:[─━-]{1,3})/g;
-const ASCII_BRANCH_RE = /(?:^|\s)(?:\+--+|\|--+|\\--+|`--+)\s*/g;
-const BRANCH_LINE_RE = /^\s*(?:(?:[|│┃]\s*)*)(?:[├└](?:[─━-]{1,3})|\+--+|\|--+|\\--+|`--+)\s*/;
+/** `|---` inside GFM tables (`| --- |`) is NOT a tree branch — negative lookahead. */
+const ASCII_BRANCH_RE = /(?:^|\s)(?:\+--+|\\--+|`--+|\|--+(?!\s*\|))\s*/g;
+const BRANCH_LINE_RE =
+  /^\s*(?:(?:[|│┃]\s*)*)(?:[├└](?:[─━-]{1,3})|\+--+|\|--+(?!\s*\|)|\\--+|`--+)\s*/;
 const BOX_CHAR_RE = /[┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═]/g;
 const BOX_TOP_RE = /[┌╔╭].*[┐╗╮]/;
 const BOX_BOTTOM_RE = /[└╚╰].*[┘╝╯]/;
@@ -16,6 +21,14 @@ function countMatches(text: string, re: RegExp): number {
   const count = (String(text || '').match(re) || []).length;
   re.lastIndex = 0;
   return count;
+}
+
+function lightNormalize(text: string): string {
+  return String(text || '')
+    .trim()
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export function looksLikeUnicodeBox(text: string): boolean {
@@ -44,13 +57,8 @@ export function looksLikeAsciiArt(text: string): boolean {
 
 function reflowUnicodeBox(text: string): string {
   return String(text || '')
-    // Top border → first body row.
     .replace(/([┐╗╮])\s+(?=[│║┃])/g, '$1\n')
-    // One body row → the next, or body → bottom border.
-    // NOTE: do NOT run this on already-nested multi-line diagrams — those
-    // legitimately contain `│  │` (outer + inner left borders) on one row.
     .replace(/([│║┃])\s+(?=[│║┃└╚╰])/g, '$1\n')
-    // A flattened second box starts after the previous bottom border.
     .replace(/([┘╝╯])\s+(?=[┌╔╭])/g, '$1\n')
     .trim();
 }
@@ -67,10 +75,7 @@ export function needsUnicodeBoxReflow(text: string): boolean {
   const lines = t.split('\n').filter((l) => l.trim().length > 0);
   if (lines.length <= 1) return true;
 
-  // Half-flat glue. Nested rows like `│  ┌──┐  │` (inner top + outer right)
-  // must NOT count as glue — only true flats:
-  // - whole top+body on one line: `┌────┐ │ …`
-  // - body+bottom glued at EOL: `│ App │ └────┘`
+  // Half-flat glue. Nested rows like `│  ┌──┐  │` must NOT count as glue.
   const glued = lines.some((l) => {
     const s = l.trimEnd();
     return (
@@ -80,7 +85,6 @@ export function needsUnicodeBoxReflow(text: string): boolean {
   });
   if (glued) return true;
 
-  // Multi-line nested layout (outer│ + inner│ on one row) — leave alone.
   if (lines.length >= 3 && lines.some((l) => (l.match(/[│║┃]/g) || []).length >= 2)) {
     return false;
   }
@@ -88,33 +92,50 @@ export function needsUnicodeBoxReflow(text: string): boolean {
   return true;
 }
 
-/** Recover branch/row line breaks after model or CommonMark flattening. */
-export function reflowCollapsedAsciiArt(text: string): string {
-  const raw = String(text || '');
-  if (!raw.trim()) return raw;
-  // Trim first: fenced bodies often end with a trailing newline that is not a
-  // real row break — that used to skip Unicode-box reflow entirely.
-  let out = raw
-    .trim()
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+/** True when a tree still has multiple branches jammed onto one line. */
+export function needsAsciiTreeReflow(text: string): boolean {
+  const t = String(text || '');
+  if (!looksLikeAsciiTree(t)) return false;
+  const lines = t.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length <= 1) return true;
+  // Already one-branch-per-line layout — leave indentation alone.
+  return lines.some((l) => {
+    const marks =
+      countMatches(l, UNICODE_BRANCH_RE) + countMatches(l, ASCII_BRANCH_RE);
+    return marks >= 2;
+  });
+}
 
-  if (looksLikeUnicodeBox(out)) {
-    if (!needsUnicodeBoxReflow(out)) return out;
-    return reflowUnicodeBox(out).replace(/\n{3,}/g, '\n\n').trim();
-  }
-
-  // Unicode branches.
+function reflowAsciiTree(text: string): string {
+  let out = text;
   out = out.replace(/[ \t]+([├└](?:[─━-]{1,3}))/g, '\n$1');
-  // Portable ASCII branches (+--, |--, \--, `--).
-  out = out.replace(/[ \t]+(\+--+|\|--+|\\--+|`--+)/g, '\n$1');
-  // After a leaf with real content, break before the next titled root.
+  // Same table-safe negative lookahead as ASCII_BRANCH_RE.
+  out = out.replace(/[ \t]+(\+--+|\\--+|`--+|\|--+(?!\s*\|))/g, '\n$1');
   out = out.replace(
     /((?:└[─━-]{1,3}|\\--+|`--+)\s+\S[^\n]*?)\s+(?=[\u4e00-\u9fffA-Za-z][^\n]{0,60}[（(])/g,
     '$1\n',
   );
   return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Recover branch/row line breaks after model or CommonMark flattening. */
+export function reflowCollapsedAsciiArt(text: string): string {
+  const raw = String(text || '');
+  if (!raw.trim()) return raw;
+
+  if (looksLikeUnicodeBox(raw)) {
+    const normalized = lightNormalize(raw);
+    if (!needsUnicodeBoxReflow(normalized)) return normalized;
+    return reflowUnicodeBox(normalized).replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  if (looksLikeAsciiTree(raw)) {
+    const normalized = lightNormalize(raw);
+    if (!needsAsciiTreeReflow(normalized)) return normalized;
+    return reflowAsciiTree(normalized);
+  }
+
+  return lightNormalize(raw);
 }
 
 /** Backward-compatible tree-specific name used by the renderer. */
@@ -162,7 +183,6 @@ function paragraphLooksLikeAsciiArt(paragraph: string): boolean {
   if (looksLikeUnicodeBox(p)) return true;
   const branchLines = p.split('\n').filter((line) => BRANCH_LINE_RE.test(line)).length;
   if (branchLines >= 2) return true;
-  // Historical/model-flattened paragraph with several branch tokens.
   return looksLikeAsciiTree(p) && structuralMarkCount(p) >= 3;
 }
 
@@ -193,8 +213,7 @@ export function normalizeAsciiArtMarkdown(markdown: string): string {
 
 /**
  * Models often put ASCII diagrams in ```text fences but flatten newlines
- * inside the fence. prepareChatMarkdown previously skipped those segments;
- * reflow them so every consumer (chat + file preview) sees real line breaks.
+ * inside the fence. Only rewrite when reflow actually changes the body.
  */
 export function reflowFencedAsciiArtBlocks(markdown: string): string {
   return String(markdown || '').replace(
@@ -209,8 +228,6 @@ export function reflowFencedAsciiArtBlocks(markdown: string): string {
         lang === 'plaintext' ||
         lang === 'ascii' ||
         lang === 'txt';
-      // Bare ``` (no language): only reflow when the body is a strong diagram signal —
-      // avoids rewriting casual prose examples that happen to use a few box chars.
       const bareFence = !lang;
       if (!explicitDiagram && !bareFence) return full;
       if (!looksLikeAsciiArt(body)) return full;
@@ -222,7 +239,9 @@ export function reflowFencedAsciiArtBlocks(markdown: string): string {
         return full;
       }
       const next = reflowCollapsedAsciiArt(body);
-      if (next === body.trim()) return full;
+      // Keep the original fence body when nothing structural changed (preserves
+      // trailing newline / indentation the author already got right).
+      if (next === lightNormalize(body)) return full;
       return `\`\`\`${info}\n${next}\n\`\`\``;
     },
   );

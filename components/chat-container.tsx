@@ -49,6 +49,7 @@ import {
   referenceSourceKind,
   webSourcesForThread,
 } from '@/lib/chat/context/references';
+import { scrubFileIdFromSessions, scrubMissingAccountFiles } from '@/lib/files/scrub-deleted-file';
 import {
   analyzeTruncation,
   hasSuccessfulRetrievalTools,
@@ -817,13 +818,33 @@ export default function ChatContainer() {
     }
   };
 
+  /** After account file delete: drop cards, content markers, caches across sessions. */
+  const scrubDeletedAccountFile = (fileId: string) => {
+    if (!fileId || fileId.startsWith('local:')) return;
+    void import('@/lib/files/direct-content').then(({ invalidatePreviewContentCache }) => {
+      invalidatePreviewContentCache(fileId);
+    });
+    void import('@/lib/files/epub-progress').then(({ clearEpubReaderPrefs }) => {
+      clearEpubReaderPrefs(fileId);
+    });
+    if (previewTarget?.kind === 'file' && previewTarget.entry.id === fileId) {
+      setPreviewTarget(null);
+    }
+    if (filePreview?.id === fileId) setFilePreview(null);
+    setSessions((prev) => scrubFileIdFromSessions(prev, fileId));
+  };
+
   const removeGeneratedImage = (entry: GeneratedImageEntry) => {
     const message = messages.find((item) => item.id === entry.messageId);
     const image = message?.images?.[entry.imageIndex];
     if (image?.fileId) {
-      void deleteStoredFile(image.fileId).catch((error) =>
-        console.warn('[files] delete generated image failed:', error),
-      );
+      const fileId = image.fileId;
+      void deleteStoredFile(fileId)
+        .then(() => scrubDeletedAccountFile(fileId))
+        .catch((error) =>
+          console.warn('[files] delete generated image failed:', error),
+        );
+      return;
     }
     setSessions((prev) =>
       prev.map((s) => {
@@ -842,9 +863,12 @@ export default function ChatContainer() {
 
   const removeGeneratedFile = (entry: GeneratedFileEntry) => {
     if (!entry.url.startsWith('local://')) {
-      void deleteStoredFile(entry.id).catch((error) =>
-        console.warn('[files] delete generated file failed:', error),
-      );
+      void deleteStoredFile(entry.id)
+        .then(() => scrubDeletedAccountFile(entry.id))
+        .catch((error) =>
+          console.warn('[files] delete generated file failed:', error),
+        );
+      return;
     }
     setSessions((prev) =>
       prev.map((s) => {
@@ -2615,37 +2639,14 @@ export default function ChatContainer() {
         open={filesManagerOpen}
         onClose={() => setFilesManagerOpen(false)}
         onDeleted={(fileId) => {
-          void import('@/lib/files/direct-content').then(({ invalidatePreviewContentCache }) => {
-            invalidatePreviewContentCache(fileId);
+          scrubDeletedAccountFile(fileId);
+        }}
+        onFilesListed={(fileIds, meta) => {
+          if (!meta.complete) return;
+          setSessions((prev) => {
+            const next = scrubMissingAccountFiles(prev, fileIds);
+            return next === prev ? prev : next;
           });
-          if (previewTarget?.kind === 'file' && previewTarget.entry.id === fileId) {
-            setPreviewTarget(null);
-          }
-          if (filePreview?.id === fileId) setFilePreview(null);
-          // Drop chat/Output cards that pointed at the deleted account file.
-          setSessions((prev) =>
-            prev.map((s) => {
-              const nextMessages = s.messages
-                .map((m) => {
-                  if (!m.files?.some((f) => f.id === fileId) && !m.images?.some((img) => img.fileId === fileId)) {
-                    return m;
-                  }
-                  const files = m.files?.filter((f) => f.id !== fileId);
-                  const images = m.images?.filter((img) => img.fileId !== fileId);
-                  const activity = (m.activity || []).filter(
-                    (step) => !(step.kind === 'file' && step.fileId === fileId),
-                  );
-                  return {
-                    ...m,
-                    files: files?.length ? files : undefined,
-                    images: images?.length ? images : undefined,
-                    activity: activity.length ? activity : undefined,
-                  };
-                })
-                .filter((m) => !isEmptyAssistantShell(m));
-              return { ...s, messages: nextMessages, updatedAt: Date.now() };
-            }),
-          );
         }}
       />
 

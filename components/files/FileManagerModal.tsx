@@ -28,6 +28,11 @@ type FileManagerModalProps = {
   onClose: () => void;
   /** Fired after a file is removed from account storage. */
   onDeleted?: (fileId: string) => void;
+  /**
+   * Fired after a successful account file listing. Parent may scrub chat refs
+   * for ids missing from the list when the page is complete.
+   */
+  onFilesListed?: (fileIds: string[], meta: { complete: boolean; limit: number }) => void;
 };
 
 function fileCreatedAt(file: AccountFile): number {
@@ -56,7 +61,12 @@ function formatDate(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
-export function FileManagerModal({ open, onClose, onDeleted }: FileManagerModalProps) {
+export function FileManagerModal({
+  open,
+  onClose,
+  onDeleted,
+  onFilesListed,
+}: FileManagerModalProps) {
   const { t } = useLocale();
   const [files, setFiles] = useState<AccountFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,14 +76,22 @@ export function FileManagerModal({ open, onClose, onDeleted }: FileManagerModalP
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [textPreview, setTextPreview] = useState<FilePreviewPayload | null>(null);
 
+  const LIST_LIMIT = 100;
+
   const loadFiles = async () => {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch('/api/files?limit=100', { cache: 'no-store' });
+      const response = await fetch(`/api/files?limit=${LIST_LIMIT}`, { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(String(data?.error || `Failed to load files (${response.status})`));
-      setFiles(Array.isArray(data?.data) ? data.data : []);
+      const listed: AccountFile[] = Array.isArray(data?.data) ? data.data : [];
+      setFiles(listed);
+      const ids = listed.map((f) => String(f.id || '').trim()).filter(Boolean);
+      onFilesListed?.(ids, {
+        complete: listed.length < LIST_LIMIT,
+        limit: LIST_LIMIT,
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to load files');
     } finally {

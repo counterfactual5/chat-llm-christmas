@@ -100,6 +100,7 @@ flowchart TD
 - **按需切片（非整书）**：`file_read` 默认返回约 8 页；可用 `start_page` / `max_pages` / `focus` 继续读。首轮省略 `start_page` 时，优先用 PDF outline 的 `body_start_page`，否则用文本启发式跳过目录，从正文附近起读；显式 `start_page=1` 或 `focus=目录/contents` 可读目录。chat-api sidecar 用 `--- page N ---` 分页，meta 可含 `outline` / `body_start_page`；同步先写 partial，后台续抽。
 - **重读靠 sidecar**：不每轮把全文塞进 `/api/chat` body；`GET /v1/files/:id/extract` 返回文本 + `partial` / `total_pages`。
 - **与图片引用同构**：书籍下载只留 fileId 引用；需要内容时再 `file_read`，类似 `【历史图片引用】` → 按需看图。
+- **删除同步**：Files 管理器 / Output 删除账户文件时，客户端 `scrubFileIdFromSessions` 会清掉各会话里的 `files`/`images`/`activity` 卡片、正文中的 `【历史文件引用】` / `[Attached File]` / 原图存档行，以及 Reference 里对应条目（随后经现有 local/cloud persist 写回）。
 
 ---
 

@@ -64,6 +64,17 @@ export function saveEpubReaderPrefs(fileId: string, prefs: Omit<EpubReaderPrefs,
   }
 }
 
+export function clearEpubReaderPrefs(fileId: string): void {
+  if (typeof window === 'undefined') return;
+  const id = String(fileId || '').trim();
+  if (!id) return;
+  try {
+    window.localStorage.removeItem(storageKey(id));
+  } catch {
+    // ignore
+  }
+}
+
 export function fontFamilyCss(id: string): string {
   const hit = EPUB_FONT_FAMILIES.find((f) => f.id === id);
   return hit?.css || EPUB_FONT_FAMILIES[0].css;

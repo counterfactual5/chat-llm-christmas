@@ -32,6 +32,8 @@ type TocEntry = { id: string; label: string; href: string };
 
 const MIN_LAYOUT_WIDTH = 160;
 const MIN_LAYOUT_HEIGHT = 120;
+/** Ignore sub-pixel / scrollbar-gutter width noise. */
+const WIDTH_RESIZE_THRESHOLD = 4;
 
 function flattenToc(items: NavItem[] | undefined, prefix = ''): TocEntry[] {
   if (!items?.length) return [];
@@ -65,7 +67,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fontSizeRef = useRef(EPUB_DEFAULT_FONT_SIZE);
   const fontFamilyRef = useRef(EPUB_DEFAULT_FONT_FAMILY);
-  const lastSizeRef = useRef({ width: 0, height: 0 });
+  const lastWidthRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -87,6 +89,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     /** continuous manager is only safe to resize after first display(). */
     let readyForResize = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let blobUrl = '';
 
     const prefs = loadEpubReaderPrefs(fileId);
     const initialSize = prefs?.fontSize || EPUB_DEFAULT_FONT_SIZE;
@@ -133,6 +136,10 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
       } catch {
         /* ignore */
       }
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        blobUrl = '';
+      }
       rendition = null;
       book = null;
       renditionRef.current = null;
@@ -140,33 +147,45 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
       host.innerHTML = '';
     };
 
+    const resizeToHost = () => {
+      if (!readyForResize || !rendition || !layoutReady(host)) return;
+      const { width, height } = hostSize(host);
+      // Width-only: continuous chapter load + scrollbar gutter change height/width
+      // in a feedback loop (white flash + flickering scrollbar).
+      if (Math.abs(width - lastWidthRef.current) < WIDTH_RESIZE_THRESHOLD) return;
+      lastWidthRef.current = width;
+      try {
+        rendition.resize(width, height);
+      } catch {
+        /* ignore */
+      }
+    };
+
     const startReader = async () => {
       if (cancelled || started || !layoutReady(host)) return;
       started = true;
-      lastSizeRef.current = hostSize(host);
 
       try {
-        // Fetch once (prefer direct chat-api) then open from ArrayBuffer so
-        // epubjs does not re-request the URL through the Vercel proxy.
         const { fetchFileContentForPreview } = await import('@/lib/files/direct-content');
         const { buf } = await fetchFileContentForPreview(url);
         if (cancelled) return;
         if (!layoutReady(host)) {
-          // Panel collapsed while downloading — allow a later retry.
           started = false;
           return;
         }
 
-        // Copy into a fresh buffer; some gateways return a detached/shared view.
         const bytes = buf.byteLength ? buf.slice(0) : buf;
-        book = ePub(bytes);
+        blobUrl = URL.createObjectURL(
+          new Blob([bytes], { type: 'application/epub+zip' }),
+        );
+        book = ePub(blobUrl);
         bookRef.current = book;
 
         const size = hostSize(host);
-        lastSizeRef.current = size;
+        lastWidthRef.current = size.width;
 
-        // Continuous vertical scroll. Explicit pixel size avoids measuring a
-        // collapsing side-panel (width animates 0→460) as a tiny column.
+        // Continuous vertical scroll inside a fixed host. Do NOT observe the
+        // host node for resize — epubjs mutates it and that caused loops.
         rendition = book.renderTo(host, {
           width: size.width,
           height: size.height,
@@ -189,28 +208,20 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         const nav = await book.loaded.navigation;
         if (!cancelled) setToc(flattenToc(nav?.toc));
 
-        if (prefs?.cfi) {
-          await rendition.display(prefs.cfi);
-        } else {
+        try {
+          if (prefs?.cfi) await rendition.display(prefs.cfi);
+          else await rendition.display();
+        } catch {
+          // Stale CFI / broken spine entry → blank page; fall back to start.
           await rendition.display();
         }
         if (cancelled) return;
 
         readyForResize = true;
-        // Re-measure after first paint — panel animation may have finished.
-        const next = hostSize(host);
-        const prev = lastSizeRef.current;
-        if (
-          Math.abs(next.width - prev.width) >= 2 ||
-          Math.abs(next.height - prev.height) >= 2
-        ) {
-          lastSizeRef.current = next;
-          try {
-            rendition.resize(next.width, next.height);
-          } catch {
-            /* ignore */
-          }
-        }
+        // One deferred width sync after panel animation — not a tight loop.
+        window.setTimeout(() => {
+          if (!cancelled) resizeToHost();
+        }, 220);
         if (!cancelled) setLoading(false);
       } catch (cause) {
         if (!cancelled) {
@@ -228,31 +239,16 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
           void startReader();
           return;
         }
-        if (!readyForResize || !rendition || !layoutReady(host)) return;
-        const next = hostSize(host);
-        const prev = lastSizeRef.current;
-        if (
-          Math.abs(next.width - prev.width) < 2 &&
-          Math.abs(next.height - prev.height) < 2
-        ) {
-          return;
-        }
-        lastSizeRef.current = next;
-        try {
-          rendition.resize(next.width, next.height);
-        } catch {
-          /* ignore */
-        }
-      }, 80);
+        resizeToHost();
+      }, 120);
     };
 
+    // Observe the outer shell only (stable panel size), never the epub host.
     const observer = new ResizeObserver(() => {
       scheduleResize();
     });
-    observer.observe(host);
     if (root) observer.observe(root);
 
-    // Side panel opens with width animation — poll briefly until layout is ready.
     void startReader();
     const readyPoll = window.setInterval(() => {
       if (cancelled || started) {
@@ -407,8 +403,11 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         )}
       </div>
 
-      <div className="relative min-h-0 min-w-0 flex-1">
-        <div ref={hostRef} className="absolute inset-0 overflow-hidden bg-white dark:bg-stone-950" />
+      <div className="relative min-h-0 min-w-0 flex-1 [scrollbar-gutter:stable]">
+        <div
+          ref={hostRef}
+          className="absolute inset-0 overflow-hidden bg-white dark:bg-stone-950 [&_.epub-container]:!h-full [&_.epub-container]:!overflow-y-auto"
+        />
         {loading && !error && (
           <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/80 text-xs text-stone-400 dark:bg-stone-950/80">
             <Loader2 className="h-5 w-5 animate-spin opacity-60" />

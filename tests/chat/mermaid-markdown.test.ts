@@ -7,7 +7,7 @@ import {
 import { prepareChatMarkdown } from '@/lib/markdown/math';
 
 describe('sanitizeMermaidForRender', () => {
-  it('strips style/classDef/init directives and normalizes curly quotes', () => {
+  it('drops init directives and normalizes curly quotes, keeping model colors', () => {
     const out = sanitizeMermaidForRender(`flowchart TD
   A[点击“登录”] --> B
   style A fill:#e1f5ff
@@ -15,9 +15,20 @@ describe('sanitizeMermaidForRender', () => {
   %%{init: {'theme':'dark'}}%%
 `);
     expect(out).toContain('A[点击"登录"]');
-    expect(out).not.toMatch(/style\s+A/i);
-    expect(out).not.toMatch(/classDef/i);
+    expect(out).toMatch(/style\s+A/i);
+    expect(out).toMatch(/classDef/i);
     expect(out).not.toContain('%%{init');
+  });
+
+  it('quotes bracket labels containing parentheses', () => {
+    const out = sanitizeMermaidForRender('flowchart TD\n  M[客户端存储JWT<br/>(localStorage)] --> N[完成]');
+    expect(out).toContain('M["客户端存储JWT<br/>(localStorage)"]');
+    expect(out).toContain('N[完成]');
+  });
+
+  it('leaves already-quoted and nested shapes untouched', () => {
+    const src = 'flowchart TD\n  A["已引号(ok)"] --> B[(数据库)]';
+    expect(sanitizeMermaidForRender(src)).toBe(src);
   });
 });
 

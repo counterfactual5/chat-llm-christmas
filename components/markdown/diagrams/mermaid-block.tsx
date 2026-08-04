@@ -6,6 +6,22 @@ import { useTheme } from '@/components/theme/ThemeProvider';
 import { cn } from '@/lib/utils';
 import { sanitizeMermaidForRender } from '@/lib/markdown/core/mermaid';
 
+/** Mermaid pins the root svg to its intrinsic width; let the container drive size. */
+function fluidSvg(svg: string): string {
+  return svg.replace(/<svg\b[^>]*>/, (tag) =>
+    tag
+      .replace(/max-width:\s*[\d.]+px/gi, 'max-width:100%')
+      .replace(/\sheight="[\d.]+(?:px)?"/i, ' height="auto"'),
+  );
+}
+
+/** mermaid.render()/parse() can leave temp or error nodes attached to <body>. */
+function removeStrayMermaidNodes(id: string): void {
+  for (const el of [document.getElementById(id), document.getElementById(`d${id}`)]) {
+    el?.remove();
+  }
+}
+
 type MermaidBlockProps = {
   value: string;
   className?: string;
@@ -26,6 +42,7 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
   const [pending, setPending] = useState(true);
   const [copied, setCopied] = useState(false);
   const [showSource, setShowSource] = useState(false);
+  const [fit, setFit] = useState(true);
 
   const rawSource = String(value || '').trim();
   const source = sanitizeMermaidForRender(rawSource);
@@ -40,10 +57,10 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
     }
 
     setPending(true);
-    setError(null);
 
     const timer = window.setTimeout(() => {
       void (async () => {
+        const id = `mermaid-${reactId}-${Math.random().toString(36).slice(2, 9)}`;
         try {
           const mermaid = (await import('mermaid')).default;
           mermaid.initialize({
@@ -52,26 +69,33 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
             theme: theme === 'dark' ? 'dark' : 'neutral',
             fontFamily: 'ui-sans-serif, system-ui, sans-serif',
           });
-          const id = `mermaid-${reactId}-${Math.random().toString(36).slice(2, 9)}`;
+          // Validate first: mermaid.render() injects a visible error graphic into
+          // the document when parsing fails, which piles up while streaming.
+          const parsed = await mermaid.parse(source, { suppressErrors: true });
+          if (cancelled) return;
+          if (!parsed) {
+            setError('Invalid mermaid syntax');
+            return;
+          }
           const { svg: rendered } = await mermaid.render(id, source);
           if (cancelled) return;
-          setSvg(rendered);
+          setSvg(fluidSvg(rendered));
           setError(null);
         } catch (err) {
           if (cancelled) return;
-          setSvg('');
           setError(err instanceof Error ? err.message : 'Failed to render diagram');
         } finally {
+          removeStrayMermaidNodes(id);
           if (!cancelled) setPending(false);
         }
       })();
-    }, 120);
+    }, streaming ? 400 : 120);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [source, theme, reactId]);
+  }, [source, theme, reactId, streaming]);
 
   const copyToClipboard = async () => {
     try {
@@ -83,7 +107,7 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
     }
   };
 
-  const showFallback = Boolean(error) || (!pending && !svg);
+  const showFallback = (Boolean(error) || !pending) && !svg;
   const fallbackHint = streaming
     ? 'Diagram not ready yet (incomplete or invalid while streaming).'
     : 'Could not render this diagram — showing source. Check Mermaid syntax.';
@@ -101,6 +125,15 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
           {pending ? ' · rendering…' : error ? ' · source' : ''}
         </span>
         <div className="flex items-center gap-1">
+          {svg && !showSource ? (
+            <button
+              type="button"
+              onClick={() => setFit((v) => !v)}
+              className="rounded-md px-2 py-1 text-xs text-stone-500 transition-colors hover:bg-stone-200/80 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-700 dark:hover:text-stone-200"
+            >
+              {fit ? 'Actual size' : 'Fit'}
+            </button>
+          ) : null}
           {svg ? (
             <button
               type="button"
@@ -140,7 +173,10 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
 
       {svg && !showSource ? (
         <div
-          className="overflow-x-auto px-3 py-4 [&_svg]:mx-auto [&_svg]:max-w-full"
+          className={cn(
+            'overflow-auto px-3 py-4 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full',
+            fit ? 'max-h-[60vh] [&_svg]:max-h-[56vh]' : 'max-h-[85vh]',
+          )}
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       ) : null}

@@ -18,6 +18,7 @@ export type ToolRunClassification = {
   isPaperSearch: boolean;
   isBookSearch: boolean;
   isBookDownload: boolean;
+  isPaperDownload: boolean;
   isGenerateImage: boolean;
   isCreateFile: boolean;
   isFileRead: boolean;
@@ -68,6 +69,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const isPaperSearch = run.name === 'paper_search';
   const isBookSearch = run.name === 'book_search';
   const isBookDownload = run.name === 'book_download';
+  const isPaperDownload = run.name === 'paper_download';
   const isGenerateImage = run.name === 'generate_image';
   const isCreateFile =
     run.name === 'create_file' ||
@@ -122,6 +124,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isPaperSearch,
     isBookSearch,
     isBookDownload,
+    isPaperDownload,
     isGenerateImage,
     isCreateFile,
     isFileRead,
@@ -199,6 +202,7 @@ export function getToolRunLabelKey(
     isPaperSearch,
     isBookSearch,
     isBookDownload,
+    isPaperDownload,
     isGenerateImage,
     isCreateFile,
     isFileRead,
@@ -292,6 +296,7 @@ export function getToolRunLabelKey(
     if (isPaperSearch) return 'searchingPapers';
     if (isBookSearch) return 'searchingBooks';
     if (isBookDownload) return 'downloadingBook';
+    if (isPaperDownload) return 'downloadingPaper';
     if (isCreateFile) return 'creatingFile';
     if (isFileRead) return 'readingFile';
     if (isDocxExtract) return 'extractingDocx';
@@ -310,6 +315,7 @@ export function getToolRunLabelKey(
   if (isPaperSearch) return 'searchedPapers';
   if (isBookSearch) return 'searchedBooks';
   if (isBookDownload) return 'downloadedBook';
+  if (isPaperDownload) return 'downloadedPaper';
   if (isCreateFile) return 'createdFile';
   if (isFileRead) return 'readFile';
   if (isDocxExtract) return 'extractedDocx';
@@ -346,6 +352,7 @@ export function toolRunShowsFetchingResults(
     classification.isReviewVerifier ||
     classification.isReviewReport ||
     classification.isBookDownload ||
+    classification.isPaperDownload ||
     classification.isNotionWrite ||
     classification.isNotionFetch ||
     classification.isGoogleWrite

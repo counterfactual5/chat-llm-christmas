@@ -9,9 +9,12 @@ import {
   formatBookDownloadCommand,
   formatLiteratureCommand,
   formatPaperActionCommand,
+  formatPaperDownloadCommand,
   isValidBookDownloadIdentifier,
+  isValidPaperDownloadIdentifier,
   markdownLinkLabel,
   resolveBookDownloadIdentifier,
+  resolvePaperDownloadIdentifier,
   type BookSource,
   type LiteratureKind,
   type PaperAction,
@@ -197,6 +200,68 @@ export async function requestBookDownload(
     identifier: String(data.identifier || identifier),
     title: String(data.title || data.filename || identifier),
     filename: String(data.filename || 'book.bin'),
+    fileId: String(data.file.id),
+    bytes: Number(data.bytes) || 0,
+    sourceUrl: String(data.sourceUrl || ''),
+    provider: data.provider ? String(data.provider) : undefined,
+  };
+}
+
+export type PaperDownloadResult =
+  | {
+      ok: true;
+      identifier: string;
+      title: string;
+      filename: string;
+      fileId: string;
+      bytes: number;
+      sourceUrl: string;
+      provider?: string;
+    }
+  | { ok: false; error: string };
+
+export async function requestPaperDownload(
+  identifier: string,
+  opts?: { fetchImpl?: typeof fetch },
+): Promise<PaperDownloadResult> {
+  const doFetch = opts?.fetchImpl ?? fetch;
+  const res = await doFetch('/api/literature/papers/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier }),
+  });
+  const raw = await res.text();
+  let data: {
+    ok?: boolean;
+    error?: string;
+    message?: string;
+    identifier?: string;
+    title?: string;
+    filename?: string;
+    bytes?: number;
+    sourceUrl?: string;
+    provider?: string;
+    file?: { id?: string };
+  } = {};
+  try {
+    data = raw ? (JSON.parse(raw) as typeof data) : {};
+  } catch {
+    return {
+      ok: false,
+      error: raw.trim().slice(0, 400) || `Download API returned non-JSON (HTTP ${res.status})`,
+    };
+  }
+  if (!res.ok || !data.file?.id) {
+    return {
+      ok: false,
+      error: data.error || data.message || `Paper download failed (HTTP ${res.status})`,
+    };
+  }
+  return {
+    ok: true,
+    identifier: String(data.identifier || identifier),
+    title: String(data.title || data.filename || identifier),
+    filename: String(data.filename || 'paper.pdf'),
     fileId: String(data.file.id),
     bytes: Number(data.bytes) || 0,
     sourceUrl: String(data.sourceUrl || ''),
@@ -395,7 +460,13 @@ export function formatLiteratureMarkdown(
         );
       }
     }
-    if (hit.pdfUrl) lines.push(`   - PDF: [Open PDF](${hit.pdfUrl})`);
+    if (kind === 'papers') {
+      const dlId = resolvePaperDownloadIdentifier(hit);
+      if (dlId && isValidPaperDownloadIdentifier(dlId)) {
+        lines.push(`   - Download: \`${formatPaperDownloadCommand(dlId)}\``);
+      }
+      if (hit.pdfUrl) lines.push(`   - PDF: [Open PDF](${hit.pdfUrl})`);
+    }
     if (kind === 'books') {
       const dlId = hit.downloadable ? resolveBookDownloadIdentifier(hit) : '';
       if (dlId && isValidBookDownloadIdentifier(dlId)) {

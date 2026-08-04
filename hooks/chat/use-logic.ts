@@ -76,6 +76,7 @@ import {
   literatureToolRun,
   requestBookDownload,
   requestLiteratureSearch,
+  requestPaperDownload,
 } from '@/lib/chat/turn/literature-search';
 import {
   bookDownloadToolRun,
@@ -83,6 +84,12 @@ import {
   formatBookDownloadMarkdown,
   mimeForDownloadedBook,
 } from '@/lib/chat/turn/book-download-turn';
+import {
+  buildPaperDownloadThread,
+  formatPaperDownloadMarkdown,
+  mimeForDownloadedPaper,
+  paperDownloadToolRun,
+} from '@/lib/chat/turn/paper-download-turn';
 
 export type { QueuedTask };
 export type UseChatLogicProps = {
@@ -584,6 +591,138 @@ export function useChatLogic(props: UseChatLogicProps) {
     return true;
   };
 
+  const runPaperDownload = async (
+    identifier: string,
+    opts?: {
+      baseMessages?: Message[];
+      skipDuplicateUser?: boolean;
+      sessionId?: string;
+      alreadyLoading?: boolean;
+    },
+  ): Promise<boolean> => {
+    const id = identifier.trim();
+    if (!id) return false;
+    if (!isAccountBound) {
+      openLoginModal();
+      return false;
+    }
+    const sessionId = opts?.sessionId || activeSessionId;
+    if (isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
+
+    stickToBottomRef.current = true;
+    if (sessionId === activeSessionId) scrollToBottom(true);
+    setIsSkillPickerOpen(false);
+    if (sessionId === activeSessionId) setInput('');
+    if (!opts?.alreadyLoading) beginLoading(sessionId);
+
+    const sessionMessages =
+      opts?.baseMessages ??
+      sessionsRef.current.find((s) => s.id === sessionId)?.messages ??
+      [];
+    const cleanedBase = cleanBaseMessagesForSend(sessionMessages);
+    const { thread, assistantId, toolRunId, newTitle } = buildPaperDownloadThread({
+      identifier: id,
+      cleanedBase,
+      skipDuplicateUser: opts?.skipDuplicateUser,
+      currentTitle: sessionsRef.current.find((s) => s.id === sessionId)?.title,
+    });
+    updateSession(sessionId, thread, newTitle);
+
+    try {
+      const result = await requestPaperDownload(id);
+      if (!result.ok) throw new Error(result.error);
+      const content = formatPaperDownloadMarkdown(result);
+      const doneRun = paperDownloadToolRun({
+        identifier: result.identifier,
+        title: result.title,
+        filename: result.filename,
+        sourceUrl: result.sourceUrl,
+        fileId: result.fileId,
+        provider: result.provider,
+      });
+      const fileEntry = {
+        id: result.fileId,
+        name: result.filename || result.title || 'paper.pdf',
+        mimeType: mimeForDownloadedPaper(result.filename || ''),
+        size: result.bytes || 0,
+        url: `/api/files/${encodeURIComponent(result.fileId)}`,
+        createdAt: Date.now(),
+      };
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => {
+              const activity = [
+                ...(m.activity || []),
+                { id: crypto.randomUUID(), kind: 'file' as const, fileId: result.fileId },
+              ];
+              if (content.trim()) {
+                activity.push({
+                  id: crypto.randomUUID(),
+                  kind: 'content' as const,
+                  text: content,
+                });
+              }
+              return {
+                ...m,
+                content,
+                incomplete: false,
+                files: [...(m.files || []).filter((f) => f.id !== fileEntry.id), fileEntry],
+                toolRuns: (m.toolRuns || []).map((r) =>
+                  r.id === toolRunId
+                    ? {
+                        ...r,
+                        status: 'done' as const,
+                        provider: doneRun.provider,
+                        results: doneRun.results,
+                      }
+                    : r,
+                ),
+                activity,
+              };
+            }),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+      if (sessionId === activeSessionIdRef.current) {
+        setOutputGroupsOpen((prev) => ({ ...prev, files: true }));
+        setIsContextPanelOpen(true);
+      }
+      void ensureFileExtractSidecar({
+        fileId: result.fileId,
+        filename: result.filename,
+        url: fileEntry.url,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Paper download failed';
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== sessionId) return s;
+          return {
+            ...s,
+            messages: mapAssistantById(s.messages, assistantId, (m) => ({
+              ...m,
+              content: `Error: ${message}`,
+              incomplete: false,
+              toolRuns: (m.toolRuns || []).map((r) =>
+                r.id === toolRunId
+                  ? { ...r, status: 'done' as const, error: message }
+                  : r,
+              ),
+            })),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+    } finally {
+      endLoading(sessionId);
+    }
+    return true;
+  };
+
   const runLiteratureSearch = async (
     kind: 'papers' | 'books',
     query: string,
@@ -731,12 +870,25 @@ export function useChatLogic(props: UseChatLogicProps) {
       if (!force && isSessionLoading(sessionId) && !opts?.alreadyLoading) return false;
       if (literatureCmd.action === 'download') {
         if (literatureCmd.error) {
+          const missing =
+            literatureCmd.kind === 'papers'
+              ? t('papersDownloadMissingId')
+              : t('booksDownloadMissingId');
+          const invalid =
+            literatureCmd.kind === 'papers'
+              ? t('papersDownloadInvalidId')
+              : t('booksDownloadInvalidId');
           setAttachError(
-            literatureCmd.error === 'missing_identifier'
-              ? t('booksDownloadMissingId')
-              : t('booksDownloadInvalidId'),
+            literatureCmd.error === 'missing_identifier' ? missing : invalid,
           );
           return false;
+        }
+        if (literatureCmd.kind === 'papers') {
+          return runPaperDownload(literatureCmd.identifier, {
+            sessionId,
+            alreadyLoading: opts?.alreadyLoading,
+            baseMessages: baseMessagesOverride,
+          });
         }
         return runBookDownload(literatureCmd.identifier, {
           sessionId,
@@ -1089,11 +1241,25 @@ export function useChatLogic(props: UseChatLogicProps) {
     if (literatureCmd) {
       if (literatureCmd.action === 'download') {
         if (literatureCmd.error) {
+          const missing =
+            literatureCmd.kind === 'papers'
+              ? t('papersDownloadMissingId')
+              : t('booksDownloadMissingId');
+          const invalid =
+            literatureCmd.kind === 'papers'
+              ? t('papersDownloadInvalidId')
+              : t('booksDownloadInvalidId');
           setAttachError(
-            literatureCmd.error === 'missing_identifier'
-              ? t('booksDownloadMissingId')
-              : t('booksDownloadInvalidId'),
+            literatureCmd.error === 'missing_identifier' ? missing : invalid,
           );
+          return;
+        }
+        if (literatureCmd.kind === 'papers') {
+          await runPaperDownload(literatureCmd.identifier, {
+            baseMessages: prior,
+            skipDuplicateUser: true,
+            sessionId,
+          });
           return;
         }
         await runBookDownload(literatureCmd.identifier, {
@@ -1254,6 +1420,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     generateImage,
     runLiteratureSearch,
     runBookDownload,
+    runPaperDownload,
     handleSubmit,
     resumeIncompleteReply,
     requestClaimReview,

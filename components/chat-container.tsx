@@ -1483,6 +1483,7 @@ export default function ChatContainer() {
     saveEditedMessage,
     runLiteratureSearch,
     runBookDownload,
+    runPaperDownload,
     stopGenerating,
     handleSubmit,
     loadingBySession,
@@ -1822,6 +1823,13 @@ export default function ChatContainer() {
         setEditingMessageContent('');
         setEditingMessageAttachments([]);
         if (literatureCmd.action === 'download') {
+          if (literatureCmd.kind === 'papers') {
+            await runPaperDownload(literatureCmd.identifier, {
+              sessionId: activeSessionId,
+              baseMessages: priorMessages,
+            });
+            return;
+          }
           await runBookDownload(literatureCmd.identifier, {
             sessionId: activeSessionId,
             baseMessages: priorMessages,
@@ -1855,6 +1863,7 @@ export default function ChatContainer() {
       requestClaimReview,
       runLiteratureSearch,
       runBookDownload,
+      runPaperDownload,
       setSessions,
       setEditingMessageId,
       setEditingMessageContent,

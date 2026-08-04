@@ -56,6 +56,7 @@ describe('classifyToolRun', () => {
     expect(classifyToolRun({ name: 'paper_search' }).isPaperSearch).toBe(true);
     expect(classifyToolRun({ name: 'book_search' }).isBookSearch).toBe(true);
     expect(classifyToolRun({ name: 'book_download' }).isBookDownload).toBe(true);
+    expect(classifyToolRun({ name: 'paper_download' }).isPaperDownload).toBe(true);
     expect(classifyToolRun({ name: 'generate_image' }).isGenerateImage).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'claim-reviewer' }).isClaimReviewer).toBe(true);
   });
@@ -151,6 +152,8 @@ describe('getToolRunLabelKey', () => {
       [{ name: 'book_search' }, false, 'searchedBooks'],
       [{ name: 'book_download' }, true, 'downloadingBook'],
       [{ name: 'book_download' }, false, 'downloadedBook'],
+      [{ name: 'paper_download' }, true, 'downloadingPaper'],
+      [{ name: 'paper_download' }, false, 'downloadedPaper'],
       [{ name: 'create_file' }, true, 'creatingFile'],
       [{ name: 'create_file' }, false, 'createdFile'],
       [{ name: 'create_spreadsheet' }, true, 'creatingFile'],

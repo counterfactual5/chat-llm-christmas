@@ -3,17 +3,22 @@ import { isClickableSlashCommand } from '@/components/chat/message/AnswerMarkdow
 import {
   formatBookDownloadCommand,
   formatLiteratureCommand,
+  formatPaperDownloadCommand,
   inferBookDownloadProvider,
+  inferPaperDownloadProvider,
   isValidBookDownloadIdentifier,
+  isValidPaperDownloadIdentifier,
   markdownLinkLabel,
   parseLiteratureCommand,
   resolveBookDownloadIdentifier,
+  resolvePaperDownloadIdentifier,
 } from '@/lib/chat/turn/literature-command';
 import {
   buildLiteratureSearchThread,
   formatLiteratureMarkdown,
 } from '@/lib/chat/turn/literature-search';
 import { buildBookDownloadThread } from '@/lib/chat/turn/book-download-turn';
+import { buildPaperDownloadThread } from '@/lib/chat/turn/paper-download-turn';
 import { formatHitsForModel } from '@/lib/tools/literature/tool';
 
 describe('parseLiteratureCommand', () => {
@@ -156,6 +161,58 @@ describe('parseLiteratureCommand', () => {
     });
   });
 
+  it('parses /papers download and rejects placeholders', () => {
+    expect(parseLiteratureCommand('/papers download ARXIV:1706.03762')).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: 'ARXIV:1706.03762',
+    });
+    expect(parseLiteratureCommand('/papers download DOI:10.1038/s41586-023-06592-0')).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: 'DOI:10.1038/s41586-023-06592-0',
+    });
+    expect(parseLiteratureCommand('/papers download 1706.03762')).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: '1706.03762',
+    });
+    expect(
+      parseLiteratureCommand(
+        '/papers download https://arxiv.org/pdf/1706.03762.pdf',
+      ),
+    ).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: 'https://arxiv.org/pdf/1706.03762.pdf',
+    });
+    expect(
+      parseLiteratureCommand('/papers download abcdefghijklmnop'),
+    ).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: 'abcdefghijklmnop',
+    });
+    expect(parseLiteratureCommand('/papers download')).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: '',
+      error: 'missing_identifier',
+    });
+    expect(parseLiteratureCommand('/papers download <id>')).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: '<id>',
+      error: 'invalid_identifier',
+    });
+    expect(parseLiteratureCommand('/papers download ARXIV:<id>')).toEqual({
+      kind: 'papers',
+      action: 'download',
+      identifier: 'ARXIV:<id>',
+      error: 'invalid_identifier',
+    });
+  });
+
   it('formats commands', () => {
     expect(formatLiteratureCommand('papers', 'RLHF')).toBe('/papers RLHF');
     expect(formatLiteratureCommand('papers', 'RLHF', { source: 'arxiv' })).toBe(
@@ -171,6 +228,9 @@ describe('parseLiteratureCommand', () => {
       '/books fpb python',
     );
     expect(formatBookDownloadCommand('foo')).toBe('/books download foo');
+    expect(formatPaperDownloadCommand('ARXIV:1706.03762')).toBe(
+      '/papers download ARXIV:1706.03762',
+    );
   });
 });
 
@@ -196,6 +256,7 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('/papers details ARXIV:1706.03762');
     expect(md).toContain('/papers citations ARXIV:1706.03762');
     expect(md).toContain('/papers references ARXIV:1706.03762');
+    expect(md).toContain('/papers download ARXIV:1706.03762');
     expect(md).toMatch(
       /Actions: `\/papers details ARXIV:1706\.03762` · `\/papers citations ARXIV:1706\.03762` · `\/papers references ARXIV:1706\.03762`/,
     );
@@ -327,6 +388,48 @@ describe('inferBookDownloadProvider / markdownLinkLabel', () => {
   });
 });
 
+describe('inferPaperDownloadProvider / resolvePaperDownloadIdentifier', () => {
+  it('labels providers and resolves download targets', () => {
+    expect(inferPaperDownloadProvider('ARXIV:1706.03762')).toBe('arxiv');
+    expect(inferPaperDownloadProvider('1706.03762')).toBe('arxiv');
+    expect(inferPaperDownloadProvider('DOI:10.1/x')).toBe('doi');
+    expect(inferPaperDownloadProvider('https://example.com/a.pdf')).toBe('direct');
+    expect(inferPaperDownloadProvider('abcdefghijklmnop')).toBe('semantic-scholar');
+
+    expect(
+      resolvePaperDownloadIdentifier({
+        paperId: 'ARXIV:1706.03762',
+        pdfUrl: 'https://arxiv.org/pdf/1706.03762.pdf',
+      }),
+    ).toBe('ARXIV:1706.03762');
+    expect(
+      resolvePaperDownloadIdentifier({
+        paperId: 'abcdefghijklmnop',
+        pdfUrl: 'https://example.com/a.pdf',
+      }),
+    ).toBe('abcdefghijklmnop');
+    expect(
+      resolvePaperDownloadIdentifier({
+        pdfUrl: 'https://arxiv.org/pdf/1706.03762.pdf',
+      }),
+    ).toBe('https://arxiv.org/pdf/1706.03762.pdf');
+    expect(
+      resolvePaperDownloadIdentifier({
+        url: 'https://arxiv.org/abs/1706.03762',
+      }),
+    ).toBe('ARXIV:1706.03762');
+    expect(
+      resolvePaperDownloadIdentifier({
+        doi: '10.1038/s41586-023-06592-0',
+      }),
+    ).toBe('DOI:10.1038/s41586-023-06592-0');
+    expect(isValidPaperDownloadIdentifier('ARXIV:1706.03762')).toBe(true);
+    expect(isValidPaperDownloadIdentifier('1706.03762v2')).toBe(true);
+    expect(isValidPaperDownloadIdentifier('short')).toBe(false);
+    expect(isValidPaperDownloadIdentifier('<id>')).toBe(false);
+  });
+});
+
 describe('resolveBookDownloadIdentifier', () => {
   it('prefers md5, then archive id, then downloadUrl, then archive.org URL', () => {
     expect(
@@ -360,6 +463,7 @@ describe('resolveBookDownloadIdentifier', () => {
 describe('isClickableSlashCommand', () => {
   it('accepts book download and paper action commands', () => {
     expect(isClickableSlashCommand('/books download calculus')).toBe(true);
+    expect(isClickableSlashCommand('/papers download ARXIV:1706.03762')).toBe(true);
     expect(isClickableSlashCommand('/papers details ARXIV:1')).toBe(true);
     expect(isClickableSlashCommand('/papers citations DOI:10.1/x')).toBe(true);
     expect(isClickableSlashCommand('/papers references ARXIV:1')).toBe(true);
@@ -434,6 +538,9 @@ describe('formatHitsForModel', () => {
     expect(papers.results[0].referencesCommand).toBe(
       '/papers references ARXIV:1706.03762',
     );
+    expect(papers.results[0].downloadCommand).toBe(
+      '/papers download ARXIV:1706.03762',
+    );
   });
 });
 
@@ -486,6 +593,21 @@ describe('literature/book Process toolRuns', () => {
       name: 'book_download',
       status: 'start',
       query: 'calculus',
+    });
+    expect(dl.thread.at(-1)?.activity?.[0]?.kind).toBe('tool');
+  });
+
+  it('seeds paper_download the same way', () => {
+    const dl = buildPaperDownloadThread({
+      identifier: 'ARXIV:1706.03762',
+      cleanedBase: [],
+      now: () => 1,
+      genId,
+    });
+    expect(dl.thread.at(-1)?.toolRuns?.[0]).toMatchObject({
+      name: 'paper_download',
+      status: 'start',
+      query: 'ARXIV:1706.03762',
     });
     expect(dl.thread.at(-1)?.activity?.[0]?.kind).toBe('tool');
   });

@@ -462,6 +462,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isPaperSearch,
                     isBookSearch,
                     isBookDownload,
+                    isPaperDownload,
                     isGenerateImage,
                     isCreateFile,
                     isFileRead,
@@ -585,7 +586,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <GitHubLogo className="h-3 w-3 shrink-0" />
                         ) : isGoogle ? (
                           <GoogleLogo className="h-3 w-3 shrink-0" />
-                        ) : isPaperSearch ? (
+                        ) : isPaperSearch || isPaperDownload ? (
                           <GraduationCap className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isBookSearch || isBookDownload ? (
                           <BookOpen className="h-3 w-3 shrink-0 opacity-60" />
@@ -617,6 +618,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isPaperSearch &&
                           !isBookSearch &&
                           !isBookDownload &&
+                          !isPaperDownload &&
                           !isGenerateImage &&
                           !isCreateFile &&
                           !isFileRead &&

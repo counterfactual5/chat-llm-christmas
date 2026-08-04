@@ -20,6 +20,7 @@ const KATEX_OPTIONS = {
 export function isClickableSlashCommand(text: string): boolean {
   const s = String(text || '').trim();
   if (/^\/books\s+download\s+\S+/i.test(s)) return true;
+  if (/^\/papers\s+download\s+\S+/i.test(s)) return true;
   if (/^\/papers\s+(details|citations|references)\s+\S+/i.test(s)) return true;
   return false;
 }

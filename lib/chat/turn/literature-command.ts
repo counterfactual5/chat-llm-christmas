@@ -5,6 +5,9 @@ const BOOKS_CMD_RE = /^(?:\/books|\/book|\/书籍|\/图书)\s+([\s\S]+)$/i;
 /** Match `/books download` even when the identifier is missing or a placeholder. */
 const BOOKS_DOWNLOAD_INTENT_RE =
   /^(?:\/books|\/book|\/书籍|\/图书)\s+download(?:\s+([\s\S]*))?$/i;
+/** Match `/papers download` even when the identifier is missing or a placeholder. */
+const PAPERS_DOWNLOAD_INTENT_RE =
+  /^(?:\/papers|\/paper|\/论文|\/学术)\s+download(?:\s+([\s\S]*))?$/i;
 
 export type LiteratureKind = 'papers' | 'books';
 
@@ -49,6 +52,13 @@ export type LiteratureCommand =
       paperId?: string;
     }
   | {
+      kind: 'papers';
+      action: 'download';
+      identifier: string;
+      /** Present when the user typed download but the id is missing/placeholder. */
+      error?: 'missing_identifier' | 'invalid_identifier';
+    }
+  | {
       kind: 'books';
       action: 'search';
       query: string;
@@ -61,6 +71,12 @@ export type LiteratureCommand =
       /** Present when the user typed download but the id is missing/placeholder. */
       error?: 'missing_identifier' | 'invalid_identifier';
     };
+
+const BARE_ARXIV_RE = /^\d{4}\.\d{4,5}(v\d+)?$/i;
+const ARXIV_PREFIXED_RE = /^ARXIV:(\d{4}\.\d{4,5}(v\d+)?)$/i;
+const DOI_PREFIXED_RE = /^DOI:\S+$/i;
+/** Semantic Scholar-style opaque ids (hex / alphanumeric, len ≥ 8). */
+const S2_PAPER_ID_RE = /^[A-Za-z0-9]{8,}$/;
 
 /**
  * Valid download targets: http(s) URL, 32-char MD5, `libgen:`+MD5, `gutenberg:`+id, or archive-style id.
@@ -76,6 +92,22 @@ export function isValidBookDownloadIdentifier(identifier: string): boolean {
   if (libgen) return /^[a-f0-9]{32}$/i.test(libgen[1]);
   if (/^[a-f0-9]{32}$/i.test(id)) return true;
   return /^[A-Za-z0-9._%-]{3,}$/.test(id);
+}
+
+/**
+ * Valid paper PDF download targets: https URL, `ARXIV:…`, `DOI:…`, bare arXiv id, or S2-style id.
+ * Rejects empty values and placeholders like `<id>`.
+ */
+export function isValidPaperDownloadIdentifier(identifier: string): boolean {
+  const id = String(identifier || '').trim();
+  if (!id) return false;
+  if (/[<>]/.test(id)) return false;
+  if (/^https?:\/\/\S+$/i.test(id)) return true;
+  if (ARXIV_PREFIXED_RE.test(id)) return true;
+  if (DOI_PREFIXED_RE.test(id)) return true;
+  if (BARE_ARXIV_RE.test(id)) return true;
+  if (S2_PAPER_ID_RE.test(id)) return true;
+  return false;
 }
 
 /** Fields needed to pick a `/books download` target from a search hit. */
@@ -132,6 +164,52 @@ export function resolveBookDownloadIdentifier(hit: BookDownloadHitFields): strin
   return '';
 }
 
+/** Fields needed to pick a `/papers download` target from a search hit. */
+export type PaperDownloadHitFields = {
+  paperId?: string;
+  pdfUrl?: string;
+  doi?: string;
+  url?: string;
+};
+
+/** Extract bare arXiv id from abs/pdf/html URLs. */
+export function arxivIdFromUrl(url: string): string {
+  const m = String(url || '').match(
+    /arxiv\.org\/(?:abs|pdf|html)\/(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+  );
+  return m?.[1] || '';
+}
+
+function isPreferablePaperId(paperId: string): boolean {
+  if (ARXIV_PREFIXED_RE.test(paperId) || DOI_PREFIXED_RE.test(paperId)) return true;
+  if (BARE_ARXIV_RE.test(paperId)) return true;
+  // S2 opaque ids — exclude bare arXiv which is also alphanumeric-ish via digits+dot.
+  if (S2_PAPER_ID_RE.test(paperId) && !BARE_ARXIV_RE.test(paperId)) return true;
+  return false;
+}
+
+/**
+ * Prefer identifiers the paper download API can resolve:
+ * ARXIV/DOI/S2 paperId → https pdfUrl → arXiv from url → DOI:doi.
+ */
+export function resolvePaperDownloadIdentifier(hit: PaperDownloadHitFields): string {
+  const paperId = String(hit.paperId || '').trim();
+  if (paperId && isPreferablePaperId(paperId)) return paperId;
+
+  const pdfUrl = String(hit.pdfUrl || '').trim();
+  if (/^https?:\/\/\S+$/i.test(pdfUrl)) return pdfUrl;
+
+  const fromUrl = arxivIdFromUrl(String(hit.url || ''));
+  if (fromUrl) return `ARXIV:${fromUrl}`;
+
+  const doi = String(hit.doi || '')
+    .trim()
+    .replace(/^doi:\s*/i, '');
+  if (doi) return `DOI:${doi}`;
+
+  return '';
+}
+
 export function bookDownloadCommandLabel(identifier: string): string {
   const id = String(identifier || '').trim();
   if (/^libgen:/i.test(id) || /^[a-f0-9]{32}$/i.test(id)) return 'Download';
@@ -147,6 +225,15 @@ export function inferBookDownloadProvider(identifier: string): string {
   if (/^gutenberg:/i.test(id)) return 'gutenberg';
   if (/^https?:\/\//i.test(id)) return 'direct';
   return 'internet-archive';
+}
+
+/** Infer Process provider label when the paper download API omits `provider`. */
+export function inferPaperDownloadProvider(identifier: string): string {
+  const id = String(identifier || '').trim();
+  if (/^ARXIV:/i.test(id) || BARE_ARXIV_RE.test(id)) return 'arxiv';
+  if (/^DOI:/i.test(id)) return 'doi';
+  if (/^https?:\/\//i.test(id)) return 'direct';
+  return 'semantic-scholar';
 }
 
 /** Strip brackets so titles cannot break markdown link labels. */
@@ -233,6 +320,29 @@ export function parseLiteratureCommand(text: string): LiteratureCommand | null {
     return { kind: 'books', action: 'download', identifier };
   }
 
+  // Prefer download intent over `/papers <query>` / paper actions.
+  const paperDownloadIntent = raw.match(PAPERS_DOWNLOAD_INTENT_RE);
+  if (paperDownloadIntent) {
+    const identifier = String(paperDownloadIntent[1] || '').trim();
+    if (!identifier) {
+      return {
+        kind: 'papers',
+        action: 'download',
+        identifier: '',
+        error: 'missing_identifier',
+      };
+    }
+    if (!isValidPaperDownloadIdentifier(identifier)) {
+      return {
+        kind: 'papers',
+        action: 'download',
+        identifier,
+        error: 'invalid_identifier',
+      };
+    }
+    return { kind: 'papers', action: 'download', identifier };
+  }
+
   const papers = raw.match(PAPERS_CMD_RE);
   if (papers?.[1]?.trim()) {
     const rest = papers[1].trim();
@@ -315,6 +425,10 @@ export function formatLiteratureCommand(
 
 export function formatBookDownloadCommand(identifier: string): string {
   return `/books download ${String(identifier || '').trim()}`;
+}
+
+export function formatPaperDownloadCommand(identifier: string): string {
+  return `/papers download ${String(identifier || '').trim()}`;
 }
 
 export function formatPaperActionCommand(

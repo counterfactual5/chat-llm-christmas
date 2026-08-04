@@ -154,7 +154,7 @@ export function withUpsertedAssistantToolRun(
       // Tools actually ran — drop stale "Stopped before calling tools" stamp
       // left over from the pre-tool narration bubble.
       if (
-        /web_search|web_read|web-read|proactive_search|image_understand|file_read|paper_search|book_search|book_download|generate_image/i.test(
+        /web_search|web_read|web-read|proactive_search|image_understand|file_read|paper_search|book_search|book_download|paper_download|generate_image/i.test(
           String(run.name || ''),
         ) &&
         !run.error

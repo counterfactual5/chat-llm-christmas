@@ -78,6 +78,10 @@ export const dict = {
       'Add a book id after /books download (e.g. libgen: followed by a 32-char MD5).',
     booksDownloadInvalidId:
       'Invalid download id. Use a real 32-char MD5 (libgen:…) or archive id — not a placeholder like <md5>.',
+    papersDownloadMissingId:
+      'Add a paper id after /papers download (e.g. ARXIV:1706.03762, DOI:…, or a PDF URL).',
+    papersDownloadInvalidId:
+      'Invalid paper download id. Use ARXIV:…, DOI:…, a bare arXiv id, an S2 paper id, or an https PDF URL — not a placeholder like <id>.',
     searchingGoogle: 'Searching Google…',
     searchedGoogle: 'Searched Google',
     searchingGmail: 'Searching Gmail…',
@@ -212,6 +216,8 @@ export const dict = {
     searchedBooks: 'Searched books',
     downloadingBook: 'Downloading book…',
     downloadedBook: 'Downloaded book',
+    downloadingPaper: 'Downloading paper…',
+    downloadedPaper: 'Downloaded paper',
     generatingImageTool: 'Generating image…',
     generatedImageTool: 'Generated image',
     paperSearchTool: 'Paper Search',
@@ -473,6 +479,10 @@ export const dict = {
     booksDownloadMissingId: '请在 /books download 后填写书籍标识（例如 libgen: + 32 位 MD5）。',
     booksDownloadInvalidId:
       '下载标识无效。请使用真实的 32 位 MD5（libgen:…）或归档 ID，不要使用 <md5> 这类占位符。',
+    papersDownloadMissingId:
+      '请在 /papers download 后填写论文标识（例如 ARXIV:1706.03762、DOI:… 或 PDF 链接）。',
+    papersDownloadInvalidId:
+      '论文下载标识无效。请使用 ARXIV:…、DOI:…、裸 arXiv id、S2 paper id 或 https PDF 链接，不要使用 <id> 这类占位符。',
     searchingGoogle: '正在搜索 Google…',
     searchedGoogle: '已搜索 Google',
     searchingGmail: '正在搜索 Gmail…',
@@ -606,6 +616,8 @@ export const dict = {
     searchedBooks: '已检索书籍',
     downloadingBook: '正在下载书籍…',
     downloadedBook: '已下载书籍',
+    downloadingPaper: '正在下载论文…',
+    downloadedPaper: '已下载论文',
     generatingImageTool: '正在生成图片…',
     generatedImageTool: '已生成图片',
     paperSearchTool: '论文检索',

@@ -2,31 +2,15 @@ import type { ToolRuntimeContext } from '@/lib/tools/registry';
 
 export type GoogleService = 'gmail' | 'calendar' | 'drive';
 
-export const GMAIL_SYSTEM_PROMPT = [
-  "You have Gmail MCP tools for the user's connected Google account.",
-  'Profile; search/read messages (incl. batch get) & threads; attachments; labels CRUD; drafts; send/reply/forward; modify/batch-modify; trash/untrash.',
-  'Bulk hygiene (prefer these over paging gmail_search): gmail_batch_mark_read / gmail_batch_archive (explicit query required — no wide defaults), gmail_batch_trash (query + confirm=true), gmail_batch_star / gmail_batch_unstar, gmail_apply_label_by_query (label name or id), gmail_batch_modify_by_query (confirm=true required when adding TRASH), gmail_thread_mark_read / gmail_modify_thread.',
-  'gmail_search returns ids[] plus messages[]. Use raw gmail_batch_modify only when you already have specific ids.',
-  'For send/reply/forward/send_draft: call the tool to open an in-chat approval compose card; the email is NOT sent until the user presses Send. Do not claim it was sent while status is awaiting_user_approval.',
-  'For trash/label changes, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true (including via gmail_batch_modify_by_query).',
-  'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
-].join(' ');
+/** Minimal service tags — operational detail lives on each tool’s description + result payload. */
+export const GMAIL_SYSTEM_PROMPT =
+  "You have Gmail tools for the user's connected Google account. Follow each tool’s description and return payload.";
 
-export const CALENDAR_SYSTEM_PROMPT = [
-  "You have Google Calendar MCP tools for the user's connected Google account.",
-  'List/create calendars; list/get/create/update/delete/move events; recurring instances; free/busy; ACL sharing.',
-  'Convenience (prefer these): calendar_quick_add for natural-language create; calendar_create_event with attendees to invite people; calendar_delete_by_query (requires timeMin+timeMax + confirm=true; query recommended); calendar_find_free_slots; calendar_rsvp.',
-  'calendar_list_events supports pageToken and returns ids[]. For create/update/delete/move/ACL/rsvp, confirm intent from the user message before calling.',
-  'Do not invent event IDs — only use tool results. Cite Calendar links when answering.',
-].join(' ');
+export const CALENDAR_SYSTEM_PROMPT =
+  "You have Google Calendar tools for the user's connected Google account. Follow each tool’s description and return payload.";
 
-export const DRIVE_SYSTEM_PROMPT = [
-  "You have Google Drive MCP tools for the user's connected Google account.",
-  'Search/get/read/export/upload; list folder children; create text/folder/shortcut; shared drives; copy; rename; trash/delete; permissions; comments.',
-  'Convenience (prefer these over paging search): drive_move; drive_trash_by_query (query + confirm=true) / drive_move_by_query / drive_share_by_query (query required); drive_resolve_path / drive_ensure_folder for path-based folders.',
-  'For share/trash/delete/create/upload/comments/bulk ops, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true.',
-  'Do not invent file IDs — only use tool results. Cite Drive links when answering.',
-].join(' ');
+export const DRIVE_SYSTEM_PROMPT =
+  "You have Google Drive tools for the user's connected Google account. Follow each tool’s description and return payload.";
 
 export function serviceSystemPrompt(service: GoogleService): string {
   if (service === 'calendar') return CALENDAR_SYSTEM_PROMPT;

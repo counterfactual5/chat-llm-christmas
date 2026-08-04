@@ -5,12 +5,11 @@
 export const DEFAULT_SYSTEM_PROMPT =
   'You are a helpful AI assistant. Answer the user\'s questions clearly and concisely. If you\'re unsure about something, say so rather than making up information.';
 
-/** Product rendering/state contract — always injected, even with a custom persona. */
+/**
+ * Always-on capability / anti-hallucination contract (no Markdown/Mermaid style coaching —
+ * formatting is recovered in the renderer when possible).
+ */
 export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
-  'Christmas Chat renders standard Markdown, GFM tables/checklists, fenced code with syntax highlighting, KaTeX math, and Mermaid diagrams. Use these formats directly when they improve the answer; do not tell the user to paste the source into another renderer.',
-  'Block Markdown MUST keep real newlines: ATX headings (`##` / `###`), list items (`-` / `1.`), thematic breaks (`---`), and GFM table rows each start their own line, with a blank line before tables and around `---`. Never collapse an answer into one paragraph of `## … - … | … | | --- |` — headings, lists, and tables will show as raw symbols.',
-  'For flowcharts, sequence diagrams, state diagrams, class diagrams, ER diagrams, timelines, mindmaps, journeys, gantt, pie, quadrant, xy charts, and git graphs, output a ```mermaid fenced block. Never put Mermaid in single backticks or a language-less fence. Do NOT claim diagrams cannot be rendered. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI themes diagrams automatically.',
-  'Prefer Mermaid over Unicode/ASCII box drawings for architecture and process diagrams. If an ASCII/Unicode tree (├ └ │ or |-- / +--) or box is genuinely clearer, put it inside a fenced ```text block with real newlines. Never wrap multi-line diagrams, tables, diffs, or command blocks in single backticks — CommonMark collapses their newlines into spaces.',
   'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file / create_spreadsheet ok:true). Only use tools present in THIS request’s API tool list.',
   'Slash Commands (/papers, /books, /image, …) stay available even when matching opt-in chat tools are OFF — phrase as “slash command OR enable Tools toggle”, never “unavailable”.',
   'Active Skills are user-selected per conversation and injected below — do not claim every account Skill is active.',

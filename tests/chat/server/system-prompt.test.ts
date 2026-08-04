@@ -36,15 +36,14 @@ describe('buildChatSystemParts', () => {
     expect(joinChatSystemParts(['one', 'two'])).toBe('one\n\n---\n\ntwo');
   });
 
-  it('always advertises native rich-output support without inventing tools', () => {
+  it('keeps anti-hallucination capability contract without Markdown style coaching', () => {
     const parts = buildChatSystemParts(base).join('\n');
 
-    expect(parts).toContain('renders standard Markdown');
-    expect(parts).toContain('KaTeX math');
-    expect(parts).toContain('Mermaid diagrams');
-    expect(parts).toContain('Do NOT claim diagrams cannot be rendered');
     expect(parts).toContain('Only use tools present in THIS request');
+    expect(parts).toContain('Never claim an image or downloadable file was created');
     expect(parts).toContain('Active Skills are user-selected per conversation');
+    expect(parts).not.toContain('Block Markdown MUST keep real newlines');
+    expect(parts).not.toContain('Prefer Mermaid over Unicode');
   });
 
   it('keeps a compact product map always on', () => {

@@ -103,4 +103,53 @@ describe('streamFinalCompletion', () => {
       reasoningOnlyBuf: '',
     });
   });
+
+  it('keeps partial output when the stream stalls mid-answer', async () => {
+    async function* stallAfterPartial() {
+      yield { choices: [{ delta: { content: 'partial ' } }] };
+      throw new Error('final completion stalled for 90s (no upstream chunks)');
+    }
+    upstreamMocks.streamChatCompletionsRaw.mockReturnValue(stallAfterPartial());
+
+    const sent: Record<string, unknown>[] = [];
+    const result = await streamFinalCompletion({
+      apiKey: 'k',
+      baseURL: 'https://example.test/v1',
+      model: 'test-model',
+      messages: [],
+      enableThinking: false,
+      foldReasoning: false,
+      idleMs: 5_000,
+      maxTotalMs: 30_000,
+      send: (payload) => sent.push(payload),
+    });
+
+    expect(result.sawText).toBe(true);
+    expect(result.sawContent).toBe(true);
+    expect(result.contentBuf).toBe('partial ');
+    expect(result.lastFinishReason).toBe('length');
+    expect(sent).toEqual([{ content: 'partial ', reasoning: undefined }]);
+  });
+
+  it('rethrows a cold stall with no tokens so the caller can retry', async () => {
+    async function* coldStall() {
+      throw new Error('final completion stalled for 90s (no upstream chunks)');
+      yield undefined; // keep as generator
+    }
+    upstreamMocks.streamChatCompletionsRaw.mockReturnValue(coldStall());
+
+    await expect(
+      streamFinalCompletion({
+        apiKey: 'k',
+        baseURL: 'https://example.test/v1',
+        model: 'test-model',
+        messages: [],
+        enableThinking: false,
+        foldReasoning: false,
+        idleMs: 5_000,
+        maxTotalMs: 30_000,
+        send: () => {},
+      }),
+    ).rejects.toThrow(/stalled for 90s/);
+  });
 });

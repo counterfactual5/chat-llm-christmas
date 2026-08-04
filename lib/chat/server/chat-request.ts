@@ -1086,10 +1086,28 @@ export async function handleChatRequest(req: NextRequest) {
             return { ...result, auditResult };
           };
 
-          let finalResult = await runFinalCompletion({
-            enableThinking: thinking,
-            foldReasoning: false,
-          });
+          let finalResult;
+          try {
+            finalResult = await runFinalCompletion({
+              enableThinking: thinking,
+              foldReasoning: false,
+            });
+          } catch (firstErr: unknown) {
+            // Cold stall (no tokens for STREAM_IDLE_TIMEOUT_MS): one retry without
+            // thinking. Mid-answer stalls are softened inside streamFinalCompletion.
+            const msg =
+              firstErr instanceof Error ? firstErr.message : String(firstErr || '');
+            const coldStall = /final completion stalled|no upstream chunks/i.test(msg);
+            if (!coldStall || clientSignal.aborted) throw firstErr;
+            console.warn(
+              'final completion stalled before first token; retrying once',
+              requestedModel,
+            );
+            finalResult = await runFinalCompletion({
+              enableThinking: false,
+              foldReasoning: false,
+            });
+          }
 
           // Some models return a totally empty stream on the first pass (seen on
           // GLM after Image Understand; also weaker free models with tools). Retry

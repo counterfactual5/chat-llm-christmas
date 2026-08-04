@@ -58,37 +58,49 @@ export async function streamFinalCompletion(opts: {
     maxTotalMs: opts.maxTotalMs,
     label: 'final completion',
   });
-  for await (const chunk of bounded) {
-    const choice = chunk?.choices?.[0];
-    const delta = choice?.delta || {};
-    const finish_reason = choice?.finish_reason || null;
-    if (finish_reason) lastFinishReason = finish_reason;
+  try {
+    for await (const chunk of bounded) {
+      const choice = chunk?.choices?.[0];
+      const delta = choice?.delta || {};
+      const finish_reason = choice?.finish_reason || null;
+      if (finish_reason) lastFinishReason = finish_reason;
 
-    const { content: rawContent, reasoning } = splitCompletionDelta(delta, {
-      reasoningAsContent: opts.foldReasoning,
-    });
-    let content = rawContent;
-
-    if (content) content = stampStripper.push(content);
-    if (finish_reason) {
-      const rest = stampStripper.flush();
-      if (rest) content = (content || '') + rest;
-    }
-
-    if (content) {
-      sawText = true;
-      sawContent = true;
-      contentBuf += content;
-    }
-    if (reasoning) {
-      sawText = true;
-      reasoningOnlyBuf += reasoning;
-    }
-    if (content || reasoning) {
-      opts.send({
-        content: content || undefined,
-        reasoning: reasoning || undefined,
+      const { content: rawContent, reasoning } = splitCompletionDelta(delta, {
+        reasoningAsContent: opts.foldReasoning,
       });
+      let content = rawContent;
+
+      if (content) content = stampStripper.push(content);
+      if (finish_reason) {
+        const rest = stampStripper.flush();
+        if (rest) content = (content || '') + rest;
+      }
+
+      if (content) {
+        sawText = true;
+        sawContent = true;
+        contentBuf += content;
+      }
+      if (reasoning) {
+        sawText = true;
+        reasoningOnlyBuf += reasoning;
+      }
+      if (content || reasoning) {
+        opts.send({
+          content: content || undefined,
+          reasoning: reasoning || undefined,
+        });
+      }
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err || '');
+    // Mid-answer idle stall: keep what the user already saw (Continue can resume).
+    // Cold stall (no tokens) still throws so the caller can retry once.
+    if (sawText && /stalled|timed out|budget|exceeded/i.test(msg)) {
+      console.warn('final completion stalled after partial output:', msg);
+      lastFinishReason = lastFinishReason || 'length';
+    } else {
+      throw err;
     }
   }
   {

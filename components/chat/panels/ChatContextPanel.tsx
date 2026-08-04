@@ -14,6 +14,7 @@ import {
   OutputPanel,
   type GeneratedFileEntry,
   type GeneratedImageEntry,
+  type ToolViewEntry,
 } from './OutputPanel';
 import { ReferencePanel } from './ReferencePanel';
 
@@ -36,11 +37,13 @@ export type ChatContextPanelProps = {
   picturesExpanded: boolean;
   onTogglePicturesExpanded: () => void;
   outputGroupsOpen: Record<string, boolean>;
-  onToggleOutputGroup: (key: 'images' | 'files') => void;
+  onToggleOutputGroup: (key: 'images' | 'files' | 'views') => void;
   images: GeneratedImageEntry[];
   files: GeneratedFileEntry[];
+  views: ToolViewEntry[];
   onPreviewImage: (entry: GeneratedImageEntry) => void;
   onPreviewFile: (entry: GeneratedFileEntry) => void;
+  onPreviewView: (entry: ToolViewEntry) => void;
   onScrollToMessage: (messageId: string) => void;
   onDownloadImage: (entry: GeneratedImageEntry) => void;
   onRemoveImage: (entry: GeneratedImageEntry) => void;
@@ -83,8 +86,10 @@ export function ChatContextPanel({
   onToggleOutputGroup,
   images,
   files,
+  views,
   onPreviewImage,
   onPreviewFile,
+  onPreviewView,
   onScrollToMessage,
   onDownloadImage,
   onRemoveImage,
@@ -147,8 +152,10 @@ export function ChatContextPanel({
                 onToggleGroup={onToggleOutputGroup}
                 images={images}
                 files={files}
+                views={views}
                 onPreviewImage={onPreviewImage}
                 onPreviewFile={onPreviewFile}
+                onPreviewView={onPreviewView}
                 onScrollToMessage={onScrollToMessage}
                 onDownloadImage={onDownloadImage}
                 onRemoveImage={onRemoveImage}

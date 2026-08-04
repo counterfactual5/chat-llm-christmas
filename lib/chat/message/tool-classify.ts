@@ -21,6 +21,7 @@ export type ToolRunClassification = {
   isGenerateImage: boolean;
   isCreateFile: boolean;
   isFileRead: boolean;
+  isDocxExtract: boolean;
   isSaveSkill: boolean;
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
@@ -69,6 +70,8 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const isGenerateImage = run.name === 'generate_image';
   const isCreateFile = run.name === 'create_file';
   const isFileRead = run.name === 'file_read' || run.provider === 'file-read';
+  const isDocxExtract =
+    run.name === 'docx_extract' || run.provider === 'docx-extract';
   const isSaveSkill = run.name === 'save_skill' || run.provider === 'skills';
   const isImageUnderstand =
     run.name === 'image_understand' ||
@@ -116,6 +119,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isGenerateImage,
     isCreateFile,
     isFileRead,
+    isDocxExtract,
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
@@ -158,6 +162,7 @@ export function getToolRunLabelKey(
     isGenerateImage,
     isCreateFile,
     isFileRead,
+    isDocxExtract,
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
@@ -242,6 +247,7 @@ export function getToolRunLabelKey(
     if (isBookDownload) return 'downloadingBook';
     if (isCreateFile) return 'creatingFile';
     if (isFileRead) return 'readingFile';
+    if (isDocxExtract) return 'extractingDocx';
     if (isSaveSkill) return 'savingSkill';
     if (isWebRead) return 'readingWeb';
     return 'searchingWeb';
@@ -258,6 +264,7 @@ export function getToolRunLabelKey(
   if (isBookDownload) return 'downloadedBook';
   if (isCreateFile) return 'createdFile';
   if (isFileRead) return 'readFile';
+  if (isDocxExtract) return 'extractedDocx';
   if (isSaveSkill) return 'savedSkill';
   if (isWebRead) return 'readWeb';
   return 'searchedWeb';
@@ -281,6 +288,7 @@ export function toolRunShowsFetchingResults(
     classification.isGenerateImage ||
     classification.isCreateFile ||
     classification.isFileRead ||
+    classification.isDocxExtract ||
     classification.isSaveSkill ||
     classification.isImageUnderstand ||
     classification.isClaimReviewer ||

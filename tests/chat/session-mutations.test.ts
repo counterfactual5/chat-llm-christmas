@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   serializeReviewToolRuns,
   settleEmptyBodyAction,
+  withAppendedAssistantToolView,
   withEmptyReplyFallback,
   withMarkedAssistantIncomplete,
   withPromotedOrphanReasoning,
@@ -111,5 +112,45 @@ describe('session/mutations', () => {
       },
     ]);
     expect(rows[0].results?.[0].body?.length).toBe(16_000);
+  });
+
+  it('appends a specialized tool view and activity step', () => {
+    const sessions = [
+      session([
+        msg({
+          id: 'a',
+          role: 'assistant',
+          content: 'hi',
+        }),
+      ]),
+    ];
+    const next = withAppendedAssistantToolView(sessions, 's1', 'a', {
+      id: 'view_1',
+      viewType: 'docx.extract',
+      title: 'report.docx',
+      sourceFileId: 'file_abc',
+      sourceFileName: 'report.docx',
+      createdAt: 42,
+      data: { sections: [{ markdown: 'Hello' }] },
+    });
+    const m = next[0].messages[0];
+    expect(m.views).toHaveLength(1);
+    expect(m.views?.[0]).toMatchObject({
+      id: 'view_1',
+      viewType: 'docx.extract',
+      title: 'report.docx',
+      sourceFileId: 'file_abc',
+    });
+    expect(m.activity?.some((s) => s.kind === 'view' && s.viewId === 'view_1')).toBe(
+      true,
+    );
+
+    const dup = withAppendedAssistantToolView(next, 's1', 'a', {
+      id: 'view_1',
+      viewType: 'docx.extract',
+      title: 'report.docx',
+      data: { sections: [] },
+    });
+    expect(dup[0].messages[0].views).toHaveLength(1);
   });
 });

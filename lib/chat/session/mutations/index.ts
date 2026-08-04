@@ -11,12 +11,14 @@
 
 export type {
   GeneratedFileInput,
+  ToolViewInput,
   ToolRunInput,
   ToolRunUpsertResult,
 } from '@/lib/chat/session/mutations/types';
 
 export {
   withAppendedAssistantGeneratedFile,
+  withAppendedAssistantToolView,
   withMarkedAssistantIncomplete,
   withAppendedAssistantContent,
   withAppendedAssistantReviewFix,

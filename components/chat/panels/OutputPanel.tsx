@@ -1,10 +1,18 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowUpRight, ChevronDown, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import {
+  ArrowUpRight,
+  ChevronDown,
+  FileText,
+  Image as ImageIcon,
+  Layers,
+  Trash2,
+} from 'lucide-react';
 import { FileEntryActions } from '@/components/files/FileEntryActions';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import type { ToolViewPayload } from '@/lib/tools/views/types';
 
 export type GeneratedImageEntry = {
   messageId: string;
@@ -27,6 +35,11 @@ export type GeneratedFileEntry = {
   createdAt: number;
 };
 
+export type ToolViewEntry = ToolViewPayload & {
+  messageId: string;
+  viewIndex: number;
+};
+
 function formatGeneratedAt(ts: number) {
   const d = new Date(ts);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -44,11 +57,13 @@ type OutputPanelProps = {
   expanded: boolean;
   onToggleExpanded: () => void;
   groupsOpen: Record<string, boolean>;
-  onToggleGroup: (key: 'images' | 'files') => void;
+  onToggleGroup: (key: 'images' | 'files' | 'views') => void;
   images: GeneratedImageEntry[];
   files: GeneratedFileEntry[];
+  views: ToolViewEntry[];
   onPreviewImage: (entry: GeneratedImageEntry) => void;
   onPreviewFile: (entry: GeneratedFileEntry) => void;
+  onPreviewView: (entry: ToolViewEntry) => void;
   onScrollToMessage: (messageId: string) => void;
   onDownloadImage: (entry: GeneratedImageEntry) => void;
   onRemoveImage: (entry: GeneratedImageEntry) => void;
@@ -63,8 +78,10 @@ export function OutputPanel({
   onToggleGroup,
   images,
   files,
+  views,
   onPreviewImage,
   onPreviewFile,
+  onPreviewView,
   onScrollToMessage,
   onDownloadImage,
   onRemoveImage,
@@ -72,7 +89,7 @@ export function OutputPanel({
   onRemoveFile,
 }: OutputPanelProps) {
   const { t } = useLocale();
-  const count = images.length + files.length;
+  const count = images.length + files.length + views.length;
 
   return (
     <div className="rounded-xl border border-stone-200/80 dark:border-stone-800 overflow-hidden">
@@ -249,6 +266,67 @@ export function OutputPanel({
                                     },
                                   ]}
                                 />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {views.length > 0 && (
+                    <div className="rounded-md bg-stone-50/70 dark:bg-stone-900/40">
+                      <button
+                        type="button"
+                        onClick={() => onToggleGroup('views')}
+                        className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800/80"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                          {t('outputViewsGroup')} · {views.length}
+                        </span>
+                        <ChevronDown
+                          className={cn(
+                            'h-3.5 w-3.5 text-stone-400 transition-transform',
+                            groupsOpen.views && 'rotate-180',
+                          )}
+                        />
+                      </button>
+                      {groupsOpen.views && (
+                        <div className="space-y-1.5 px-1.5 pb-1.5">
+                          {views.map((entry) => (
+                            <div
+                              key={`${entry.messageId}-${entry.id}-${entry.viewIndex}`}
+                              className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
+                            >
+                              <button
+                                type="button"
+                                title={t('openToolView')}
+                                onClick={() => onPreviewView(entry)}
+                                className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
+                              >
+                                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
+                                  <Layers className="h-4 w-4 text-stone-500" />
+                                </span>
+                                <span className="min-w-0 flex-1 py-0.5">
+                                  <span className="block truncate font-mono text-[10px] leading-4 text-stone-400">
+                                    {formatGeneratedAt(entry.createdAt)}
+                                    <span className="mx-1 text-stone-600">·</span>
+                                    {entry.viewType}
+                                  </span>
+                                  <span className="mt-0.5 block truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
+                                    {entry.title}
+                                  </span>
+                                </span>
+                              </button>
+                              <div className="flex shrink-0 items-center self-center">
+                                <button
+                                  type="button"
+                                  title={t('viewInChat')}
+                                  onClick={() => onScrollToMessage(entry.messageId)}
+                                  className="rounded-md p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:hover:bg-stone-800 dark:hover:text-stone-200"
+                                >
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </button>
                               </div>
                             </div>
                           ))}

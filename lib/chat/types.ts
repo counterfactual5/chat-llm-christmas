@@ -1,10 +1,14 @@
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
+import type { ToolViewPayload } from '@/lib/tools/views/types';
+
+export type { ToolViewPayload };
 
 export type MessageActivityStep =
   | { id: string; kind: 'reasoning'; text: string }
   | { id: string; kind: 'tool'; toolRunId: string }
   | { id: string; kind: 'content'; text: string }
   | { id: string; kind: 'file'; fileId: string }
+  | { id: string; kind: 'view'; viewId: string }
   /** Opens a new Process panel with a custom title (e.g. Plan / Search / Synthesize / Verify). */
   | { id: string; kind: 'stage'; title: string };
 
@@ -51,6 +55,11 @@ export type Message = {
     content?: string;
     createdAt: number;
   }>;
+  /**
+   * Specialized tool-result views for this assistant turn (Output / side panel).
+   * Distinct from generated files and from full Office preview.
+   */
+  views?: ToolViewPayload[];
   /** Marks a synthetic compacted-history bubble. */
   compacted?: boolean;
   /** Model chain-of-thought / reasoning stream, shown in a collapsible panel. */

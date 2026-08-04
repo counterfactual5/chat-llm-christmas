@@ -7,7 +7,8 @@ export type ProcessStep = Extract<ActivityStep, { kind: 'reasoning' } | { kind: 
 export type TimelineSegment =
   | { type: 'process'; id: string; steps: ProcessStep[]; live: boolean; title?: string }
   | { type: 'content'; id: string; text: string }
-  | { type: 'file'; id: string; fileId: string };
+  | { type: 'file'; id: string; fileId: string }
+  | { type: 'view'; id: string; viewId: string };
 
 function isCreateFileRun(run: MessageToolRun | undefined): boolean {
   return Boolean(run && (run.name === 'create_file' || run.name === 'create-file'));
@@ -100,6 +101,22 @@ export function buildActivitySteps(
     }
     base.splice(spliceAt, 0, ...orphanFiles);
   }
+
+  // Orphan specialized views (older messages without activity steps).
+  const viewIdsInActivity = new Set(
+    base
+      .filter((s): s is { id: string; kind: 'view'; viewId: string } => s.kind === 'view')
+      .map((s) => s.viewId),
+  );
+  for (const view of message.views || []) {
+    if (viewIdsInActivity.has(view.id)) continue;
+    base.push({
+      id: `${message.id}-view-${view.id}`,
+      kind: 'view',
+      viewId: view.id,
+    });
+    viewIdsInActivity.add(view.id);
+  }
   return base;
 }
 
@@ -132,10 +149,11 @@ export function buildTimelineSegments(opts: {
 
   const hasContentSteps = activitySteps.some((s) => s.kind === 'content');
   const hasFileSteps = activitySteps.some((s) => s.kind === 'file');
+  const hasViewSteps = activitySteps.some((s) => s.kind === 'view');
   const hasStageSteps = activitySteps.some((s) => s.kind === 'stage');
 
-  // Legacy path: no content/file/stage — single Process panel.
-  if (!hasContentSteps && !hasFileSteps && !hasStageSteps) {
+  // Legacy path: no content/file/view/stage — single Process panel.
+  if (!hasContentSteps && !hasFileSteps && !hasViewSteps && !hasStageSteps) {
     const processSteps = activitySteps.filter(
       (s): s is ProcessStep => s.kind === 'reasoning' || s.kind === 'tool',
     );
@@ -161,6 +179,7 @@ export function buildTimelineSegments(opts: {
   const segs: TimelineSegment[] = [];
   let buf: ProcessStep[] = [];
   let fileBuf: Array<{ id: string; fileId: string }> = [];
+  let viewBuf: Array<{ id: string; viewId: string }> = [];
   let processIdx = 0;
   let currentTitle: string | undefined;
   const flushFiles = () => {
@@ -168,6 +187,12 @@ export function buildTimelineSegments(opts: {
       segs.push({ type: 'file', id: f.id, fileId: f.fileId });
     }
     fileBuf = [];
+  };
+  const flushViews = () => {
+    for (const v of viewBuf) {
+      segs.push({ type: 'view', id: v.id, viewId: v.viewId });
+    }
+    viewBuf = [];
   };
   const flushProcess = (live: boolean) => {
     if (!buf.length && !live) return;
@@ -180,30 +205,36 @@ export function buildTimelineSegments(opts: {
     });
     buf = [];
     flushFiles();
+    flushViews();
   };
 
   for (const step of activitySteps) {
     if (step.kind === 'stage') {
       flushProcess(false);
       flushFiles();
+      flushViews();
       currentTitle = step.title;
       continue;
     }
     if (step.kind === 'content') {
       flushProcess(false);
       flushFiles();
+      flushViews();
       if (step.text.trim()) {
         segs.push({ type: 'content', id: step.id, text: step.text });
       }
     } else if (step.kind === 'file') {
       fileBuf.push({ id: step.id, fileId: step.fileId });
+    } else if (step.kind === 'view') {
+      viewBuf.push({ id: step.id, viewId: step.viewId });
     } else {
-      if (fileBuf.length > 0) {
+      if (fileBuf.length > 0 || viewBuf.length > 0) {
         const isCreateFileTool =
           step.kind === 'tool' && isCreateFileRun(toolById.get(step.toolRunId));
         if (!isCreateFileTool) {
           flushProcess(false);
           flushFiles();
+          flushViews();
         }
       }
       buf.push(step);
@@ -214,6 +245,7 @@ export function buildTimelineSegments(opts: {
     Boolean(messageIsStreaming && (buf.length > 0 || !visibleContent || replyWait)),
   );
   flushFiles();
+  flushViews();
 
   // Research / live stream: content may sit on message.content before an
   // activity content step exists — still show it after the process panels.

@@ -208,7 +208,9 @@ export async function handleChatRequest(req: NextRequest) {
         Array.isArray(messages) ? (messages as Array<{ role?: string; content?: unknown }>) : [],
       );
     if (!hasAttachedDocs) {
-      enabledTools = enabledTools.filter((t) => t.name !== 'file_read');
+      enabledTools = enabledTools.filter(
+        (t) => t.name !== 'file_read' && t.name !== 'docx_extract',
+      );
     }
     const toolDefs = openaiToolDefinitions(enabledTools);
     const toolsGuidance = toolSystemPrompt(enabledTools);

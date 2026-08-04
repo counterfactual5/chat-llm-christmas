@@ -2,9 +2,12 @@
  * Append/update assistant content, reasoning, files, incomplete flags.
  */
 
-import type { ChatSession } from '@/lib/chat/types';
+import type { ChatSession, ToolViewPayload } from '@/lib/chat/types';
 import { stripMessageStamp } from '@/lib/chat/context/time-context';
-import type { GeneratedFileInput } from '@/lib/chat/session/mutations/types';
+import type {
+  GeneratedFileInput,
+  ToolViewInput,
+} from '@/lib/chat/session/mutations/types';
 import { touchSession } from '@/lib/chat/session/mutations/shared';
 
 export function withAppendedAssistantGeneratedFile(
@@ -47,6 +50,54 @@ export function withAppendedAssistantGeneratedFile(
         return {
           ...m,
           files: [...existing, entry],
+          activity,
+        };
+      }),
+    });
+  });
+}
+
+export function withAppendedAssistantToolView(
+  sessions: ChatSession[],
+  sessionId: string,
+  assistantId: string,
+  view: ToolViewInput,
+): ChatSession[] {
+  const entry: ToolViewPayload = {
+    id: String(view.id || '').trim(),
+    viewType: String(view.viewType || '').trim() || 'unknown',
+    title: String(view.title || '').trim() || 'View',
+    ...(view.sourceFileId
+      ? { sourceFileId: String(view.sourceFileId).trim() }
+      : {}),
+    ...(view.sourceFileName
+      ? { sourceFileName: String(view.sourceFileName).trim() }
+      : {}),
+    createdAt: typeof view.createdAt === 'number' ? view.createdAt : Date.now(),
+    data: view.data ?? null,
+  };
+  if (!entry.id) return sessions;
+  return sessions.map((s) => {
+    if (s.id !== sessionId) return s;
+    return touchSession(s, {
+      messages: s.messages.map((m) => {
+        if (m.id !== assistantId) return m;
+        const existing = m.views || [];
+        if (existing.some((v) => v.id === entry.id)) return m;
+        const activity = [...(m.activity || [])];
+        const alreadyInTimeline = activity.some(
+          (step) => step.kind === 'view' && step.viewId === entry.id,
+        );
+        if (!alreadyInTimeline) {
+          activity.push({
+            id: `${assistantId}-view-${entry.id}`,
+            kind: 'view',
+            viewId: entry.id,
+          });
+        }
+        return {
+          ...m,
+          views: [...existing, entry],
           activity,
         };
       }),

@@ -14,6 +14,16 @@ export type GeneratedFileInput = {
   createdAt?: number;
 };
 
+export type ToolViewInput = {
+  id: string;
+  viewType: string;
+  title: string;
+  sourceFileId?: string;
+  sourceFileName?: string;
+  createdAt?: number;
+  data?: unknown;
+};
+
 export type ToolRunInput = {
   name: string;
   status: 'start' | 'done';

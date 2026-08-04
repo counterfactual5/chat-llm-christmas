@@ -17,6 +17,7 @@ import { isOptionalBuiltinToolId } from '@/lib/tools/optional-builtins';
 import {
   withAppendedAssistantContent,
   withAppendedAssistantGeneratedFile,
+  withAppendedAssistantToolView,
   withAppendedAssistantReasoning,
   withAppendedAssistantReviewFix,
   withEmptyReplyFallback,
@@ -31,6 +32,7 @@ import {
   serializeReviewToolRuns,
   settleEmptyBodyAction,
   type GeneratedFileInput,
+  type ToolViewInput,
 } from '@/lib/chat/session/mutations';
 
 export type StreamChatApiMessage = ReturnType<
@@ -545,6 +547,26 @@ export async function streamChatResponse(
           };
           deps.setSessions((prev) =>
             withAppendedAssistantGeneratedFile(prev, sessionId, assistantId, file),
+          );
+          if (sessionId === deps.getActiveSessionId()) {
+            deps.onGeneratedFileForActiveSession();
+          }
+        }
+        if (parsed.view_created && typeof parsed.view_created === 'object') {
+          const raw = parsed.view_created as Record<string, unknown>;
+          const view: ToolViewInput = {
+            id: String(raw.id || ''),
+            viewType: String(raw.viewType || ''),
+            title: String(raw.title || ''),
+            sourceFileId:
+              typeof raw.sourceFileId === 'string' ? raw.sourceFileId : undefined,
+            sourceFileName:
+              typeof raw.sourceFileName === 'string' ? raw.sourceFileName : undefined,
+            createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+            data: raw.data,
+          };
+          deps.setSessions((prev) =>
+            withAppendedAssistantToolView(prev, sessionId, assistantId, view),
           );
           if (sessionId === deps.getActiveSessionId()) {
             deps.onGeneratedFileForActiveSession();

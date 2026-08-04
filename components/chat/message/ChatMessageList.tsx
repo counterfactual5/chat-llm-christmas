@@ -62,6 +62,7 @@ import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
 } from '../panels/OutputPanel';
+import type { ToolViewPayload } from '@/lib/tools/views/types';
 import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
 
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
@@ -99,6 +100,7 @@ export type ChatMessageListProps = {
   setImagePreviewSrc: (src: string | null) => void;
   onPreviewImage: (entry: GeneratedImageEntry) => void;
   onPreviewFile: (entry: GeneratedFileEntry) => void;
+  onPreviewView: (view: ToolViewPayload, messageId: string) => void;
   cancelEditMessage: () => void;
   saveEditedMessage: (messageId: string) => void;
   editUserMessage: (messageId: string) => void;
@@ -158,6 +160,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
     setImagePreviewSrc,
     onPreviewImage,
     onPreviewFile,
+    onPreviewView,
     cancelEditMessage,
     saveEditedMessage,
     editUserMessage,
@@ -480,6 +483,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isGenerateImage,
                     isCreateFile,
                     isFileRead,
+                    isDocxExtract,
                     isSaveSkill,
                     isClaimReviewer,
                     isReviewAudit,
@@ -516,6 +520,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       isGoogle ||
                       isCreateFile ||
                       isFileRead ||
+                      isDocxExtract ||
                       isSaveSkill ||
                       isWebRead ||
                       isPaperRead ||
@@ -532,6 +537,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         !isImageUnderstand &&
                         !isCreateFile &&
                         !isFileRead &&
+                        !isDocxExtract &&
                         !isSaveSkill &&
                         !isClaimReviewer));
                   return (
@@ -590,6 +596,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <FilePlus className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isFileRead ? (
                           <FileSearch className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isDocxExtract ? (
+                          <Layers className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isSaveSkill ? (
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isWebRead ? (
@@ -613,6 +621,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isGenerateImage &&
                           !isCreateFile &&
                           !isFileRead &&
+                          !isDocxExtract &&
                           !isSaveSkill &&
                           !isClaimReviewer &&
                           !isReviewAudit &&
@@ -1303,6 +1312,39 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                     className="mr-1 rounded-lg p-2 text-stone-400 hover:bg-stone-200/70 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200"
                                   >
                                     <Download className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              );
+                            })()
+                          ) : seg.type === 'view' ? (
+                            (() => {
+                              const view = (message.views || []).find(
+                                (v) => v.id === seg.viewId,
+                              );
+                              if (!view) return null;
+                              return (
+                                <div
+                                  key={seg.id}
+                                  className="flex max-w-md items-center gap-2 rounded-xl border border-stone-200 bg-stone-50/80 p-1.5 dark:border-stone-800 dark:bg-stone-900/60"
+                                >
+                                  <button
+                                    type="button"
+                                    title={t('openToolView')}
+                                    onClick={() => onPreviewView(view, message.id)}
+                                    className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-white/80 dark:hover:bg-stone-950/50"
+                                  >
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-200/80 dark:bg-stone-800">
+                                      <Layers className="h-4 w-4 text-stone-500" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
+                                        {view.title}
+                                      </div>
+                                      <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
+                                        {view.viewType}
+                                        {` · ${t('openToolView')}`}
+                                      </div>
+                                    </div>
                                   </button>
                                 </div>
                               );

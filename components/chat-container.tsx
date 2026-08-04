@@ -90,14 +90,17 @@ import {
 import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
+  type ToolViewEntry,
 } from '@/components/chat/panels/OutputPanel';
 import { ChatSidebar } from '@/components/chat/session/ChatSidebar';
 import { ChatComposer } from '@/components/chat/composer/ChatComposer';
 import { ChatMessageList } from '@/components/chat/message/ChatMessageList';
 import { ChatContextPanel } from '@/components/chat/panels/ChatContextPanel';
 import { ChatPreviewPanel } from '@/components/chat/panels/ChatPreviewPanel';
+import { ToolViewPanel } from '@/components/chat/panels/ToolViewPanel';
 import { ChatModals } from '@/components/chat/overlays/ChatModals';
 import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
+import type { ToolViewPayload } from '@/lib/tools/views/types';
 import {
   appendQuotedSelection,
   parseQuotedUserMessage,
@@ -179,9 +182,17 @@ export default function ChatContainer() {
   const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [isPreviewPanelOpen, setIsPreviewPanelOpen] = useState(false);
-  const [previewFileEntry, setPreviewFileEntry] = useState<GeneratedFileEntry | null>(null);
+  type PreviewTarget =
+    | { kind: 'file'; entry: GeneratedFileEntry }
+    | { kind: 'view'; view: ToolViewPayload; messageId?: string }
+    | null;
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget>(null);
   const openFilePreview = (entry: GeneratedFileEntry) => {
-    setPreviewFileEntry(entry);
+    setPreviewTarget({ kind: 'file', entry });
+    setIsPreviewPanelOpen(true);
+  };
+  const openViewPreview = (view: ToolViewPayload, messageId?: string) => {
+    setPreviewTarget({ kind: 'view', view, messageId });
     setIsPreviewPanelOpen(true);
   };
   const [picturesExpanded, setPicturesExpanded] = useState(false);
@@ -764,11 +775,27 @@ export default function ChatContainer() {
     return out.slice().reverse();
   }, [messages]);
 
+  const generatedViewHistory = useMemo((): ToolViewEntry[] => {
+    const out: ToolViewEntry[] = [];
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.views?.length) continue;
+      m.views.forEach((view, viewIndex) => {
+        out.push({
+          ...view,
+          messageId: m.id,
+          viewIndex,
+        });
+      });
+    }
+    return out.slice().reverse();
+  }, [messages]);
+
   const isEmptyAssistantShell = (m: Message) =>
     m.role === 'assistant' &&
     !m.content?.trim() &&
     !m.images?.length &&
     !m.files?.length &&
+    !m.views?.length &&
     !m.reasoning &&
     !m.toolRuns?.length;
 
@@ -1862,18 +1889,19 @@ export default function ChatContainer() {
     scrollToBottom(true);
     if (lastPreviewSessionIdRef.current === activeSessionId) return;
     lastPreviewSessionIdRef.current = activeSessionId;
-    setPreviewFileEntry(null);
+    setPreviewTarget(null);
   }, [activeSessionId]);
 
   // Keep / drop the side-panel preview against the live Output file list:
   // deleted → clear; same id with updated content/name/size → refresh snapshot.
   useEffect(() => {
-    if (!previewFileEntry) return;
+    if (!previewTarget || previewTarget.kind !== 'file') return;
+    const previewFileEntry = previewTarget.entry;
     const latest = generatedFileHistory.find(
       (f) => f.id === previewFileEntry.id && f.messageId === previewFileEntry.messageId,
     );
     if (!latest) {
-      setPreviewFileEntry(null);
+      setPreviewTarget(null);
       return;
     }
     if (
@@ -1883,9 +1911,35 @@ export default function ChatContainer() {
       latest.url !== previewFileEntry.url ||
       latest.mimeType !== previewFileEntry.mimeType
     ) {
-      setPreviewFileEntry(latest);
+      setPreviewTarget({ kind: 'file', entry: latest });
     }
-  }, [generatedFileHistory, previewFileEntry]);
+  }, [generatedFileHistory, previewTarget]);
+
+  // Keep specialized views in sync with message.views (or clear if removed).
+  useEffect(() => {
+    if (!previewTarget || previewTarget.kind !== 'view') return;
+    const latest = generatedViewHistory.find(
+      (v) =>
+        v.id === previewTarget.view.id &&
+        (!previewTarget.messageId || v.messageId === previewTarget.messageId),
+    );
+    if (!latest) {
+      setPreviewTarget(null);
+      return;
+    }
+    if (
+      latest.title !== previewTarget.view.title ||
+      latest.viewType !== previewTarget.view.viewType ||
+      latest.data !== previewTarget.view.data ||
+      latest.sourceFileName !== previewTarget.view.sourceFileName
+    ) {
+      setPreviewTarget({
+        kind: 'view',
+        view: latest,
+        messageId: latest.messageId,
+      });
+    }
+  }, [generatedViewHistory, previewTarget]);
 
   // While the assistant turn is still open but the stream has gone idle (no new
   // content / thought / tool), show a textless spinner under the bubble — including
@@ -2316,6 +2370,7 @@ export default function ChatContainer() {
                 setImagePreviewSrc={setImagePreviewSrc}
                 onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
                 onPreviewFile={openFilePreview}
+                onPreviewView={openViewPreview}
                 cancelEditMessage={cancelEditMessage}
                 saveEditedMessage={saveEditedMessageOrResearch}
                 editUserMessage={editUserMessage}
@@ -2440,22 +2495,35 @@ export default function ChatContainer() {
             </div>
           </div>
 
-          <ChatPreviewPanel
-            open={isPreviewPanelOpen}
-            onClose={() => setIsPreviewPanelOpen(false)}
-            file={previewFileEntry}
-            onExpandFullscreen={(payload) => {
-              setFilePreview(payload);
-            }}
-            onJumpToMessage={() => {
-              if (!previewFileEntry) return;
-              scrollToMessage(previewFileEntry.messageId);
-            }}
-            onDownload={() => {
-              if (!previewFileEntry) return;
-              void downloadGeneratedFile(previewFileEntry);
-            }}
-          />
+          {previewTarget?.kind === 'view' ? (
+            <ToolViewPanel
+              open={isPreviewPanelOpen}
+              onClose={() => setIsPreviewPanelOpen(false)}
+              view={previewTarget.view}
+              messageId={previewTarget.messageId}
+              onJumpToMessage={() => {
+                if (!previewTarget.messageId) return;
+                scrollToMessage(previewTarget.messageId);
+              }}
+            />
+          ) : (
+            <ChatPreviewPanel
+              open={isPreviewPanelOpen}
+              onClose={() => setIsPreviewPanelOpen(false)}
+              file={previewTarget?.kind === 'file' ? previewTarget.entry : null}
+              onExpandFullscreen={(payload) => {
+                setFilePreview(payload);
+              }}
+              onJumpToMessage={() => {
+                if (previewTarget?.kind !== 'file') return;
+                scrollToMessage(previewTarget.entry.messageId);
+              }}
+              onDownload={() => {
+                if (previewTarget?.kind !== 'file') return;
+                void downloadGeneratedFile(previewTarget.entry);
+              }}
+            />
+          )}
           <ChatContextPanel
             open={isContextPanelOpen}
             onClose={() => setIsContextPanelOpen(false)}
@@ -2467,8 +2535,10 @@ export default function ChatContainer() {
             }
             images={generatedImageHistory}
             files={generatedFileHistory}
+            views={generatedViewHistory}
             onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
             onPreviewFile={openFilePreview}
+            onPreviewView={(entry) => openViewPreview(entry, entry.messageId)}
             onScrollToMessage={scrollToMessage}
             onDownloadImage={(entry) => void downloadGeneratedImage(entry)}
             onRemoveImage={removeGeneratedImage}

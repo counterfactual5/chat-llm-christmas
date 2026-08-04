@@ -6,6 +6,7 @@ import { createImageUnderstandTool } from '@/lib/tools/image-understand/tool';
 import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
 import { createCreateFileTool } from '@/lib/tools/create-file/tool';
 import { createFileReadTool } from '@/lib/tools/file-read/tool';
+import { createDocxExtractTool } from '@/lib/tools/docx-extract/tool';
 import {
   createPaperSearchTool,
   createBookSearchTool,
@@ -26,6 +27,7 @@ export function builtinToolRegistry(): ChatTool[] {
     createGenerateImageTool(),
     createImageUnderstandTool(),
     createFileReadTool(),
+    createDocxExtractTool(),
     createSaveSkillTool(),
     createCreateFileTool(),
   ];
@@ -114,6 +116,13 @@ export {
   parseFileReadArgs,
   normalizeFileId,
 } from '@/lib/tools/file-read/tool';
+
+export {
+  createDocxExtractTool,
+  parseDocxExtractArgs,
+  sectionsFromDocxHtml,
+  htmlFragmentToMarkdown,
+} from '@/lib/tools/docx-extract/tool';
 
 export {
   createPaperSearchTool,

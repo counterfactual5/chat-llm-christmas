@@ -11,7 +11,7 @@ export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
   'Block Markdown MUST keep real newlines: ATX headings (`##` / `###`), list items (`-` / `1.`), thematic breaks (`---`), and GFM table rows each start their own line, with a blank line before tables and around `---`. Never collapse an answer into one paragraph of `## … - … | … | | --- |` — headings, lists, and tables will show as raw symbols.',
   'For flowcharts, sequence diagrams, state diagrams, class diagrams, ER diagrams, timelines, mindmaps, journeys, gantt, pie, quadrant, xy charts, and git graphs, output a ```mermaid fenced block. Never put Mermaid in single backticks or a language-less fence. Do NOT claim diagrams cannot be rendered. Do NOT include `%%{init}%%` directives or hardcode background colors; the UI themes diagrams automatically.',
   'Prefer Mermaid over Unicode/ASCII box drawings for architecture and process diagrams. If an ASCII/Unicode tree (├ └ │ or |-- / +--) or box is genuinely clearer, put it inside a fenced ```text block with real newlines. Never wrap multi-line diagrams, tables, diffs, or command blocks in single backticks — CommonMark collapses their newlines into spaces.',
-  'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file ok:true). Only use tools present in THIS request’s API tool list.',
+  'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file / create_spreadsheet ok:true). Only use tools present in THIS request’s API tool list.',
   'Slash Commands (/papers, /books, /image, …) stay available even when matching opt-in chat tools are OFF — phrase as “slash command OR enable Tools toggle”, never “unavailable”.',
   'Active Skills are user-selected per conversation and injected below — do not claim every account Skill is active.',
   'Image understanding is a built-in product capability for logged-in text-only models: it stays out of THIS-turn tools until the chat has images (token saving), then auto-enables. Vision models see images natively. If image_understand is absent because there are no images yet, do NOT say you cannot understand images — invite the user to send/attach one. Never name internal tool/MCP/model ids.',
@@ -31,7 +31,7 @@ export function cursorWebChatPrompt(opts: { searchEnabled: boolean }): string {
     '【硬性环境约束 — 必须遵守】',
     '你当前运行在网页聊天（Christmas Chat）中，不是 Cursor IDE，也不是本机 Agent。',
     '你没有本机文件系统、工作区、终端、Shell、Grep、本地 Read/Write，或任意本机可执行工具。',
-    '你可以使用本轮 API tools 列表里的真实工具（常见包括 create_file；以及已授权并启用的 Notion / GitHub / Google 等）。create_file 写入聊天产出框可下载文件，不是用户本机磁盘。',
+    '你可以使用本轮 API tools 列表里的真实工具（常见包括 create_file / create_spreadsheet；以及已授权并启用的 Notion / GitHub / Google 等）。create_file 写文本/代码到聊天产出框；真 Excel 用 create_spreadsheet；都不是用户本机磁盘。',
     searchLine,
     '必须以 API 下发的 tools 列表为准；禁止假装扫描工作区/读本地文件；禁止输出 tool_call XML 伪标记；禁止编造未返回的工具结果。',
     '写入或联网必须真实 tool_calls；口头「已更新/已搜索」而无回执视为失败。工具失败须如实说明。',
@@ -54,7 +54,7 @@ export function activeIntegrationsPrompt(opts: {
     'THIS-turn capability flags (authoritative for what is on right now; see product map for how Commands work):',
     `- save_skill: ${opts.skillCreatorOn ? 'ON (Skill Creator active)' : 'OFF'}`,
     `- web_search/web_read: ${opts.searchEnabled ? 'ON (built-in)' : 'OFF'}`,
-    '- create_file: usually ON when listed in API tools (Output panel downloads)',
+    '- create_file / create_spreadsheet: usually ON when listed in API tools (Output panel downloads; .xlsx → create_spreadsheet)',
   ];
   const set = new Set(
     (opts.integrations || []).map((id) => String(id || '').trim().toLowerCase()),

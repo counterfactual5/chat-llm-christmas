@@ -41,6 +41,26 @@ export function isPreviewableTextFile(file: {
   );
 }
 
+/** CSV / TSV / Excel extract — prefer HTML table preview over code fence. */
+export function isSpreadsheetPreviewFile(file: {
+  name?: string;
+  mimeType?: string;
+  mime?: string;
+  filename?: string;
+}): boolean {
+  const mime = String(file.mimeType || file.mime || '').toLowerCase();
+  if (
+    mime.includes('spreadsheet') ||
+    mime === 'text/csv' ||
+    mime === 'text/tab-separated-values' ||
+    mime.includes('excel')
+  ) {
+    return true;
+  }
+  const name = String(file.name || file.filename || '').toLowerCase();
+  return /\.(xlsx|xls|csv|tsv)$/i.test(name);
+}
+
 /**
  * Inline `content`, or a fetchable `url` for PDF / EPUB / image / text
  * (text is lazy-fetched by the preview panel — not embedded in session JSON).

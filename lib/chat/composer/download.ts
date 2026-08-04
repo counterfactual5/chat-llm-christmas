@@ -27,13 +27,15 @@ export async function downloadGeneratedImage(entry: GeneratedImageEntry): Promis
 export async function downloadGeneratedFile(entry: GeneratedFileEntry): Promise<void> {
   try {
     let blob: Blob;
-    if (typeof entry.content === 'string') {
+    // Prefer remote binary URL when present — `content` may be a text extract for preview only
+    // (e.g. create_spreadsheet stores TSV extract alongside an .xlsx url).
+    if (entry.url && !entry.url.startsWith('local://')) {
+      const res = await fetch(entry.url);
+      blob = await res.blob();
+    } else if (typeof entry.content === 'string') {
       blob = new Blob([entry.content], {
         type: entry.mimeType || 'text/plain;charset=utf-8',
       });
-    } else if (entry.url && !entry.url.startsWith('local://')) {
-      const res = await fetch(entry.url);
-      blob = await res.blob();
     } else {
       throw new Error('No file content available');
     }

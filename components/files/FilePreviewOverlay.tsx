@@ -5,7 +5,16 @@ import { Download, FileText, Loader2, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { EpubReader } from '@/components/files/EpubReader';
 import { CodeBlock } from '@/components/markdown/code/code-block';
-import { isEpubFile, isPdfFile, isPreviewableImageFile } from '@/lib/files/preview';
+import {
+  isEpubFile,
+  isPdfFile,
+  isPreviewableImageFile,
+  isSpreadsheetPreviewFile,
+} from '@/lib/files/preview';
+import {
+  parseSpreadsheetPreviewText,
+  type ParsedSpreadsheetSection,
+} from '@/lib/files/spreadsheet';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { cn } from '@/lib/utils';
 
@@ -221,7 +230,64 @@ function PdfPreviewFrame({
   );
 }
 
-/** Pure content renderer (markdown / code / PDF / EPUB / image) — overlay + side panel. */
+function SpreadsheetTablePreview({ sections }: { sections: ParsedSpreadsheetSection[] }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      {sections.map((section) => {
+        const colCount = Math.max(1, ...section.rows.map((r) => r.length));
+        const [header, ...body] = section.rows;
+        const hasHeader = Boolean(header && header.some((c) => c.trim()));
+        return (
+          <div key={section.name} className="min-w-0">
+            {sections.length > 1 || section.name !== 'Sheet1' ? (
+              <div className="mb-2 text-xs font-medium text-stone-500 dark:text-stone-400">
+                {section.name}
+              </div>
+            ) : null}
+            <div className="min-w-0 overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
+              <table className="w-full min-w-[240px] border-collapse text-left text-xs">
+                {hasHeader ? (
+                  <thead>
+                    <tr className="border-b border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900/60">
+                      {Array.from({ length: colCount }, (_, i) => (
+                        <th
+                          key={i}
+                          className="px-2.5 py-1.5 font-semibold text-stone-700 dark:text-stone-200"
+                        >
+                          {header?.[i] ?? ''}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                ) : null}
+                <tbody>
+                  {(hasHeader ? body : section.rows).map((row, ri) => (
+                    <tr
+                      key={ri}
+                      className="border-b border-stone-100 last:border-0 dark:border-stone-800/80"
+                    >
+                      {Array.from({ length: colCount }, (_, ci) => (
+                        <td
+                          key={ci}
+                          className="max-w-[220px] truncate px-2.5 py-1.5 text-stone-600 dark:text-stone-300"
+                          title={row[ci] || ''}
+                        >
+                          {row[ci] ?? ''}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Pure content renderer (markdown / code / PDF / EPUB / image / table) — overlay + side panel. */
 export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   const url = String(file.url || '').trim();
   if (!file.content && url && isEpubFile(file)) {
@@ -242,6 +308,13 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   }
 
   const text = typeof file.content === 'string' ? file.content : '';
+  if (text && isSpreadsheetPreviewFile(file)) {
+    const sections = parseSpreadsheetPreviewText(text);
+    if (sections.length) {
+      return <SpreadsheetTablePreview sections={sections} />;
+    }
+  }
+
   const richText = prefersAnswerMarkdownPreview(file);
   const language = languageFromFilename(file.name);
 

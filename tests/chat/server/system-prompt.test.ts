@@ -80,7 +80,7 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('THIS-turn capability flags');
     expect(parts).toContain('save_skill: OFF');
     expect(parts).toContain('web_search/web_read: OFF');
-    expect(parts).toContain('create_file: usually ON');
+    expect(parts).toContain('create_file / create_spreadsheet: usually ON');
   });
 
   it('states auto-review product status', () => {
@@ -104,7 +104,7 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('The user explicitly requested a claim review');
     expect(parts).toContain('manually requested a review');
     expect(parts).toContain('This chat already contains image(s) generated');
-    expect(parts).toContain('This chat already contains downloadable file(s) created via create_file.');
+    expect(parts).toContain('This chat already contains downloadable file(s) created via create_file / create_spreadsheet.');
   });
 
   it('includes account skill catalog when Skill Creator needs replace targets', () => {

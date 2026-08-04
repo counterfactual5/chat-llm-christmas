@@ -11,7 +11,12 @@ export type TimelineSegment =
   | { type: 'view'; id: string; viewId: string };
 
 function isCreateFileRun(run: MessageToolRun | undefined): boolean {
-  return Boolean(run && (run.name === 'create_file' || run.name === 'create-file'));
+  return Boolean(
+    run &&
+      (run.name === 'create_file' ||
+        run.name === 'create-file' ||
+        run.name === 'create_spreadsheet'),
+  );
 }
 
 /**

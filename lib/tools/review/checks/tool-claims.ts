@@ -292,7 +292,7 @@ const SURFACE_TOOL_PATTERNS: Record<FakedToolSurface, RegExp[]> = {
   web_search: [/web_search/i, /proactive_search/i],
   web_read: [/web_read/i, /web-read/i, /read_url/i],
   save_skill: [/save_skill/i],
-  create_file: [/create_file/i],
+  create_file: [/create_file/i, /create_spreadsheet/i],
 };
 
 function extractErrorSnippet(payload: string): string {

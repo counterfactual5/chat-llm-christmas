@@ -18,6 +18,7 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('Continue reply');
     expect(text).toContain('手动添加');
     expect(text).toContain('create_file');
+    expect(text).toContain('create_spreadsheet');
     expect(text).toContain('/research [quick|standard|rigorous]');
     expect(text).toContain('web|literature|mixed');
     expect(text).toContain('image_understand');
@@ -53,6 +54,7 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('sources=news or sources=wiki');
     expect(text).toContain('mixed = web + papers/books + news + wiki');
     expect(text).toContain('Never upgrade inactive library blurbs');
+    expect(text).toContain('create_spreadsheet');
   });
 });
 

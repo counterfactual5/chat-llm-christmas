@@ -68,7 +68,10 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const isBookSearch = run.name === 'book_search';
   const isBookDownload = run.name === 'book_download';
   const isGenerateImage = run.name === 'generate_image';
-  const isCreateFile = run.name === 'create_file';
+  const isCreateFile =
+    run.name === 'create_file' ||
+    run.name === 'create-file' ||
+    run.name === 'create_spreadsheet';
   const isFileRead = run.name === 'file_read' || run.provider === 'file-read';
   const isDocxExtract =
     run.name === 'docx_extract' || run.provider === 'docx-extract';

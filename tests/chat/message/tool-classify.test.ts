@@ -47,6 +47,7 @@ describe('classifyToolRun', () => {
     expect(classifyToolRun({ name: 'web_read' }).isWebRead).toBe(true);
     expect(classifyToolRun({ name: 'web-read' }).isWebRead).toBe(true);
     expect(classifyToolRun({ name: 'create_file' }).isCreateFile).toBe(true);
+    expect(classifyToolRun({ name: 'create_spreadsheet' }).isCreateFile).toBe(true);
     expect(classifyToolRun({ name: 'file_read' }).isFileRead).toBe(true);
     expect(classifyToolRun({ name: 'x', provider: 'file-read' }).isFileRead).toBe(true);
     expect(classifyToolRun({ name: 'save_skill', provider: 'skills' }).isSaveSkill).toBe(true);
@@ -152,6 +153,8 @@ describe('getToolRunLabelKey', () => {
       [{ name: 'book_download' }, false, 'downloadedBook'],
       [{ name: 'create_file' }, true, 'creatingFile'],
       [{ name: 'create_file' }, false, 'createdFile'],
+      [{ name: 'create_spreadsheet' }, true, 'creatingFile'],
+      [{ name: 'create_spreadsheet' }, false, 'createdFile'],
       [{ name: 'file_read' }, true, 'readingFile'],
       [{ name: 'file_read' }, false, 'readFile'],
       [{ name: 'save_skill', provider: 'skills' }, true, 'savingSkill'],

@@ -135,9 +135,9 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   if (opts.hasGeneratedFiles) {
     systemParts.push(
       [
-        'This chat already contains downloadable file(s) created via create_file.',
+        'This chat already contains downloadable file(s) created via create_file / create_spreadsheet.',
         'They appear in the Output panel. Refer to those existing files when the user asks about them.',
-        'To add more files, call create_file again — do not pretend a file exists without a successful create_file receipt.',
+        'To add more files, call create_file or create_spreadsheet again — do not pretend a file exists without a successful tool receipt (ok:true).',
       ].join(' '),
     );
   }

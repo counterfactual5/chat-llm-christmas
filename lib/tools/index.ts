@@ -5,6 +5,7 @@ import { createWebReadTool } from '@/lib/tools/web-read/tool';
 import { createImageUnderstandTool } from '@/lib/tools/image-understand/tool';
 import { createSaveSkillTool } from '@/lib/tools/save-skill/tool';
 import { createCreateFileTool } from '@/lib/tools/create-file/tool';
+import { createCreateSpreadsheetTool } from '@/lib/tools/create-spreadsheet/tool';
 import { createFileReadTool } from '@/lib/tools/file-read/tool';
 import { createDocxExtractTool } from '@/lib/tools/docx-extract/tool';
 import {
@@ -30,6 +31,7 @@ export function builtinToolRegistry(): ChatTool[] {
     createDocxExtractTool(),
     createSaveSkillTool(),
     createCreateFileTool(),
+    createCreateSpreadsheetTool(),
   ];
 }
 
@@ -110,6 +112,11 @@ export {
   sanitizeGeneratedFilename,
   mimeFromFilename,
 } from '@/lib/tools/create-file/tool';
+
+export {
+  createCreateSpreadsheetTool,
+  parseCreateSpreadsheetArgs,
+} from '@/lib/tools/create-spreadsheet/tool';
 
 export {
   createFileReadTool,

@@ -45,7 +45,8 @@ const EXT_MIME: Record<string, string> = {
 
 const CREATE_FILE_SYSTEM_PROMPT = [
   'You have a create_file tool that saves a downloadable text/code file into this chat’s Output panel.',
-  'Call create_file when the user asks you to create, generate, export, or provide a downloadable file (e.g. .md, .py, .ts, .json, .csv, .yaml, .sh).',
+  'Call create_file when the user asks you to create, generate, export, or provide a downloadable text file (e.g. .md, .py, .ts, .json, .csv, .yaml, .sh).',
+  'For real Excel .xlsx workbooks, use create_spreadsheet instead of create_file.',
   'Do NOT call create_file for ordinary inline code examples in your reply.',
   'For multiple files, call create_file once per file with a clear filename.',
   'Never claim a file was created unless create_file returned ok:true.',

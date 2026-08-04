@@ -5,6 +5,7 @@ import {
   isPdfFile,
   isPreviewableImageFile,
   isPreviewableTextFile,
+  isSpreadsheetPreviewFile,
 } from '@/lib/files/preview';
 
 describe('canPreviewGeneratedFile', () => {
@@ -83,7 +84,7 @@ describe('canPreviewGeneratedFile', () => {
 });
 
 describe('preview mime helpers', () => {
-  it('detects pdf / epub / image / text', () => {
+  it('detects pdf / epub / image / text / spreadsheet', () => {
     expect(isPdfFile({ name: 'a.pdf', mimeType: 'application/octet-stream' })).toBe(true);
     expect(isEpubFile({ name: 'a.epub', mimeType: 'application/octet-stream' })).toBe(true);
     expect(isEpubFile({ mimeType: 'application/epub+zip' })).toBe(true);
@@ -92,5 +93,12 @@ describe('preview mime helpers', () => {
       true,
     );
     expect(isPreviewableTextFile({ mime: 'text/html' })).toBe(true);
+    expect(
+      isSpreadsheetPreviewFile({
+        name: 'report.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      }),
+    ).toBe(true);
+    expect(isSpreadsheetPreviewFile({ name: 'data.csv' })).toBe(true);
   });
 });

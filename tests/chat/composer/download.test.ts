@@ -125,6 +125,25 @@ describe('downloadGeneratedFile', () => {
     expect(anchor.click).toHaveBeenCalledTimes(1);
   });
 
+  it('prefers remote binary url over inline preview content', async () => {
+    const anchor = stubAnchor();
+    const blob = new Blob(['xlsx-bytes']);
+    const fetchMock = vi.fn(async () => ({ blob: async () => blob }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await downloadGeneratedFile({
+      ...baseEntry,
+      name: 'report.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      url: '/api/files/file_xlsx',
+      content: '## Sheet: Sales\n\nItem\tQty',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/files/file_xlsx');
+    expect(createObjectURLMock).toHaveBeenCalledWith(blob);
+    expect(anchor.download).toBe('report.xlsx');
+  });
+
   it('falls back to opening a remote url when nothing else works', async () => {
     stubAnchor();
     vi.stubGlobal('fetch', vi.fn(async () => {

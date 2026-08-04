@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Loader2, Send, X } from 'lucide-react';
-import { useLocale } from '@/lib/i18n';
+import { useLocale, type MessageKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GmailApprovalDraft } from '@/lib/mcp/google/gmail-approval';
 
@@ -14,6 +14,13 @@ export type EmailApprovalCardProps = {
   onSend: (draft: GmailApprovalDraft) => void | Promise<void>;
   onCancel: () => void | Promise<void>;
 };
+
+function approvalTitleKey(tool: GmailApprovalDraft['tool']): MessageKey {
+  if (tool === 'gmail_reply') return 'emailAwaitingReply';
+  if (tool === 'gmail_forward') return 'emailAwaitingForward';
+  if (tool === 'gmail_send_draft') return 'emailAwaitingSendDraft';
+  return 'emailAwaitingSend';
+}
 
 export function EmailApprovalCard({
   draft,
@@ -29,6 +36,9 @@ export function EmailApprovalCard({
   const [bcc, setBcc] = useState(draft.bcc || '');
   const [subject, setSubject] = useState(draft.subject || '');
   const [body, setBody] = useState(draft.body || '');
+  // Only show Cc/Bcc when the draft already has them (or the user filled them).
+  const [showCc] = useState(Boolean(String(draft.cc || '').trim()));
+  const [showBcc] = useState(Boolean(String(draft.bcc || '').trim()));
 
   const locked = busy || disabled;
 
@@ -39,7 +49,9 @@ export function EmailApprovalCard({
         'space-y-2.5',
       )}
     >
-      <div className="text-xs font-medium text-muted-foreground">{t('emailAwaitingApproval')}</div>
+      <div className="text-xs font-medium text-muted-foreground">
+        {t(approvalTitleKey(draft.tool))}
+      </div>
       <label className="block space-y-1">
         <span className="text-[11px] text-muted-foreground">{t('emailTo')}</span>
         <input
@@ -50,7 +62,7 @@ export function EmailApprovalCard({
           className="w-full rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-sm outline-none focus:border-foreground/30"
         />
       </label>
-      <div className="grid gap-2 sm:grid-cols-2">
+      {showCc ? (
         <label className="block space-y-1">
           <span className="text-[11px] text-muted-foreground">{t('emailCc')}</span>
           <input
@@ -61,6 +73,8 @@ export function EmailApprovalCard({
             className="w-full rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-sm outline-none focus:border-foreground/30"
           />
         </label>
+      ) : null}
+      {showBcc ? (
         <label className="block space-y-1">
           <span className="text-[11px] text-muted-foreground">{t('emailBcc')}</span>
           <input
@@ -71,7 +85,7 @@ export function EmailApprovalCard({
             className="w-full rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-sm outline-none focus:border-foreground/30"
           />
         </label>
-      </div>
+      ) : null}
       <label className="block space-y-1">
         <span className="text-[11px] text-muted-foreground">{t('emailSubject')}</span>
         <input

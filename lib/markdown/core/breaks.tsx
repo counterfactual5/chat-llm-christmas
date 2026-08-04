@@ -1,10 +1,10 @@
 /**
- * Model answers often put literal `<br>` / `<br/>` inside GFM table cells.
- * react-markdown does not interpret raw HTML by default, so those tags show as
- * text. Expand them into real line breaks when rendering.
+ * Model answers often put literal `<br>` / `<br/>` or escaped `\n` inside GFM
+ * table cells (tables cannot contain real newlines). react-markdown does not
+ * interpret raw HTML by default, and `\n` shows as text. Expand both into real
+ * line breaks when rendering.
  *
- * Leading `<br>` (common after list-like cells) is stripped so the cell does
- * not start with a blank line.
+ * Leading breaks are stripped so the cell does not start with a blank line.
  */
 
 import {
@@ -21,8 +21,15 @@ const BR_ONLY = /^<br\s*\/?>$/i;
 const LEADING_BR = /^(?:<br\s*\/?>)+/i;
 const TRAILING_BR = /(?:<br\s*\/?>)+$/i;
 
+/** Turn literal backslash-n sequences into `<br>` so one expander handles both. */
+export function normalizeEscapedNewlines(s: string): string {
+  return String(s || '').replace(/\\n/g, '<br>');
+}
+
 function expandBreaksInString(s: string, keyPrefix: string): ReactNode {
-  const trimmed = s.replace(LEADING_BR, '').replace(TRAILING_BR, '');
+  const trimmed = normalizeEscapedNewlines(s)
+    .replace(LEADING_BR, '')
+    .replace(TRAILING_BR, '');
   if (!trimmed) return null;
   if (!BR_TOKEN.test(trimmed)) return trimmed;
 

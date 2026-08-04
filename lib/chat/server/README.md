@@ -21,7 +21,7 @@ Request pipeline: `chat-request.ts` (`handleChatRequest`).
 | `upstream.ts` | OpenAI-compatible completions transport (stream + one-shot) |
 | `stream-budget.ts` | Idle / total stream timeout math, plus `boundedAsyncIterator` that applies it to any upstream stream |
 | `tool-round.ts` | One tool-calling round: stream + accumulate tool_call deltas alongside content/reasoning |
-| `run-tool-rounds.ts` | Multi-round tool loop orchestrator (empty-`tool_calls` decisions + execute tools) |
+| `run-tool-rounds.ts` | Multi-round tool loop orchestrator (empty-`tool_calls` decisions + execute tools in parallel per round) |
 | `final-completion.ts` | Post-tool-round completion streaming (content/reasoning split, stamp stripping) |
 | `plain-completion.ts` | Un-budgeted tools-off completion streaming shared by Request Review answers and Auto-review corrections |
 | `review-turns.ts` | Request Review orchestration: parse reviewed turns, run the claim audit per turn, build the dedicated-answer prompt |

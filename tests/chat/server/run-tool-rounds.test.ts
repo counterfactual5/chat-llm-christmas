@@ -155,6 +155,74 @@ describe('runToolRounds', () => {
     expect(runRound).not.toHaveBeenCalled();
   });
 
+  it('executes multiple tool_calls in parallel', async () => {
+    const workingMessages: any[] = [{ role: 'user', content: 'go' }];
+    const state = makeState();
+    const started: number[] = [];
+    const executeRegisteredTool = vi.fn(
+      async (
+        _tools: unknown,
+        call: { name: string; callId: string },
+      ) => {
+        started.push(Date.now());
+        await new Promise((r) => setTimeout(r, 80));
+        return { content: JSON.stringify({ ok: true, name: call.name }) };
+      },
+    );
+
+    const t0 = Date.now();
+    const outcome = await runToolRounds({
+      state,
+      maxRounds: 1,
+      activeToolDefs: [{ type: 'function', function: { name: 'web_search' } }],
+      apiKey: 'k',
+      baseURL: 'https://example.test',
+      model: 'm',
+      workingMessages,
+      enableThinking: false,
+      reasoningAsContent: false,
+      idleMs: 1000,
+      maxTotalMs: 5000,
+      cursorModel: false,
+      searchEnabled: true,
+      autoReview: false,
+      authorizedIntegrations: [],
+      skillCreatorOn: false,
+      autoReviewTurnBoundary: 0,
+      userAsk: 'search both',
+      enabledTools: [],
+      toolCtx: {},
+      send: vi.fn(),
+      closeStreamDone: vi.fn(),
+      runProactiveSearch: vi.fn(),
+      postAudit: vi.fn(),
+      streamReviewCorrection: vi.fn(),
+      actionableReviewIssues: (issues) => issues,
+      executeRegisteredTool,
+      runRound: async () => ({
+        ok: true,
+        streamedContent: '',
+        streamedReasoning: '',
+        toolCalls: [
+          { id: 'c1', name: 'web_search', arguments: '{"query":"a"}' },
+          { id: 'c2', name: 'web_search', arguments: '{"query":"b"}' },
+        ],
+        roundFinishReason: 'tool_calls',
+        hasToolCallDeltas: true,
+      }),
+    });
+    const elapsed = Date.now() - t0;
+
+    expect(outcome).toEqual({ status: 'continue' });
+    expect(executeRegisteredTool).toHaveBeenCalledTimes(2);
+    // Sequential would be ~160ms+; parallel should finish near one delay.
+    expect(elapsed).toBeLessThan(140);
+    const toolMsgs = workingMessages.filter((m) => m.role === 'tool');
+    expect(toolMsgs).toHaveLength(2);
+    expect(toolMsgs[0].tool_call_id).toBe('c1');
+    expect(toolMsgs[1].tool_call_id).toBe('c2');
+  });
+
   it('executes tool_calls and flags round failures', async () => {
     const workingMessages: any[] = [{ role: 'user', content: 'write' }];
     const state = makeState();

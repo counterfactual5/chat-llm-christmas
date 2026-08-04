@@ -36,6 +36,103 @@ export const MAX_TOOL_ROUNDS = 3;
 /** Extra rounds when Google / Notion / GitHub write tools are in play. */
 export const MAX_TOOL_ROUNDS_INTEGRATIONS = 5;
 
+/**
+ * Execute one round's tool_calls in parallel; append role:tool messages in
+ * the original call order so the model still sees a stable transcript.
+ */
+async function executeToolCallsInParallel(opts: {
+  toolCalls: ToolCallAccum[];
+  streamedContent: string;
+  userAsk: string;
+  workingMessages: Array<Record<string, unknown>>;
+  enabledTools: unknown;
+  toolCtx: unknown;
+  executeRegisteredTool: RunToolRoundsDeps['executeRegisteredTool'];
+  /** When true, skip calls with incomplete JSON args (timeout / truncated stream). */
+  skipIncompleteArgs?: boolean;
+}): Promise<boolean> {
+  const {
+    toolCalls,
+    streamedContent,
+    userAsk,
+    workingMessages,
+    enabledTools,
+    toolCtx,
+    executeRegisteredTool,
+    skipIncompleteArgs = false,
+  } = opts;
+
+  type Slot =
+    | { kind: 'skip'; content: string; failed: true }
+    | { kind: 'ok'; content: string; failed: boolean }
+    | { kind: 'error'; content: string; failed: true };
+
+  const slots = await Promise.all(
+    toolCalls.map(async (tc): Promise<Slot> => {
+      if (skipIncompleteArgs && !toolArgumentsAreComplete(tc.arguments)) {
+        return {
+          kind: 'skip',
+          failed: true,
+          content: JSON.stringify({
+            ok: false,
+            error:
+              'Tool call arguments were truncated mid-stream; not executed.',
+            truncated: true,
+          }),
+        };
+      }
+      const fallbackQuery = buildToolFallbackQuery({
+        toolCall: tc,
+        userAsk,
+        streamedContent,
+        workingMessages: workingMessages as Array<{
+          role?: string;
+          content?: unknown;
+        }>,
+      });
+      try {
+        const result = await executeRegisteredTool(
+          enabledTools,
+          {
+            name: tc.name,
+            callId: tc.id,
+            rawArguments: tc.arguments,
+            fallbackQuery,
+          },
+          toolCtx,
+        );
+        const payload = String(result.content || '');
+        return {
+          kind: 'ok',
+          content: result.content,
+          failed: toolResultIndicatesFailure(payload),
+        };
+      } catch (err: unknown) {
+        return {
+          kind: 'error',
+          failed: true,
+          content: JSON.stringify({
+            error: err instanceof Error ? err.message : String(err || 'tool failed'),
+          }),
+        };
+      }
+    }),
+  );
+
+  let anyFailure = false;
+  for (let i = 0; i < toolCalls.length; i++) {
+    const tc = toolCalls[i]!;
+    const slot = slots[i]!;
+    if (slot.failed) anyFailure = true;
+    workingMessages.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      content: slot.content,
+    });
+  }
+  return anyFailure;
+}
+
 /** Prompt pushed after a failed tool round when narration arrives without a retry. */
 export const TOOL_FAILURE_RECOVERY_PROMPT = [
   'Your previous tool call(s) FAILED — see the tool result error payloads above.',
@@ -230,56 +327,17 @@ export async function runToolRounds(
             })),
           });
           let roundHadToolFailure = false;
-          for (const tc of toolCalls) {
-            if (!toolArgumentsAreComplete(tc.arguments)) {
-              roundHadToolFailure = true;
-              deps.workingMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: JSON.stringify({
-                  ok: false,
-                  error:
-                    'Tool call arguments were truncated mid-stream; not executed.',
-                  truncated: true,
-                }),
-              });
-              continue;
-            }
-            const fallbackQuery = buildToolFallbackQuery({
-              toolCall: tc,
-              userAsk: deps.userAsk,
-              streamedContent,
-              workingMessages: deps.workingMessages,
-            });
-            try {
-              const result = await deps.executeRegisteredTool(
-                deps.enabledTools,
-                {
-                  name: tc.name,
-                  callId: tc.id,
-                  rawArguments: tc.arguments,
-                  fallbackQuery,
-                },
-                deps.toolCtx,
-              );
-              const payload = String(result.content || '');
-              if (toolResultIndicatesFailure(payload)) roundHadToolFailure = true;
-              deps.workingMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: result.content,
-              });
-            } catch (err: unknown) {
-              roundHadToolFailure = true;
-              deps.workingMessages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: JSON.stringify({
-                  error: err instanceof Error ? err.message : String(err || 'tool failed'),
-                }),
-              });
-            }
-          }
+          const failed = await executeToolCallsInParallel({
+            toolCalls,
+            streamedContent,
+            userAsk: deps.userAsk,
+            workingMessages: deps.workingMessages,
+            enabledTools: deps.enabledTools,
+            toolCtx: deps.toolCtx,
+            executeRegisteredTool: deps.executeRegisteredTool,
+            skipIncompleteArgs: true,
+          });
+          if (failed) roundHadToolFailure = true;
           if (roundHadToolFailure) deps.state.lastToolRoundHadFailure = true;
         } else if (streamedContent) {
           deps.workingMessages.push({
@@ -409,7 +467,6 @@ export async function runToolRounds(
 
     // Tool calls present — any narration already landed in the bubble as content.
     deps.state.usedTools = true;
-    let roundHadToolFailure = false;
     deps.workingMessages.push({
       role: 'assistant',
       content: streamedContent || null,
@@ -420,33 +477,15 @@ export async function runToolRounds(
       })),
     });
 
-    for (const tc of toolCalls) {
-      const fallbackQuery = buildToolFallbackQuery({
-        toolCall: tc,
-        userAsk: deps.userAsk,
-        streamedContent,
-        workingMessages: deps.workingMessages,
-      });
-      const result = await deps.executeRegisteredTool(
-        deps.enabledTools,
-        {
-          name: tc.name,
-          callId: tc.id,
-          rawArguments: tc.arguments,
-          fallbackQuery,
-        },
-        deps.toolCtx,
-      );
-      const payload = String(result.content || '');
-      if (toolResultIndicatesFailure(payload)) {
-        roundHadToolFailure = true;
-      }
-      deps.workingMessages.push({
-        role: 'tool',
-        tool_call_id: tc.id,
-        content: result.content,
-      });
-    }
+    const roundHadToolFailure = await executeToolCallsInParallel({
+      toolCalls,
+      streamedContent,
+      userAsk: deps.userAsk,
+      workingMessages: deps.workingMessages,
+      enabledTools: deps.enabledTools,
+      toolCtx: deps.toolCtx,
+      executeRegisteredTool: deps.executeRegisteredTool,
+    });
     if (roundHadToolFailure) deps.state.lastToolRoundHadFailure = true;
   }
 

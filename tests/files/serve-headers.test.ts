@@ -73,7 +73,7 @@ describe('fileContentResponseHeaders', () => {
     expect(headers['X-Content-Type-Options']).toBe('nosniff');
   });
 
-  it('sniffs EPUB content-type without rewriting a .pdf filename', () => {
+  it('rewrites a mislabeled .pdf name when bytes are EPUB', () => {
     const headers = fileContentResponseHeaders({
       buf: epubBytes(),
       gatewayContentType: 'application/pdf',
@@ -81,7 +81,8 @@ describe('fileContentResponseHeaders', () => {
     }) as Record<string, string>;
 
     expect(headers['Content-Type']).toBe('application/epub+zip');
-    expect(headers['Content-Disposition']).toContain('.pdf');
+    expect(headers['Content-Disposition']).toContain('.epub');
+    expect(headers['Content-Disposition']).not.toMatch(/\.pdf"/);
   });
 
   it('appends .epub only when the stored name has no extension', () => {
@@ -92,5 +93,27 @@ describe('fileContentResponseHeaders', () => {
     expect(inlineContentDisposition('d7f59f7392fbb541b56', 'application/pdf')).toContain(
       'd7f59f7392fbb541b56.pdf',
     );
+  });
+});
+
+describe('streamSniffedFileResponse', () => {
+  it('sniffs PDF from a streamed body without buffering the whole object first', async () => {
+    const { streamSniffedFileResponse } = await import('@/lib/files/serve-headers');
+    const pdf = new TextEncoder().encode('%PDF-1.4 streamed-body-' + 'x'.repeat(4000));
+    const upstream = new Response(pdf, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(pdf.byteLength),
+      },
+    });
+    const res = await streamSniffedFileResponse({
+      upstream,
+      filename: 'doc.bin',
+    });
+    expect(res.headers.get('Content-Type')).toBe('application/pdf');
+    expect(res.headers.get('Content-Disposition')).toContain('.pdf');
+    const out = new Uint8Array(await res.arrayBuffer());
+    expect(out.byteLength).toBe(pdf.byteLength);
+    expect(String.fromCharCode(out[0], out[1], out[2], out[3])).toBe('%PDF');
   });
 });

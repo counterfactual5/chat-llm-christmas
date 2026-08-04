@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { filesGatewayBaseURL } from '@/lib/files/gateway';
-import { fileContentResponseHeaders } from '@/lib/files/serve-headers';
+import { streamSniffedFileResponse } from '@/lib/files/serve-headers';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -60,20 +60,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     );
   }
 
-  const buf = await res.arrayBuffer();
   const queryName = req.nextUrl.searchParams.get('filename') || '';
   const filename =
     queryName.trim() ||
     filenameFromDisposition(res.headers.get('content-disposition')) ||
     fileId;
-  return new Response(buf, {
-    status: 200,
-    headers: fileContentResponseHeaders({
-      buf,
-      gatewayContentType: res.headers.get('content-type'),
-      filename,
-    }),
-  });
+
+  return streamSniffedFileResponse({ upstream: res, filename });
 }
 
 /** Delete an account-scoped gateway file, then callers remove its chat reference. */

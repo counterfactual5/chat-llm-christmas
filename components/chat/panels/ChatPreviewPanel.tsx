@@ -201,14 +201,30 @@ export function ChatPreviewPanel({
             </div>
           </div>
 
-          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+          <div
+            className={cn(
+              'min-h-0 min-w-0 flex-1 overscroll-contain',
+              file &&
+                (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)) &&
+                !file.content
+                ? 'overflow-hidden'
+                : 'overflow-x-hidden overflow-y-auto',
+            )}
+          >
             {!file ? (
               <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                 <FileText className="h-8 w-8 opacity-40" />
                 <span>{t('previewPanelEmpty')}</span>
               </div>
             ) : resolved ? (
-              <div className="min-w-0 max-w-full px-4 py-4">
+              <div
+                className={cn(
+                  'min-h-0 min-w-0 max-w-full',
+                  isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)
+                    ? 'flex h-full flex-col p-0'
+                    : 'px-4 py-4',
+                )}
+              >
                 <FilePreviewContent file={resolved} />
               </div>
             ) : needsTextFetch && !fetchError ? (

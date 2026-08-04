@@ -122,19 +122,30 @@ function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
 }
 
 /**
- * Chrome’s PDF plugin inside an iframe is unreliable when the URL path is a
- * bare hash id and Content-Type is application/octet-stream. Fetch → blob with
- * an explicit application/pdf type (cookies still sent same-origin).
+ * Chrome’s PDF plugin inside an iframe is unreliable when Content-Type is
+ * application/octet-stream. Prefer the proxied URL when the sniff already
+ * returned application/pdf; otherwise fetch → blob. EPUB bytes (or sniffed
+ * epub Content-Type) hand off to EpubReader.
  */
-function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
+function PdfPreviewFrame({
+  url,
+  title,
+  fileId,
+}: {
+  url: string;
+  title: string;
+  fileId: string;
+}) {
   const [src, setSrc] = useState('');
   const [error, setError] = useState('');
+  const [asEpub, setAsEpub] = useState(false);
 
   useEffect(() => {
     let objectUrl = '';
     let cancelled = false;
     setSrc('');
     setError('');
+    setAsEpub(false);
 
     void (async () => {
       try {
@@ -148,11 +159,35 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
               : `Failed to load PDF (${response.status})`,
           );
         }
+        const ct = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (ct === 'application/epub+zip') {
+          // Abort body; EpubReader will load the same URL.
+          try {
+            await response.body?.cancel();
+          } catch {
+            /* ignore */
+          }
+          if (!cancelled) setAsEpub(true);
+          return;
+        }
+        if (ct === 'application/pdf') {
+          // Same-origin + correct type → Chrome iframe works without a second copy.
+          try {
+            await response.body?.cancel();
+          } catch {
+            /* ignore */
+          }
+          if (!cancelled) setSrc(`${url}#toolbar=0`);
+          return;
+        }
+
         const buf = await response.arrayBuffer();
+        if (isEpubBytes(buf)) {
+          if (!cancelled) setAsEpub(true);
+          return;
+        }
         if (!isPdfBytes(buf)) {
-          throw new Error(
-            describeNonPdf(buf, response.headers.get('content-type') || ''),
-          );
+          throw new Error(describeNonPdf(buf, ct));
         }
         objectUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
         if (cancelled) {
@@ -173,6 +208,17 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [url]);
+
+  if (asEpub) {
+    return (
+      <EpubReader
+        fileId={fileId || url}
+        url={url}
+        title={title}
+        className="h-full min-h-[20rem] rounded-none border-0"
+      />
+    );
+  }
 
   if (error) {
     return (
@@ -204,7 +250,7 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
     <iframe
       title={title}
       src={src}
-      className="h-[min(80vh,900px)] w-full min-h-[24rem] rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+      className="h-full min-h-[24rem] w-full rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
     />
   );
 }
@@ -240,10 +286,17 @@ function SpreadsheetTablePreview({
 export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   const url = String(file.url || '').trim();
   if (!file.content && url && isEpubFile(file)) {
-    return <EpubReader fileId={file.id || url} url={url} title={file.name} />;
+    return (
+      <EpubReader
+        fileId={file.id || url}
+        url={url}
+        title={file.name}
+        className="h-full min-h-[20rem] rounded-none border-0"
+      />
+    );
   }
   if (!file.content && url && isPdfFile(file)) {
-    return <PdfPreviewFrame url={url} title={file.name} />;
+    return <PdfPreviewFrame url={url} title={file.name} fileId={file.id || url} />;
   }
   if (!file.content && url && isPreviewableImageFile(file)) {
     return (
@@ -348,7 +401,14 @@ export function FilePreviewOverlay({
           </button>
         </div>
 
-        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6">
+        <div
+          className={cn(
+            'min-h-0 min-w-0 flex-1',
+            file && !file.content && (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file))
+              ? 'overflow-hidden p-0'
+              : 'overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6',
+          )}
+        >
           <FilePreviewContent file={file} />
         </div>
       </div>

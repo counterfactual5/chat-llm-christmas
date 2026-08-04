@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import ePub, { type Book, type NavItem, type Rendition } from 'epubjs';
 import {
   BookOpen,
-  ChevronLeft,
-  ChevronRight,
   List,
   Loader2,
   Type,
@@ -32,6 +30,9 @@ export type EpubReaderProps = {
 
 type TocEntry = { id: string; label: string; href: string };
 
+const MIN_LAYOUT_WIDTH = 160;
+const MIN_LAYOUT_HEIGHT = 120;
+
 function flattenToc(items: NavItem[] | undefined, prefix = ''): TocEntry[] {
   if (!items?.length) return [];
   const out: TocEntry[] = [];
@@ -45,13 +46,26 @@ function flattenToc(items: NavItem[] | undefined, prefix = ''): TocEntry[] {
   return out;
 }
 
+function hostSize(el: HTMLElement): { width: number; height: number } {
+  const width = Math.max(0, Math.floor(el.clientWidth));
+  const height = Math.max(0, Math.floor(el.clientHeight));
+  return { width, height };
+}
+
+function layoutReady(el: HTMLElement): boolean {
+  const { width, height } = hostSize(el);
+  return width >= MIN_LAYOUT_WIDTH && height >= MIN_LAYOUT_HEIGHT;
+}
+
 export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const bookRef = useRef<Book | null>(null);
   const renditionRef = useRef<Rendition | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fontSizeRef = useRef(EPUB_DEFAULT_FONT_SIZE);
   const fontFamilyRef = useRef(EPUB_DEFAULT_FONT_FAMILY);
+  const lastSizeRef = useRef({ width: 0, height: 0 });
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -60,13 +74,18 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
   const [fontOpen, setFontOpen] = useState(false);
   const [fontSize, setFontSize] = useState(EPUB_DEFAULT_FONT_SIZE);
   const [fontFamily, setFontFamily] = useState(EPUB_DEFAULT_FONT_FAMILY);
-  const [locationLabel, setLocationLabel] = useState('');
 
   useEffect(() => {
     const host = hostRef.current;
+    const root = rootRef.current;
     if (!host || !url || !fileId) return;
 
     let cancelled = false;
+    let book: Book | null = null;
+    let rendition: Rendition | null = null;
+    let started = false;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+
     const prefs = loadEpubReaderPrefs(fileId);
     const initialSize = prefs?.fontSize || EPUB_DEFAULT_FONT_SIZE;
     const initialFamily = prefs?.fontFamily || EPUB_DEFAULT_FONT_FAMILY;
@@ -77,30 +96,16 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     setLoading(true);
     setError('');
     setToc([]);
-    setLocationLabel('');
 
-    const book = ePub(url);
-    bookRef.current = book;
-
-    // Continuous vertical scroll (chat-like), not left/right page flips.
-    const rendition = book.renderTo(host, {
-      width: '100%',
-      height: '100%',
-      flow: 'scrolled',
-      manager: 'continuous',
-      allowScriptedContent: false,
-    });
-    renditionRef.current = rendition;
-
-    const applyTheme = (size: string, family: string) => {
-      rendition.themes.default({
+    const applyTheme = (target: Rendition, size: string, family: string) => {
+      target.themes.default({
         body: {
           'font-family': fontFamilyCss(family),
           'line-height': '1.65',
           padding: '0.5rem 0.75rem !important',
         },
       });
-      rendition.themes.fontSize(size);
+      target.themes.fontSize(size);
     };
 
     const persist = (cfi?: string) => {
@@ -114,31 +119,64 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
       }, 400);
     };
 
-    rendition.on('relocated', (location: {
-      start?: { cfi?: string; displayed?: { page?: number; total?: number } };
-      atEnd?: boolean;
-    }) => {
-      const cfi = location?.start?.cfi;
-      // Paginated mode exposes page/total; scrolled continuous usually does not —
-      // keep the label empty and let the filename sit in the toolbar instead.
-      const page = location?.start?.displayed?.page;
-      const total = location?.start?.displayed?.total;
-      if (typeof page === 'number' && typeof total === 'number' && total > 0) {
-        setLocationLabel(`${page} / ${total}`);
-      } else {
-        setLocationLabel('');
-      }
-      if (cfi) persist(cfi);
-    });
-
-    void (async () => {
+    const destroyReader = () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
       try {
+        rendition?.destroy();
+      } catch {
+        /* ignore */
+      }
+      try {
+        book?.destroy();
+      } catch {
+        /* ignore */
+      }
+      rendition = null;
+      book = null;
+      renditionRef.current = null;
+      bookRef.current = null;
+      host.innerHTML = '';
+    };
+
+    const startReader = async () => {
+      if (cancelled || started || !layoutReady(host)) return;
+      started = true;
+      const { width, height } = hostSize(host);
+      lastSizeRef.current = { width, height };
+
+      try {
+        book = ePub(url);
+        bookRef.current = book;
+
+        // Continuous vertical scroll. Explicit pixel size avoids measuring a
+        // collapsing side-panel (width animates 0→460) as a tiny column.
+        rendition = book.renderTo(host, {
+          width,
+          height,
+          flow: 'scrolled',
+          manager: 'continuous',
+          allowScriptedContent: false,
+        });
+        renditionRef.current = rendition;
+
+        rendition.on('relocated', (location: { start?: { cfi?: string } }) => {
+          const cfi = location?.start?.cfi;
+          if (cfi) persist(cfi);
+        });
+
         await book.ready;
         if (cancelled) return;
-        applyTheme(initialSize, initialFamily);
+        applyTheme(rendition, initialSize, initialFamily);
 
         const nav = await book.loaded.navigation;
         if (!cancelled) setToc(flattenToc(nav?.toc));
+
+        // Re-measure after paint — panel animation may have finished.
+        const next = hostSize(host);
+        if (next.width !== width || next.height !== height) {
+          lastSizeRef.current = next;
+          rendition.resize(next.width, next.height);
+        }
 
         if (prefs?.cfi) {
           await rendition.display(prefs.cfi);
@@ -152,24 +190,57 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
           setLoading(false);
         }
       }
-    })();
+    };
+
+    const scheduleResize = () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (cancelled) return;
+        if (!started) {
+          void startReader();
+          return;
+        }
+        if (!rendition || !layoutReady(host)) return;
+        const next = hostSize(host);
+        const prev = lastSizeRef.current;
+        if (
+          Math.abs(next.width - prev.width) < 2 &&
+          Math.abs(next.height - prev.height) < 2
+        ) {
+          return;
+        }
+        lastSizeRef.current = next;
+        try {
+          rendition.resize(next.width, next.height);
+        } catch {
+          /* ignore */
+        }
+      }, 80);
+    };
+
+    const observer = new ResizeObserver(() => {
+      scheduleResize();
+    });
+    observer.observe(host);
+    if (root) observer.observe(root);
+
+    // Side panel opens with width animation — poll briefly until layout is ready.
+    void startReader();
+    const readyPoll = window.setInterval(() => {
+      if (cancelled || started) {
+        window.clearInterval(readyPoll);
+        return;
+      }
+      void startReader();
+    }, 50);
+    window.setTimeout(() => window.clearInterval(readyPoll), 2500);
 
     return () => {
       cancelled = true;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      try {
-        rendition.destroy();
-      } catch {
-        /* ignore */
-      }
-      try {
-        book.destroy();
-      } catch {
-        /* ignore */
-      }
-      renditionRef.current = null;
-      bookRef.current = null;
-      host.innerHTML = '';
+      window.clearInterval(readyPoll);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      observer.disconnect();
+      destroyReader();
     };
   }, [fileId, url]);
 
@@ -198,13 +269,6 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     });
   };
 
-  const goPrev = () => {
-    void renditionRef.current?.prev();
-  };
-  const goNext = () => {
-    void renditionRef.current?.next();
-  };
-
   const goToc = (href: string) => {
     void renditionRef.current?.display(href);
     setTocOpen(false);
@@ -212,8 +276,9 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
 
   return (
     <div
+      ref={rootRef}
       className={cn(
-        'flex h-[min(80vh,900px)] min-h-[28rem] w-full flex-col overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950',
+        'flex h-full min-h-[28rem] w-full min-w-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950',
         className,
       )}
     >
@@ -247,24 +312,8 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
           <Type className="h-4 w-4" />
         </button>
         <div className="min-w-0 flex-1 truncate px-1 text-center text-[11px] text-stone-400">
-          {locationLabel || title || 'EPUB'}
+          {title || 'EPUB'}
         </div>
-        <button
-          type="button"
-          title="Previous chapter"
-          onClick={goPrev}
-          className="rounded-md p-1.5 text-stone-500 hover:bg-stone-200/80 dark:hover:bg-stone-800"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          title="Next chapter"
-          onClick={goNext}
-          className="rounded-md p-1.5 text-stone-500 hover:bg-stone-200/80 dark:hover:bg-stone-800"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
 
         {tocOpen && (
           <div className="absolute left-2 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
@@ -330,8 +379,8 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         )}
       </div>
 
-      <div className="relative min-h-0 flex-1">
-        <div ref={hostRef} className="absolute inset-0 bg-white dark:bg-stone-950" />
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div ref={hostRef} className="absolute inset-0 overflow-hidden bg-white dark:bg-stone-950" />
         {loading && !error && (
           <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/80 text-xs text-stone-400 dark:bg-stone-950/80">
             <Loader2 className="h-5 w-5 animate-spin opacity-60" />

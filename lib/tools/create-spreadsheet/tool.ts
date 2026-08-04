@@ -186,7 +186,10 @@ export function createCreateSpreadsheetTool(): ChatTool {
           mimeType: SPREADSHEET_MIME,
           size: uploaded.bytes || bytes.byteLength,
           url: `/api/files/${encodeURIComponent(uploaded.id)}`,
-          content: extractText,
+          content:
+            extractText.length > 24_000
+              ? `${extractText.slice(0, 24_000)}\n\n[…truncated for chat preview; full text is on the file extract]`
+              : extractText,
           createdAt: Date.now(),
         };
 

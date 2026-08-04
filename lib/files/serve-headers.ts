@@ -102,9 +102,10 @@ function safeDownloadName(raw: string, contentType: string): string {
   if (contentType === 'application/pdf' && !/\.pdf$/i.test(name)) {
     name = `${name.replace(/\.(epub|bin|octet-stream)$/i, '')}.pdf`;
   }
-  // Only append .epub when the name has no extension — do not rewrite .pdf↔.epub.
-  if (contentType === 'application/epub+zip' && !/\.[a-z0-9]{2,8}$/i.test(name)) {
-    name = `${name}.epub`;
+  if (contentType === 'application/epub+zip') {
+    // Align extension with sniffed type (including historical *.pdf mislabels).
+    name = name.replace(/\.pdf$/i, '.epub');
+    if (!/\.epub$/i.test(name)) name = `${name.replace(/\.[^.]+$/, '') || name}.epub`;
   }
   return name.slice(0, 120);
 }
@@ -126,11 +127,131 @@ export function fileContentResponseHeaders(opts: {
     opts.gatewayContentType || 'application/octet-stream',
   );
   const filename = String(opts.filename || '').trim() || undefined;
-  return {
+  const headers: Record<string, string> = {
     'Content-Type': contentType,
     'Content-Length': String(opts.buf.byteLength),
     'Content-Disposition': inlineContentDisposition(filename || '', contentType),
     'Cache-Control': 'private, max-age=3600',
     'X-Content-Type-Options': 'nosniff',
   };
+  return headers;
+}
+
+/** Headers after sniffing a small prefix (streaming proxy — no full body yet). */
+export function fileContentHeadersFromSniff(opts: {
+  head: ArrayBuffer;
+  gatewayContentType?: string | null;
+  filename?: string | null;
+  /** Upstream Content-Length when known (full object size). */
+  contentLength?: string | null;
+}): Record<string, string> {
+  const contentType = sniffBinaryContentType(
+    opts.head,
+    opts.gatewayContentType || 'application/octet-stream',
+  );
+  const filename = String(opts.filename || '').trim() || undefined;
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Content-Disposition': inlineContentDisposition(filename || '', contentType),
+    'Cache-Control': 'private, max-age=3600',
+    'X-Content-Type-Options': 'nosniff',
+  };
+  const len = String(opts.contentLength || '').trim();
+  if (/^\d+$/.test(len)) headers['Content-Length'] = len;
+  return headers;
+}
+
+const SNIFF_BYTES = 2048;
+
+function concatUint8(chunks: Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((n, c) => n + c.byteLength, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Stream gateway file bytes to the client: sniff only the first ~2KB for
+ * Content-Type / Disposition, then pipe the rest without buffering the whole file.
+ */
+export async function streamSniffedFileResponse(opts: {
+  upstream: Response;
+  filename: string;
+}): Promise<Response> {
+  const gatewayContentType = opts.upstream.headers.get('content-type');
+  const upstreamLength = opts.upstream.headers.get('content-length');
+  const body = opts.upstream.body;
+
+  if (!body) {
+    const buf = await opts.upstream.arrayBuffer();
+    return new Response(buf, {
+      status: 200,
+      headers: fileContentResponseHeaders({
+        buf,
+        gatewayContentType,
+        filename: opts.filename,
+      }),
+    });
+  }
+
+  const reader = body.getReader();
+  const prefixChunks: Uint8Array[] = [];
+  let prefixBytes = 0;
+  let streamDone = false;
+
+  while (prefixBytes < SNIFF_BYTES) {
+    const { done, value } = await reader.read();
+    if (done) {
+      streamDone = true;
+      break;
+    }
+    if (value?.byteLength) {
+      prefixChunks.push(value);
+      prefixBytes += value.byteLength;
+    }
+  }
+
+  const head = concatUint8(prefixChunks);
+  const headCopy = head.slice();
+  const headers = fileContentHeadersFromSniff({
+    head: headCopy.buffer,
+    gatewayContentType,
+    filename: opts.filename,
+    contentLength: streamDone ? String(head.byteLength) : upstreamLength,
+  });
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (headCopy.byteLength) controller.enqueue(headCopy);
+      if (streamDone) {
+        controller.close();
+        return;
+      }
+      const pump = (): void => {
+        void reader.read().then(
+          ({ done, value }) => {
+            if (done) {
+              controller.close();
+              return;
+            }
+            if (value?.byteLength) controller.enqueue(value);
+            pump();
+          },
+          (err: unknown) => {
+            controller.error(err);
+          },
+        );
+      };
+      pump();
+    },
+    cancel(reason) {
+      void reader.cancel(reason);
+    },
+  });
+
+  return new Response(stream, { status: 200, headers });
 }

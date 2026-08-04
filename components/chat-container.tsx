@@ -64,6 +64,7 @@ import { useChatAttachments } from '@/hooks/chat/use-attachments';
 import { useChatSkills } from '@/hooks/chat/use-skills';
 import { useMemoryWiring } from '@/hooks/chat/use-memory-wiring';
 import { useChatSlash } from '@/hooks/chat/use-slash';
+import { useGmailApproval } from '@/hooks/chat/use-gmail-approval';
 import { parseImageCommand } from '@/lib/chat/turn/image-command';
 import {
   formatResearchCommand,
@@ -506,6 +507,10 @@ export default function ChatContainer() {
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
+  const { onGmailApproval, gmailApprovalBusyId, gmailApprovalError } = useGmailApproval({
+    setSessions,
+    activeSessionId: activeSessionId || null,
+  });
 
   useEffect(() => {
     if (!imagePreviewSrc) return;
@@ -2384,6 +2389,9 @@ export default function ChatContainer() {
                 onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
                 onPreviewFile={openFilePreview}
                 onPreviewView={openViewPreview}
+                onGmailApproval={onGmailApproval}
+                gmailApprovalBusyId={gmailApprovalBusyId}
+                gmailApprovalError={gmailApprovalError}
                 cancelEditMessage={cancelEditMessage}
                 saveEditedMessage={saveEditedMessageOrResearch}
                 editUserMessage={editUserMessage}

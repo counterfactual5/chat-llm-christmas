@@ -199,7 +199,8 @@ export const gmailToolDefs: GoogleToolDef[] = [
   },
   {
     name: 'gmail_send',
-    description: 'Send an email from the connected Gmail account. Only when the user clearly asked to send.',
+    description:
+      'Propose sending an email (opens an in-chat approval compose card). The email is NOT sent until the user presses Send. Only call when the user clearly asked to send.',
     write: true,
     parameters: {
       type: 'object',
@@ -229,7 +230,7 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_reply',
     description:
-      'Reply to a Gmail message in the same thread. Uses original Message-ID headers. Set replyAll=true to CC other recipients.',
+      'Propose a reply in the same Gmail thread (opens approval card; not sent until the user confirms). Uses original Message-ID headers. Set replyAll=true to CC other recipients.',
     write: true,
     parameters: {
       type: 'object',
@@ -260,7 +261,7 @@ export const gmailToolDefs: GoogleToolDef[] = [
   {
     name: 'gmail_forward',
     description:
-      'Forward a Gmail message to a new recipient (quotes original plain-text body).',
+      'Propose forwarding a Gmail message (opens approval card; not sent until the user confirms). Quotes original plain-text body.',
     write: true,
     parameters: {
       type: 'object',
@@ -776,7 +777,8 @@ export const gmailToolDefs: GoogleToolDef[] = [
   },
   {
     name: 'gmail_send_draft',
-    description: 'Send an existing Gmail draft by draftId.',
+    description:
+      'Propose sending an existing Gmail draft by draftId (opens approval card; not sent until the user confirms).',
     write: true,
     parameters: {
       type: 'object',

@@ -150,7 +150,12 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
  */
 export function getToolRunLabelKey(
   classification: ToolRunClassification,
-  state: { searching: boolean; failed: boolean },
+  state: {
+    searching: boolean;
+    failed: boolean;
+    awaitingApproval?: boolean;
+    approvalOutcome?: 'sent' | 'cancelled';
+  },
 ): MessageKey {
   const {
     isNotion,
@@ -186,7 +191,11 @@ export function getToolRunLabelKey(
     isResearchMixedSearch,
     isPaperRead,
   } = classification;
-  const { searching, failed } = state;
+  const { searching, failed, awaitingApproval, approvalOutcome } = state;
+
+  if (awaitingApproval) return 'emailAwaitingApproval';
+  if (approvalOutcome === 'sent') return 'emailSent';
+  if (approvalOutcome === 'cancelled') return 'emailCancelled';
 
   if (isReviewAudit) {
     if (failed) return 'toolFailed';

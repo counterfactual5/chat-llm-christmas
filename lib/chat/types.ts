@@ -1,7 +1,9 @@
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
+import type { GmailApprovalDraft } from '@/lib/mcp/google/gmail-approval';
 
 export type { ToolViewPayload };
+export type { GmailApprovalDraft };
 
 export type MessageActivityStep =
   | { id: string; kind: 'reasoning'; text: string }
@@ -15,11 +17,15 @@ export type MessageActivityStep =
 export type MessageToolRun = {
   id: string;
   name: string;
-  status: 'start' | 'done';
+  status: 'start' | 'done' | 'awaiting_approval';
   query?: string;
   provider?: string;
   results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
   error?: string;
+  /** Present when a Gmail send-family tool is waiting for UI confirmation. */
+  approval?: GmailApprovalDraft;
+  /** sent | cancelled after the user acts on the approval card. */
+  approvalOutcome?: 'sent' | 'cancelled';
 };
 
 /** Deep Research job linkage on an assistant turn (Continue / cancel). */

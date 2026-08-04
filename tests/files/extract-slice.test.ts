@@ -102,6 +102,29 @@ describe('extract-slice', () => {
     ).toBe(false);
   });
 
+  it('detects flattened single-line PDF TOC without Contents heading', () => {
+    const flat =
+      '1.1 Introduction 6 1. 2 What does Crypto-___ Mean? 9 1.3 Why Is Crypto Better? 32 1.4 How To Get Started 33 2.1 Introduction to Trading 40 2.2 Making A Plan 45';
+    expect(looksLikeTocPage(flat)).toBe(true);
+
+    const pages = parseExtractPages(
+      [
+        '--- page 3 ---',
+        'Disclaimer copyright text that is long enough to not look like a toc listing of chapters',
+        '',
+        '--- page 4 ---',
+        flat,
+        '',
+        '--- page 5 ---',
+        'PART 1: CRYPTO',
+        '',
+        '--- page 6 ---',
+        '1.1 INTRODUCTION The digital world is like a parallel universe: it exists within our world, it has permeated our thinking and daily life with enough substance to pass the body-start length gate.',
+      ].join('\n'),
+    );
+    expect(findBodyStartPage(pages)).toBe(6);
+  });
+
   it('finds body start after TOC stretch', () => {
     const pages = parseExtractPages(withToc);
     expect(findBodyStartPage(pages)).toBe(4);
@@ -153,5 +176,14 @@ describe('extract-slice', () => {
         focus: '目录',
       }).startPage,
     ).toBe(1);
+    // Phrases that merely contain "contents" should NOT force TOC mode.
+    expect(
+      resolveAutoStartPage({
+        pages,
+        startPageExplicit: false,
+        startPage: 1,
+        focus: 'file contents overview',
+      }).source,
+    ).toBe('focus');
   });
 });

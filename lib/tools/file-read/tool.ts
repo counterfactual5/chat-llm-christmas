@@ -326,8 +326,31 @@ export function createFileReadTool(): ChatTool {
       const { fileId, focus, startPage, maxPages, startPageExplicit } =
         parseFileReadArgs(rawArguments, fallbackQuery || ctx.userAsk);
       if (!fileId) {
+        const missing = '(missing file_id)';
+        ctx.send({
+          tool: {
+            status: 'start',
+            name: 'file_read',
+            query: missing,
+            provider: 'file-read',
+          },
+        });
+        ctx.send({
+          tool: {
+            status: 'done',
+            name: 'file_read',
+            query: missing,
+            provider: 'file-read',
+            results: [],
+            error: 'file_id is required',
+          },
+        });
         return {
-          content: JSON.stringify({ ok: false, error: 'file_id is required' }),
+          content: JSON.stringify({
+            ok: false,
+            error: 'file_id is required',
+            code: 'BAD_ARGS',
+          }),
         };
       }
 

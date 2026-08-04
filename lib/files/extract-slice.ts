@@ -25,33 +25,90 @@ export type AutoStartResult = {
 
 const TOC_HEADING =
   /(?:^|\n)\s*(?:table\s+of\s+contents|\bcontents\b|目录|目次)\s*(?:\n|$)/i;
-const TOC_FOCUS = /目录|目次|table\s+of\s+contents|\bcontents\b|\btoc\b/i;
+/** focus must be primarily a TOC request — not any phrase containing "contents". */
+const TOC_FOCUS =
+  /^(?:目录|目次|table\s+of\s+contents|contents|toc)(?:\s+page)?\s*$/i;
 const DOT_LEADER = /\.{3,}\s*\d{1,4}\s*$/;
-const TRAILING_PAGE_NUM = /\S.{8,}\s{2,}\d{1,4}\s*$/;
+const TRAILING_PAGE_NUM = /\S.{2,70}\s+\d{1,4}\s*$/;
+/** Numbered TOC entries like "1.1 Introduction 6" or "1. 2 Title 9". */
+const NUMBERED_TOC_ENTRY =
+  /^\d+\.\s*\d+\s+\S.{0,70}?\s+\d{1,4}\s*$/;
+
+/**
+ * PDF extracts often flatten a page to one line. Split into pseudo-rows so
+ * TOC scoring still works without real newlines / dot leaders.
+ */
+function tocCandidateChunks(raw: string): string[] {
+  const lines = raw
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length >= 4) return lines;
+
+  const one = (lines[0] || raw).trim();
+  if (!one) return [];
+
+  // Prefer "1.1 Title 6" / "1. 2 Title 9" section breaks (PDF-flattened TOCs).
+  const bySection = one
+    .split(/(?=\b\d+\.\s*\d+\s+[\p{L}\p{N}])/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (bySection.length >= 4) return bySection;
+
+  // Looser "Title 12" splits only when a Contents heading is present.
+  if (
+    TOC_HEADING.test(one) ||
+    /^(table of contents|contents|目录|目次)\b/i.test(one)
+  ) {
+    const pageChunks = one.match(/\S.{3,80}?\s+\d{1,3}(?=\s+\S|$)/g);
+    if (pageChunks && pageChunks.length >= 4) {
+      return pageChunks.map((s) => s.trim());
+    }
+  }
+  return lines.length ? lines : [one];
+}
+
+function tocChunkHitRatio(chunks: string[]): { ratio: number; numbered: number } {
+  if (!chunks.length) return { ratio: 0, numbered: 0 };
+  let hits = 0;
+  let numbered = 0;
+  for (const c of chunks) {
+    if (NUMBERED_TOC_ENTRY.test(c)) {
+      hits += 1;
+      numbered += 1;
+      continue;
+    }
+    if (DOT_LEADER.test(c) || (TRAILING_PAGE_NUM.test(c) && c.length < 140)) {
+      hits += 1;
+    }
+  }
+  return { ratio: hits / chunks.length, numbered };
+}
 
 /** True when a page looks like a table-of-contents listing. */
 export function looksLikeTocPage(text: string): boolean {
   const raw = String(text || '').trim();
   if (!raw) return false;
-  const lines = raw
-    .split(/\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const chunks = tocCandidateChunks(raw);
+  const first = chunks[0] || raw;
   const hasHeading =
     TOC_HEADING.test(raw) ||
-    /^(table of contents|contents|目录|目次)\b/i.test(lines[0] || '');
+    /^(table of contents|contents|目录|目次)\b/i.test(first);
 
-  if (lines.length >= 4) {
-    const leaderish = lines.filter(
-      (l) =>
-        DOT_LEADER.test(l) ||
-        (TRAILING_PAGE_NUM.test(l) && l.length < 140),
-    ).length;
-    const ratio = leaderish / lines.length;
+  if (chunks.length >= 3) {
+    const { ratio, numbered } = tocChunkHitRatio(chunks);
     if (hasHeading && ratio >= 0.25) return true;
-    if (ratio >= 0.45 && raw.length < 4500) return true;
+    // Dot-leader TOCs without a heading — require real leaders, not "Chapter 1 …".
+    if (!hasHeading && raw.length < 4500) {
+      const leaders = chunks.filter((c) => DOT_LEADER.test(c)).length;
+      if (leaders >= 4 && leaders / chunks.length >= 0.45) return true;
+    }
+    // Flattened numbered TOC without a "Contents" heading (common in PDFs).
+    if (numbered >= 4 && numbered / chunks.length >= 0.5 && raw.length < 4500) {
+      return true;
+    }
   }
-  if (hasHeading && raw.length < 2800 && lines.length >= 3) return true;
+  if (hasHeading && raw.length < 2800 && chunks.length >= 3) return true;
   return false;
 }
 

@@ -2611,7 +2611,43 @@ export default function ChatContainer() {
         onQuote={quoteSelectedText}
       />
 
-      <FileManagerModal open={filesManagerOpen} onClose={() => setFilesManagerOpen(false)} />
+      <FileManagerModal
+        open={filesManagerOpen}
+        onClose={() => setFilesManagerOpen(false)}
+        onDeleted={(fileId) => {
+          void import('@/lib/files/direct-content').then(({ invalidatePreviewContentCache }) => {
+            invalidatePreviewContentCache(fileId);
+          });
+          if (previewTarget?.kind === 'file' && previewTarget.entry.id === fileId) {
+            setPreviewTarget(null);
+          }
+          if (filePreview?.id === fileId) setFilePreview(null);
+          // Drop chat/Output cards that pointed at the deleted account file.
+          setSessions((prev) =>
+            prev.map((s) => {
+              const nextMessages = s.messages
+                .map((m) => {
+                  if (!m.files?.some((f) => f.id === fileId) && !m.images?.some((img) => img.fileId === fileId)) {
+                    return m;
+                  }
+                  const files = m.files?.filter((f) => f.id !== fileId);
+                  const images = m.images?.filter((img) => img.fileId !== fileId);
+                  const activity = (m.activity || []).filter(
+                    (step) => !(step.kind === 'file' && step.fileId === fileId),
+                  );
+                  return {
+                    ...m,
+                    files: files?.length ? files : undefined,
+                    images: images?.length ? images : undefined,
+                    activity: activity.length ? activity : undefined,
+                  };
+                })
+                .filter((m) => !isEmptyAssistantShell(m));
+              return { ...s, messages: nextMessages, updatedAt: Date.now() };
+            }),
+          );
+        }}
+      />
 
       <MemoryManagerModal
         open={memoriesManagerOpen}

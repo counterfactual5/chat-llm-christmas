@@ -246,7 +246,13 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         if (!cancelled) setLoading(false);
       } catch (cause) {
         if (cancelled || abort.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : 'Failed to open EPUB');
+        const raw = cause instanceof Error ? cause.message : 'Failed to open EPUB';
+        const missing = /\b404\b|not found|不存在|FILE_NOT_FOUND/i.test(raw);
+        setError(
+          missing
+            ? 'This file was deleted or is no longer available.'
+            : raw,
+        );
         setLoading(false);
       }
     };

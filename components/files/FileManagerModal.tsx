@@ -26,6 +26,8 @@ export type AccountFile = {
 type FileManagerModalProps = {
   open: boolean;
   onClose: () => void;
+  /** Fired after a file is removed from account storage. */
+  onDeleted?: (fileId: string) => void;
 };
 
 function fileCreatedAt(file: AccountFile): number {
@@ -54,7 +56,7 @@ function formatDate(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
-export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
+export function FileManagerModal({ open, onClose, onDeleted }: FileManagerModalProps) {
   const { t } = useLocale();
   const [files, setFiles] = useState<AccountFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -101,7 +103,9 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
         throw new Error(String(data?.error || `Failed to delete file (${response.status})`));
       }
       setFiles((previous) => previous.filter((file) => file.id !== pendingDelete.id));
+      const deletedId = pendingDelete.id;
       setPendingDelete(null);
+      onDeleted?.(deletedId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to delete file');
     } finally {

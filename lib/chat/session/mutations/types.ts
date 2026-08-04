@@ -30,6 +30,8 @@ export type ToolRunInput = {
   name: string;
   status: 'start' | 'done' | 'awaiting_approval';
   query?: string;
+  /** Model tool_call id when present (preferred match key for parallel runs). */
+  callId?: string;
   provider?: string;
   results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
   error?: string;

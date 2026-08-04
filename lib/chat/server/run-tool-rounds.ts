@@ -91,6 +91,29 @@ async function executeToolCallsInParallel(opts: {
         }>,
       });
       try {
+        const baseCtx = toolCtx as {
+          send?: (payload: Record<string, unknown>) => void;
+          [key: string]: unknown;
+        };
+        const baseSend = baseCtx?.send;
+        const perCallCtx =
+          typeof baseSend === 'function'
+            ? {
+                ...baseCtx,
+                send: (payload: Record<string, unknown>) => {
+                  const tool = payload?.tool;
+                  if (tool && typeof tool === 'object' && !Array.isArray(tool)) {
+                    const t = tool as Record<string, unknown>;
+                    baseSend({
+                      ...payload,
+                      tool: t.callId ? tool : { ...t, callId: tc.id },
+                    });
+                    return;
+                  }
+                  baseSend(payload);
+                },
+              }
+            : toolCtx;
         const result = await executeRegisteredTool(
           enabledTools,
           {
@@ -99,7 +122,7 @@ async function executeToolCallsInParallel(opts: {
             rawArguments: tc.arguments,
             fallbackQuery,
           },
-          toolCtx,
+          perCallCtx,
         );
         const payload = String(result.content || '');
         return {

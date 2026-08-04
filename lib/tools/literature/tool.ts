@@ -208,14 +208,15 @@ const PAPER_SYSTEM = [
   'You have a paper_search tool for academic papers (arXiv / Semantic Scholar / OpenAlex).',
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
-  'After results, cite title + URL; only offer /papers details|citations|references|download using paperId/commands from the tool receipt — never invent ids.',
-  'For PDF downloads: only cite downloadCommand from the tool receipt (ARXIV:… / DOI:… / S2 id / pdf URL). When downloadCommand is absent but pdfUrl is present, show pdfUrl as a markdown Open PDF link.',
+  'After results, cite title + URL from the tool receipt only.',
+  'For follow-ups (/papers details|citations|references|download): copy the exact command fields from the receipt (detailsCommand / citationsCommand / referencesCommand / downloadCommand). Never invent ids or download commands.',
+  'When downloadCommand is absent but pdfUrl is present, show pdfUrl as a markdown Open PDF link.',
 ].join(' ');
 
 const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
-  'For downloads: only cite downloadCommand from the tool receipt (libgen md5 / IA id / gutenberg:id / direct URL). Never invent identifiers or claim only LibGen works.',
+  'For downloads: only cite downloadCommand from the tool receipt — never invent identifiers.',
   'When downloadCommand is absent, give the hit url as a markdown Manual download link for the user to open themselves.',
   'After results, cite title + URL; never invent catalog entries.',
 ].join(' ');

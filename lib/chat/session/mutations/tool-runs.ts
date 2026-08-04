@@ -21,11 +21,40 @@ function toolRunQueryKey(query: string | undefined): string {
   return String(query || '').trim();
 }
 
+function toolRunCallId(callId: string | undefined): string {
+  return String(callId || '').trim();
+}
+
 function sameToolQuery(
   a: { name: string; query?: string },
   b: { name: string; query?: string },
 ): boolean {
   return a.name === b.name && toolRunQueryKey(a.query) === toolRunQueryKey(b.query);
+}
+
+function findPendingToolRunIndex(
+  existing: Array<{ name: string; query?: string; callId?: string; status: string }>,
+  run: { name: string; query?: string; callId?: string },
+): number {
+  const callId = toolRunCallId(run.callId);
+  if (callId) {
+    const byCall = existing.findIndex(
+      (r) => r.status === 'start' && toolRunCallId(r.callId) === callId,
+    );
+    if (byCall >= 0) return byCall;
+  }
+  const byQuery = existing.findIndex(
+    (r) => sameToolQuery(r, run) && r.status === 'start',
+  );
+  if (byQuery >= 0) return byQuery;
+
+  const nameOnlyPending = existing
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.name === run.name && r.status === 'start');
+  if (toolRunQueryKey(run.query)) {
+    return nameOnlyPending.length === 1 ? nameOnlyPending[0]!.i : -1;
+  }
+  return nameOnlyPending[0]?.i ?? -1;
 }
 
 export function withUpsertedAssistantToolRun(
@@ -42,25 +71,14 @@ export function withUpsertedAssistantToolRun(
       if (m.id !== assistantId) return m;
       if (run.provider === 'claim-reviewer') return m;
       const existing = m.toolRuns || [];
-      // Prefer name+query so parallel paper_search (different queries) don't steal
-      // each other's done events. Name-only fallback only when the event has no query
-      // (tools that never send one) or exactly one pending start remains for that name.
-      const idx = existing.findIndex(
-        (r) => sameToolQuery(r, run) && r.status === 'start',
-      );
-      const nameOnlyPending = existing
-        .map((r, i) => ({ r, i }))
-        .filter(({ r }) => r.name === run.name && r.status === 'start');
-      const pendingIdx =
-        idx >= 0
-          ? idx
-          : run.status === 'done' || run.status === 'awaiting_approval'
-            ? toolRunQueryKey(run.query)
-              ? nameOnlyPending.length === 1
-                ? nameOnlyPending[0]!.i
-                : -1
-              : nameOnlyPending[0]?.i ?? -1
-            : -1;
+      // Prefer callId, then name+query, so parallel same-tool calls don't steal
+      // each other's done events. Name-only fallback only when the event has no
+      // query (tools that never send one) or exactly one pending start remains.
+      const idx =
+        run.status === 'done' || run.status === 'awaiting_approval'
+          ? findPendingToolRunIndex(existing, run)
+          : -1;
+      const pendingIdx = idx;
       const awaitingIdx =
         run.status === 'done'
           ? existing.findIndex(
@@ -75,17 +93,23 @@ export function withUpsertedAssistantToolRun(
       let activity = [...(m.activity || [])];
       if (run.status === 'start') {
         const toolRunId = crypto.randomUUID();
-        // Only close a pending start with the *same* name+query (retry / lost done).
-        // Different queries for the same tool are parallel calls — keep them all.
-        const closedOrphans = existing.map((r) =>
-          sameToolQuery(r, run) && r.status === 'start'
-            ? {
-                ...r,
-                status: 'done' as const,
-                error: r.error || 'Superseded by a later call',
-              }
-            : r,
-        );
+        const incomingCallId = toolRunCallId(run.callId);
+        // Close only a true retry of the *same* call (same callId), or — when
+        // callId is absent (slash / legacy) — the same name+query start.
+        const closedOrphans = existing.map((r) => {
+          const retrySameCall =
+            Boolean(incomingCallId) &&
+            r.status === 'start' &&
+            toolRunCallId(r.callId) === incomingCallId;
+          const legacySameQuery =
+            !incomingCallId && sameToolQuery(r, run) && r.status === 'start';
+          if (!retrySameCall && !legacySameQuery) return r;
+          return {
+            ...r,
+            status: 'done' as const,
+            error: r.error || 'Superseded by a later call',
+          };
+        });
         toolRuns = [
           ...closedOrphans,
           {
@@ -93,6 +117,7 @@ export function withUpsertedAssistantToolRun(
             name: run.name,
             status: 'start' as const,
             query: run.query,
+            callId: incomingCallId || undefined,
             approval: run.approval,
           },
         ];
@@ -109,6 +134,7 @@ export function withUpsertedAssistantToolRun(
                 status: 'awaiting_approval' as const,
                 provider: run.provider || r.provider,
                 query: run.query ?? r.query,
+                callId: toolRunCallId(run.callId) || r.callId,
                 approval: run.approval || r.approval,
               }
             : r,
@@ -122,6 +148,7 @@ export function withUpsertedAssistantToolRun(
             name: run.name,
             status: 'awaiting_approval' as const,
             query: run.query,
+            callId: toolRunCallId(run.callId) || undefined,
             provider: run.provider,
             approval: run.approval,
           },
@@ -139,6 +166,8 @@ export function withUpsertedAssistantToolRun(
                 ...r,
                 status: 'done' as const,
                 provider: run.provider || r.provider,
+                query: run.query ?? r.query,
+                callId: toolRunCallId(run.callId) || r.callId,
                 results: run.results,
                 error: run.error,
                 approval: run.approval ?? r.approval,
@@ -155,6 +184,7 @@ export function withUpsertedAssistantToolRun(
             name: run.name,
             status: 'done' as const,
             query: run.query,
+            callId: toolRunCallId(run.callId) || undefined,
             provider: run.provider,
             results: run.results,
             error: run.error,

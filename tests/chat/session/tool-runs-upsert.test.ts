@@ -85,7 +85,7 @@ describe('withUpsertedAssistantToolRun parallel same-tool queries', () => {
     expect(a?.error).toBeUndefined();
   });
 
-  it('supersedes only a pending start with the same query', () => {
+  it('supersedes only a pending start with the same query when callId is absent', () => {
     let sessions = [sessionWithAssistant()];
     sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
       name: 'paper_search',
@@ -110,5 +110,34 @@ describe('withUpsertedAssistantToolRun parallel same-tool queries', () => {
     expect(sameRuns.filter((r) => r.status === 'start')).toHaveLength(1);
     expect(sameRuns.filter((r) => r.status === 'done' && r.error)).toHaveLength(1);
     expect(runs.find((r) => r.query === 'other')?.status).toBe('start');
+  });
+
+  it('matches parallel identical queries by callId', () => {
+    let sessions = [sessionWithAssistant()];
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'paper_search',
+      status: 'start',
+      query: 'same',
+      callId: 'call_a',
+    }).sessions;
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'paper_search',
+      status: 'start',
+      query: 'same',
+      callId: 'call_b',
+    }).sessions;
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'paper_search',
+      status: 'done',
+      query: 'same',
+      callId: 'call_b',
+      results: [{ title: 'b', url: 'https://b', snippet: '' }],
+    }).sessions;
+
+    const runs = runsOf(sessions);
+    expect(runs).toHaveLength(2);
+    expect(runs.find((r) => r.callId === 'call_a')?.status).toBe('start');
+    expect(runs.find((r) => r.callId === 'call_b')?.status).toBe('done');
+    expect(runs.find((r) => r.callId === 'call_b')?.results?.[0]?.title).toBe('b');
   });
 });

@@ -551,6 +551,12 @@ export async function streamChatResponse(
               name: String(parsed.tool.name || 'web_search'),
               status: toolStatus,
               query: parsed.tool.query,
+              callId:
+                typeof parsed.tool.callId === 'string'
+                  ? parsed.tool.callId
+                  : typeof parsed.tool.call_id === 'string'
+                    ? parsed.tool.call_id
+                    : undefined,
               provider: parsed.tool.provider,
               results: Array.isArray(parsed.tool.results) ? parsed.tool.results : undefined,
               error: parsed.tool.error,

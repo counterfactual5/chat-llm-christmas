@@ -19,6 +19,11 @@ export type MessageToolRun = {
   name: string;
   status: 'start' | 'done' | 'awaiting_approval';
   query?: string;
+  /**
+   * Upstream tool_call id when the run came from the model tool loop.
+   * Preferred over name+query when matching parallel same-tool starts/dones.
+   */
+  callId?: string;
   provider?: string;
   results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
   error?: string;

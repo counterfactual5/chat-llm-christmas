@@ -30,7 +30,6 @@ import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
 import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
 import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Textarea } from '@/components/ui/textarea';
-import { CodeBlock } from '@/components/markdown/code/code-block';
 import {
   AttachmentImageThumb,
   isImageAttachment,
@@ -874,71 +873,18 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       </button>
                       {open && body && (
                         <ReasoningBodyScroll body={body} live={live}>
-                          <ReactMarkdown
-                            remarkPlugins={[remarkMath, remarkGfm]}
-                            rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                            components={{
-                              p({ children }) {
-                                return (
-                                  <p className="whitespace-pre-wrap m-0 leading-5">
-                                    {children}
-                                  </p>
-                                );
-                              },
-                              code({ className, children, ...props }) {
-                                const match = /language-(\w+)/.exec(className || '');
-                                const value = String(children).replace(/\n$/, '');
-                                if (match) {
-                                  return <CodeBlock language={match[1]} value={value} />;
-                                }
-                                return (
-                                  <code
-                                    {...props}
-                                    className="rounded bg-stone-200/60 px-1.5 py-0.5 text-[11px] font-mono text-stone-900 dark:bg-stone-800 dark:text-stone-100"
-                                  >
-                                    {children}
-                                  </code>
-                                );
-                              },
-                              ul({ children }) {
-                                return (
-                                  <ul className="my-2 pl-6 list-disc space-y-0.5">
-                                    {children}
-                                  </ul>
-                                );
-                              },
-                              ol({ children }) {
-                                return (
-                                  <ol className="my-2 pl-6 list-decimal space-y-0.5">
-                                    {children}
-                                  </ol>
-                                );
-                              },
-                              li({ children }) {
-                                return <li className="leading-6">{children}</li>;
-                              },
-                              blockquote({ children }) {
-                                return (
-                                  <blockquote className="my-2 border-l-[3px] border-stone-300 pl-3 not-italic dark:border-stone-600">
-                                    {children}
-                                  </blockquote>
-                                );
-                              },
-                              pre({ children }) {
-                                return <>{children}</>;
-                              },
-                            }}
-                          >
-                            {prepareChatMarkdown(body, {
-                              streaming:
-                                isActiveLoading &&
-                                message.id === lastMessage?.id &&
-                                message.role === 'assistant',
-                              // Don't reflow smashed answer tables inside Thought —
-                              // verifier CoT is English prose and gets shredded.
-                              reflowBlocks: false,
-                            })}
-                          </ReactMarkdown>
+                          <AnswerMarkdown
+                            text={body}
+                            streaming={
+                              isActiveLoading &&
+                              message.id === lastMessage?.id &&
+                              message.role === 'assistant'
+                            }
+                            // Don't reflow smashed answer tables inside Thought —
+                            // verifier CoT is English prose and gets shredded.
+                            reflowBlocks={false}
+                            className="space-y-2 text-[12px] leading-5 text-stone-500 dark:text-stone-400 [&_p]:mb-2 [&_p]:leading-5"
+                          />
                         </ReasoningBodyScroll>
                       )}
                     </div>

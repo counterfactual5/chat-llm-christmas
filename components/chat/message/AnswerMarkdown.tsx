@@ -8,6 +8,7 @@ import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
 import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
 import { looksLikeAsciiArt, reflowCollapsedAsciiArt } from '@/lib/markdown/core/ascii-art';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
+import { cn } from '@/lib/utils';
 
 const KATEX_OPTIONS = {
   throwOnError: false,
@@ -27,14 +28,28 @@ export function AnswerMarkdown({
   text,
   streaming,
   onSendCommand,
+  reflowBlocks = true,
+  className,
 }: {
   text: string;
   streaming: boolean;
   /** Send a slash command as a new user turn (e.g. /books download …). */
   onSendCommand?: (command: string) => void;
+  /**
+   * Restore smashed headings/lists/tables. Thought/CoT keeps this off —
+   * English verifier prose is easily shredded by answer-oriented reflow.
+   */
+  reflowBlocks?: boolean;
+  /** Extra classes on the outer wrapper (e.g. denser Thought chrome). */
+  className?: string;
 }) {
   return (
-    <div className="chat-markdown w-full min-w-0 max-w-full overflow-x-hidden text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3 [overflow-wrap:anywhere] [&_sup]:text-[0.7em] [&_sup_a]:text-orange-700 [&_sup_a]:no-underline dark:[&_sup_a]:text-orange-300 [&_section[data-footnotes]]:mt-6 [&_section[data-footnotes]]:border-t [&_section[data-footnotes]]:border-stone-200 [&_section[data-footnotes]]:pt-3 [&_section[data-footnotes]]:text-[13px] [&_section[data-footnotes]]:text-stone-500 dark:[&_section[data-footnotes]]:border-stone-700 dark:[&_section[data-footnotes]]:text-stone-400 [&_section[data-footnotes]_h2]:text-xs [&_section[data-footnotes]_h2]:font-semibold [&_section[data-footnotes]_h2]:uppercase [&_section[data-footnotes]_h2]:tracking-wider [&_section[data-footnotes]_h2]:text-stone-400">
+    <div
+      className={cn(
+        'chat-markdown w-full min-w-0 max-w-full overflow-x-hidden text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3 [overflow-wrap:anywhere] [&_sup]:text-[0.7em] [&_sup_a]:text-orange-700 [&_sup_a]:no-underline dark:[&_sup_a]:text-orange-300 [&_section[data-footnotes]]:mt-6 [&_section[data-footnotes]]:border-t [&_section[data-footnotes]]:border-stone-200 [&_section[data-footnotes]]:pt-3 [&_section[data-footnotes]]:text-[13px] [&_section[data-footnotes]]:text-stone-500 dark:[&_section[data-footnotes]]:border-stone-700 dark:[&_section[data-footnotes]]:text-stone-400 [&_section[data-footnotes]_h2]:text-xs [&_section[data-footnotes]_h2]:font-semibold [&_section[data-footnotes]_h2]:uppercase [&_section[data-footnotes]_h2]:tracking-wider [&_section[data-footnotes]_h2]:text-stone-400',
+        className,
+      )}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
@@ -129,7 +144,10 @@ export function AnswerMarkdown({
           },
         }}
       >
-        {prepareChatMarkdown(unwrapMarkdownDocumentFence(text), { streaming })}
+        {prepareChatMarkdown(unwrapMarkdownDocumentFence(text), {
+          streaming,
+          reflowBlocks,
+        })}
       </ReactMarkdown>
     </div>
   );

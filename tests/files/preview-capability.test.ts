@@ -6,6 +6,7 @@ import {
   isPreviewableImageFile,
   isPreviewableTextFile,
   isSpreadsheetPreviewFile,
+  formatPreviewTypeLabel,
 } from '@/lib/files/preview';
 
 describe('canPreviewGeneratedFile', () => {
@@ -100,5 +101,9 @@ describe('preview mime helpers', () => {
       }),
     ).toBe(true);
     expect(isSpreadsheetPreviewFile({ name: 'data.csv' })).toBe(true);
+    expect(formatPreviewTypeLabel({ name: 'a.epub', mimeType: 'application/epub+zip' })).toBe(
+      'EPUB',
+    );
+    expect(formatPreviewTypeLabel({ name: 'a.pdf', mimeType: 'application/pdf' })).toBe('PDF');
   });
 });

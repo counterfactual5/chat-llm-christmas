@@ -61,6 +61,41 @@ export function isSpreadsheetPreviewFile(file: {
   return /\.(xlsx|xls|csv|tsv)$/i.test(name);
 }
 
+/** Human-readable type label for preview chrome (not raw MIME). */
+export function formatPreviewTypeLabel(file: {
+  name?: string;
+  mimeType?: string;
+  mime?: string;
+  filename?: string;
+}): string {
+  const mime = String(file.mimeType || file.mime || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  const name = String(file.name || file.filename || '').toLowerCase();
+  if (isEpubFile(file) || mime === 'application/epub+zip') return 'EPUB';
+  if (isPdfFile(file) || mime === 'application/pdf') return 'PDF';
+  if (isPreviewableImageFile(file) || mime.startsWith('image/')) {
+    const sub = mime.startsWith('image/') ? mime.slice(6) : name.split('.').pop() || 'image';
+    return sub.toUpperCase();
+  }
+  if (isSpreadsheetPreviewFile(file) || mime.includes('spreadsheet') || mime.includes('excel')) {
+    return 'Excel';
+  }
+  if (name.endsWith('.docx') || mime.includes('wordprocessingml')) return 'Word';
+  if (mime.startsWith('text/')) {
+    if (mime.includes('markdown') || name.endsWith('.md')) return 'Markdown';
+    if (mime === 'text/csv' || name.endsWith('.csv')) return 'CSV';
+    return 'Text';
+  }
+  if (mime && mime !== 'application/octet-stream') {
+    const leaf = mime.includes('/') ? mime.slice(mime.lastIndexOf('/') + 1) : mime;
+    return leaf.replace(/\+zip$/i, '').toUpperCase() || mime;
+  }
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : '';
+  return ext ? ext.toUpperCase() : 'File';
+}
+
 /**
  * Inline `content`, or a fetchable `url` for PDF / EPUB / image / text
  * (text is lazy-fetched by the preview panel — not embedded in session JSON).

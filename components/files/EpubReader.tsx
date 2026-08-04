@@ -82,10 +82,12 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     const book = ePub(url);
     bookRef.current = book;
 
+    // Continuous vertical scroll (chat-like), not left/right page flips.
     const rendition = book.renderTo(host, {
       width: '100%',
       height: '100%',
-      flow: 'paginated',
+      flow: 'scrolled',
+      manager: 'continuous',
       allowScriptedContent: false,
     });
     renditionRef.current = rendition;
@@ -114,12 +116,17 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
 
     rendition.on('relocated', (location: {
       start?: { cfi?: string; displayed?: { page?: number; total?: number } };
+      atEnd?: boolean;
     }) => {
       const cfi = location?.start?.cfi;
+      // Paginated mode exposes page/total; scrolled continuous usually does not —
+      // keep the label empty and let the filename sit in the toolbar instead.
       const page = location?.start?.displayed?.page;
       const total = location?.start?.displayed?.total;
       if (typeof page === 'number' && typeof total === 'number' && total > 0) {
         setLocationLabel(`${page} / ${total}`);
+      } else {
+        setLocationLabel('');
       }
       if (cfi) persist(cfi);
     });
@@ -244,7 +251,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         </div>
         <button
           type="button"
-          title="Previous"
+          title="Previous chapter"
           onClick={goPrev}
           className="rounded-md p-1.5 text-stone-500 hover:bg-stone-200/80 dark:hover:bg-stone-800"
         >
@@ -252,7 +259,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         </button>
         <button
           type="button"
-          title="Next"
+          title="Next chapter"
           onClick={goNext}
           className="rounded-md p-1.5 text-stone-500 hover:bg-stone-200/80 dark:hover:bg-stone-800"
         >

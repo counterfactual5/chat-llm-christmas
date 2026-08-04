@@ -11,6 +11,7 @@ import {
   isPdfFile,
   isPreviewableImageFile,
   isSpreadsheetPreviewFile,
+  formatPreviewTypeLabel,
 } from '@/lib/files/preview';
 import { parseSpreadsheetPreviewText } from '@/lib/files/spreadsheet-text';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
@@ -113,7 +114,7 @@ type FilePreviewOverlayProps = {
 function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
   const ct = String(contentType || '').split(';')[0].trim() || 'unknown type';
   if (isEpubBytes(buf) || ct === 'application/epub+zip') {
-    return 'EPUB_BYTES';
+    return 'This file is an EPUB, not a PDF. Re-download or rename to .epub to preview.';
   }
   const head = new Uint8Array(buf.slice(0, 8));
   const hex = [...head].map((b) => b.toString(16).padStart(2, '0')).join(' ');
@@ -124,28 +125,16 @@ function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
  * Chrome’s PDF plugin inside an iframe is unreliable when the URL path is a
  * bare hash id and Content-Type is application/octet-stream. Fetch → blob with
  * an explicit application/pdf type (cookies still sent same-origin).
- *
- * LibGen downloads sometimes store EPUB bytes as *.pdf — hand off to EpubReader.
  */
-function PdfPreviewFrame({
-  url,
-  title,
-  fileId,
-}: {
-  url: string;
-  title: string;
-  fileId: string;
-}) {
+function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
   const [src, setSrc] = useState('');
   const [error, setError] = useState('');
-  const [asEpub, setAsEpub] = useState(false);
 
   useEffect(() => {
     let objectUrl = '';
     let cancelled = false;
     setSrc('');
     setError('');
-    setAsEpub(false);
 
     void (async () => {
       try {
@@ -160,10 +149,6 @@ function PdfPreviewFrame({
           );
         }
         const buf = await response.arrayBuffer();
-        if (isEpubBytes(buf)) {
-          if (!cancelled) setAsEpub(true);
-          return;
-        }
         if (!isPdfBytes(buf)) {
           throw new Error(
             describeNonPdf(buf, response.headers.get('content-type') || ''),
@@ -188,10 +173,6 @@ function PdfPreviewFrame({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [url]);
-
-  if (asEpub) {
-    return <EpubReader fileId={fileId || url} url={url} title={title} />;
-  }
 
   if (error) {
     return (
@@ -262,7 +243,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
     return <EpubReader fileId={file.id || url} url={url} title={file.name} />;
   }
   if (!file.content && url && isPdfFile(file)) {
-    return <PdfPreviewFrame url={url} title={file.name} fileId={file.id || url} />;
+    return <PdfPreviewFrame url={url} title={file.name} />;
   }
   if (!file.content && url && isPreviewableImageFile(file)) {
     return (
@@ -337,8 +318,8 @@ export function FilePreviewOverlay({
             <div className="truncate text-sm font-medium text-stone-900 dark:text-stone-100">
               {file.name}
             </div>
-            <div className="truncate font-mono text-[11px] text-stone-400">
-              {file.mimeType}
+            <div className="truncate text-[11px] text-stone-400">
+              {formatPreviewTypeLabel(file)}
               {typeof file.size === 'number' && file.size > 0
                 ? ` · ${file.size < 1024 ? `${file.size} B` : file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)} KB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB`}`
                 : ''}

@@ -14,7 +14,7 @@ function pdfBytes(prefix = ''): ArrayBuffer {
   return out.buffer;
 }
 
-/** Minimal EPUB: ZIP local header + mimetype entry (matches real LibGen mislabels). */
+/** Minimal EPUB: ZIP local header + mimetype entry. */
 function epubBytes(): ArrayBuffer {
   const text = 'PK\u0003\u0004\u0014\u0000\u0000\u0000\u0000\u0000xxxxmimetypeapplication/epub+zip';
   const out = new Uint8Array(text.length);
@@ -73,7 +73,7 @@ describe('fileContentResponseHeaders', () => {
     expect(headers['X-Content-Type-Options']).toBe('nosniff');
   });
 
-  it('rewrites a mislabeled .pdf name when bytes are EPUB', () => {
+  it('sniffs EPUB content-type without rewriting a .pdf filename', () => {
     const headers = fileContentResponseHeaders({
       buf: epubBytes(),
       gatewayContentType: 'application/pdf',
@@ -81,8 +81,11 @@ describe('fileContentResponseHeaders', () => {
     }) as Record<string, string>;
 
     expect(headers['Content-Type']).toBe('application/epub+zip');
-    expect(headers['Content-Disposition']).toContain('.epub');
-    expect(headers['Content-Disposition']).not.toMatch(/\.pdf"/);
+    expect(headers['Content-Disposition']).toContain('.pdf');
+  });
+
+  it('appends .epub only when the stored name has no extension', () => {
+    expect(inlineContentDisposition('book-id', 'application/epub+zip')).toContain('book-id.epub');
   });
 
   it('appends .pdf when the stored name is a bare hash id', () => {

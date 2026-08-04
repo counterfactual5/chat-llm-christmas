@@ -71,8 +71,7 @@ export function sniffBinaryContentType(
     return 'image/webp';
   }
 
-  // Do not trust a gateway "application/pdf" when magic says otherwise —
-  // LibGen downloads often defaulted to .pdf while the bytes were EPUB.
+  // Do not trust a gateway "application/pdf" when magic says otherwise.
   if (given === 'application/pdf') {
     return 'application/octet-stream';
   }
@@ -103,9 +102,9 @@ function safeDownloadName(raw: string, contentType: string): string {
   if (contentType === 'application/pdf' && !/\.pdf$/i.test(name)) {
     name = `${name.replace(/\.(epub|bin|octet-stream)$/i, '')}.pdf`;
   }
-  if (contentType === 'application/epub+zip') {
-    name = name.replace(/\.pdf$/i, '.epub');
-    if (!/\.epub$/i.test(name)) name = `${name}.epub`;
+  // Only append .epub when the name has no extension — do not rewrite .pdf↔.epub.
+  if (contentType === 'application/epub+zip' && !/\.[a-z0-9]{2,8}$/i.test(name)) {
+    name = `${name}.epub`;
   }
   return name.slice(0, 120);
 }

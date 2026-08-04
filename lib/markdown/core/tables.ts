@@ -198,13 +198,59 @@ function repairOrphanTableRow(
   return rows;
 }
 
+function isPipeRow(line: string): boolean {
+  const t = String(line || '').trim();
+  return t.startsWith('|') && t.endsWith('|') && pipeCount(t) >= 3;
+}
+
+/**
+ * Models sometimes drop the `|---|` delimiter row, leaving the whole table as
+ * literal pipe text. Restore it when a run of rows with a consistent column
+ * count starts outside any existing table.
+ */
+export function insertMissingTableSeparator(markdown: string): string {
+  const src = String(markdown || '');
+  if (!src.includes('|')) return src;
+
+  const lines = src.split('\n');
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    out.push(line);
+    if (!isPipeRow(line) || isSeparatorLine(lines[i + 1] ?? '')) continue;
+
+    // Only a header can start a table: the line above must not be table-ish.
+    const prev = out[out.length - 2] ?? '';
+    if (isPipeRow(prev) || isSeparatorLine(prev)) continue;
+
+    const cols = splitMarkdownTableCells(line).length;
+    if (cols < 2) continue;
+
+    const body: string[] = [];
+    while (
+      isPipeRow(lines[i + 1 + body.length] ?? '') &&
+      splitMarkdownTableCells(lines[i + 1 + body.length]!).length === cols
+    ) {
+      body.push(lines[i + 1 + body.length]!);
+    }
+    if (body.length < 2) continue;
+
+    out.push(`|${' --- |'.repeat(cols)}`);
+    out.push(...body);
+    i += body.length;
+  }
+
+  return out.join('\n');
+}
+
 /**
  * Insert newlines between smashed table rows. Safe no-op when rows are already
  * separated or the text is not table-like.
  */
 export function reflowCollapsedMarkdownTables(markdown: string): string {
   // Peel jammed titles / orphan rows first (works when sep/rows already have newlines).
-  let src = repairGfmTableStructure(String(markdown || ''));
+  let src = insertMissingTableSeparator(repairGfmTableStructure(String(markdown || '')));
   if (!src.includes('|') || !SEP_ROW.test(src)) return src;
 
   src = src.replace(

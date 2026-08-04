@@ -115,7 +115,7 @@ export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   if (!src) return src;
 
   let out = reflowOutsideFences(src, reflowHeadingsListsHrs);
-  out = reflowCollapsedMarkdownTables(out);
+  out = reflowOutsideFences(out, reflowCollapsedMarkdownTables);
   out = out.replace(/\n{3,}/g, '\n\n');
   return out;
 }

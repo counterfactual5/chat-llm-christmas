@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  insertMissingTableSeparator,
   looksLikeCollapsedMarkdownTable,
   reflowCollapsedMarkdownTables,
   repairGfmTableStructure,
@@ -21,6 +22,32 @@ describe('reflowCollapsedMarkdownTables', () => {
   it('leaves already-valid tables alone', () => {
     const ok = ['| a | b |', '| --- | --- |', '| 1 | 2 |'].join('\n');
     expect(reflowCollapsedMarkdownTables(ok)).toBe(ok);
+  });
+
+  it('restores a delimiter row the model forgot', () => {
+    const out = insertMissingTableSeparator(
+      [
+        '| 库名称 | 主要功能 | 学习难度 |',
+        '| NumPy | 数值计算与多维数组 | 中等 |',
+        '| Pandas | 数据处理与分析 | 中等 |',
+        '| Matplotlib | 数据可视化 | 较低 |',
+      ].join('\n'),
+    );
+    const lines = out.split('\n');
+    expect(lines[1]).toBe('| --- | --- | --- |');
+    expect(lines).toHaveLength(5);
+    expect(lines[2]).toContain('NumPy');
+  });
+
+  it('does not touch table bodies, short runs, or fenced examples', () => {
+    const valid = ['| a | b |', '| --- | --- |', '| 1 | 2 |', '| 3 | 4 |'].join('\n');
+    expect(insertMissingTableSeparator(valid)).toBe(valid);
+
+    const twoRows = ['| a | b |', '| 1 | 2 |'].join('\n');
+    expect(insertMissingTableSeparator(twoRows)).toBe(twoRows);
+
+    const fenced = ['```md', '| a | b |', '| 1 | 2 |', '| 3 | 4 |', '```'].join('\n');
+    expect(prepareChatMarkdown(fenced)).toContain(fenced);
   });
 
   it('runs through prepareChatMarkdown', () => {

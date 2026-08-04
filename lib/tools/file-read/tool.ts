@@ -130,8 +130,19 @@ type FetchOk = {
   extractedPages?: number | null;
   bodyStartPage?: number | null;
   outline?: Array<{ title?: string; page?: number | null }>;
+  pdfType?: string | null;
+  pdfConfidence?: number | null;
+  pagesNeedingOcr?: number[];
+  needsOcr?: boolean;
 };
-type FetchErr = { ok: false; error: string; code?: string };
+type FetchErr = {
+  ok: false;
+  error: string;
+  code?: string;
+  pdfType?: string | null;
+  needsOcr?: boolean;
+  pagesNeedingOcr?: number[];
+};
 
 async function fetchGatewayFileText(
   fileId: string,
@@ -177,6 +188,10 @@ async function fetchGatewayFileText(
         extracted_pages?: number | null;
         body_start_page?: number | null;
         outline?: Array<{ title?: string; page?: number | null }>;
+        pdf_type?: string | null;
+        pdf_confidence?: number | null;
+        pages_needing_ocr?: number[];
+        needs_ocr?: boolean;
       };
       const text = String(data.text || '');
       if (text.trim()) {
@@ -191,6 +206,13 @@ async function fetchGatewayFileText(
           bodyStartPage:
             Number(data.body_start_page) > 0 ? Number(data.body_start_page) : null,
           outline: Array.isArray(data.outline) ? data.outline : [],
+          pdfType: data.pdf_type ?? null,
+          pdfConfidence:
+            Number(data.pdf_confidence) > 0 ? Number(data.pdf_confidence) : null,
+          pagesNeedingOcr: Array.isArray(data.pages_needing_ocr)
+            ? data.pages_needing_ocr
+            : [],
+          needsOcr: Boolean(data.needs_ocr),
         };
       }
     } catch {
@@ -212,21 +234,37 @@ async function fetchGatewayFileText(
     // EXTRACT_NOT_FOUND on a known file — unusual if auto-build is on; surface clearly.
   } else if (extractRes.status === 422) {
     let detail = `Could not extract text from ${filename}`;
+    let code = 'EXTRACT_FAILED';
+    let pdfType: string | null = null;
+    let needsOcr = false;
+    let pagesNeedingOcr: number[] = [];
     try {
       const body = (await extractRes.json()) as {
         code?: string;
         message?: string;
         error?: string;
+        pdf_type?: string;
+        needs_ocr?: boolean;
+        pages_needing_ocr?: number[];
       };
       detail = String(body.message || body.error || detail);
-      return {
-        ok: false,
-        error: detail,
-        code: String(body.code || 'EXTRACT_FAILED'),
-      };
+      code = String(body.code || 'EXTRACT_FAILED');
+      pdfType = body.pdf_type ? String(body.pdf_type) : null;
+      needsOcr = Boolean(body.needs_ocr) || code === 'NEEDS_OCR';
+      pagesNeedingOcr = Array.isArray(body.pages_needing_ocr)
+        ? body.pages_needing_ocr
+        : [];
     } catch {
-      return { ok: false, error: detail, code: 'EXTRACT_FAILED' };
+      /* ignore */
     }
+    return {
+      ok: false,
+      error: detail,
+      code,
+      pdfType,
+      needsOcr,
+      pagesNeedingOcr,
+    };
   }
 
   const res = await fetch(`${base}/files/${encodeURIComponent(fileId)}/content`, {
@@ -377,6 +415,9 @@ export function createFileReadTool(): ChatTool {
         let extractPages: number | null | undefined;
         let bodyStartFromMeta: number | null = null;
         let outline: Array<{ title?: string; page?: number | null }> = [];
+        let pdfType: string | null = null;
+        let needsOcr = false;
+        let pagesNeedingOcr: number[] = [];
 
         if (!text) {
           const fetched = await fetchGatewayFileText(
@@ -399,6 +440,13 @@ export function createFileReadTool(): ChatTool {
                 ok: false,
                 error: fetched.error,
                 code: fetched.code,
+                pdf_type: fetched.pdfType ?? null,
+                needs_ocr: Boolean(fetched.needsOcr),
+                pages_needing_ocr: fetched.pagesNeedingOcr || [],
+                tip:
+                  fetched.needsOcr || fetched.code === 'NEEDS_OCR'
+                    ? 'This PDF looks scanned/image-based. Text-layer extract is empty; OCR is not enabled yet.'
+                    : undefined,
               }),
             };
           }
@@ -409,6 +457,9 @@ export function createFileReadTool(): ChatTool {
           extractPages = fetched.extractedPages;
           bodyStartFromMeta = fetched.bodyStartPage ?? null;
           outline = fetched.outline || [];
+          pdfType = fetched.pdfType ?? null;
+          needsOcr = Boolean(fetched.needsOcr);
+          pagesNeedingOcr = fetched.pagesNeedingOcr || [];
         }
 
         const pages = parseExtractPages(text);
@@ -431,6 +482,13 @@ export function createFileReadTool(): ChatTool {
           tips.push(
             `Skipped front matter/TOC; started at page ${auto.bodyStartPage} (${auto.source}). Pass start_page=1 or focus="contents" to read the TOC.`,
           );
+        }
+        if (needsOcr && pagesNeedingOcr.length) {
+          tips.push(
+            `PDF classified as ${pdfType || 'Mixed'}; pages needing OCR (not extracted as text): ${pagesNeedingOcr.slice(0, 12).join(', ')}${pagesNeedingOcr.length > 12 ? '…' : ''}.`,
+          );
+        } else if (pdfType && pdfType !== 'TextBased') {
+          tips.push(`PDF classified as ${pdfType}.`);
         }
         if (slice.hasMore) {
           tips.push(
@@ -473,6 +531,9 @@ export function createFileReadTool(): ChatTool {
             skipped_toc: auto.skippedToc,
             body_start_page: auto.bodyStartPage,
             auto_start_source: auto.source,
+            pdf_type: pdfType,
+            needs_ocr: needsOcr,
+            pages_needing_ocr: pagesNeedingOcr,
             outline_preview: outline.slice(0, 12).map((e) => ({
               title: e.title,
               page: e.page ?? null,

@@ -42,9 +42,6 @@ export function cursorWebChatPrompt(opts: { searchEnabled: boolean }): string {
   ].join('');
 }
 
-/** @deprecated Prefer cursorWebChatPrompt({ searchEnabled }). Kept for import compatibility. */
-export const CURSOR_WEB_CHAT_PROMPT = cursorWebChatPrompt({ searchEnabled: true });
-
 /** Explicit inventory of THIS-turn toggles (contracts live in CHAT_OUTPUT_CAPABILITIES_PROMPT; map in productUsageGuidePrompt). */
 export function activeIntegrationsPrompt(opts: {
   searchEnabled: boolean;

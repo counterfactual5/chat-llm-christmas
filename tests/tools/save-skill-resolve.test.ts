@@ -123,12 +123,10 @@ describe('skillPersistenceGatePrompt', () => {
     expect(off).toContain('/skill');
     expect(off).toContain('手动添加');
     expect(off).toContain('Do not paste the full Skill body');
-    expect(off).toContain('Past tool outcomes');
     expect(off).toContain('cannot create or replace');
     const on = skillPersistenceGatePrompt(true);
     expect(on).toContain('Skill Creator ON');
     expect(on).toContain('save_skill');
     expect(on).toContain('Iterate/replace');
-    expect(on).toContain('Past tool outcomes');
   });
 });

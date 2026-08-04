@@ -107,7 +107,6 @@ const WEB_SEARCH_SYSTEM_PROMPT = [
   'Do search (without waiting for an explicit search request) when a good answer needs live or post-training facts: news, prices, product versions, “最新/最近/现在怎么样”, people/companies/events that change, docs that may have been updated, or anything you are unsure may be outdated.',
   'Pass sources=news for headlines/breaking news; sources=wiki for encyclopedia/entity verification; otherwise omit or use web.',
   'For sources=wiki, pass a single-language entity name (e.g. 比特币 or Bitcoin — not both) and prefer lang=zh|en matching the user.',
-  'There is NO /news or /wiki slash command. Never tell the user to run /news or /wiki — you call web_search yourself.',
   'If the user explicitly asks to search/look up, call web_search.',
   'After web_search, if you need full article/docs text from a result URL, call web_read on that URL (do not rely on snippets alone for deep details).',
   'Do not pretend to search — if you need the web, call the tool; if you do not need the web, answer directly.',

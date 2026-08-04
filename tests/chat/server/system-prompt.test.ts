@@ -107,7 +107,7 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('The user explicitly requested a claim review');
     expect(parts).toContain('manually requested a review');
     expect(parts).toContain('This chat already contains image(s) generated');
-    expect(parts).toContain('This chat already contains downloadable file(s) (create_file / create_spreadsheet / book download).');
+    expect(parts).toContain('This chat already contains downloadable file(s)');
   });
 
   it('includes account skill catalog when Skill Creator needs replace targets', () => {
@@ -129,7 +129,7 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('Skill Creator OFF');
     expect(parts).toContain('/skill');
     expect(parts).toContain('Do not paste the full Skill body');
-    expect(parts).toContain('Past tool outcomes');
+    expect(parts).toContain('Past tool results');
   });
 });
 

@@ -48,6 +48,8 @@ export function invalidatePreviewContentCache(fileId: string) {
   const id = String(fileId || '').trim();
   if (id) previewCache.delete(id);
 }
+
+export function fileIdFromPreviewUrl(url: string): string {
   const raw = String(url || '').trim();
   const m = raw.match(/^\/api\/files\/([^/?#]+)/i);
   if (!m?.[1]) return '';

@@ -1,6 +1,10 @@
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message } from '@/lib/chat/types';
-import { collapseAttachedFileBlocksForHistory } from '@/lib/files/attached-file-blocks';
+import {
+  collapseAttachedFileBlocksForHistory,
+  formatChatFileHistoryRefs,
+  HISTORY_FILE_REF_MARKER,
+} from '@/lib/files/attached-file-blocks';
 import {
   hasPersistedImageTranscription,
   imageRefsFromMessageImages,
@@ -9,6 +13,21 @@ import {
   stripImageArchiveBlock,
   stripUserMessageArtifactsForDisplay,
 } from '@/lib/tools/image-understand/persist';
+
+function appendAssistantFileRefs(
+  content: string,
+  files: Message['files'] | undefined,
+): string {
+  if (!files?.length) return content;
+  const refs = formatChatFileHistoryRefs(files);
+  if (!refs) return content;
+  const body = String(content || '');
+  // Avoid duplicating when a prior serialize already injected the marker.
+  if (body.includes(HISTORY_FILE_REF_MARKER) && files.every((f) => body.includes(f.id))) {
+    return body;
+  }
+  return [body.trim(), refs].filter(Boolean).join('\n\n');
+}
 
 export function sessionHasImages(
   messages: Message[],
@@ -146,16 +165,19 @@ export function toApiMessages(
             timestamp: m.timestamp,
           });
         }
-        if (String(content || '').trim()) {
+        const withFiles = appendAssistantFileRefs(content, m.files);
+        if (String(withFiles || '').trim()) {
           out.push({
             role: 'assistant',
-            content,
+            content: withFiles,
             images: [],
             timestamp: m.timestamp,
           });
         }
         return out;
       }
+
+      content = appendAssistantFileRefs(content, m.files);
     }
 
     return [

@@ -4,7 +4,9 @@ import {
   collapseAttachedFileBlocksForHistory,
   collapseAttachedFileBodiesInMessages,
   collectFileExtractsFromMessages,
+  formatChatFileHistoryRefs,
   HISTORY_FILE_REF_MARKER,
+  messagesHaveAttachedFiles,
   parseAttachedFileBlocks,
 } from '@/lib/files/attached-file-blocks';
 import {
@@ -48,6 +50,44 @@ describe('attached-file-blocks', () => {
     expect(collapsed).toContain('file_read');
     expect(collapsed).toContain('what does it say?');
     expect(collapsed).not.toContain('alpha '.repeat(20));
+  });
+
+  it('formats assistant-delivered file refs for file_read', () => {
+    const refs = formatChatFileHistoryRefs([
+      { id: 'file-book', name: 'Guide.pdf', mimeType: 'application/pdf' },
+      { id: 'file-book', name: 'dup.pdf' },
+    ]);
+    expect(refs).toContain(HISTORY_FILE_REF_MARKER);
+    expect(refs).toContain('fileId: file-book');
+    expect(refs).toContain('Guide.pdf');
+    expect(refs).toContain('file_read');
+    expect(refs.match(/file-book/g)?.length).toBe(1);
+  });
+
+  it('messagesHaveAttachedFiles sees assistant file refs', () => {
+    expect(
+      messagesHaveAttachedFiles([
+        { role: 'user', content: 'download please' },
+        {
+          role: 'assistant',
+          content: formatChatFileHistoryRefs([
+            { id: 'file-1', name: 'a.pdf', mimeType: 'application/pdf' },
+          ]),
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      messagesHaveAttachedFiles([
+        {
+          role: 'assistant',
+          content: '',
+          files: [{ id: 'file-2' }],
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      messagesHaveAttachedFiles([{ role: 'user', content: 'hello' }]),
+    ).toBe(false);
   });
 
   it('onlyWithFileId keeps bodies without a stored id', () => {

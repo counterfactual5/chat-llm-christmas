@@ -96,8 +96,9 @@ flowchart TD
 - **首轮不空转**：最新附件全文进用户消息；不要求模型先调工具再读。
 - **会话也折叠**：下一轮发送时，旧用户消息里的全文（有 fileId）被压成引用；云同步 / 本地恢复同样处理。最新用户轮保留全文，方便 Retry。
 - **气泡不泄全文**：UI 展示用 `attachedFilesForUserBubbleDisplay`，即使本轮会话里还存着全文也不刷屏。
-- **`file_read` 懒注入**：本线程有附件文档时才进工具列表。
-- **重读靠 sidecar**：不再每轮把 `fileExtracts` 塞进 `/api/chat` body；`file_read` 读 chat-api `GET /v1/files/:id/extract`。
+- **`file_read` 懒注入**：本线程有附件文档，或助手交付的文件（`book_download` / `create_file` → `【历史文件引用】`）时才进工具列表。
+- **重读靠 sidecar**：不再每轮把 `fileExtracts` 塞进 `/api/chat` body；`file_read` 读 chat-api `GET /v1/files/:id/extract`；缺失时服务端可从 PDF/EPUB 内容即时抽取，并 `PUT` 回 sidecar。
+- **与图片引用同构**：书籍下载留下 fileId 引用（非整书正文），模型需要时再 `file_read`，类似 `【历史图片引用】` → `image_understand` / 视觉像素。
 
 ---
 

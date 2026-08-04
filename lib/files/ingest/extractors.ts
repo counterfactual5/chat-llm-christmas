@@ -9,15 +9,40 @@ export function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+const PDF_PAGE_LIMIT = 40;
+
+export async function extractPdfTextFromBytes(data: Uint8Array): Promise<string> {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // Node / server: no worker. Browser ingest still uses extractPdfText(File).
+  const doc = await pdfjs.getDocument({
+    data,
+    useSystemFonts: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+    isOffscreenCanvasSupported: false,
+  }).promise;
+  const pages: string[] = [];
+  const limit = Math.min(doc.numPages, PDF_PAGE_LIMIT);
+  for (let i = 1; i <= limit; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    pages.push(content.items.map((item: { str?: string }) => item.str || '').join(' '));
+  }
+  if (doc.numPages > limit) {
+    pages.push(`\n[…truncated: showing first ${limit} of ${doc.numPages} pages]`);
+  }
+  return pages.join('\n\n').trim();
+}
+
 export async function extractPdfText(file: File): Promise<string> {
-  const pdfjs = await import('pdfjs-dist');
   // Pin worker to the installed package version via CDN to avoid bundler path issues.
+  const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
   const data = new Uint8Array(await file.arrayBuffer());
   const doc = await pdfjs.getDocument({ data }).promise;
   const pages: string[] = [];
-  const limit = Math.min(doc.numPages, 40);
+  const limit = Math.min(doc.numPages, PDF_PAGE_LIMIT);
   for (let i = 1; i <= limit; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
@@ -27,6 +52,35 @@ export async function extractPdfText(file: File): Promise<string> {
     pages.push(`\n[…truncated: showing first ${limit} of ${doc.numPages} pages]`);
   }
   return pages.join('\n\n').trim();
+}
+
+/** Strip tags from EPUB XHTML/HTML spine documents (best-effort plain text). */
+export async function extractEpubTextFromBytes(data: Uint8Array): Promise<string> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(data);
+  const parts: string[] = [];
+  const names = Object.keys(zip.files)
+    .filter((n) => /\.(x?html?|xml)$/i.test(n) && !/META-INF/i.test(n))
+    .sort();
+  const limit = Math.min(names.length, 80);
+  for (let i = 0; i < limit; i++) {
+    const raw = await zip.files[names[i]]!.async('string');
+    const text = String(raw || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length > 40) parts.push(text);
+  }
+  if (names.length > limit) {
+    parts.push(`[…truncated: showing first ${limit} of ${names.length} EPUB documents]`);
+  }
+  return parts.join('\n\n').trim();
 }
 
 export async function extractDocxText(file: File): Promise<string> {

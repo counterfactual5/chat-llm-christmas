@@ -24,6 +24,7 @@ import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { useLocale } from '@/lib/i18n';
 import { formatQuotedMessage } from '@/lib/chat/message/quotes';
 import { toApiMessages, ingestedToMessageImages } from '@/lib/chat/message/api-messages';
+import { ensureFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { isAssistantError } from '@/lib/chat/message/display';
@@ -550,6 +551,12 @@ export function useChatLogic(props: UseChatLogicProps) {
         setOutputGroupsOpen((prev) => ({ ...prev, files: true }));
         setIsContextPanelOpen(true);
       }
+      // Background: store PDF/EPUB extract so follow-up file_read is cheap.
+      void ensureFileExtractSidecar({
+        fileId: result.fileId,
+        filename: result.filename,
+        url: fileEntry.url,
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Book download failed';
       setSessions((prev) =>

@@ -221,9 +221,16 @@ export async function handleChatRequest(req: NextRequest) {
     const hasGeneratedImages = chatMessages.some(
       (m) => m?.role === 'assistant' && Array.isArray(m.images) && m.images.length > 0,
     );
-    const hasGeneratedFiles = chatMessages.some(
-      (m) => m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0,
-    );
+    const hasGeneratedFiles = chatMessages.some((m) => {
+      if (m?.role === 'assistant' && Array.isArray(m.files) && m.files.length > 0) {
+        return true;
+      }
+      const text = typeof m?.content === 'string' ? m.content : '';
+      return (
+        (m?.role === 'assistant' || m?.role === 'tool') &&
+        text.includes('【历史文件引用】')
+      );
+    });
     let accountSkillCatalog = '';
     if (boundUserKey) {
       try {

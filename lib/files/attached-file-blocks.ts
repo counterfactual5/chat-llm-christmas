@@ -102,6 +102,33 @@ export function formatAttachedFileHistoryRef(
 }
 
 /**
+ * Lightweight refs for assistant-delivered files (book_download / create_file /
+ * create_spreadsheet) — same marker family as collapsed user attachments so
+ * file_read can open them on demand (image-ref pattern for documents).
+ */
+export function formatChatFileHistoryRefs(
+  files: Array<{ id?: string; name?: string; mimeType?: string }>,
+): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const f of files || []) {
+    const fileId = String(f.id || '').trim();
+    if (!fileId || seen.has(fileId)) continue;
+    seen.add(fileId);
+    const name = String(f.name || fileId).trim() || fileId;
+    const mime = String(f.mimeType || '').trim();
+    const mimePart = mime ? ` [${mime}]` : '';
+    lines.push(`- ${name} (fileId: ${fileId})${mimePart}`);
+  }
+  if (!lines.length) return '';
+  return [
+    HISTORY_FILE_REF_MARKER,
+    ...lines,
+    '如需全文请调用 file_read（传入 file_id）。这些文件已保存在本对话 / Files，无需用户重新上传。',
+  ].join('\n');
+}
+
+/**
  * Replace full attached-file bodies with describing + fileId refs.
  * Leaves the trailing user ask (after `---`) untouched when present.
  *
@@ -221,20 +248,22 @@ export function collectFileExtractsFromMessages(
 }
 
 export function messagesHaveAttachedFiles(
-  messages: Array<{ role?: string; content?: unknown }>,
+  messages: Array<{
+    role?: string;
+    content?: unknown;
+    files?: Array<{ id?: string }>;
+  }>,
 ): boolean {
   for (const m of messages) {
-    if (m.role !== 'user') continue;
-    const text =
-      typeof m.content === 'string'
-        ? m.content
-        : Array.isArray(m.content)
-          ? m.content
-              .filter((p: any) => p?.type === 'text' && typeof p.text === 'string')
-              .map((p: any) => p.text)
-              .join('\n')
-          : '';
-    if (contentHasAttachedFiles(text)) return true;
+    if (Array.isArray(m.files) && m.files.some((f) => String(f?.id || '').trim())) {
+      return true;
+    }
+    const text = messageTextContent(m.content);
+    // User attaches + assistant 【历史文件引用】 (book_download / create_file).
+    if (m.role === 'user' || m.role === 'assistant' || m.role === 'tool') {
+      if (contentHasAttachedFiles(text)) return true;
+      if (text.includes('(fileId:') && /file_read|历史文件引用/.test(text)) return true;
+    }
   }
   return false;
 }

@@ -135,8 +135,9 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   if (opts.hasGeneratedFiles) {
     systemParts.push(
       [
-        'This chat already contains downloadable file(s) created via create_file / create_spreadsheet.',
-        'They appear in the Output panel. Refer to those existing files when the user asks about them.',
+        'This chat already contains downloadable file(s) (create_file / create_spreadsheet / book download).',
+        'They appear in the Output / Files UI and as 【历史文件引用】 markers with fileId in the conversation.',
+        'When the user asks you to read, summarize, or quote those files, call file_read with that file_id — do not claim you cannot read them when a marker is present.',
         'To add more files, call create_file or create_spreadsheet again — do not pretend a file exists without a successful tool receipt (ok:true).',
       ].join(' '),
     );

@@ -119,6 +119,9 @@ export function bookDownloadToolRun(opts: {
         title: opts.title,
         url: fileUrl || opts.sourceUrl || '',
         snippet: opts.filename,
+        ...(opts.fileId
+          ? { body: `file_id: ${opts.fileId}\nfilename: ${opts.filename}` }
+          : {}),
       },
     ],
   };

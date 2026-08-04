@@ -103,7 +103,7 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('The user explicitly requested a claim review');
     expect(parts).toContain('manually requested a review');
     expect(parts).toContain('This chat already contains image(s) generated');
-    expect(parts).toContain('This chat already contains downloadable file(s) created via create_file / create_spreadsheet.');
+    expect(parts).toContain('This chat already contains downloadable file(s) (create_file / create_spreadsheet / book download).');
   });
 
   it('includes account skill catalog when Skill Creator needs replace targets', () => {

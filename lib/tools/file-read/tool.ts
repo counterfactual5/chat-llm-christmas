@@ -113,7 +113,52 @@ async function fetchGatewayFileText(
       filename,
     );
 
-  if (!looksText) {
+  const isPdf =
+    ct === 'application/pdf' ||
+    /\.pdf$/i.test(filename) ||
+    (buf.length >= 5 &&
+      buf[0] === 0x25 &&
+      buf[1] === 0x50 &&
+      buf[2] === 0x44 &&
+      buf[3] === 0x46 &&
+      buf[4] === 0x2d);
+  const isEpub =
+    ct === 'application/epub+zip' ||
+    /\.epub$/i.test(filename) ||
+    (buf.length >= 4 &&
+      buf[0] === 0x50 &&
+      buf[1] === 0x4b &&
+      /\.epub$/i.test(filename));
+
+  let text = '';
+  if (looksText) {
+    text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  } else if (isPdf) {
+    try {
+      const { extractPdfTextFromBytes } = await import('@/lib/files/ingest/extractors');
+      text = await extractPdfTextFromBytes(buf);
+    } catch (cause) {
+      return {
+        ok: false,
+        error: `Could not extract PDF text from ${filename}: ${
+          cause instanceof Error ? cause.message : 'extract failed'
+        }`,
+      };
+    }
+  } else if (isEpub) {
+    try {
+      const { extractEpubTextFromBytes } = await import('@/lib/files/ingest/extractors');
+      text = await extractEpubTextFromBytes(buf);
+    } catch (cause) {
+      return {
+        ok: false,
+        error: `Could not extract EPUB text from ${filename}: ${
+          cause instanceof Error ? cause.message : 'extract failed'
+        }`,
+      };
+    }
+  } else {
     return {
       ok: false,
       error: [
@@ -123,8 +168,23 @@ async function fetchGatewayFileText(
     };
   }
 
-  let text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  if (!text.trim()) {
+    return {
+      ok: false,
+      error: `File ${filename} produced an empty text extract (scanned/image PDF or empty document).`,
+    };
+  }
+
+  // Best-effort: cache extract sidecar for later file_read rounds.
+  void fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ text }),
+  }).catch(() => {});
+
   return { ok: true, name: filename, text, mime: ct || mime };
 }
 
@@ -153,9 +213,11 @@ function formatForModel(opts: {
 }
 
 const FILE_READ_SYSTEM_PROMPT = [
-  'You also have a file_read tool to re-read the full text of an earlier attached document.',
-  'Older turns show 【历史文件引用】 markers with fileId — call file_read with that file_id when the preview is not enough.',
-  'Do not invent file contents. Prefer the extract returned by the tool over guessing from the short preview.',
+  'You also have a file_read tool to read the full text of documents in this chat.',
+  'Sources: (1) user attachments, (2) assistant-delivered files from book_download / create_file / create_spreadsheet.',
+  'They appear as 【历史文件引用】 markers with fileId — call file_read with that file_id when the user asks you to read, summarize, quote, or analyze the file.',
+  'Do not invent file contents. Prefer the extract returned by the tool over guessing from the filename or preview.',
+  'Never claim you cannot read a downloaded book or Output file when a 【历史文件引用】 marker with fileId is present.',
 ].join(' ');
 
 export function createFileReadTool(): ChatTool {
@@ -166,7 +228,7 @@ export function createFileReadTool(): ChatTool {
       function: {
         name: 'file_read',
         description:
-          'Re-read the full extracted text of a document attached earlier in this chat. Pass the file_id from a 【历史文件引用】 marker (or stored fileId). Use when the short preview is insufficient.',
+          'Read the full extracted text of a document in this chat. Pass the file_id from a 【历史文件引用】 marker (user attachment, book download, or create_file). Use when the user asks you to read/summarize/analyze that file, or when the short preview is insufficient.',
         parameters: {
           type: 'object',
           properties: {

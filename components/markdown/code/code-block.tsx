@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import hljs from 'highlight.js/lib/common';
 import { Check, Copy } from 'lucide-react';
+import { looksLikeAsciiArt } from '@/lib/markdown/core/ascii-art';
 import { cn } from '@/lib/utils';
 import { MermaidBlock, isMermaidLanguage } from '@/components/markdown/diagrams/mermaid-block';
 
@@ -58,7 +59,14 @@ function highlightCode(value: string, language: string) {
 
 export function CodeBlock({ language, value, wrap = false, streaming = false }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
-  const highlighted = useMemo(() => highlightCode(value, language), [value, language]);
+  // Box-drawing / trees need fixed metrics + tight leading; soft-wrap and hljs
+  // tokenization both make pipes look fragmented even when the source is fine.
+  const asciiArt = looksLikeAsciiArt(value);
+  const softWrap = wrap && !asciiArt;
+  const highlighted = useMemo(
+    () => (asciiArt ? escapeHtml(value) : highlightCode(value, language)),
+    [value, language, asciiArt],
+  );
 
   if (isMermaidLanguage(language)) {
     return <MermaidBlock value={value} streaming={streaming} />;
@@ -98,16 +106,17 @@ export function CodeBlock({ language, value, wrap = false, streaming = false }: 
       </div>
       <pre
         className={cn(
-          'max-w-full p-4 text-sm leading-relaxed',
-          wrap ? 'overflow-x-hidden' : 'overflow-x-auto',
+          'max-w-full p-4 text-sm',
+          asciiArt ? 'leading-none' : 'leading-relaxed',
+          softWrap ? 'overflow-x-hidden' : 'overflow-x-auto',
         )}
       >
         <code
           className={cn(
             'hljs font-mono',
-            wrap
+            softWrap
               ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'
-              : 'whitespace-pre',
+              : 'whitespace-pre [overflow-wrap:normal]',
             `language-${language}`,
           )}
           dangerouslySetInnerHTML={{ __html: highlighted }}

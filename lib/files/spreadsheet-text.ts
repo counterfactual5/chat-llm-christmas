@@ -7,10 +7,34 @@
 export const PREVIEW_TABLE_MAX_ROWS = 200;
 export const PREVIEW_TABLE_MAX_COLS = 30;
 
+/**
+ * Preview-only: when a sheet is a single wide record (header + ≤1 body row
+ * with many columns), render as field|value instead of a skinny horizontal table.
+ * Does not change the underlying .xlsx / extract text.
+ */
+export const PREVIEW_KEY_VALUE_MIN_COLS = 3;
+
 export type ParsedSpreadsheetSection = {
   name: string;
   rows: string[][];
 };
+
+/** True when preview should flip one wide record into vertical key-value rows. */
+export function shouldPreviewAsKeyValue(
+  headers: string[] | undefined,
+  bodyRows: string[][],
+): boolean {
+  if (!headers || headers.length < PREVIEW_KEY_VALUE_MIN_COLS) return false;
+  if (bodyRows.length !== 1) return false;
+  const row = bodyRows[0];
+  if (!row?.some((c) => String(c ?? '').trim())) return false;
+  return true;
+}
+
+/** Map header cells + one body row into `[field, value]` pairs for preview. */
+export function transposeToKeyValueRows(headers: string[], bodyRow: string[]): string[][] {
+  return headers.map((h, i) => [String(h ?? ''), String(bodyRow[i] ?? '')]);
+}
 
 /** Parse extract / CSV / TSV text into preview sections. */
 export function parseSpreadsheetPreviewText(text: string): ParsedSpreadsheetSection[] {

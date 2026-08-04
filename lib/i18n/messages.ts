@@ -348,6 +348,8 @@ export const dict = {
     extractedXlsx: 'Extracted spreadsheet',
     openToolView: 'Open view',
     toolViewEmptyTable: 'This sheet has no table data.',
+    spreadsheetFieldCol: 'Field',
+    spreadsheetValueCol: 'Value',
     toolViewEmptyComments:
       'No Word comments in this document. Try extract or outline mode instead.',
     toolViewEmptyOutline:
@@ -737,6 +739,8 @@ export const dict = {
     extractedXlsx: '已提取表格',
     openToolView: '打开视图',
     toolViewEmptyTable: '此工作表没有表格数据。',
+    spreadsheetFieldCol: '分类',
+    spreadsheetValueCol: '信息',
     toolViewEmptyComments: '该文档没有 Word 批注。可改用 extract 或 outline 模式。',
     toolViewEmptyOutline: '未找到标题大纲。可改用 extract 模式查看正文。',
     download: '下载',

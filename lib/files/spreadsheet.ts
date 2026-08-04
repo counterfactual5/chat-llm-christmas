@@ -8,7 +8,10 @@ import * as XLSX from 'xlsx';
 export {
   PREVIEW_TABLE_MAX_COLS,
   PREVIEW_TABLE_MAX_ROWS,
+  PREVIEW_KEY_VALUE_MIN_COLS,
   parseSpreadsheetPreviewText,
+  shouldPreviewAsKeyValue,
+  transposeToKeyValueRows,
   type ParsedSpreadsheetSection,
 } from '@/lib/files/spreadsheet-text';
 import type { ParsedSpreadsheetSection } from '@/lib/files/spreadsheet-text';

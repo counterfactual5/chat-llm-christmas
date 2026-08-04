@@ -7,6 +7,10 @@ import {
   sheetsToExtractText,
   workbookBytesToXlsxTableViewData,
 } from '@/lib/files/spreadsheet';
+import {
+  shouldPreviewAsKeyValue,
+  transposeToKeyValueRows,
+} from '@/lib/files/spreadsheet-text';
 import { parseCreateSpreadsheetArgs } from '@/lib/tools/create-spreadsheet/tool';
 import { parseXlsxExtractArgs } from '@/lib/tools/xlsx-extract/tool';
 import {
@@ -59,6 +63,34 @@ describe('parseSpreadsheetPreviewText', () => {
 
     const csv = parseSpreadsheetPreviewText('a,b\n1,2');
     expect(csv).toEqual([{ name: 'Sheet1', rows: [['a', 'b'], ['1', '2']] }]);
+  });
+});
+
+describe('shouldPreviewAsKeyValue / transposeToKeyValueRows', () => {
+  it('transposes a single wide record (≥3 cols, exactly 1 body row)', () => {
+    const headers = ['收件人', '标题', '内容'];
+    const body = [['a@x.com', 'Hello', 'Line1\nLine2']];
+    expect(shouldPreviewAsKeyValue(headers, body)).toBe(true);
+    expect(transposeToKeyValueRows(headers, body[0]!)).toEqual([
+      ['收件人', 'a@x.com'],
+      ['标题', 'Hello'],
+      ['内容', 'Line1\nLine2'],
+    ]);
+  });
+
+  it('keeps multi-row and narrow tables as normal grids', () => {
+    expect(
+      shouldPreviewAsKeyValue(
+        ['A', 'B', 'C'],
+        [
+          ['1', '2', '3'],
+          ['4', '5', '6'],
+        ],
+      ),
+    ).toBe(false);
+    expect(shouldPreviewAsKeyValue(['A', 'B'], [['1', '2']])).toBe(false);
+    expect(shouldPreviewAsKeyValue(undefined, [['1', '2', '3']])).toBe(false);
+    expect(shouldPreviewAsKeyValue(['A', 'B', 'C'], [['', '', '']])).toBe(false);
   });
 });
 

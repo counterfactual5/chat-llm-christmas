@@ -16,6 +16,9 @@ export const SOFT_TRUNCATION_REASONS = new Set([
   'Stopped before calling tools',
 ]);
 
+/** Mid-stream tool idle budgets that may be followed by a successful final answer. */
+export const RECOVERABLE_TOOL_TIMEOUT_REASON = 'Stream timed out during tool use';
+
 /** Known SSE completion codes — drive Retry vs Continue copy on the client. */
 export type StreamCompletionCode =
   | 'tools_timeout'

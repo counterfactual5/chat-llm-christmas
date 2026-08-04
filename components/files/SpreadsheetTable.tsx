@@ -35,15 +35,16 @@ export function SpreadsheetTable({
           {sheetName}
         </div>
       ) : null}
-      <div className="min-w-0 overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
-        <table className="w-full min-w-[240px] border-collapse text-left text-xs">
+      <div className="min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border border-stone-200 dark:border-stone-800">
+        {/* w-max so wide sheets expand past the panel and scroll horizontally */}
+        <table className="w-max min-w-full border-collapse text-left text-xs">
           {headers && headers.length > 0 ? (
             <thead>
               <tr className="border-b border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900/60">
                 {Array.from({ length: colCount }, (_, i) => (
                   <th
                     key={i}
-                    className="px-2.5 py-1.5 font-semibold text-stone-700 dark:text-stone-200"
+                    className="whitespace-nowrap px-2.5 py-1.5 font-semibold text-stone-700 dark:text-stone-200"
                   >
                     {headers[i] ?? ''}
                   </th>
@@ -60,7 +61,7 @@ export function SpreadsheetTable({
                 {Array.from({ length: colCount }, (_, ci) => (
                   <td
                     key={ci}
-                    className="max-w-[220px] truncate px-2.5 py-1.5 text-stone-600 dark:text-stone-300"
+                    className="max-w-[280px] truncate whitespace-nowrap px-2.5 py-1.5 text-stone-600 dark:text-stone-300"
                     title={row[ci] || ''}
                   >
                     {row[ci] ?? ''}

@@ -329,9 +329,13 @@ export function FilePreviewOverlay({
         <div
           className={cn(
             'min-h-0 min-w-0 flex-1',
-            file && !file.content && (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file))
+            file &&
+              !file.content &&
+              (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file))
               ? 'overflow-hidden p-0'
-              : 'overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6',
+              : isSpreadsheetPreviewFile(file)
+                ? 'overflow-auto px-4 py-4 sm:px-6'
+                : 'overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6',
           )}
         >
           <FilePreviewContent file={file} />

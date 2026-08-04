@@ -68,7 +68,14 @@ export function ToolViewPanel({
             </div>
           </div>
 
-          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+          <div
+            className={cn(
+              'min-h-0 min-w-0 flex-1 overscroll-contain',
+              view?.viewType === 'xlsx.table'
+                ? 'overflow-auto'
+                : 'overflow-x-hidden overflow-y-auto',
+            )}
+          >
             {!view ? (
               <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                 <Layers className="h-8 w-8 opacity-40" />

@@ -13,6 +13,7 @@ import {
 } from '@/lib/chat/message/think-tags';
 import {
   NATURAL_FINISH_REASONS,
+  RECOVERABLE_TOOL_TIMEOUT_REASON,
   SOFT_TRUNCATION_REASONS,
   truncationFromFinishReason,
 } from '@/lib/chat/stream/truncation';
@@ -98,15 +99,62 @@ export function analyzeTruncation(
   if (!text) return { truncated: false, reason: '' };
 
   // Sticky only for hard reasons. Soft legacy reasons are revalidated below.
+  // tools_timeout is recoverable: tool round may idle, then final answer completes.
   if (storedReason && !SOFT_TRUNCATION_REASONS.has(storedReason)) {
-    return { truncated: true, reason: storedReason };
+    if (
+      storedReason === RECOVERABLE_TOOL_TIMEOUT_REASON ||
+      storedReason.startsWith('Stream timed out during tool use')
+    ) {
+      // tools_timeout SSE uses finish_reason=length; treat that like a soft signal
+      // when the body looks finished (not a real max_tokens cut).
+      const naturalStop =
+        !finishReason ||
+        NATURAL_FINISH_REASONS.has(finishReason) ||
+        finishReason === 'length' ||
+        hints?.serverTruncated === false;
+      if (naturalStop || hints?.serverTruncated === false) {
+        const structural = structuralTruncation(
+          text,
+          finishReason === 'length' ? 'stop' : finishReason,
+        );
+        if (structural.truncated) return structural;
+        const abrupt = looksAbruptlyCutOff(text);
+        if (abrupt.truncated) return abrupt;
+        // Substantial finished answer after a tool-round idle → not truncated.
+        if (text.trim().length >= 40) {
+          return { truncated: false, reason: '' };
+        }
+      }
+    } else {
+      return { truncated: true, reason: storedReason };
+    }
   }
 
   // Authoritative server completion event.
   if (hints?.serverTruncated === true) {
+    const reason =
+      hints.serverReason ||
+      truncationFromFinishReason(finishReason).reason ||
+      'Reply was interrupted';
+    // Same recovery: mid-stream tools_timeout then a clean stop should not stick.
+    // tools_timeout payload itself uses finish_reason=length.
+    if (
+      (reason === RECOVERABLE_TOOL_TIMEOUT_REASON ||
+        reason.startsWith('Stream timed out during tool use')) &&
+      finishReason &&
+      (NATURAL_FINISH_REASONS.has(finishReason) || finishReason === 'length') &&
+      text.trim().length >= 40 &&
+      !looksAbruptlyCutOff(text).truncated &&
+      !structuralTruncation(
+        text,
+        finishReason === 'length' ? 'stop' : finishReason,
+      ).truncated
+    ) {
+      return { truncated: false, reason: '' };
+    }
     return {
       truncated: true,
-      reason: hints.serverReason || truncationFromFinishReason(finishReason).reason || 'Reply was interrupted',
+      reason,
     };
   }
   if (hints?.serverTruncated === false) {

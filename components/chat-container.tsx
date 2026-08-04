@@ -1017,6 +1017,19 @@ export default function ChatContainer() {
     if (base.truncated && base.reason === 'Stopped before calling tools' && toolsOk) {
       return withShort({ truncated: false, reason: '' });
     }
+    // Tool-round idle timeout may fire before a successful final answer;
+    // do not keep Continue when the reply finished cleanly.
+    if (
+      base.truncated &&
+      (base.reason === 'Stream timed out during tool use' ||
+        base.reason.startsWith('Stream timed out during tool use')) &&
+      (!lastMessage.finishReason ||
+        lastMessage.finishReason === 'stop' ||
+        lastMessage.finishReason === 'end_turn') &&
+      String(lastMessage.content || '').trim().length >= 40
+    ) {
+      return withShort({ truncated: false, reason: '' });
+    }
     if (base.truncated) return withShort(base);
 
     // Tool failed and the model never finished a recovery answer — common when

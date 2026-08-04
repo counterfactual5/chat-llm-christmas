@@ -21,6 +21,7 @@ import {
   isPdfFile,
   isPreviewableImageFile,
   isPreviewableTextFile,
+  isSpreadsheetPreviewFile,
 } from '@/lib/files/preview';
 import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { useLocale } from '@/lib/i18n';
@@ -208,7 +209,9 @@ export function ChatPreviewPanel({
                 (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)) &&
                 !file.content
                 ? 'overflow-hidden'
-                : 'overflow-x-hidden overflow-y-auto',
+                : file && isSpreadsheetPreviewFile(file)
+                  ? 'overflow-auto'
+                  : 'overflow-x-hidden overflow-y-auto',
             )}
           >
             {!file ? (

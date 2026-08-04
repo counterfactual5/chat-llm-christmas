@@ -1,7 +1,15 @@
 import type { ChatSession, WebSearchSource } from '@/lib/chat/types';
 import { formatWebSourcesForReference } from '@/lib/chat/context/references';
-import { analyzeTruncation } from '@/lib/chat/stream/reply-truncation';
-import { actionFromStreamCode } from '@/lib/chat/stream/truncation';
+import {
+  analyzeTruncation,
+  looksAbruptlyCutOff,
+  structuralTruncation,
+} from '@/lib/chat/stream/reply-truncation';
+import {
+  actionFromStreamCode,
+  NATURAL_FINISH_REASONS,
+  RECOVERABLE_TOOL_TIMEOUT_REASON,
+} from '@/lib/chat/stream/truncation';
 import {
   contentHasThinkMarkup,
   createThinkStreamParser,
@@ -349,6 +357,37 @@ export async function streamChatResponse(
       }
     }
 
+    // Mid-tool idle may emit tools_timeout (finish_reason=length) before a
+    // successful final answer. If the stream then completed with a real body,
+    // do not keep Continue sticky on that recoverable code.
+    if (serverCode === 'tools_timeout' && !unexpectedEnd) {
+      const body = streamed.trim();
+      const natural =
+        (finishReason && NATURAL_FINISH_REASONS.has(finishReason)) ||
+        serverTruncated === false ||
+        finishReason === 'length';
+      if (
+        natural &&
+        body.length >= 40 &&
+        !looksAbruptlyCutOff(streamed).truncated &&
+        !structuralTruncation(
+          streamed,
+          finishReason === 'length' ? 'stop' : finishReason,
+        ).truncated
+      ) {
+        serverCode = undefined;
+        if (
+          !serverTruncationReason ||
+          serverTruncationReason === RECOVERABLE_TOOL_TIMEOUT_REASON ||
+          serverTruncationReason.startsWith('Stream timed out during tool use')
+        ) {
+          serverTruncationReason = undefined;
+        }
+        if (serverTruncated === true) serverTruncated = false;
+        if (finishReason === 'length') finishReason = 'stop';
+      }
+    }
+
     const fromCode = actionFromStreamCode(serverCode);
 
     // Connection dropped / function killed mid-stream: no [DONE] arrived.
@@ -411,15 +450,48 @@ export async function streamChatResponse(
       }
       try {
         const parsed = JSON.parse(data);
-        if (parsed.finish_reason) finishReason = parsed.finish_reason;
+        if (parsed.finish_reason) {
+          finishReason = parsed.finish_reason;
+          // A later natural stop must clear sticky mid-stream tools_timeout
+          // even if that event omitted truncated:false.
+          if (
+            NATURAL_FINISH_REASONS.has(String(parsed.finish_reason)) &&
+            serverCode === 'tools_timeout'
+          ) {
+            serverCode = undefined;
+            if (
+              !serverTruncationReason ||
+              serverTruncationReason === RECOVERABLE_TOOL_TIMEOUT_REASON ||
+              serverTruncationReason.startsWith('Stream timed out during tool use')
+            ) {
+              serverTruncationReason = undefined;
+            }
+            if (serverTruncated === true) serverTruncated = false;
+          }
+        }
         if (typeof parsed.truncated === 'boolean') {
           serverTruncated = parsed.truncated;
+          // A later natural completion must clear sticky mid-stream codes
+          // (e.g. tools_timeout sent before a successful final answer).
+          if (parsed.truncated === false) {
+            serverCode = undefined;
+            if (!parsed.truncation_reason) serverTruncationReason = undefined;
+          }
         }
         if (typeof parsed.truncation_reason === 'string' && parsed.truncation_reason) {
           serverTruncationReason = parsed.truncation_reason;
         }
         if (typeof parsed.code === 'string' && parsed.code) {
-          serverCode = parsed.code;
+          // Do not re-stick tools_timeout after a later natural completion.
+          if (
+            parsed.code === 'tools_timeout' &&
+            (serverTruncated === false ||
+              (finishReason && NATURAL_FINISH_REASONS.has(finishReason)))
+          ) {
+            /* ignore stale / out-of-order idle signal */
+          } else {
+            serverCode = parsed.code;
+          }
         }
         if (parsed.reasoning) {
           appendToAssistantReasoning(parsed.reasoning);

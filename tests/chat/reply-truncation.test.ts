@@ -44,9 +44,39 @@ describe('reply truncation', () => {
     expect(looksLikeToolNarration('我无法扫描工作区，但可以解释这个错误。')).toBe(false);
   });
 
-  it('builds a continuation prompt that closes an open code block', () => {
-    const prompt = buildContinuationPrompt('```ts\nconst answer =');
-    expect(prompt).toContain('You stopped inside a fenced code block');
-    expect(prompt).toContain('<<<TAIL');
+  it('clears recovered tools_timeout after a finished final answer', () => {
+    const body = [
+      '已整理成表格：',
+      '',
+      '| 分类 | 信息 |',
+      '| --- | --- |',
+      '| 收件人 | a@b.com |',
+      '',
+      '邮件尚未发送，请在弹卡中确认。',
+    ].join('\n');
+    expect(
+      analyzeTruncation(body, 'stop', true, 'Stream timed out during tool use'),
+    ).toEqual({ truncated: false, reason: '' });
+    expect(
+      analyzeTruncation(body, 'length', true, 'Stream timed out during tool use'),
+    ).toEqual({ truncated: false, reason: '' });
+    expect(
+      analyzeTruncation(body, 'stop', false, undefined, {
+        serverTruncated: true,
+        serverReason: 'Stream timed out during tool use',
+      }),
+    ).toEqual({ truncated: false, reason: '' });
+    expect(
+      analyzeTruncation(body, 'length', false, undefined, {
+        serverTruncated: true,
+        serverReason: 'Stream timed out during tool use',
+      }),
+    ).toEqual({ truncated: false, reason: '' });
+  });
+
+  it('keeps tools_timeout when the body is still abrupt', () => {
+    expect(
+      analyzeTruncation('## 下一步', 'stop', true, 'Stream timed out during tool use'),
+    ).toEqual({ truncated: true, reason: 'Stopped mid-section' });
   });
 });

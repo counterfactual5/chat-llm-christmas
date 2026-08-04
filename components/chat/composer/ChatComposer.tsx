@@ -42,9 +42,8 @@ import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message, ModelOption, SkillItem } from '@/lib/chat/types';
+import { QuoteMarkdown } from '@/components/chat/message/QuoteMarkdown';
 import { skillSlashName } from '@/lib/skills/creator';
-import { compactQuoteMath } from '@/lib/markdown/math';
-import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
   PRODUCT_SLASH_COMMANDS,
   slashCommandIcon,
@@ -453,11 +452,9 @@ export function ChatComposer(props: ChatComposerProps) {
                 className="group flex items-start gap-1"
               >
                 <blockquote className="min-w-0 flex-1 border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500">
-                  <AnswerMarkdown
-                    text={compactQuoteMath(quote)}
-                    streaming={false}
-                    reflowBlocks={false}
-                    className="chat-quote line-clamp-3 space-y-0 text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4"
+                  <QuoteMarkdown
+                    text={quote}
+                    className="line-clamp-3"
                   />
                 </blockquote>
                 <button

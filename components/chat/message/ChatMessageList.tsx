@@ -49,6 +49,7 @@ import { getReviewCheckTitleKey } from '@/lib/chat/message/review-labels';
 import { getReviewCheckIcon } from './helpers/review-check-icon';
 import { ReasoningBodyScroll } from '@/components/chat/message/ReasoningBodyScroll';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
+import { QuoteMarkdown } from '@/components/chat/message/QuoteMarkdown';
 import { EmailApprovalCard } from '@/components/chat/message/EmailApprovalCard';
 import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
 import type { GmailApprovalDraft } from '@/lib/mcp/google/gmail-approval';
@@ -60,7 +61,6 @@ import {
   type GeneratedImageEntry,
 } from '../panels/OutputPanel';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
-import { compactQuoteMath } from '@/lib/markdown/math';
 
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
 
@@ -368,12 +368,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                   key={qi}
                                   className="border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500"
                                 >
-                                  <AnswerMarkdown
-                                    text={compactQuoteMath(quote)}
-                                    streaming={false}
-                                    reflowBlocks={false}
-                                    className="chat-quote space-y-0 text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4"
-                                  />
+                                  <QuoteMarkdown text={quote} />
                                 </blockquote>
                               ))}
                             </div>

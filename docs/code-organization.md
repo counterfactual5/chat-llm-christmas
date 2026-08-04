@@ -31,7 +31,7 @@
    `components/chat-container.tsx` 只做接线（UI ↔ hooks）。新逻辑进 owning hook / `lib/chat/*`，见 [`lib/chat/README.md`](../lib/chat/README.md) 与 container 头注释 ownership 表。
 
 5. **单一事实来源（SSOT）**  
-   目录、映射、命令列表、流式标签解析等只维护一份；调用方 import，不另起平行表。已有例子：`lib/files/text-types.ts`、`lib/chat/composer/slash-commands.ts`、`lib/chat/message/stream-xml-tags.ts`、`lib/images/generate-and-store.ts`、`AnswerMarkdown`。
+   目录、映射、命令列表、流式标签解析等只维护一份；调用方 import，不另起平行表。已有例子：`lib/files/text-types.ts`、`lib/chat/composer/slash-commands.ts`、`lib/chat/message/stream-xml-tags.ts`、`lib/images/generate-and-store.ts`、答案用 `AnswerMarkdown` / 引用芯片用 `QuoteMarkdown`。
 
 ---
 
@@ -48,7 +48,7 @@ docs/                  产品与跨仓流程说明（非代码地图时用）
 | 域 | UI | Hooks | Lib | 备注 |
 |----|----|-------|-----|------|
 | Chat 壳 | `components/chat/*`、`chat-container.tsx` | `hooks/chat/*` | `lib/chat/*` | 地图：`lib/chat/README.md` |
-| Markdown 渲染 | `components/markdown/*` + `components/chat/message/AnswerMarkdown.tsx` | — | `lib/markdown/*` | 预处理无 React；渲染在 components |
+| Markdown 渲染 | `components/markdown/*` + `AnswerMarkdown` / `QuoteMarkdown` | — | `lib/markdown/*` | 预处理无 React；答案 vs 引用芯片分流 |
 | 文件 / 预览 | `components/files/*`、chat panels | — | `lib/files/*` | `lib/files/README.md` |
 | 生图 | — | — | `lib/images/*` | 工具与 `/api/images` 共用 |
 | 工具 | `lib/tools/views`（侧栏视图） | — | `lib/tools/<tool-name>/` | 一工具一目录；审查见 review README |
@@ -90,6 +90,7 @@ docs/                  产品与跨仓流程说明（非代码地图时用）
 
 - 预处理：`lib/markdown/core`、`lib/markdown/math`。
 - 聊天气泡同款渲染：只挂 `AnswerMarkdown`（Thought 用 `reflowBlocks={false}`）。
+- 引用芯片 / 用户气泡引用：`QuoteMarkdown`（数学为主；不做 ascii fence / CodeBlock）。
 - Mermaid / CodeBlock：`components/markdown/**`，不要把浏览器依赖塞回 `lib/markdown`（已标明例外除外）。
 
 ### 4.4 工具（`lib/tools`）
@@ -114,7 +115,8 @@ docs/                  产品与跨仓流程说明（非代码地图时用）
 | Composer / Sidebar 各维护一份命令按钮 | 共享 `PRODUCT_SLASH_COMMANDS` |
 | 各处私有 `EXT_MIME` / 下载 anchor 样板 | `text-types` / `lib/files/download` |
 | `/api/images` 与 `generate_image` 两套上传 | `generateAndStoreImage` |
-| 新面板再 `import ReactMarkdown` | `AnswerMarkdown` |
+| 新面板再 `import ReactMarkdown` 做答案级渲染 | `AnswerMarkdown`；引用预览用 `QuoteMarkdown` |
+| 引用芯片走完整 `prepareChatMarkdown` / CodeBlock | `prepareQuoteMarkdown`（避免 ASCII 变成 text/Copy 卡片） |
 | `lib/chat` client barrel 导出 server 模块 | 调用方直连 `@/lib/chat/server/...` |
 | 为「兼容」在根目录加只转发的 shim 文件 | 改 import 到真实归属（review 已禁止） |
 | 用 system prompt 硬编码掩盖渲染 / 预处理 bug | 修 `lib/markdown` / 组件 |

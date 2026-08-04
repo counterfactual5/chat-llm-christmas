@@ -46,6 +46,22 @@ export function prepareChatMarkdown(
 }
 
 /**
+ * Quote chips only need readable math — skip ascii/mermaid fencing, table
+ * restore, and other answer-oriented rewrites that inflate CodeBlock chrome.
+ */
+export function prepareQuoteMarkdown(content: string): string {
+  let out = normalizeMathDelimiters(String(content || ''));
+  out = liftQuotedMathBlocks(out);
+  out = fixFlankingEmphasis(out);
+  out = fixBoldWrappedUrls(out);
+  out = escapeCurrencyDollars(out);
+  if (hasUnclosedDisplayMath(out)) {
+    out = escapeIncompleteBlockMath(out);
+  }
+  return out;
+}
+
+/**
  * Shrink quote previews: turn lone $$…$$ formulas into inline $…$
  * (keeps \begin{…} display blocks). Cuts KaTeX display margins in quote chips.
  */

@@ -66,7 +66,9 @@ export function markdownFromDomSelection(sel: Selection | null): string {
       let out = '';
       for (const child of Array.from(el.childNodes)) out += serialize(child);
       if (
-        ['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'TR', 'BLOCKQUOTE'].includes(el.tagName) &&
+        ['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'TR', 'BLOCKQUOTE', 'PRE'].includes(
+          el.tagName,
+        ) &&
         out &&
         !out.endsWith('\n')
       ) {

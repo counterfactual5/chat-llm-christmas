@@ -14,5 +14,5 @@ export {
 } from './detect';
 export { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
 export { fixFlankingEmphasis, fixBoldWrappedUrls, escapeCurrencyDollars } from './emphasis';
-export { prepareChatMarkdown, compactQuoteMath } from './prepare';
+export { prepareChatMarkdown, prepareQuoteMarkdown, compactQuoteMath } from './prepare';
 export { texFromKatexElement, markdownFromDomSelection } from './katex-dom';

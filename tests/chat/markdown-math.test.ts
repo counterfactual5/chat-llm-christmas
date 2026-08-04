@@ -12,6 +12,7 @@ import {
   looksLikeTruncatedMath,
   normalizeMathDelimiters,
   prepareChatMarkdown,
+  prepareQuoteMarkdown,
 } from '@/lib/markdown/math';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
@@ -168,6 +169,17 @@ describe('compactQuoteMath', () => {
     expect(compactQuoteMath(input)).toBe(
       '\n$$\n\\begin{aligned}a&=b\\end{aligned}\n$$\n',
     );
+  });
+});
+
+describe('prepareQuoteMarkdown', () => {
+  it('normalizes math without fencing ascii box-drawing', () => {
+    const ascii = '┌──┐\n│Hi│\n└──┘';
+    const out = prepareQuoteMarkdown(`${ascii}\n\n$x^2$ costs $5`);
+    expect(out).toContain('┌──┐');
+    expect(out).not.toMatch(/```/);
+    expect(out).toContain('$x^2$');
+    expect(out).toContain('\\$5');
   });
 });
 

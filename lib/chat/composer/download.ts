@@ -31,6 +31,9 @@ export async function downloadGeneratedFile(entry: GeneratedFileEntry): Promise<
     // (e.g. create_spreadsheet stores TSV extract alongside an .xlsx url).
     if (entry.url && !entry.url.startsWith('local://')) {
       const res = await fetch(entry.url);
+      if (!res.ok) {
+        throw new Error(`Download failed (${res.status})`);
+      }
       blob = await res.blob();
     } else if (typeof entry.content === 'string') {
       blob = new Blob([entry.content], {

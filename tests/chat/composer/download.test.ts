@@ -116,7 +116,7 @@ describe('downloadGeneratedFile', () => {
   it('fetches remote urls when there is no inline content', async () => {
     const anchor = stubAnchor();
     const blob = new Blob(['remote']);
-    const fetchMock = vi.fn(async () => ({ blob: async () => blob }));
+    const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => blob }));
     vi.stubGlobal('fetch', fetchMock);
 
     await downloadGeneratedFile({ ...baseEntry, url: 'https://example.com/notes.txt' });
@@ -128,7 +128,7 @@ describe('downloadGeneratedFile', () => {
   it('prefers remote binary url over inline preview content', async () => {
     const anchor = stubAnchor();
     const blob = new Blob(['xlsx-bytes']);
-    const fetchMock = vi.fn(async () => ({ blob: async () => blob }));
+    const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => blob }));
     vi.stubGlobal('fetch', fetchMock);
 
     await downloadGeneratedFile({
@@ -142,6 +142,27 @@ describe('downloadGeneratedFile', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/files/file_xlsx');
     expect(createObjectURLMock).toHaveBeenCalledWith(blob);
     expect(anchor.download).toBe('report.xlsx');
+  });
+
+  it('opens the url when fetch returns a non-OK status', async () => {
+    stubAnchor();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        blob: async () => new Blob(['not found']),
+      })),
+    );
+
+    await downloadGeneratedFile({
+      ...baseEntry,
+      url: '/api/files/missing',
+      content: 'preview-only',
+    });
+
+    expect(openMock).toHaveBeenCalledWith('/api/files/missing', '_blank', 'noopener,noreferrer');
+    expect(createObjectURLMock).not.toHaveBeenCalled();
   });
 
   it('falls back to opening a remote url when nothing else works', async () => {

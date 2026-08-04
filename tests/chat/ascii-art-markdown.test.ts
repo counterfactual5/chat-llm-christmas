@@ -124,6 +124,32 @@ describe('ASCII art Markdown recovery', () => {
     expect(normalizeAsciiArtMarkdown(table)).toBe(table);
   });
 
+  it('fences underscore/pipe sequence diagrams before table repair shreds them', () => {
+    const diagram = [
+      '        _______________________',
+      '       |     请求响应流程      |',
+      '       |_______________________|',
+      '                 |',
+      '    _____________|_____________',
+      '   |                           |',
+      ' __v__                       __v__',
+      '|浏览器| -----> |CDN(Cache)| -----> |源站|',
+      '|______|         |_________|         |____|',
+      '                   |',
+      '                   v',
+      '                __|__',
+      '               | DB  |',
+      '               |_____|',
+    ].join('\n');
+    expect(looksLikeAsciiArt(diagram)).toBe(true);
+    const out = prepareChatMarkdown(`我来画：\n\n${diagram}\n\n说明`);
+    expect(out).toContain('```text');
+    expect(out).toContain('_____________|_____________');
+    expect(out).not.toContain('| _____________ |');
+    // Keep centering pad on the first frame line.
+    expect(out).toContain('        _______________________');
+  });
+
   it('does not reflow weak bare fences that only mention a few box chars', () => {
     const md = 'Example glyph: ```\nsee ┌ here\n```\n';
     expect(normalizeAsciiArtMarkdown(md)).toBe(md);

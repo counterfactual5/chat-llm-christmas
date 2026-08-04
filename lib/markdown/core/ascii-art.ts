@@ -51,8 +51,57 @@ export function looksLikeAsciiTree(text: string): boolean {
   return unicodeBranches + asciiBranches > 0;
 }
 
+/**
+ * Classic sequence / frame diagrams built from `|`, `_`, `-`, `+`, arrows —
+ * without Unicode box-drawing and often without `+---` tree branches.
+ *
+ * These must be fenced before GFM table repair: a lone `|` in
+ * `____|____` gets rewritten into `| ____ | ____ |` and shreds the figure.
+ */
+export function looksLikeAsciiLineArt(text: string): boolean {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (looksLikeUnicodeBox(t) || looksLikeAsciiTree(t)) return false;
+
+  const nonEmpty = t.split('\n').filter((l) => l.trim().length > 0);
+  if (nonEmpty.length < 4) return false;
+
+  const pipeLines = nonEmpty.filter((l) => l.includes('|')).length;
+  const underscoreLines = nonEmpty.filter((l) => /_{3,}/.test(l)).length;
+  const edgeDashLines = nonEmpty.filter((l) =>
+    /(?:^|[^|\-\s])[-+]{3,}(?:[^|\-\s]|$)/.test(l) || /^\s*[+|].*[+|]\s*$/.test(l),
+  ).length;
+  const arrowLines = nonEmpty.filter((l) =>
+    /(?:<-+|-+>|<--+|--+>|====+>|<====+)/.test(l),
+  ).length;
+  const struct = (t.match(/[|_\-+=<>^v/\\]/g) || []).length;
+
+  // Real GFM tables: almost every line is a pipe-row and a separator exists.
+  const gfmSep = nonEmpty.filter((l) => {
+    const s = l.trim();
+    return /^[\s|:\-]+$/.test(s) && /-{3,}/.test(s) && (s.match(/\|/g) || []).length >= 2;
+  }).length;
+  if (gfmSep >= 1 && pipeLines >= nonEmpty.length - 1) {
+    return false;
+  }
+
+  // Underscore-framed boxes (common in GLM sequence diagrams).
+  if (pipeLines >= 3 && underscoreLines >= 2 && nonEmpty.length >= 4) return true;
+  // Pipe frames + arrows (browser → CDN → origin).
+  if (pipeLines >= 4 && arrowLines >= 1 && struct >= 16) return true;
+  // Dense multi-line pipe art that is not a clean table.
+  if (pipeLines >= 5 && struct >= 24 && (underscoreLines >= 1 || edgeDashLines >= 2)) {
+    return true;
+  }
+  return false;
+}
+
 export function looksLikeAsciiArt(text: string): boolean {
-  return looksLikeAsciiTree(text) || looksLikeUnicodeBox(text);
+  return (
+    looksLikeAsciiTree(text) ||
+    looksLikeUnicodeBox(text) ||
+    looksLikeAsciiLineArt(text)
+  );
 }
 
 function reflowUnicodeBox(text: string): string {
@@ -135,6 +184,11 @@ export function reflowCollapsedAsciiArt(text: string): string {
     return reflowAsciiTree(normalized);
   }
 
+  // Pipe/underscore sequence art: do not trim leading spaces (centering pads).
+  if (looksLikeAsciiLineArt(raw)) {
+    return String(raw || '').replace(/^\n+/, '').replace(/\n+$/, '');
+  }
+
   return lightNormalize(raw);
 }
 
@@ -159,7 +213,10 @@ function structuralMarkCount(text: string): number {
 }
 
 function fenceText(content: string): string {
-  return `\n\n\`\`\`text\n${content.trim()}\n\`\`\`\n\n`;
+  // Keep leading indentation — sequence diagrams pad the first line to center
+  // frames. Only strip blank lines around the block.
+  const body = String(content || '').replace(/^\n+/, '').replace(/\n+$/, '');
+  return `\n\n\`\`\`text\n${body}\n\`\`\`\n\n`;
 }
 
 /**
@@ -181,6 +238,7 @@ export function promoteInlineAsciiArtToFences(markdown: string): string {
 function paragraphLooksLikeAsciiArt(paragraph: string): boolean {
   const p = String(paragraph || '');
   if (looksLikeUnicodeBox(p)) return true;
+  if (looksLikeAsciiLineArt(p)) return true;
   const branchLines = p.split('\n').filter((line) => BRANCH_LINE_RE.test(line)).length;
   if (branchLines >= 2) return true;
   return looksLikeAsciiTree(p) && structuralMarkCount(p) >= 3;

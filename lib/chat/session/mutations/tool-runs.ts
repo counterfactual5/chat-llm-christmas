@@ -36,9 +36,19 @@ export function withUpsertedAssistantToolRun(
       const pendingIdx =
         idx >= 0
           ? idx
-          : run.status === 'done'
+          : run.status === 'done' || run.status === 'awaiting_approval'
             ? existing.findIndex((r) => r.name === run.name && r.status === 'start')
             : -1;
+      const awaitingIdx =
+        run.status === 'done'
+          ? existing.findIndex(
+              (r) =>
+                r.name === run.name &&
+                (r.status === 'awaiting_approval' ||
+                  (run.approval?.callId &&
+                    r.approval?.callId === run.approval.callId)),
+            )
+          : -1;
       let toolRuns;
       let activity = [...(m.activity || [])];
       if (run.status === 'start') {
@@ -62,6 +72,7 @@ export function withUpsertedAssistantToolRun(
             name: run.name,
             status: 'start' as const,
             query: run.query,
+            approval: run.approval,
           },
         ];
         activity.push({
@@ -69,15 +80,48 @@ export function withUpsertedAssistantToolRun(
           kind: 'tool',
           toolRunId,
         });
-      } else if (pendingIdx >= 0) {
+      } else if (run.status === 'awaiting_approval' && pendingIdx >= 0) {
         toolRuns = existing.map((r, i) =>
           i === pendingIdx
             ? {
                 ...r,
+                status: 'awaiting_approval' as const,
+                provider: run.provider || r.provider,
+                query: run.query ?? r.query,
+                approval: run.approval || r.approval,
+              }
+            : r,
+        );
+      } else if (run.status === 'awaiting_approval') {
+        const toolRunId = crypto.randomUUID();
+        toolRuns = [
+          ...existing,
+          {
+            id: toolRunId,
+            name: run.name,
+            status: 'awaiting_approval' as const,
+            query: run.query,
+            provider: run.provider,
+            approval: run.approval,
+          },
+        ];
+        activity.push({
+          id: crypto.randomUUID(),
+          kind: 'tool',
+          toolRunId,
+        });
+      } else if (pendingIdx >= 0 || awaitingIdx >= 0) {
+        const targetIdx = pendingIdx >= 0 ? pendingIdx : awaitingIdx;
+        toolRuns = existing.map((r, i) =>
+          i === targetIdx
+            ? {
+                ...r,
                 status: 'done' as const,
-                provider: run.provider,
+                provider: run.provider || r.provider,
                 results: run.results,
                 error: run.error,
+                approval: run.approval ?? r.approval,
+                approvalOutcome: run.approvalOutcome ?? r.approvalOutcome,
               }
             : r,
         );
@@ -93,6 +137,8 @@ export function withUpsertedAssistantToolRun(
             provider: run.provider,
             results: run.results,
             error: run.error,
+            approval: run.approval,
+            approvalOutcome: run.approvalOutcome,
           },
         ];
         activity.push({
@@ -224,6 +270,41 @@ export function withUpsertedAssistantToolRun(
     openContextPanel,
     unsetWebSourcesCleared,
   };
+}
+
+/** Patch a specific tool run after the user confirms or cancels Gmail send. */
+export function withResolvedGmailApproval(
+  sessions: ChatSession[],
+  sessionId: string,
+  assistantId: string,
+  toolRunId: string,
+  outcome: {
+    approvalOutcome: 'sent' | 'cancelled';
+    error?: string;
+    results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
+  },
+): ChatSession[] {
+  return sessions.map((s) => {
+    if (s.id !== sessionId) return s;
+    const msgs = s.messages.map((m) => {
+      if (m.id !== assistantId) return m;
+      return {
+        ...m,
+        toolRuns: (m.toolRuns || []).map((r) =>
+          r.id === toolRunId
+            ? {
+                ...r,
+                status: 'done' as const,
+                approvalOutcome: outcome.approvalOutcome,
+                error: outcome.error,
+                results: outcome.results ?? r.results,
+              }
+            : r,
+        ),
+      };
+    });
+    return touchSession(s, { messages: msgs });
+  });
 }
 
 /** Close any tool runs still marked start when the stream settles. */

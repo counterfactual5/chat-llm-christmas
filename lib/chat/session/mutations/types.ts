@@ -24,14 +24,18 @@ export type ToolViewInput = {
   data?: unknown;
 };
 
+import type { GmailApprovalDraft } from '@/lib/mcp/google/gmail-approval';
+
 export type ToolRunInput = {
   name: string;
-  status: 'start' | 'done';
+  status: 'start' | 'done' | 'awaiting_approval';
   query?: string;
   provider?: string;
   results?: Array<{ title: string; url: string; snippet: string; body?: string }>;
   error?: string;
   targetTimestamp?: number;
+  approval?: GmailApprovalDraft;
+  approvalOutcome?: 'sent' | 'cancelled';
 };
 
 export type ToolRunUpsertResult = {

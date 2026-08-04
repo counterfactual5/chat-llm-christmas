@@ -3,6 +3,11 @@ import { calendarToolDefs } from '@/lib/mcp/google/calendar';
 import { driveToolDefs } from '@/lib/mcp/google/drive';
 import { gmailToolDefs } from '@/lib/mcp/google/gmail';
 import {
+  awaitingApprovalToolResult,
+  buildGmailApprovalDraft,
+  isGmailApprovalTool,
+} from '@/lib/mcp/google/gmail-approval';
+import {
   extractUiResults,
   googleToken,
   queryHint,
@@ -31,7 +36,7 @@ function makeTool(def: GoogleToolDef): ChatTool {
     },
     systemPrompt: serviceSystemPrompt(toolService(def.name)),
     enabled: (flags) => flags.integrations.includes(toolService(def.name)),
-    async execute({ rawArguments, fallbackQuery }, ctx) {
+    async execute({ rawArguments, fallbackQuery, callId }, ctx) {
       const token = googleToken(ctx);
       if (!token) {
         return {
@@ -63,6 +68,39 @@ function makeTool(def: GoogleToolDef): ChatTool {
           write,
         },
       });
+
+      // Send/reply/forward/send_draft: never auto-send — wait for UI approval.
+      if (isGmailApprovalTool(def.name)) {
+        try {
+          const draft = await buildGmailApprovalDraft(token, def.name, args, callId);
+          ctx.send({
+            tool: {
+              status: 'awaiting_approval',
+              name: def.name,
+              query,
+              provider: 'google',
+              write: true,
+              approval: draft,
+            },
+          });
+          return { content: awaitingApprovalToolResult(draft) };
+        } catch (err: unknown) {
+          const message =
+            err instanceof Error ? err.message : String(err || 'Failed to prepare email draft');
+          ctx.send({
+            tool: {
+              status: 'done',
+              name: def.name,
+              query,
+              provider: 'google',
+              write: true,
+              results: [],
+              error: message,
+            },
+          });
+          return { content: JSON.stringify({ ok: false, error: message }) };
+        }
+      }
 
       try {
         const result = await def.run(token, args, fallback);

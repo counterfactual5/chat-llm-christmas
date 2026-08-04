@@ -7,7 +7,8 @@ export const GMAIL_SYSTEM_PROMPT = [
   'Profile; search/read messages (incl. batch get) & threads; attachments; labels CRUD; drafts; send/reply/forward; modify/batch-modify; trash/untrash.',
   'Bulk hygiene (prefer these over paging gmail_search): gmail_batch_mark_read / gmail_batch_archive (explicit query required — no wide defaults), gmail_batch_trash (query + confirm=true), gmail_batch_star / gmail_batch_unstar, gmail_apply_label_by_query (label name or id), gmail_batch_modify_by_query (confirm=true required when adding TRASH), gmail_thread_mark_read / gmail_modify_thread.',
   'gmail_search returns ids[] plus messages[]. Use raw gmail_batch_modify only when you already have specific ids.',
-  'For send/reply/forward/trash/label changes, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true (including via gmail_batch_modify_by_query).',
+  'For send/reply/forward/send_draft: call the tool to open an in-chat approval compose card; the email is NOT sent until the user presses Send. Do not claim it was sent while status is awaiting_user_approval.',
+  'For trash/label changes, confirm intent from the user message before calling. Never trash without an explicit query scope and confirm=true (including via gmail_batch_modify_by_query).',
   'Do not invent message IDs — only use tool results. Cite Gmail links when answering.',
 ].join(' ');
 

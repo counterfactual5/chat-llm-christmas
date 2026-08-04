@@ -29,6 +29,7 @@ export {
 export {
   withUpsertedAssistantToolRun,
   withSettledOpenToolRuns,
+  withResolvedGmailApproval,
 } from '@/lib/chat/session/mutations/tool-runs';
 
 export {

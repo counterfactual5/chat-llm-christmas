@@ -35,7 +35,7 @@ import {
   AttachmentImageThumb,
   isImageAttachment,
 } from '@/components/files/AttachmentImageThumb';
-import { canPreviewGeneratedFile } from '@/lib/files/preview';
+import { canPreviewGeneratedFile, formatPreviewTypeLabel } from '@/lib/files/preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
@@ -54,7 +54,9 @@ import { getReviewCheckTitleKey } from '@/lib/chat/message/review-labels';
 import { getReviewCheckIcon } from './helpers/review-check-icon';
 import { ReasoningBodyScroll } from '@/components/chat/message/ReasoningBodyScroll';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
+import { EmailApprovalCard } from '@/components/chat/message/EmailApprovalCard';
 import { MemorySavedNotice } from '@/components/memories/MemorySavedNotice';
+import type { GmailApprovalDraft } from '@/lib/mcp/google/gmail-approval';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { attachedFilesForUserBubbleDisplay } from '@/lib/files/attached-file-blocks';
 import {
@@ -101,6 +103,14 @@ export type ChatMessageListProps = {
   onPreviewImage: (entry: GeneratedImageEntry) => void;
   onPreviewFile: (entry: GeneratedFileEntry) => void;
   onPreviewView: (view: ToolViewPayload, messageId: string) => void;
+  onGmailApproval?: (
+    messageId: string,
+    toolRunId: string,
+    action: 'send' | 'cancel',
+    draft: GmailApprovalDraft,
+  ) => void | Promise<void>;
+  gmailApprovalBusyId?: string | null;
+  gmailApprovalError?: string | null;
   cancelEditMessage: () => void;
   saveEditedMessage: (messageId: string) => void;
   editUserMessage: (messageId: string) => void;
@@ -161,6 +171,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
     onPreviewImage,
     onPreviewFile,
     onPreviewView,
+    onGmailApproval,
+    gmailApprovalBusyId,
+    gmailApprovalError,
     cancelEditMessage,
     saveEditedMessage,
     editUserMessage,
@@ -513,8 +526,18 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   const resultCount = run.results?.length || 0;
                   // Expand only while in flight; auto-collapse when done
                   // so Process doesn't bury the answer. Explicit toggles win.
-                  const expanded = toolRunOpen[run.id] ?? searching;
-                  const label = t(getToolRunLabelKey(classification, { searching, failed }));
+                  // Keep approval cards expanded so the compose form stays visible.
+                  const expanded =
+                    toolRunOpen[run.id] ??
+                    (searching || run.status === 'awaiting_approval');
+                  const label = t(
+                    getToolRunLabelKey(classification, {
+                      searching,
+                      failed,
+                      awaitingApproval: run.status === 'awaiting_approval',
+                      approvalOutcome: run.approvalOutcome,
+                    }),
+                  );
                   const showQueryInline =
                     Boolean(run.query) &&
                     (isNotion ||
@@ -550,7 +573,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         onClick={() =>
                           setToolRunOpen((prev) => ({
                             ...prev,
-                            [run.id]: !(prev[run.id] ?? searching),
+                            [run.id]: !(
+                              prev[run.id] ??
+                              (searching || run.status === 'awaiting_approval')
+                            ),
                           }))
                         }
                         className={cn(
@@ -656,6 +682,30 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       </button>
                       {expanded && (
                         <div className="space-y-1 pb-1 pl-5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                          {run.status === 'awaiting_approval' &&
+                            run.approval &&
+                            onGmailApproval && (
+                              <EmailApprovalCard
+                                draft={run.approval}
+                                busy={gmailApprovalBusyId === run.id}
+                                error={
+                                  gmailApprovalBusyId === run.id
+                                    ? gmailApprovalError
+                                    : null
+                                }
+                                onSend={(next) =>
+                                  void onGmailApproval(message.id, run.id, 'send', next)
+                                }
+                                onCancel={() =>
+                                  void onGmailApproval(
+                                    message.id,
+                                    run.id,
+                                    'cancel',
+                                    run.approval!,
+                                  )
+                                }
+                              />
+                            )}
                           {/* Query already sits on the status line for research
                               stages / reads — don't repeat it as a subtitle. */}
                           {searching &&
@@ -1288,8 +1338,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                       <div className="truncate text-sm font-medium text-stone-800 dark:text-stone-100">
                                         {file.name}
                                       </div>
-                                      <div className="mt-0.5 truncate font-mono text-[11px] text-stone-400">
-                                        {file.mimeType}
+                                      <div className="mt-0.5 truncate text-[11px] text-stone-400">
+                                        {formatPreviewTypeLabel(file)}
                                         {file.size > 0
                                           ? ` · ${formatFileSize(file.size)}`
                                           : ''}

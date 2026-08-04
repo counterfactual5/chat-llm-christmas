@@ -467,14 +467,25 @@ export async function streamChatResponse(
             openContextPanel: false,
             unsetWebSourcesCleared: false,
           };
+          const toolStatusRaw = String(parsed.tool.status || 'start');
+          const toolStatus =
+            toolStatusRaw === 'done'
+              ? 'done'
+              : toolStatusRaw === 'awaiting_approval'
+                ? 'awaiting_approval'
+                : 'start';
           deps.setSessions((prev) => {
             const result = withUpsertedAssistantToolRun(prev, sessionId, assistantId, {
               name: String(parsed.tool.name || 'web_search'),
-              status: parsed.tool.status === 'done' ? 'done' : 'start',
+              status: toolStatus,
               query: parsed.tool.query,
               provider: parsed.tool.provider,
               results: Array.isArray(parsed.tool.results) ? parsed.tool.results : undefined,
               error: parsed.tool.error,
+              approval:
+                parsed.tool.approval && typeof parsed.tool.approval === 'object'
+                  ? (parsed.tool.approval as import('@/lib/mcp/google/gmail-approval').GmailApprovalDraft)
+                  : undefined,
               targetTimestamp:
                 typeof parsed.tool.targetTimestamp === 'number'
                   ? parsed.tool.targetTimestamp

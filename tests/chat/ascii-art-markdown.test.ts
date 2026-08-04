@@ -68,6 +68,22 @@ describe('ASCII art Markdown recovery', () => {
     expect(prepareChatMarkdown(prose)).not.toContain('```');
   });
 
+  it('peels leading prose out of a mixed ```text fence', () => {
+    const art = ['┌───────┐', '│浏览器  │', '│Browser│', '└───┬───┘'].join('\n');
+    const body = [
+      '明白，按每个汉字占 2 列对齐后再输出。下面开始画图。',
+      '',
+      art,
+    ].join('\n');
+    const md = `\`\`\`text\n${body}\n\`\`\``;
+    const out = normalizeAsciiArtMarkdown(md);
+    expect(out).toContain('明白，按每个汉字占 2 列对齐后再输出。下面开始画图。');
+    expect(out).toContain('```text');
+    expect(out).toContain('┌───────┐');
+    // Prose must sit outside the fence, not as the first fence line.
+    expect(out).toMatch(/明白[\s\S]*```text\n┌/);
+  });
+
   it('runs through prepareChatMarkdown before remark can collapse newlines', () => {
     const out = prepareChatMarkdown('标题\n\n`Root\n├─ a\n└─ b`');
     expect(out).toContain('```text');

@@ -16,6 +16,97 @@ const BOX_CHAR_RE = /[┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═]/g;
 const BOX_TOP_RE = /[┌╔╭].*[┐╗╮]/;
 const BOX_BOTTOM_RE = /[└╚╰].*[┘╝╯]/;
 
+/** A line that belongs to a diagram frame / tree / banner — not prose. */
+export function isAsciiStructuralLine(line: string): boolean {
+  const s = String(line || '').trimEnd();
+  const t = s.trim();
+  if (!t) return false;
+  if (/^[┌╔╭└╚╰]/.test(t)) return true;
+  if (/^[│║┃]/.test(t)) return true;
+  if (BRANCH_LINE_RE.test(s)) return true;
+  // Underscore / dash frames and pipe rows used in sequence art.
+  if (/_{3,}/.test(t) && (t.includes('|') || /^_+$/.test(t.replace(/\s/g, '')))) return true;
+  if (/^\|/.test(t) && (t.match(/\|/g) || []).length >= 2) return true;
+  // Section banners: ═══ title ═══
+  if (/[═]{4,}/.test(t) || /^[-=_]{8,}$/.test(t)) return true;
+  // Pure box-drawing / connector rows.
+  if (/^[\s┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═├┤┬┴┼▲▼▶◀◄↓↑←→+\-|\\/_]+$/.test(t) && /[┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═├┤┬┴┼]/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Peel leading/trailing prose out of a block that mixes explanation with a
+ * diagram (common when models wrap everything in one ```text fence).
+ *
+ * Short labels above a tree (`Root`, `app`) stay with the art; only
+ * sentence-like explanation is peeled.
+ */
+export function looksLikeExplanatoryProseLine(line: string): boolean {
+  const t = String(line || '').trim();
+  if (!t) return false;
+  if (isAsciiStructuralLine(line)) return false;
+  if (/[。！？；]/.test(t)) return true;
+  if (t.length >= 28) return true;
+  if (/(对齐|下面|明白|说明|需要|输出|框线|汉字|重新|随时说|按「|占\s*\d+\s*列|注：|上述)/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+export function partitionAsciiArtContent(text: string): {
+  proseBefore: string;
+  art: string;
+  proseAfter: string;
+} {
+  const raw = String(text ?? '');
+  const lines = raw.split('\n');
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (isAsciiStructuralLine(lines[i]!)) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  if (first < 0) {
+    return { proseBefore: '', art: raw, proseAfter: '' };
+  }
+
+  let artStart = first;
+  while (artStart > 0) {
+    const prev = lines[artStart - 1]!;
+    if (prev.trim() === '') {
+      artStart--;
+      continue;
+    }
+    if (looksLikeExplanatoryProseLine(prev)) break;
+    // Keep short titles / tree roots with the diagram.
+    artStart--;
+  }
+
+  let artEnd = last;
+  while (artEnd + 1 < lines.length) {
+    const next = lines[artEnd + 1]!;
+    if (next.trim() === '') {
+      artEnd++;
+      continue;
+    }
+    if (looksLikeExplanatoryProseLine(next)) break;
+    artEnd++;
+  }
+
+  // Drop only blank lines that sit between peeled prose and art.
+  while (artStart < first && lines[artStart]!.trim() === '') artStart++;
+  while (artEnd > last && lines[artEnd]!.trim() === '') artEnd--;
+
+  const proseBefore = lines.slice(0, artStart).join('\n').replace(/\n+$/, '');
+  const art = lines.slice(artStart, artEnd + 1).join('\n');
+  const proseAfter = lines.slice(artEnd + 1).join('\n').replace(/^\n+/, '');
+  return { proseBefore, art, proseAfter };
+}
+
 function countMatches(text: string, re: RegExp): number {
   re.lastIndex = 0;
   const count = (String(text || '').match(re) || []).length;
@@ -270,6 +361,9 @@ function paragraphLooksLikeAsciiArt(paragraph: string): boolean {
  * Promote unfenced ASCII-art paragraphs too. This catches portable trees that
  * contain literal backticks (`-- child), which would otherwise corrupt Markdown
  * code-span parsing before the renderer gets a chance to inspect them.
+ *
+ * When a paragraph mixes leading prose with a diagram, only the diagram is
+ * fenced — the explanation stays outside as normal markdown.
  */
 export function promotePlainAsciiArtBlocks(markdown: string): string {
   return mapOutsideFences(String(markdown || ''), (segment) =>
@@ -277,7 +371,16 @@ export function promotePlainAsciiArtBlocks(markdown: string): string {
       .split(/(\n{2,})/)
       .map((part) => {
         if (/^\n{2,}$/.test(part) || !paragraphLooksLikeAsciiArt(part)) return part;
-        return fenceText(reflowCollapsedAsciiArt(part));
+        const { proseBefore, art, proseAfter } = partitionAsciiArtContent(part);
+        const body = reflowCollapsedAsciiArt(art);
+        if (!looksLikeAsciiArt(body) && !paragraphLooksLikeAsciiArt(body)) {
+          return fenceText(reflowCollapsedAsciiArt(part));
+        }
+        const chunks: string[] = [];
+        if (proseBefore.trim()) chunks.push(proseBefore.trimEnd());
+        chunks.push(fenceText(body).trim());
+        if (proseAfter.trim()) chunks.push(proseAfter.trimStart());
+        return `\n\n${chunks.join('\n\n')}\n\n`;
       })
       .join(''),
   );
@@ -294,6 +397,8 @@ export function normalizeAsciiArtMarkdown(markdown: string): string {
 /**
  * Models often put ASCII diagrams in ```text fences but flatten newlines
  * inside the fence. Only rewrite when reflow actually changes the body.
+ * Also peel leading/trailing prose out of mixed ```text fences so explanations
+ * are not trapped in a non-wrapping code chrome.
  */
 export function reflowFencedAsciiArtBlocks(markdown: string): string {
   return String(markdown || '').replace(
@@ -318,11 +423,31 @@ export function reflowFencedAsciiArtBlocks(markdown: string): string {
       ) {
         return full;
       }
-      const next = reflowCollapsedAsciiArt(body);
-      // Keep the original fence body when nothing structural changed (preserves
-      // trailing newline / indentation the author already got right).
-      if (next === lightNormalize(body)) return full;
-      return `\`\`\`${info}\n${next}\n\`\`\``;
+
+      const { proseBefore, art, proseAfter } = partitionAsciiArtContent(body);
+      const next = reflowCollapsedAsciiArt(art);
+      const artLooks = looksLikeAsciiArt(next) || looksLikeAsciiArt(art);
+      if (!artLooks) {
+        const collapsed = reflowCollapsedAsciiArt(body);
+        if (collapsed === lightNormalize(body)) return full;
+        return `\`\`\`${info}\n${collapsed}\n\`\`\``;
+      }
+
+      const fenceInfo = info || 'text';
+      const fenced = `\`\`\`${fenceInfo}\n${next.replace(/^\n+/, '').replace(/\n+$/, '')}\n\`\`\``;
+      const mixed = Boolean(proseBefore.trim() || proseAfter.trim());
+      if (!mixed) {
+        if (next === lightNormalize(body) || next === body.replace(/^\n+/, '').replace(/\n+$/, '')) {
+          return full;
+        }
+        return fenced;
+      }
+
+      const chunks: string[] = [];
+      if (proseBefore.trim()) chunks.push(proseBefore.trimEnd());
+      chunks.push(fenced);
+      if (proseAfter.trim()) chunks.push(proseAfter.trimStart());
+      return chunks.join('\n\n');
     },
   );
 }

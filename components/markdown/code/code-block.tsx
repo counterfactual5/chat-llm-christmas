@@ -63,7 +63,11 @@ export function CodeBlock({ language, value, wrap = false, streaming = false }: 
   // Box-drawing / trees: no soft-wrap, no hljs spans (both shred alignment).
   // CJK in system mono is ~1.66×ASCII — AsciiArtPre forces a 1ch/2ch grid.
   const asciiArt = looksLikeAsciiArt(value);
-  const softWrap = wrap && !asciiArt;
+  const lang = resolveLanguage(language);
+  // Plain `text` fences often hold prose the model wrapped by mistake — allow
+  // soft-wrap unless this block is real ASCII art (which must stay pre).
+  const plainTextFence = !lang || lang === 'plaintext';
+  const softWrap = !asciiArt && (wrap || plainTextFence);
   const highlighted = useMemo(
     () => (asciiArt ? '' : highlightCode(value, language)),
     [value, language, asciiArt],

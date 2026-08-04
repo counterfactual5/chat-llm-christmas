@@ -35,11 +35,33 @@ export function looksLikeUnicodeBox(text: string): boolean {
   const t = String(text || '');
   const chars = t.match(BOX_CHAR_RE) || [];
   if (chars.length < 6) return false;
-  return (
+  const hasCorners =
     (BOX_TOP_RE.test(t) && BOX_BOTTOM_RE.test(t)) ||
     /[╔╗╚╝]/.test(t) ||
-    /[╭╮╰╯]/.test(t)
-  );
+    /[╭╮╰╯]/.test(t);
+  if (!hasCorners) return false;
+
+  const lines = t.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length <= 1) {
+    const trimmed = t.trim();
+    // Flattened one-line boxes start with a corner. Prose that only *lists*
+    // glyphs ("用 ┌┐│─ 对齐") must not become a ```text fence.
+    if (!/^[┌╔╭]/.test(trimmed)) return false;
+    return true;
+  }
+
+  // Multi-line: require real box rows, not a paragraph that happens to
+  // mention corners inside parentheses / quotes.
+  const structural = lines.filter((l) => {
+    const s = l.trim();
+    return (
+      /^[┌╔╭].*[┐╗╮]\s*$/.test(s) ||
+      /^[└╚╰].*[┘╝╯]\s*$/.test(s) ||
+      /^[│║┃]/.test(s) ||
+      /^[\s┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═├┤┬┴┼]+$/.test(s)
+    );
+  }).length;
+  return structural >= 2;
 }
 
 export function looksLikeAsciiTree(text: string): boolean {

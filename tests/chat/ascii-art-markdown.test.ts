@@ -60,6 +60,14 @@ describe('ASCII art Markdown recovery', () => {
     expect(normalizeAsciiArtMarkdown('Use `npm test` now.')).toBe('Use `npm test` now.');
   });
 
+  it('does not fence prose that only enumerates box-drawing glyphs', () => {
+    const prose =
+      '明白，按「每个汉字占 2 列宽度、ASCII 框线字符（─│┌┐└┘├┤┬┴┼▲▼▶◀ 等）占 1 列」重新对齐。下面所有框宽度都按字符数计算。';
+    expect(looksLikeAsciiArt(prose)).toBe(false);
+    expect(normalizeAsciiArtMarkdown(prose)).toBe(prose);
+    expect(prepareChatMarkdown(prose)).not.toContain('```');
+  });
+
   it('runs through prepareChatMarkdown before remark can collapse newlines', () => {
     const out = prepareChatMarkdown('标题\n\n`Root\n├─ a\n└─ b`');
     expect(out).toContain('```text');

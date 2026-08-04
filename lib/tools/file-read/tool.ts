@@ -113,78 +113,27 @@ async function fetchGatewayFileText(
       filename,
     );
 
-  const isPdf =
-    ct === 'application/pdf' ||
-    /\.pdf$/i.test(filename) ||
-    (buf.length >= 5 &&
-      buf[0] === 0x25 &&
-      buf[1] === 0x50 &&
-      buf[2] === 0x44 &&
-      buf[3] === 0x46 &&
-      buf[4] === 0x2d);
-  const isEpub =
-    ct === 'application/epub+zip' ||
-    /\.epub$/i.test(filename) ||
-    (buf.length >= 4 &&
-      buf[0] === 0x50 &&
-      buf[1] === 0x4b &&
-      /\.epub$/i.test(filename));
-
-  let text = '';
-  if (looksText) {
-    text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-  } else if (isPdf) {
-    try {
-      const { extractPdfTextFromBytes } = await import('@/lib/files/ingest/extractors');
-      text = await extractPdfTextFromBytes(buf);
-    } catch (cause) {
-      return {
-        ok: false,
-        error: `Could not extract PDF text from ${filename}: ${
-          cause instanceof Error ? cause.message : 'extract failed'
-        }`,
-      };
-    }
-  } else if (isEpub) {
-    try {
-      const { extractEpubTextFromBytes } = await import('@/lib/files/ingest/extractors');
-      text = await extractEpubTextFromBytes(buf);
-    } catch (cause) {
-      return {
-        ok: false,
-        error: `Could not extract EPUB text from ${filename}: ${
-          cause instanceof Error ? cause.message : 'extract failed'
-        }`,
-      };
-    }
-  } else {
+  // PDF/EPUB extraction runs on chat-api (Node) via GET /extract above —
+  // never import unpdf/pdfjs here: /api/chat is Edge and the bundle would exceed
+  // Vercel's 1MB limit (and pdfjs needs DOM).
+  if (!looksText) {
     return {
       ok: false,
       error: [
-        `File ${filename} (${ct || 'binary'}) has no stored text extract.`,
-        'Re-attach the file so the client can extract text again, or upload with an extract sidecar.',
+        `File ${filename} (${ct || 'binary'}) has no readable text extract yet.`,
+        'Ask again in a moment after the extract finishes, or re-download / re-attach the file.',
       ].join(' '),
     };
   }
 
+  let text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   if (!text.trim()) {
     return {
       ok: false,
-      error: `File ${filename} produced an empty text extract (scanned/image PDF or empty document).`,
+      error: `File ${filename} produced an empty text extract.`,
     };
   }
-
-  // Best-effort: cache extract sidecar for later file_read rounds.
-  void fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ text }),
-  }).catch(() => {});
-
   return { ok: true, name: filename, text, mime: ct || mime };
 }
 

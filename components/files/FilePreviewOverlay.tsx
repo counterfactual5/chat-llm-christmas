@@ -5,6 +5,7 @@ import { Download, FileText, Loader2, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { CodeBlock } from '@/components/markdown/code/code-block';
 import { isPdfFile, isPreviewableImageFile } from '@/lib/files/preview';
+import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { cn } from '@/lib/utils';
 
 export type FilePreviewPayload = {
@@ -101,10 +102,23 @@ type FilePreviewOverlayProps = {
   };
 };
 
+function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
+  const ct = String(contentType || '').split(';')[0].trim() || 'unknown type';
+  if (isEpubBytes(buf) || ct === 'application/epub+zip') {
+    return 'This file is an EPUB (often mislabeled as .pdf by the downloader). Download it and open in an e-reader — in-chat PDF preview cannot render EPUB.';
+  }
+  const head = new Uint8Array(buf.slice(0, 8));
+  const hex = [...head].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+  return `Response is not a PDF (${ct || 'no content-type'}; first bytes: ${hex || 'empty'})`;
+}
+
 /**
  * Chrome’s PDF plugin inside an iframe is unreliable when the URL path is a
  * bare hash id and Content-Type is application/octet-stream. Fetch → blob with
  * an explicit application/pdf type (cookies still sent same-origin).
+ *
+ * Also guards against LibGen downloads that were stored as *.pdf / application/pdf
+ * while the bytes are actually EPUB (ZIP).
  */
 function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
   const [src, setSrc] = useState('');
@@ -118,20 +132,21 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
 
     void (async () => {
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, { credentials: 'same-origin' });
         if (!response.ok) {
-          throw new Error(`Failed to load PDF (${response.status})`);
+          const detail = await response.text().catch(() => '');
+          const hint = detail.trim().slice(0, 120);
+          throw new Error(
+            hint
+              ? `Failed to load PDF (${response.status}): ${hint}`
+              : `Failed to load PDF (${response.status})`,
+          );
         }
         const buf = await response.arrayBuffer();
-        const head = new Uint8Array(buf.slice(0, 5));
-        const looksPdf =
-          head.length >= 4 &&
-          head[0] === 0x25 &&
-          head[1] === 0x50 &&
-          head[2] === 0x44 &&
-          head[3] === 0x46;
-        if (!looksPdf) {
-          throw new Error('Response is not a PDF');
+        if (!isPdfBytes(buf)) {
+          throw new Error(
+            describeNonPdf(buf, response.headers.get('content-type') || ''),
+          );
         }
         objectUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
         if (cancelled) {
@@ -157,14 +172,14 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
     return (
       <div className="flex min-h-[24rem] flex-col items-center justify-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-4 text-center text-xs text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
         <FileText className="h-8 w-8 opacity-40" />
-        <span>{error}</span>
+        <span className="max-w-sm leading-relaxed">{error}</span>
         <a
           href={url}
           target="_blank"
           rel="noopener noreferrer"
           className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
         >
-          Open in new tab
+          Download / open in new tab
         </a>
       </div>
     );

@@ -21,18 +21,10 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('create_spreadsheet');
     expect(text).toContain('/research [quick|standard|rigorous]');
     expect(text).toContain('web|literature|mixed');
-    expect(text).toContain('image_understand');
     expect(text).toContain('Notion');
-    expect(text).toContain('OPT-IN Tools toggles');
-    expect(text).toContain('do not contradict yourself');
-    expect(text).toContain('slash command OR by enabling');
-    expect(text).toContain('never put /papers|/books|/image under');
-    expect(text).toContain('There is NO /news or /wiki slash command');
-    expect(text).toContain('not a dedicated finance/market data feed');
-    expect(text).toContain('NOT product features');
     expect(text).toContain('[ACTIVE]');
-    expect(text).toContain('prefer GitHub tools over generic web');
     expect(text).toContain('follow the user’s language');
+    expect(text).not.toContain('detailed product guide');
   });
 });
 
@@ -43,16 +35,9 @@ describe('productUsageGuideDetailPrompt', () => {
     expect(text).toContain('generate_image chat tool is opt-in');
     expect(text).toContain('Sidebar Tools: always-on Web Search');
     expect(text).toContain('opt-in toggles (default OFF)');
-    expect(text).toContain('GitHub MCP is enabled for this chat, it is the primary path');
-    expect(text).toContain('generic webpage reading is fallback only');
-    expect(text).toContain('no first-class finance');
     expect(text).toContain('image_understand');
     expect(text).toContain('/skill not /skills');
-    expect(text).toContain('available via slash command OR by enabling the matching Tools switch');
-    expect(text).toContain('never invent or recommend /news or /wiki');
     expect(text).toContain('Prefer /papers or /books for dedicated literature search/download');
-    expect(text).toContain('sources=news or sources=wiki');
-    expect(text).toContain('mixed = web + papers/books + news + wiki');
     expect(text).toContain('Never upgrade inactive library blurbs');
     expect(text).toContain('create_spreadsheet');
   });

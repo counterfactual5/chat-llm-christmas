@@ -11,7 +11,6 @@ const SYSTEM_PROMPT = [
   'You have a generate_image tool that creates an image via the image model and saves it to this chat.',
   'Call it when the user asks to draw/generate/create an image (or clearly wants a picture of something).',
   'Pass a clear English or Chinese visual prompt. Do not claim an image was generated unless the tool returned ok:true.',
-  'The user can always force generation with the /image slash command (does not need this tool to be ON).',
 ].join(' ');
 
 function parsePrompt(rawArguments: string, fallback: string): string {

@@ -8,8 +8,11 @@ import type { LiteratureHit } from '@/lib/chat/turn/literature-search';
 import {
   formatBookDownloadCommand,
   formatPaperActionCommand,
+  formatPaperDownloadCommand,
   isValidBookDownloadIdentifier,
+  isValidPaperDownloadIdentifier,
   resolveBookDownloadIdentifier,
+  resolvePaperDownloadIdentifier,
 } from '@/lib/chat/turn/literature-command';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
@@ -171,6 +174,11 @@ export function formatHitsForModel(
     provider,
     results: results.slice(0, 12).map((r) => {
       const paperId = r.paperId ? String(r.paperId) : undefined;
+      const resolved = resolvePaperDownloadIdentifier(r);
+      const downloadCommand =
+        resolved && isValidPaperDownloadIdentifier(resolved)
+          ? formatPaperDownloadCommand(resolved)
+          : undefined;
       return {
         title: r.title || '',
         url: r.url || '',
@@ -180,6 +188,7 @@ export function formatHitsForModel(
         source: r.sourceProvider,
         paperId,
         pdfUrl: r.pdfUrl,
+        downloadCommand,
         detailsCommand: paperId ? formatPaperActionCommand('details', paperId) : undefined,
         citationsCommand: paperId
           ? formatPaperActionCommand('citations', paperId)
@@ -190,8 +199,8 @@ export function formatHitsForModel(
       };
     }),
     hint:
-      'Only show /papers details|citations|references commands from the receipt fields. ' +
-      'Never invent paper ids. Prefer pdfUrl as a markdown link when present.',
+      'Only show /papers details|citations|references|download commands from the receipt fields. ' +
+      'Never invent paper ids. Prefer downloadCommand when present; otherwise use pdfUrl as a markdown Open PDF link.',
   });
 }
 
@@ -199,15 +208,13 @@ const PAPER_SYSTEM = [
   'You have a paper_search tool for academic papers (arXiv / Semantic Scholar / OpenAlex).',
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
-  'If this tool is OFF, the user can still run the always-available slash command /papers — never say /papers is unavailable.',
-  'After results, cite title + URL; only offer /papers details|citations|references using paperId/commands from the tool receipt — never invent ids.',
-  'When pdfUrl is present, show it as a markdown link.',
+  'After results, cite title + URL; only offer /papers details|citations|references|download using paperId/commands from the tool receipt — never invent ids.',
+  'For PDF downloads: only cite downloadCommand from the tool receipt (ARXIV:… / DOI:… / S2 id / pdf URL). When downloadCommand is absent but pdfUrl is present, show pdfUrl as a markdown Open PDF link.',
 ].join(' ');
 
 const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
-  'If this tool is OFF, the user can still run the always-available slash command /books — never say /books is unavailable.',
   'For downloads: only cite downloadCommand from the tool receipt (libgen md5 / IA id / gutenberg:id / direct URL). Never invent identifiers or claim only LibGen works.',
   'When downloadCommand is absent, give the hit url as a markdown Manual download link for the user to open themselves.',
   'After results, cite title + URL; never invent catalog entries.',

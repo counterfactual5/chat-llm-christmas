@@ -9,8 +9,6 @@ describe('activeIntegrationsPrompt', () => {
     });
 
     expect(text).toContain('GitHub MCP: ON');
-    expect(text).toContain('use it first for github.com repositories');
-    expect(text).toContain('generic web tools are fallback only');
   });
 
   it('reports opt-in paper/book/image tools as OFF by default', () => {
@@ -21,10 +19,6 @@ describe('activeIntegrationsPrompt', () => {
     expect(text).toContain('paper_search: OFF');
     expect(text).toContain('book_search: OFF');
     expect(text).toContain('generate_image: OFF');
-    expect(text).toContain('slash /papers OR enable Paper Search');
-    expect(text).toContain('slash /books OR enable Book Search');
-    expect(text).toContain('slash /image OR enable Generate Image');
-    expect(text).toContain('do NOT call /papers unavailable');
   });
 
   it('reports opt-in paper/book/image tools as ON when enabled', () => {

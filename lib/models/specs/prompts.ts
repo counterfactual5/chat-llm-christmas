@@ -6,14 +6,19 @@ export const DEFAULT_SYSTEM_PROMPT =
   'You are a helpful AI assistant. Answer the user\'s questions clearly and concisely. If you\'re unsure about something, say so rather than making up information.';
 
 /**
- * Always-on capability / anti-hallucination contract (no Markdown/Mermaid style coaching —
- * formatting is recovered in the renderer when possible).
+ * Always-on capability / anti-hallucination contract (SSOT for the repeated
+ * easy-to-contradict rules — product map / detail / activeIntegrations only
+ * reference it; tool prompts keep only call mechanics, not these contracts).
+ * No Markdown/Mermaid style coaching — formatting is recovered in the renderer.
  */
 export const CHAT_OUTPUT_CAPABILITIES_PROMPT = [
   'Never claim an image or downloadable file was created without the real pipeline (/image client result in chat, or create_file / create_spreadsheet ok:true). Only use tools present in THIS request’s API tool list.',
-  'Slash Commands (/papers, /books, /image, …) stay available even when matching opt-in chat tools are OFF — phrase as “slash command OR enable Tools toggle”, never “unavailable”.',
-  'Active Skills are user-selected per conversation and injected below — do not claim every account Skill is active.',
+  'Slash Commands (/papers, /books, /image, …) stay available even when matching opt-in chat tools are OFF — phrase as “slash command OR enable Tools toggle”, never “unavailable”. /skill (singular) is always available via Commands; save_skill is OFF until Skill Creator is on — never list /skill itself as unavailable.',
+  'Active Skills are user-selected per conversation and injected below; account Skill library blurbs are catalog only — do not claim every account Skill is active or a product feature.',
   'Image understanding is a built-in product capability for logged-in text-only models: it stays out of THIS-turn tools until the chat has images (token saving), then auto-enables. Vision models see images natively. If image_understand is absent because there are no images yet, do NOT say you cannot understand images — invite the user to send/attach one. Never name internal tool/MCP/model ids.',
+  'file_read is lazy: off until the chat has documents or assistant-delivered files, then auto-on. It returns a SHORT page slice by default (use start_page / focus to continue). Never invent file contents.',
+  'There is NO /news or /wiki slash command — for headlines or encyclopedia lookup call web_search yourself (sources=news / sources=wiki); never tell the user to type /news or /wiki. This is not a dedicated finance/market-data feed — label source, time, and live vs historical.',
+  'When GitHub MCP is enabled this turn, use it first for github.com repos / files / issues / PRs / releases; generic web is fallback only.',
   'THIS-turn capability flags (save_skill ON/OFF, search, MCP, …) only describe what is available for new calls in the current request. Past tool results in this chat stand as they were returned then; turning a capability off later does not change those earlier outcomes — it only means you cannot make new calls of that kind until it is on again.',
 ].join('\n');
 
@@ -40,7 +45,7 @@ export function cursorWebChatPrompt(opts: { searchEnabled: boolean }): string {
 /** @deprecated Prefer cursorWebChatPrompt({ searchEnabled }). Kept for import compatibility. */
 export const CURSOR_WEB_CHAT_PROMPT = cursorWebChatPrompt({ searchEnabled: true });
 
-/** Explicit inventory of THIS-turn toggles (product command map lives in productUsageGuidePrompt). */
+/** Explicit inventory of THIS-turn toggles (contracts live in CHAT_OUTPUT_CAPABILITIES_PROMPT; map in productUsageGuidePrompt). */
 export function activeIntegrationsPrompt(opts: {
   searchEnabled: boolean;
   integrations: string[];
@@ -50,7 +55,7 @@ export function activeIntegrationsPrompt(opts: {
   skillCreatorOn?: boolean;
 }): string {
   const lines: string[] = [
-    'THIS-turn capability flags (authoritative for what is on right now; see product map for how Commands work):',
+    'THIS-turn capability flags (authoritative for what is on right now; rules for slash-vs-Tools / lazy tools are in the capability contract):',
     `- save_skill: ${opts.skillCreatorOn ? 'ON (Skill Creator active)' : 'OFF'}`,
     `- web_search/web_read: ${opts.searchEnabled ? 'ON (built-in)' : 'OFF'}`,
     '- create_file / create_spreadsheet: usually ON when listed in API tools (Output panel downloads; .xlsx → create_spreadsheet)',
@@ -62,9 +67,7 @@ export function activeIntegrationsPrompt(opts: {
     lines.push('- Notion MCP: ON');
   }
   if (set.has('github')) {
-    lines.push(
-      '- GitHub MCP: ON — use it first for github.com repositories, files, directories, issues, PRs, releases, and GitHub docs; generic web tools are fallback only when GitHub MCP cannot access the resource.',
-    );
+    lines.push('- GitHub MCP: ON');
   }
   if (set.has('gmail')) {
     lines.push('- Gmail MCP: ON');
@@ -75,31 +78,11 @@ export function activeIntegrationsPrompt(opts: {
   if (set.has('drive')) {
     lines.push('- Drive MCP: ON');
   }
-  if (set.has('paper_search')) {
-    lines.push('- paper_search: ON (opt-in Tools toggle)');
-  } else {
-    lines.push(
-      '- paper_search: OFF — available via slash /papers OR enable Paper Search in Tools; do NOT call /papers unavailable',
-    );
-  }
-  if (set.has('book_search')) {
-    lines.push('- book_search: ON (opt-in Tools toggle)');
-  } else {
-    lines.push(
-      '- book_search: OFF — available via slash /books OR enable Book Search in Tools; do NOT call /books unavailable',
-    );
-  }
-  if (set.has('generate_image')) {
-    lines.push('- generate_image: ON (opt-in Tools toggle)');
-  } else {
-    lines.push(
-      '- generate_image: OFF — available via slash /image OR enable Generate Image in Tools; do NOT call /image unavailable',
-    );
-  }
+  lines.push(`- paper_search: ${set.has('paper_search') ? 'ON' : 'OFF'}`);
+  lines.push(`- book_search: ${set.has('book_search') ? 'ON' : 'OFF'}`);
+  lines.push(`- generate_image: ${set.has('generate_image') ? 'ON' : 'OFF'}`);
   if (set.has('zhipu-vision')) {
-    lines.push(
-      '- Image understanding: ON for text-only models (treat injected vision as what you saw; never name internal tool/MCP/model ids).',
-    );
+    lines.push('- Image understanding: ON for text-only models this turn.');
   }
   if (set.has('google') && !set.has('gmail') && !set.has('calendar') && !set.has('drive')) {
     lines.push('- Google Workspace MCP: ON');

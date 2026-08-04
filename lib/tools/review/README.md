@@ -2,6 +2,8 @@
 
 产品内置的回答审查能力；不是 MCP，也不是提供给模型自行调用的工具。
 
+仓库总规范（按功能拆分、SSOT）：[`docs/code-organization.md`](../../../docs/code-organization.md)。
+
 ## 目录职责
 
 | Path | Responsibility |

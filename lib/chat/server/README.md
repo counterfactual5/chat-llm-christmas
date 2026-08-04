@@ -3,6 +3,8 @@
 Server-only helpers for the chat API. Prefer importing these
 directly from here; do not re-export through client chat barrels.
 
+Repo-wide structure rules: [`docs/code-organization.md`](../../../docs/code-organization.md).
+
 HTTP entry: `app/api/chat/route.ts` (runtime / `maxDuration` / `POST` only).
 Request pipeline: `chat-request.ts` (`handleChatRequest`).
 

@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Chat shell — wires UI panels to hooks. Prefer jumping to the owning module:
+ * Chat shell — wires UI panels to hooks. Prefer jumping to the owning module.
+ * Repo structure rules: docs/code-organization.md. Chat map: lib/chat/README.md.
  *
  *  Account status                  hooks/chat/use-account.ts + lib/chat/account/client.ts
  *  Notion/GitHub/Google status     hooks/chat/use-integrations.ts + lib/chat/integrations/client.ts
@@ -9,7 +10,7 @@
  *  Attachments ingest / upload     hooks/chat/use-attachments.ts
  *  Skills toggle / create / delete hooks/chat/use-skills.ts
  *  Account memories / extract      hooks/chat/use-memory-wiring.ts (+ use-memories, lib/memories/)
- *  Slash menu                      hooks/chat/use-slash.ts
+ *  Slash menu                      hooks/chat/use-slash.ts (+ lib/chat/composer/slash-commands.ts catalog)
  *  OAuth return query              lib/chat/account/oauth-return.ts
  *  Send / queue / resume / review   hooks/chat/use-logic.ts
  *    queue state                   hooks/chat/use-chat-queue.ts

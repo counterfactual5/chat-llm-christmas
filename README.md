@@ -10,8 +10,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Docs
 
+- [代码组织与模块规范](docs/code-organization.md) — 按功能域拆分、分层、SSOT、反模式（写代码前先读）
 - [图片与文件附件](docs/images-and-files.md) — 直传、上下文折叠、`file_read` / 视觉路径
-- Agent placement: [`AGENTS.md`](AGENTS.md) → [`lib/chat/README.md`](lib/chat/README.md), [`lib/files/README.md`](lib/files/README.md), [`lib/images/README.md`](lib/images/README.md), [`lib/markdown/README.md`](lib/markdown/README.md)
+- Agent 入口: [`AGENTS.md`](AGENTS.md) → chat / files / images / markdown 领域 README
 
 ## Notion (hosted MCP)
 

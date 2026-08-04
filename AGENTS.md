@@ -4,8 +4,14 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-Chat layout & placement: see `lib/chat/README.md` (read first). Do not pile new logic into `components/chat-container.tsx` — follow that README’s placement section.
-Server tool loop: `lib/chat/server/README.md`.
-When touching claim review / markdown: `lib/tools/review/README.md`, `lib/markdown/README.md`.
-Files / preview / downloads: `lib/files/README.md` (MIME+lang catalog, preview fetch, download helpers).
-Image generate+store: `lib/images/README.md` (shared by `/api/images` and `generate_image`).
+## Where to put code (read first)
+
+**Structure & module rules:** [`docs/code-organization.md`](docs/code-organization.md) — organize by feature domain; split reusable / independently testable pieces; keep `app` / `components` / `hooks` / `lib` layers thin and one-way.
+
+Domain maps (after the doc above):
+
+- Chat layout & placement: `lib/chat/README.md`. Do not pile new logic into `components/chat-container.tsx`.
+- Server tool loop: `lib/chat/server/README.md`.
+- Claim review / markdown: `lib/tools/review/README.md`, `lib/markdown/README.md`.
+- Files / preview / downloads: `lib/files/README.md`.
+- Image generate+store: `lib/images/README.md`.

@@ -1,5 +1,7 @@
 # Markdown
 
+预处理与渲染的拆分、以及「只走 `AnswerMarkdown`」等约定，服从仓库总规范：[`docs/code-organization.md`](../../docs/code-organization.md)。
+
 ## `lib/markdown/` — 预处理（无 React）
 
 不依赖 React UI 的 Markdown 预处理和解析辅助逻辑。

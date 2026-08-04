@@ -2,6 +2,8 @@
 
 Reusable file helpers shared by chat tools, preview UI, and downloads. Prefer extending these modules over copying MIME maps, fetch paths, or `<a download>` logic into call sites.
 
+Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organization.md).
+
 ## Shared catalogs / helpers
 
 | Module | Responsibility |

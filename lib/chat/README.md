@@ -1,6 +1,8 @@
 # lib/chat
 
-Map of record for chat feature code. Split modules by **reusable function**, not line-count. Server-only helpers live under `server/` — see [`server/README.md`](./server/README.md); do not import them from client barrels.
+Map of record for chat feature code. **Split by reusable function / feature area, not line-count.** Repo-wide rules (layers, SSOT, anti-patterns): [`docs/code-organization.md`](../../docs/code-organization.md).
+
+Server-only helpers live under `server/` — see [`server/README.md`](./server/README.md); do not import them from client barrels.
 
 ## Placement / dependency direction
 
@@ -14,6 +16,8 @@ Map of record for chat feature code. Split modules by **reusable function**, not
 | `lib/chat/server/*` | Server-only helpers used by that pipeline |
 
 For the detailed ownership map (which hook/lib owns what), see the header comment in `components/chat-container.tsx`. Prefer extending the owning module over growing the container.
+
+Mirror UI folders under `components/chat/{composer,message,session,panels,overlays,research}` with logic here under the same area name when possible.
 
 Public session-mutation path: `session/mutations/`. Always import from `@/lib/chat/session/mutations` (no other entry point).
 

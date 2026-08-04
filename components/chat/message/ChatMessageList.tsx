@@ -536,6 +536,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       failed,
                       awaitingApproval: run.status === 'awaiting_approval',
                       approvalOutcome: run.approvalOutcome,
+                      toolName: run.name,
                     }),
                   );
                   const showQueryInline =

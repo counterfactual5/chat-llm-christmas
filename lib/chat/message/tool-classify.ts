@@ -148,6 +148,33 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
  * Pick the i18n key for a tool run's status line, given its classification
  * plus in-flight / failure state. Caller resolves the key via `t()`.
  */
+/** Per-tool labels for Gmail send-family approval UI. */
+export function getGmailApprovalLabelKey(
+  toolName: string,
+  phase: 'awaiting' | 'sent' | 'cancelled',
+): MessageKey {
+  const name = String(toolName || '').toLowerCase().replace(/-/g, '_');
+  if (name === 'gmail_reply') {
+    if (phase === 'awaiting') return 'emailAwaitingReply';
+    if (phase === 'sent') return 'emailReplySent';
+    return 'emailReplyCancelled';
+  }
+  if (name === 'gmail_forward') {
+    if (phase === 'awaiting') return 'emailAwaitingForward';
+    if (phase === 'sent') return 'emailForwardSent';
+    return 'emailForwardCancelled';
+  }
+  if (name === 'gmail_send_draft') {
+    if (phase === 'awaiting') return 'emailAwaitingSendDraft';
+    if (phase === 'sent') return 'emailDraftSent';
+    return 'emailDraftCancelled';
+  }
+  // gmail_send and fallback
+  if (phase === 'awaiting') return 'emailAwaitingSend';
+  if (phase === 'sent') return 'emailSent';
+  return 'emailCancelled';
+}
+
 export function getToolRunLabelKey(
   classification: ToolRunClassification,
   state: {
@@ -155,6 +182,7 @@ export function getToolRunLabelKey(
     failed: boolean;
     awaitingApproval?: boolean;
     approvalOutcome?: 'sent' | 'cancelled';
+    toolName?: string;
   },
 ): MessageKey {
   const {
@@ -191,11 +219,13 @@ export function getToolRunLabelKey(
     isResearchMixedSearch,
     isPaperRead,
   } = classification;
-  const { searching, failed, awaitingApproval, approvalOutcome } = state;
+  const { searching, failed, awaitingApproval, approvalOutcome, toolName } = state;
 
-  if (awaitingApproval) return 'emailAwaitingApproval';
-  if (approvalOutcome === 'sent') return 'emailSent';
-  if (approvalOutcome === 'cancelled') return 'emailCancelled';
+  if (awaitingApproval) return getGmailApprovalLabelKey(toolName || '', 'awaiting');
+  if (approvalOutcome === 'sent') return getGmailApprovalLabelKey(toolName || '', 'sent');
+  if (approvalOutcome === 'cancelled') {
+    return getGmailApprovalLabelKey(toolName || '', 'cancelled');
+  }
 
   if (isReviewAudit) {
     if (failed) return 'toolFailed';

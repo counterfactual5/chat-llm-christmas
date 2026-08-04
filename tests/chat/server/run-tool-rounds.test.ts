@@ -410,5 +410,10 @@ describe('runToolRounds', () => {
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'tools_timeout' }),
     );
+    expect(send).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        content: expect.stringMatching(/Stream timed out/i),
+      }),
+    );
   });
 });

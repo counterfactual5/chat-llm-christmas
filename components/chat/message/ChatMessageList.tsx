@@ -821,7 +821,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   // streaming. Incomplete alone (e.g. after refresh) is not live.
                   const segLive = Boolean(seg.live && isActiveLoading);
                   // While the stream is idle (replyWait), freeze Thought chrome;
-                  // the textless gap spinner is rendered after the timeline.
+                  // Waiting is shown as a Process row instead of a bare spinner.
                   const thoughtStreaming = segLive && !replyWait;
                   const lastIdx = seg.steps.length - 1;
                   const rendered = seg.steps
@@ -839,18 +839,68 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     )
                     .filter(Boolean);
 
-                  // Nothing yet — do NOT label this as Thinking. Waiting for the
-                  // first token is not the same as chain-of-thought; the textless
-                  // gap spinner under the timeline covers that state.
-                  if (rendered.length === 0) {
+                  const showWaitingRow = segLive && (replyWait || rendered.length === 0);
+                  // Nothing yet and not live — skip.
+                  if (rendered.length === 0 && !showWaitingRow) {
                     return null;
                   }
 
+                  const waitingRow = showWaitingRow ? (
+                    <div
+                      key={`${seg.id}-waiting`}
+                      className="flex items-start gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                    >
+                      <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+                      <span>{t('processWaitingDetail')}</span>
+                    </div>
+                  ) : null;
+
                   // A single step is self-describing (Thought / Searched the web …),
                   // so the outer "Process" header would only add noise — unless this
-                  // segment has an explicit stage title (Plan / Search / …).
-                  if (rendered.length === 1 && !seg.title) {
+                  // segment has an explicit stage title (Plan / Search / …) or we are
+                  // showing the Waiting row (needs a collapsible shell).
+                  if (rendered.length === 1 && !seg.title && !showWaitingRow) {
                     return <div key={seg.id}>{rendered}</div>;
+                  }
+
+                  // Pure wait (no thought/tools yet): collapsible Waiting module.
+                  if (rendered.length === 0 && showWaitingRow) {
+                    const waitId = `${seg.id}-wait`;
+                    const open = reasoningOpen[waitId] ?? true;
+                    return (
+                      <div
+                        key={seg.id}
+                        className={cn(
+                          'overflow-hidden',
+                          open &&
+                            'rounded-md border border-stone-200/70 bg-stone-50/50 dark:border-stone-800/80 dark:bg-stone-900/40',
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setReasoningOpen((prev) => ({
+                              ...prev,
+                              [waitId]: !(prev[waitId] ?? true),
+                            }))
+                          }
+                          className={cn(
+                            'flex w-full items-center gap-1.5 py-0.5 text-left text-[12px] leading-5 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300',
+                            open && 'px-2 pt-1.5',
+                          )}
+                        >
+                          <ChevronDown
+                            className={cn(
+                              'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                              open ? 'rotate-0' : '-rotate-90',
+                            )}
+                          />
+                          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
+                          <span>{t('processWaiting')}</span>
+                        </button>
+                        {open && <div className="space-y-1.5 px-2 pb-1.5 pl-6">{waitingRow}</div>}
+                      </div>
+                    );
                   }
 
                   // Keep Process open when it contains tool calls — otherwise a
@@ -858,7 +908,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   // never ran, while receipts only appear inside Review.
                   const hasToolSteps = seg.steps.some((s) => s.kind === 'tool');
                   const open = reasoningOpen[seg.id] ?? (segLive || hasToolSteps);
-                  const segStepCount = rendered.length;
+                  const segStepCount = rendered.length + (showWaitingRow ? 1 : 0);
                   return (
                     <div
                       key={seg.id}
@@ -894,7 +944,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         <span className="opacity-50">· {segStepCount}</span>
                       </button>
                       {open && (
-                        <div className="space-y-1.5 px-2 pb-1.5 pl-6">{rendered}</div>
+                        <div className="space-y-1.5 px-2 pb-1.5 pl-6">
+                          {rendered}
+                          {waitingRow}
+                        </div>
                       )}
                     </div>
                   );
@@ -911,18 +964,24 @@ export function ChatMessageList(props: ChatMessageListProps) {
                 const hasReasoningActivity = activitySteps.some(
                   (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
                 );
-                // Textless wait marker: first-token gap (no thought yet) OR idle
-                // after narration. Never pretends the model is "thinking".
+                const hasLiveProcessSeg = timelineSegments.some(
+                  (s) => s.type === 'process' && s.live && messageIsStreaming,
+                );
+                // Fallback only when timeline has no live Process (Waiting lives there).
                 const streamGapSpinner =
                   messageIsStreaming &&
                   message.incomplete &&
                   !toolPendingUi &&
+                  !hasLiveProcessSeg &&
                   (replyWait || (awaitingFirstContent && !hasReasoningActivity)) ? (
                     <div
-                      className="flex items-center py-1.5"
+                      className="overflow-hidden rounded-md border border-stone-200/70 bg-stone-50/50 dark:border-stone-800/80 dark:bg-stone-900/40"
                       aria-label={t('generatingReply')}
                     >
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-stone-400 dark:text-stone-500" />
+                      <div className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400">
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                        <span>{t('processWaiting')}</span>
+                      </div>
                     </div>
                   ) : null;
 

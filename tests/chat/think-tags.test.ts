@@ -51,4 +51,16 @@ describe('displayAssistantParts', () => {
     expect(parts.reasoning).toContain('金融口径草稿');
     expect(parts.content.trim()).toBe('正式能力说明');
   });
+
+  it('strips tools-round timeout banners from the answer body', () => {
+    const message = {
+      id: 'a2',
+      role: 'assistant',
+      content:
+        '[Stream timed out during tool use: tools round stalled for 90s (no upstream chunks)]\n\nHere is the fixed diagram.',
+    } as Message;
+    const parts = displayAssistantParts(message);
+    expect(parts.content).toBe('Here is the fixed diagram.');
+    expect(parts.content).not.toMatch(/Stream timed out/i);
+  });
 });

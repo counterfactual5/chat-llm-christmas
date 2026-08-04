@@ -296,7 +296,8 @@ export async function runToolRounds(
           ].join(' '),
         });
         deps.send({
-          content: `\n\n[Stream timed out during tool use: ${roundResult.skipReason || 'budget exceeded'}]`,
+          // Do not dump the timeout into answer content — Continue / Process UI
+          // surfaces tools_timeout via streamCompletionPayload instead.
           ...streamCompletionPayload('length', { code: 'tools_timeout' }),
         });
       }

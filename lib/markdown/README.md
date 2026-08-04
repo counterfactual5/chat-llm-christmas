@@ -23,7 +23,7 @@
 
 | Path | Responsibility |
 |------|----------------|
-| `code/` | 代码块渲染、复制和语法高亮；识别 `mermaid` 后转交图表组件。 |
+| `code/` | 代码块渲染、复制和语法高亮；识别 `mermaid` 后转交图表组件；ASCII/Unicode 框图走 `ascii-art-pre`（按东亚终端 1/2 栏宽铺格子，避免 Menlo CJK ≈1.66× 错位）。 |
 | `diagrams/` | Mermaid 图表渲染、主题适配、源码回退和复制。 |
 
 聊天内 Markdown 渲染统一走 `components/chat/message/AnswerMarkdown.tsx`（含 ASCII 重排 / 表格恢复等预处理），避免平行再起一套 `react-markdown`：

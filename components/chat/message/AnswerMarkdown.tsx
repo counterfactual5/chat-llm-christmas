@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import { AsciiArtPre } from '@/components/markdown/code/ascii-art-pre';
 import { CodeBlock } from '@/components/markdown/code/code-block';
 import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
 import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
@@ -121,14 +122,16 @@ export function AnswerMarkdown({
               return <CodeBlock language={match[1]} value={value} streaming={streaming} />;
             }
             if (isBlock) {
-              const ascii = looksLikeAsciiArt(value);
+              if (looksLikeAsciiArt(value)) {
+                return (
+                  <AsciiArtPre
+                    value={value}
+                    className="my-4 rounded-lg bg-stone-100 p-4 text-[13px] text-stone-800 dark:bg-stone-900/60 dark:text-stone-300"
+                  />
+                );
+              }
               return (
-                <pre
-                  className={cn(
-                    'my-4 max-w-full min-w-0 overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-4 font-mono text-[13px] text-stone-800 [overflow-wrap:normal] dark:bg-stone-900/60 dark:text-stone-300',
-                    ascii ? 'leading-none' : 'leading-5',
-                  )}
-                >
+                <pre className="my-4 max-w-full min-w-0 overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-4 font-mono text-[13px] leading-5 text-stone-800 [overflow-wrap:normal] dark:bg-stone-900/60 dark:text-stone-300">
                   <code {...props}>{value}</code>
                 </pre>
               );

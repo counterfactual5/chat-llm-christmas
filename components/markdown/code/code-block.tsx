@@ -5,6 +5,7 @@ import hljs from 'highlight.js/lib/common';
 import { Check, Copy } from 'lucide-react';
 import { looksLikeAsciiArt } from '@/lib/markdown/core/ascii-art';
 import { cn } from '@/lib/utils';
+import { AsciiArtPre } from '@/components/markdown/code/ascii-art-pre';
 import { MermaidBlock, isMermaidLanguage } from '@/components/markdown/diagrams/mermaid-block';
 
 interface CodeBlockProps {
@@ -59,12 +60,12 @@ function highlightCode(value: string, language: string) {
 
 export function CodeBlock({ language, value, wrap = false, streaming = false }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
-  // Box-drawing / trees need fixed metrics + tight leading; soft-wrap and hljs
-  // tokenization both make pipes look fragmented even when the source is fine.
+  // Box-drawing / trees: no soft-wrap, no hljs spans (both shred alignment).
+  // CJK in system mono is ~1.66×ASCII — AsciiArtPre forces a 1ch/2ch grid.
   const asciiArt = looksLikeAsciiArt(value);
   const softWrap = wrap && !asciiArt;
   const highlighted = useMemo(
-    () => (asciiArt ? escapeHtml(value) : highlightCode(value, language)),
+    () => (asciiArt ? '' : highlightCode(value, language)),
     [value, language, asciiArt],
   );
 
@@ -104,24 +105,27 @@ export function CodeBlock({ language, value, wrap = false, streaming = false }: 
           )}
         </button>
       </div>
-      <pre
-        className={cn(
-          'max-w-full p-4 text-sm',
-          asciiArt ? 'leading-none' : 'leading-relaxed',
-          softWrap ? 'overflow-x-hidden' : 'overflow-x-auto',
-        )}
-      >
-        <code
+      {asciiArt ? (
+        <AsciiArtPre value={value} className="p-4 text-sm text-stone-800 dark:text-stone-200" />
+      ) : (
+        <pre
           className={cn(
-            'hljs font-mono',
-            softWrap
-              ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'
-              : 'whitespace-pre [overflow-wrap:normal]',
-            `language-${language}`,
+            'max-w-full p-4 text-sm leading-relaxed',
+            softWrap ? 'overflow-x-hidden' : 'overflow-x-auto',
           )}
-          dangerouslySetInnerHTML={{ __html: highlighted }}
-        />
-      </pre>
+        >
+          <code
+            className={cn(
+              'hljs font-mono',
+              softWrap
+                ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'
+                : 'whitespace-pre [overflow-wrap:normal]',
+              `language-${language}`,
+            )}
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+          />
+        </pre>
+      )}
     </div>
   );
 }

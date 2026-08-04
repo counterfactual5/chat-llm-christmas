@@ -16,6 +16,115 @@ import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 /** Per-call return cap — overview / chapter, not whole book. */
 const MAX_RETURN_CHARS = 28_000;
 const DEFAULT_MAX_PAGES = 8;
+/** Pages with fewer chars are treated as empty for on-demand OCR. */
+const MIN_PAGE_CHARS_FOR_OCR = 40;
+const MAX_OCR_PAGES_PER_CALL = 8;
+
+/**
+ * Which pages in the current read window should be OCR'd on demand.
+ * TextBased: never. Mixed/Scanned/ImageBased: empty pages that need text.
+ */
+export function pagesNeedingOcrInWindow(opts: {
+  pages: Array<{ page: number; text: string }>;
+  startPage: number;
+  maxPages: number;
+  pagesNeedingOcr: number[];
+  needsOcr: boolean;
+  pdfType: string | null;
+}): number[] {
+  const pdfType = String(opts.pdfType || '');
+  if (pdfType === 'TextBased') return [];
+
+  const listed = new Set(
+    (opts.pagesNeedingOcr || [])
+      .map((n) => Math.floor(Number(n)))
+      .filter((n) => n >= 1),
+  );
+  const typeOcr =
+    opts.needsOcr ||
+    pdfType === 'Scanned' ||
+    pdfType === 'ImageBased' ||
+    pdfType === 'Mixed' ||
+    listed.size > 0;
+  if (!typeOcr) return [];
+
+  const start = Math.max(1, Math.floor(Number(opts.startPage)) || 1);
+  const max = Math.min(
+    MAX_OCR_PAGES_PER_CALL,
+    Math.max(1, Math.floor(Number(opts.maxPages)) || DEFAULT_MAX_PAGES),
+  );
+  const byPage = new Map(opts.pages.map((p) => [p.page, p.text]));
+  const out: number[] = [];
+  for (let p = start; p < start + max; p++) {
+    const body = String(byPage.get(p) || '').trim();
+    if (body.length >= MIN_PAGE_CHARS_FOR_OCR) continue;
+    if (pdfType === 'Mixed' && listed.size > 0 && !listed.has(p)) {
+      // Mixed: only OCR pages classify flagged (unless list empty → empty pages).
+      continue;
+    }
+    out.push(p);
+    if (out.length >= MAX_OCR_PAGES_PER_CALL) break;
+  }
+  return out;
+}
+
+async function requestOcrPages(
+  fileId: string,
+  pages: number[],
+  apiKey: string,
+): Promise<{
+  ok: boolean;
+  text?: string;
+  ocrPages?: Array<{ page: number; provider?: string; chars?: number; error?: string }>;
+  pagesNeedingOcr?: number[];
+  needsOcr?: boolean;
+  error?: string;
+}> {
+  if (!pages.length) return { ok: true };
+  const base = filesGatewayBaseURL();
+  const res = await fetch(
+    `${base}/files/${encodeURIComponent(fileId)}/ocr-pages`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ pages }),
+    },
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    text?: string;
+    ocr_pages?: Array<{
+      page: number;
+      provider?: string;
+      chars?: number;
+      error?: string;
+    }>;
+    pages_needing_ocr?: number[];
+    needs_ocr?: boolean;
+    message?: string;
+    error?: string;
+    code?: string;
+  };
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: String(
+        data.message || data.error || `OCR HTTP ${res.status}`,
+      ).slice(0, 300),
+    };
+  }
+  return {
+    ok: true,
+    text: String(data.text || ''),
+    ocrPages: Array.isArray(data.ocr_pages) ? data.ocr_pages : [],
+    pagesNeedingOcr: Array.isArray(data.pages_needing_ocr)
+      ? data.pages_needing_ocr
+      : [],
+    needsOcr: Boolean(data.needs_ocr),
+  };
+}
 
 export type FileReadArgs = {
   fileId: string;
@@ -194,7 +303,9 @@ async function fetchGatewayFileText(
         needs_ocr?: boolean;
       };
       const text = String(data.text || '');
-      if (text.trim()) {
+      const needsOcrFlag = Boolean(data.needs_ocr);
+      // Empty placeholder extract is OK when OCR is available on demand.
+      if (text.trim() || needsOcrFlag) {
         return {
           ok: true,
           name: data.filename ? String(data.filename) : filename,
@@ -212,7 +323,7 @@ async function fetchGatewayFileText(
           pagesNeedingOcr: Array.isArray(data.pages_needing_ocr)
             ? data.pages_needing_ocr
             : [],
-          needsOcr: Boolean(data.needs_ocr),
+          needsOcr: needsOcrFlag,
         };
       }
     } catch {
@@ -256,6 +367,24 @@ async function fetchGatewayFileText(
         : [];
     } catch {
       /* ignore */
+    }
+    // Legacy 422 NEEDS_OCR — still try on-demand OCR for the requested window.
+    if (needsOcr || code === 'NEEDS_OCR') {
+      return {
+        ok: true,
+        name: filename,
+        text: '',
+        mime,
+        partial: true,
+        totalPages: null,
+        extractedPages: 0,
+        bodyStartPage: null,
+        outline: [],
+        pdfType,
+        pdfConfidence: null,
+        pagesNeedingOcr,
+        needsOcr: true,
+      };
     }
     return {
       ok: false,
@@ -317,6 +446,7 @@ const FILE_READ_SYSTEM_PROMPT = [
   'file_read returns a SHORT slice by default (about 8 pages), not the whole book — this saves context.',
   'First call with only file_id auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body.',
   'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
+  'Scanned or mixed PDFs may OCR empty pages in the current window on demand (same as reading a slice — not whole-book OCR).',
   'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
   'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',
@@ -419,12 +549,13 @@ export function createFileReadTool(): ChatTool {
         let needsOcr = false;
         let pagesNeedingOcr: number[] = [];
 
-        if (!text) {
-          const fetched = await fetchGatewayFileText(
-            fileId,
-            ctx.credentials?.skillsApiKey || ctx.gateway?.apiKey,
-          );
-          if (!fetched.ok) {
+        // Prefer gateway (may include freshly OCR'd pages); fall back to in-turn cache.
+        const fetched = await fetchGatewayFileText(
+          fileId,
+          ctx.credentials?.skillsApiKey || ctx.gateway?.apiKey,
+        );
+        if (!fetched.ok) {
+          if (!text) {
             ctx.send({
               tool: {
                 status: 'done',
@@ -445,13 +576,14 @@ export function createFileReadTool(): ChatTool {
                 pages_needing_ocr: fetched.pagesNeedingOcr || [],
                 tip:
                   fetched.needsOcr || fetched.code === 'NEEDS_OCR'
-                    ? 'This PDF looks scanned/image-based. Text-layer extract is empty; OCR is not enabled yet.'
+                    ? 'This PDF looks scanned/image-based. Call file_read again after OCR is available, or ensure the gateway OCR endpoint is configured.'
                     : undefined,
               }),
             };
           }
-          name = fetched.name;
-          text = fetched.text;
+        } else {
+          name = fetched.name || name;
+          text = fetched.text || text;
           partialExtract = Boolean(fetched.partial);
           extractTotal = fetched.totalPages;
           extractPages = fetched.extractedPages;
@@ -470,6 +602,52 @@ export function createFileReadTool(): ChatTool {
           focus,
           outlineBodyStart: bodyStartFromMeta,
         });
+
+        let ocrApplied: number[] = [];
+        let ocrProviders: string[] = [];
+        let ocrError: string | undefined;
+        const apiKey =
+          ctx.credentials?.skillsApiKey || ctx.gateway?.apiKey || '';
+        const needOcrPages = pagesNeedingOcrInWindow({
+          pages,
+          startPage: auto.startPage,
+          maxPages,
+          pagesNeedingOcr,
+          needsOcr,
+          pdfType,
+        });
+        if (needOcrPages.length && apiKey) {
+          const ocr = await requestOcrPages(fileId, needOcrPages, apiKey);
+          if (ocr.ok && ocr.text?.trim()) {
+            text = ocr.text;
+            if (ctx.fileExtracts) {
+              ctx.fileExtracts[fileId] = { name, text };
+            }
+            pagesNeedingOcr = ocr.pagesNeedingOcr ?? pagesNeedingOcr;
+            needsOcr = ocr.needsOcr ?? needsOcr;
+            ocrApplied = (ocr.ocrPages || [])
+              .filter((r) => !r.error && (r.chars || 0) > 0)
+              .map((r) => r.page);
+            ocrProviders = [
+              ...new Set(
+                (ocr.ocrPages || [])
+                  .map((r) => String(r.provider || ''))
+                  .filter((p) => p && p !== 'existing' && p !== 'error'),
+              ),
+            ];
+            const failed = (ocr.ocrPages || []).filter((r) => r.error);
+            if (failed.length && !ocrApplied.length) {
+              ocrError = failed
+                .map((r) => `p${r.page}: ${r.error}`)
+                .join('; ')
+                .slice(0, 240);
+            }
+          } else if (!ocr.ok) {
+            ocrError = ocr.error;
+            console.warn('[file_read] on-demand OCR failed:', ocr.error);
+          }
+        }
+
         const slice = sliceExtractForRead(text, {
           startPage: auto.startPage,
           maxPages,
@@ -483,9 +661,17 @@ export function createFileReadTool(): ChatTool {
             `Skipped front matter/TOC; started at page ${auto.bodyStartPage} (${auto.source}). Pass start_page=1 or focus="contents" to read the TOC.`,
           );
         }
-        if (needsOcr && pagesNeedingOcr.length) {
+        if (ocrApplied.length) {
           tips.push(
-            `PDF classified as ${pdfType || 'Mixed'}; pages needing OCR (not extracted as text): ${pagesNeedingOcr.slice(0, 12).join(', ')}${pagesNeedingOcr.length > 12 ? '…' : ''}.`,
+            `OCR applied to page(s) ${ocrApplied.join(', ')}${
+              ocrProviders.length ? ` via ${ocrProviders.join('+')}` : ''
+            }.`,
+          );
+        } else if (ocrError) {
+          tips.push(`On-demand OCR failed: ${ocrError}`);
+        } else if (needsOcr && pagesNeedingOcr.length) {
+          tips.push(
+            `PDF classified as ${pdfType || 'Mixed'}; pages still needing OCR: ${pagesNeedingOcr.slice(0, 12).join(', ')}${pagesNeedingOcr.length > 12 ? '…' : ''}.`,
           );
         } else if (pdfType && pdfType !== 'TextBased') {
           tips.push(`PDF classified as ${pdfType}.`);
@@ -506,7 +692,9 @@ export function createFileReadTool(): ChatTool {
             status: 'done',
             name: 'file_read',
             query,
-            provider: 'file-read',
+            provider: ocrApplied.length
+              ? ocrProviders[0] || 'pdf-ocr'
+              : 'file-read',
             results: [
               {
                 title: name,
@@ -534,6 +722,7 @@ export function createFileReadTool(): ChatTool {
             pdf_type: pdfType,
             needs_ocr: needsOcr,
             pages_needing_ocr: pagesNeedingOcr,
+            ocr_pages: ocrApplied.length ? ocrApplied : undefined,
             outline_preview: outline.slice(0, 12).map((e) => ({
               title: e.title,
               page: e.page ?? null,

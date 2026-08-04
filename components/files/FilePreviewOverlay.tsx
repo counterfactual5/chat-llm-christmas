@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { Download, FileText, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Download, FileText, Loader2, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { CodeBlock } from '@/components/markdown/code/code-block';
 import { isPdfFile, isPreviewableImageFile } from '@/lib/files/preview';
@@ -101,17 +101,98 @@ type FilePreviewOverlayProps = {
   };
 };
 
+/**
+ * Chrome’s PDF plugin inside an iframe is unreliable when the URL path is a
+ * bare hash id and Content-Type is application/octet-stream. Fetch → blob with
+ * an explicit application/pdf type (cookies still sent same-origin).
+ */
+function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
+  const [src, setSrc] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let objectUrl = '';
+    let cancelled = false;
+    setSrc('');
+    setError('');
+
+    void (async () => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to load PDF (${response.status})`);
+        }
+        const buf = await response.arrayBuffer();
+        const head = new Uint8Array(buf.slice(0, 5));
+        const looksPdf =
+          head.length >= 4 &&
+          head[0] === 0x25 &&
+          head[1] === 0x50 &&
+          head[2] === 0x44 &&
+          head[3] === 0x46;
+        if (!looksPdf) {
+          throw new Error('Response is not a PDF');
+        }
+        objectUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = '';
+          return;
+        }
+        setSrc(`${objectUrl}#toolbar=0`);
+      } catch (cause) {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : 'Failed to load PDF');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (error) {
+    return (
+      <div className="flex min-h-[24rem] flex-col items-center justify-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-4 text-center text-xs text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
+        <FileText className="h-8 w-8 opacity-40" />
+        <span>{error}</span>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+        >
+          Open in new tab
+        </a>
+      </div>
+    );
+  }
+
+  if (!src) {
+    return (
+      <div className="flex min-h-[24rem] items-center justify-center gap-2 rounded-lg border border-stone-200 bg-stone-50 text-xs text-stone-400 dark:border-stone-800 dark:bg-stone-900">
+        <Loader2 className="h-5 w-5 animate-spin opacity-60" />
+        <span>Loading PDF…</span>
+      </div>
+    );
+  }
+
+  return (
+    <iframe
+      title={title}
+      src={src}
+      className="h-[min(80vh,900px)] w-full min-h-[24rem] rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
+    />
+  );
+}
+
 /** Pure content renderer (markdown / code / PDF / image) — overlay + side panel. */
 export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   const url = String(file.url || '').trim();
   if (!file.content && url && isPdfFile(file)) {
-    return (
-      <iframe
-        title={file.name}
-        src={url}
-        className="h-[min(80vh,900px)] w-full min-h-[24rem] rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
-      />
-    );
+    return <PdfPreviewFrame url={url} title={file.name} />;
   }
   if (!file.content && url && isPreviewableImageFile(file)) {
     return (

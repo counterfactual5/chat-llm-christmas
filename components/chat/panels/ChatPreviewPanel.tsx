@@ -35,11 +35,17 @@ export type ChatPreviewPanelProps = {
 };
 
 function fileSourceUrl(file: GeneratedFileEntry): string {
+  const name = String(file.name || '').trim();
+  const withFilename = (path: string) => {
+    if (!name || !path.startsWith('/api/files/')) return path;
+    const join = path.includes('?') ? '&' : '?';
+    return `${path}${join}filename=${encodeURIComponent(name)}`;
+  };
   const direct = String(file.url || '').trim();
-  if (direct) return direct;
+  if (direct) return withFilename(direct);
   const id = String(file.id || '').trim();
   if (!id || id.startsWith('local:')) return '';
-  return `/api/files/${encodeURIComponent(id)}`;
+  return withFilename(`/api/files/${encodeURIComponent(id)}`);
 }
 
 export function ChatPreviewPanel({

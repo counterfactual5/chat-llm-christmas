@@ -1,10 +1,27 @@
 import { NextRequest } from 'next/server';
 import { filesGatewayBaseURL } from '@/lib/files/gateway';
+import { fileContentResponseHeaders } from '@/lib/files/serve-headers';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
 
 type Params = { params: Promise<{ id: string }> };
+
+function filenameFromDisposition(header: string | null): string {
+  if (!header) return '';
+  const star = header.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;]+)/i);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
+    } catch {
+      /* ignore */
+    }
+  }
+  const plain = header.match(/filename\s*=\s*("([^"]*)"|([^;]+))/i);
+  return String(plain?.[2] ?? plain?.[3] ?? '')
+    .trim()
+    .replace(/^"|"$/g, '');
+}
 
 /** Proxy gateway file bytes for UI preview/download (auth via chat cookie). */
 export async function GET(req: NextRequest, { params }: Params) {
@@ -43,14 +60,19 @@ export async function GET(req: NextRequest, { params }: Params) {
     );
   }
 
-  const contentType = res.headers.get('content-type') || 'application/octet-stream';
   const buf = await res.arrayBuffer();
+  const queryName = req.nextUrl.searchParams.get('filename') || '';
+  const filename =
+    queryName.trim() ||
+    filenameFromDisposition(res.headers.get('content-disposition')) ||
+    fileId;
   return new Response(buf, {
     status: 200,
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'private, max-age=3600',
-    },
+    headers: fileContentResponseHeaders({
+      buf,
+      gatewayContentType: res.headers.get('content-type'),
+      filename,
+    }),
   });
 }
 

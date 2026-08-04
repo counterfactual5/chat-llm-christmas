@@ -70,6 +70,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
   const lastWidthRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
+  const [loadStatus, setLoadStatus] = useState('Loading EPUB…');
   const [error, setError] = useState('');
   const [toc, setToc] = useState<TocEntry[]>([]);
   const [tocOpen, setTocOpen] = useState(false);
@@ -90,6 +91,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     let readyForResize = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let blobUrl = '';
+    const abort = new AbortController();
 
     const prefs = loadEpubReaderPrefs(fileId);
     const initialSize = prefs?.fontSize || EPUB_DEFAULT_FONT_SIZE;
@@ -99,9 +101,28 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     setFontSize(initialSize);
     setFontFamily(initialFamily);
     setLoading(true);
+    setLoadStatus('Downloading…');
     setError('');
     setToc([]);
 
+    const formatMb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+
+    // Start the download immediately — do not wait for the side-panel width
+    // animation. Layout is only required before renderTo().
+    const bytesPromise = import('@/lib/files/direct-content').then(
+      ({ fetchFileContentForPreview }) =>
+        fetchFileContentForPreview(url, {
+          signal: abort.signal,
+          onProgress: ({ loaded, total }) => {
+            if (cancelled) return;
+            if (total > 0) {
+              setLoadStatus(`Downloading… ${formatMb(loaded)} / ${formatMb(total)}`);
+            } else if (loaded > 0) {
+              setLoadStatus(`Downloading… ${formatMb(loaded)}`);
+            }
+          },
+        }),
+    );
     const applyTheme = (target: Rendition, size: string, family: string) => {
       target.themes.default({
         body: {
@@ -166,8 +187,8 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
       started = true;
 
       try {
-        const { fetchFileContentForPreview } = await import('@/lib/files/direct-content');
-        const { buf } = await fetchFileContentForPreview(url);
+        if (!cancelled) setLoadStatus('Opening EPUB…');
+        const { buf } = await bytesPromise;
         if (cancelled) return;
         if (!layoutReady(host)) {
           started = false;
@@ -224,10 +245,9 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         }, 220);
         if (!cancelled) setLoading(false);
       } catch (cause) {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Failed to open EPUB');
-          setLoading(false);
-        }
+        if (cancelled || abort.signal.aborted) return;
+        setError(cause instanceof Error ? cause.message : 'Failed to open EPUB');
+        setLoading(false);
       }
     };
 
@@ -261,6 +281,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
 
     return () => {
       cancelled = true;
+      abort.abort();
       window.clearInterval(readyPoll);
       if (resizeTimer) clearTimeout(resizeTimer);
       observer.disconnect();
@@ -411,7 +432,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         {loading && !error && (
           <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/80 text-xs text-stone-400 dark:bg-stone-950/80">
             <Loader2 className="h-5 w-5 animate-spin opacity-60" />
-            <span>Loading EPUB…</span>
+            <span>{loadStatus}</span>
           </div>
         )}
         {error && (

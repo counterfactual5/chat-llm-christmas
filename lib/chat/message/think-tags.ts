@@ -5,19 +5,20 @@
  * panel instead of leaking tags into the answer.
  */
 
+import {
+  createOpenCloseStreamParser,
+  incompleteTagHold,
+} from '@/lib/chat/message/stream-xml-tags';
+
 const OPEN_RE = /<(think|thinking)\b[^>]*>/i;
 const CLOSE_RE = /<\/(think|thinking)>/i;
 
-/** Incomplete open/close tag stuck at the end of a chunk — hold until next chunk. */
-function incompleteTagHold(text: string): number {
-  const lastLt = text.lastIndexOf('<');
-  if (lastLt < 0) return -1;
-  const tail = text.slice(lastLt);
-  // Full tags already matched elsewhere; only hold unfinished prefixes.
-  if (/>/.test(tail)) return -1;
-  if (/^<\/?(?:t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?)?$/i.test(tail)) return lastLt;
-  if (/^<\/?(?:think|thinking)\b[^>]*$/i.test(tail)) return lastLt;
-  return -1;
+const HOLD_NAMES = ['think', 'thinking'] as const;
+
+function hold(buffer: string): number {
+  return incompleteTagHold(buffer, (partial) =>
+    HOLD_NAMES.some((n) => n.startsWith(partial)),
+  );
 }
 
 export type ThinkStreamParser = {
@@ -34,87 +35,36 @@ export type ThinkStreamParser = {
 
 /** Stateful splitter for streaming content chunks. */
 export function createThinkStreamParser(): ThinkStreamParser {
-  let buffer = '';
-  let inThink = false;
+  const parser = createOpenCloseStreamParser({
+    openRe: OPEN_RE,
+    closeRe: CLOSE_RE,
+    hold,
+    orphanCloseAsInside: true,
+  });
 
-  const consume = (
-    final: boolean,
-  ): { content: string; reasoning: string; orphanClose: boolean } => {
+  const fold = (batch: ReturnType<typeof parser.push>) => {
     let content = '';
     let reasoning = '';
-    let orphanClose = false;
-
-    while (buffer.length > 0) {
-      if (!inThink) {
-        const openMatch = buffer.match(OPEN_RE);
-        const closeMatch = buffer.match(CLOSE_RE);
-        const openIdx = openMatch?.index ?? -1;
-        const closeIdx = closeMatch?.index ?? -1;
-
-        // Orphan </think>: some models omit the opening tag and only emit the
-        // close marker between a hidden draft and the real answer. Treat the
-        // text before the close as reasoning.
-        if (
-          closeMatch &&
-          closeIdx >= 0 &&
-          (openIdx < 0 || closeIdx < openIdx)
-        ) {
-          reasoning += buffer.slice(0, closeIdx);
-          buffer = buffer.slice(closeIdx + closeMatch[0].length);
-          orphanClose = true;
-          continue;
-        }
-
-        if (!openMatch || openIdx < 0) {
-          if (!final) {
-            const holdAt = incompleteTagHold(buffer);
-            if (holdAt >= 0) {
-              content += buffer.slice(0, holdAt);
-              buffer = buffer.slice(holdAt);
-              break;
-            }
-          }
-          content += buffer;
-          buffer = '';
-          break;
-        }
-        content += buffer.slice(0, openIdx);
-        buffer = buffer.slice(openIdx + openMatch[0].length);
-        inThink = true;
-      } else {
-        const closeMatch = buffer.match(CLOSE_RE);
-        if (!closeMatch || closeMatch.index == null) {
-          if (!final) {
-            const holdAt = incompleteTagHold(buffer);
-            if (holdAt >= 0) {
-              reasoning += buffer.slice(0, holdAt);
-              buffer = buffer.slice(holdAt);
-              break;
-            }
-          }
-          reasoning += buffer;
-          buffer = '';
-          break;
-        }
-        reasoning += buffer.slice(0, closeMatch.index);
-        buffer = buffer.slice(closeMatch.index + closeMatch[0].length);
-        inThink = false;
-      }
+    for (const s of batch.segments) {
+      if (s.kind === 'outside') content += s.text;
+      else reasoning += s.text;
     }
-
-    return { content, reasoning, orphanClose };
+    return {
+      content,
+      reasoning,
+      orphanClose: batch.orphanClose,
+    };
   };
 
   return {
     push(chunk: string) {
-      buffer += chunk;
-      return consume(false);
+      return fold(parser.push(chunk));
     },
     flush() {
-      return consume(true);
+      return fold(parser.flush());
     },
     get inThink() {
-      return inThink;
+      return parser.inside;
     },
   };
 }

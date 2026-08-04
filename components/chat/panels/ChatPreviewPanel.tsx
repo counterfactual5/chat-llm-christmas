@@ -22,6 +22,7 @@ import {
   isPreviewableImageFile,
   isPreviewableTextFile,
 } from '@/lib/files/preview';
+import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GeneratedFileEntry } from './OutputPanel';
@@ -86,9 +87,8 @@ export function ChatPreviewPanel({
 
     void (async () => {
       try {
-        const response = await fetch(sourceUrl);
-        if (!response.ok) throw new Error(`Failed to load preview (${response.status})`);
-        const text = await response.text();
+        const { buf } = await fetchFileContentForPreview(sourceUrl);
+        const text = new TextDecoder('utf-8').decode(buf);
         if (!cancelled) setFetchedContent(text);
       } catch (cause) {
         if (!cancelled) {

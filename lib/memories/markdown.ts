@@ -1,4 +1,5 @@
 import { MEMORY_KINDS, type MemoryCandidate, type MemoryItem, type MemoryKind } from '@/lib/memories/types';
+import { downloadTextContent } from '@/lib/files/download';
 
 const KIND_SET = new Set<string>(MEMORY_KINDS);
 const SECTION_TO_KIND: Record<string, MemoryKind> = {
@@ -152,13 +153,5 @@ export function parseMemoriesMarkdown(markdown: string): ParsedMemoryMarkdownIte
 }
 
 export function downloadTextFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  downloadTextContent(filename, content, 'text/markdown;charset=utf-8');
 }

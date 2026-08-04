@@ -2,22 +2,16 @@ import type {
   GeneratedFileEntry,
   GeneratedImageEntry,
 } from '@/components/chat/panels/OutputPanel';
+import { downloadBlob, triggerDownload } from '@/lib/files/download';
 
-function triggerDownload(url: string, filename: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-}
+export { triggerDownload, downloadBlob, downloadTextContent } from '@/lib/files/download';
 
 /** Downloads a generated image via blob fetch, falling back to opening the url. */
 export async function downloadGeneratedImage(entry: GeneratedImageEntry): Promise<void> {
   try {
     const res = await fetch(entry.url);
     const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    triggerDownload(objectUrl, `image-${entry.timestamp}.png`);
-    URL.revokeObjectURL(objectUrl);
+    downloadBlob(blob, `image-${entry.timestamp}.png`);
   } catch {
     window.open(entry.url, '_blank', 'noopener,noreferrer');
   }
@@ -42,9 +36,7 @@ export async function downloadGeneratedFile(entry: GeneratedFileEntry): Promise<
     } else {
       throw new Error('No file content available');
     }
-    const objectUrl = URL.createObjectURL(blob);
-    triggerDownload(objectUrl, entry.name || `file-${entry.createdAt}`);
-    URL.revokeObjectURL(objectUrl);
+    downloadBlob(blob, entry.name || `file-${entry.createdAt}`);
   } catch {
     if (entry.url && !entry.url.startsWith('local://')) {
       window.open(entry.url, '_blank', 'noopener,noreferrer');

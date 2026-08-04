@@ -16,6 +16,7 @@ import {
 import { parseSpreadsheetPreviewText } from '@/lib/files/spreadsheet-text';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { fetchFileContentForPreview } from '@/lib/files/direct-content';
+import { fileExt, languageFromFilename } from '@/lib/files/text-types';
 import { cn } from '@/lib/utils';
 
 export type FilePreviewPayload = {
@@ -28,52 +29,6 @@ export type FilePreviewPayload = {
   url?: string;
   size?: number;
 };
-
-const EXT_LANG: Record<string, string> = {
-  md: 'markdown',
-  markdown: 'markdown',
-  py: 'python',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
-  jsx: 'javascript',
-  json: 'json',
-  csv: 'plaintext',
-  tsv: 'plaintext',
-  yaml: 'yaml',
-  yml: 'yaml',
-  html: 'xml',
-  htm: 'xml',
-  css: 'css',
-  sql: 'sql',
-  sh: 'bash',
-  bash: 'bash',
-  xml: 'xml',
-  toml: 'plaintext',
-  ini: 'plaintext',
-  env: 'plaintext',
-  txt: 'plaintext',
-  rs: 'rust',
-  go: 'go',
-  java: 'java',
-  kt: 'kotlin',
-  swift: 'swift',
-  rb: 'ruby',
-  php: 'php',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-};
-
-function fileExt(name: string): string {
-  const base = String(name || '').split('/').pop() || '';
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
-}
 
 export function isMarkdownPreview(file: Pick<FilePreviewPayload, 'name' | 'mimeType'>): boolean {
   const mime = String(file.mimeType || '').toLowerCase();
@@ -97,9 +52,7 @@ export function prefersAnswerMarkdownPreview(
   return ext === 'txt' || ext === 'text';
 }
 
-export function languageFromFilename(name: string): string {
-  return EXT_LANG[fileExt(name)] || 'plaintext';
-}
+export { languageFromFilename };
 
 type FilePreviewOverlayProps = {
   file: FilePreviewPayload | null;

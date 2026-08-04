@@ -1,11 +1,6 @@
-import OpenAI from 'openai';
 import { NextRequest } from 'next/server';
-import {
-  gatewayBaseURL,
-  filesGatewayBaseURL,
-  uploadGatewayBase64Png,
-  uploadGatewayFile,
-} from '@/lib/files/gateway';
+import { gatewayBaseURL } from '@/lib/files/gateway';
+import { generateAndStoreImage } from '@/lib/images/generate-and-store';
 
 // Image b64 payloads are large — Node has more headroom than Edge for this route.
 export const runtime = 'nodejs';
@@ -64,102 +59,47 @@ export async function POST(req: NextRequest) {
     if (!prompt) return jsonError('Missing image prompt.', 400);
     if (prompt.length > 4000) return jsonError('Prompt is too long (max 4000 chars).', 400);
 
-    const baseURL = gatewayBaseURL();
-    const filesBaseURL = filesGatewayBaseURL();
-    const openai = new OpenAI({ apiKey: boundUserKey, baseURL });
-
-    // GPT Image models always return b64_json and reject `response_format`.
-    let result: {
-      data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
-    };
     try {
-      result = (await openai.images.generate({
-        model,
+      const stored = await generateAndStoreImage({
+        apiKey: boundUserKey,
+        baseURL: gatewayBaseURL(),
         prompt,
-        n: 1,
-        size: size as '1024x1024' | '1536x1024' | '1024x1536' | 'auto',
-        ...(quality ? { quality: quality as 'low' | 'medium' | 'high' | 'auto' } : {}),
-      } as any)) as typeof result;
+        model,
+        size,
+        quality,
+      });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          image: stored.image,
+          fileId: stored.fileId,
+          model: stored.model,
+          revised_prompt: stored.revised_prompt,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        },
+      );
     } catch (genErr) {
       const { detail, status } = upstreamErrorMessage(genErr);
       console.error('images.generate failed:', status, detail);
+      // Distinguish generate vs upload failures for the client when possible.
+      const msg = String(detail || '');
+      if (/saving to Files|file id|upload/i.test(msg)) {
+        return jsonError(
+          msg.startsWith('Image was generated')
+            ? msg
+            : `Image was generated but saving to Files API failed: ${detail}`,
+          502,
+        );
+      }
       return jsonError(detail, status);
     }
-
-    const item = result?.data?.[0];
-    const b64 = item?.b64_json;
-    const remoteUrl = item?.url;
-
-    if (!b64 && !remoteUrl) {
-      return jsonError('Upstream returned no image data.', 502);
-    }
-
-    let fileId: string | null = null;
-    let image = '';
-
-    // Files upload is mandatory now: sessions sync cross-device via file refs,
-    // so inline data URLs are no longer an acceptable fallback. Query param +
-    // a chat routing model keep compatibility with NewAPI-style distributors.
-    const filesModel =
-      String(process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() || 'gpt-4o';
-
-    try {
-      if (b64) {
-        const uploaded = await uploadGatewayBase64Png({
-          apiKey: boundUserKey,
-          baseURL: filesBaseURL,
-          b64,
-          filename: `gen-${Date.now()}.png`,
-          model: filesModel,
-        });
-        fileId = uploaded.id;
-        image = `/api/files/${encodeURIComponent(uploaded.id)}`;
-      } else if (remoteUrl) {
-        const fetched = await fetch(String(remoteUrl));
-        if (!fetched.ok) {
-          return jsonError(`Failed to fetch generated image URL (HTTP ${fetched.status}).`, 502);
-        }
-        const bytes = new Uint8Array(await fetched.arrayBuffer());
-        const uploaded = await uploadGatewayFile({
-          apiKey: boundUserKey,
-          baseURL: filesBaseURL,
-          bytes,
-          filename: `gen-${Date.now()}.png`,
-          mime: fetched.headers.get('content-type') || 'image/png',
-          model: filesModel,
-        });
-        fileId = uploaded.id;
-        image = `/api/files/${encodeURIComponent(uploaded.id)}`;
-      }
-    } catch (uploadErr) {
-      console.error('images file upload failed:', uploadErr);
-      const { detail } = upstreamErrorMessage(uploadErr);
-      return jsonError(
-        `Image was generated but saving to Files API failed: ${detail}`,
-        502,
-      );
-    }
-
-    if (!image || !fileId) {
-      return jsonError('Image was generated but no file id was saved.', 502);
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        image,
-        fileId,
-        model,
-        revised_prompt: item?.revised_prompt || null,
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      },
-    );
   } catch (err: unknown) {
-    console.error('images route error:', err);
     const { detail, status } = upstreamErrorMessage(err);
+    console.error('images route failed:', err);
     return jsonError(detail, status);
   }
 }

@@ -3,12 +3,8 @@
  * Same gateway path as `/image` command; shows under Process via tool start/done.
  */
 
-import OpenAI from 'openai';
-import {
-  filesGatewayBaseURL,
-  uploadGatewayBase64Png,
-  uploadGatewayFile,
-} from '@/lib/files/gateway';
+import { gatewayBaseURL } from '@/lib/files/gateway';
+import { generateAndStoreImage } from '@/lib/images/generate-and-store';
 import type { ChatTool } from '@/lib/tools/registry';
 
 const SYSTEM_PROMPT = [
@@ -66,7 +62,7 @@ export function createGenerateImageTool(): ChatTool {
       }
 
       const apiKey = ctx.gateway?.apiKey || ctx.credentials?.skillsApiKey;
-      const baseURL = ctx.gateway?.baseURL;
+      const baseURL = ctx.gateway?.baseURL || gatewayBaseURL();
       if (!apiKey || !baseURL) {
         const error = 'Image generation requires a connected account';
         ctx.send({
@@ -80,63 +76,18 @@ export function createGenerateImageTool(): ChatTool {
       });
 
       try {
-        const openai = new OpenAI({ apiKey, baseURL });
-        const result = (await openai.images.generate({
-          model: 'gpt-image-1.5',
+        const stored = await generateAndStoreImage({
+          apiKey,
+          baseURL,
           prompt,
-          n: 1,
-          size: '1024x1024',
-          quality: 'medium',
-        } as any)) as {
-          data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
-        };
-        const item = result?.data?.[0];
-        const b64 = item?.b64_json;
-        const remoteUrl = item?.url;
-        if (!b64 && !remoteUrl) {
-          throw new Error('Upstream returned no image data');
-        }
-
-        const filesBaseURL = filesGatewayBaseURL();
-        const filesModel =
-          String(process.env.LLM_CHRISTMAS_FILE_MODEL || 'gpt-4o').trim() || 'gpt-4o';
-        let fileId = '';
-        let image = '';
-
-        if (b64) {
-          const uploaded = await uploadGatewayBase64Png({
-            apiKey,
-            baseURL: filesBaseURL,
-            b64,
-            filename: `gen-${Date.now()}.png`,
-            model: filesModel,
-          });
-          fileId = uploaded.id;
-          image = `/api/files/${encodeURIComponent(uploaded.id)}`;
-        } else if (remoteUrl) {
-          const fetched = await fetch(String(remoteUrl));
-          if (!fetched.ok) {
-            throw new Error(`Failed to fetch generated image URL (HTTP ${fetched.status})`);
-          }
-          const bytes = new Uint8Array(await fetched.arrayBuffer());
-          const uploaded = await uploadGatewayFile({
-            apiKey,
-            baseURL: filesBaseURL,
-            bytes,
-            filename: `gen-${Date.now()}.png`,
-            mime: fetched.headers.get('content-type') || 'image/png',
-            model: filesModel,
-          });
-          fileId = uploaded.id;
-          image = `/api/files/${encodeURIComponent(uploaded.id)}`;
-        }
+        });
 
         ctx.send({
           image_generated: {
-            url: image,
-            fileId,
+            url: stored.image,
+            fileId: stored.fileId,
             prompt,
-            model: 'gpt-image-1.5',
+            model: stored.model,
           },
         });
         ctx.send({
@@ -148,8 +99,8 @@ export function createGenerateImageTool(): ChatTool {
             results: [
               {
                 title: prompt.slice(0, 80),
-                url: image,
-                snippet: fileId ? `file ${fileId}` : 'generated image',
+                url: stored.image,
+                snippet: `file ${stored.fileId}`,
               },
             ],
           },
@@ -158,12 +109,11 @@ export function createGenerateImageTool(): ChatTool {
           content: JSON.stringify({
             ok: true,
             prompt,
-            fileId,
-            image,
-            revised_prompt: item?.revised_prompt || null,
+            fileId: stored.fileId,
+            url: stored.image,
           }),
         };
-      } catch (err) {
+      } catch (err: unknown) {
         const error = err instanceof Error ? err.message : 'Image generation failed';
         ctx.send({
           tool: {

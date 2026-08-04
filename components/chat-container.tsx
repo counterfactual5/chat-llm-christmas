@@ -88,6 +88,7 @@ import {
   downloadGeneratedFile,
   downloadGeneratedImage,
 } from '@/lib/chat/composer/download';
+import { downloadTextContent } from '@/lib/files/download';
 import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
@@ -2093,13 +2094,7 @@ export default function ChatContainer() {
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
     const md = session.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${m.content}\n`).join('\n---\n\n');
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${session.title}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadTextContent(`${session.title}.md`, md, 'text/markdown;charset=utf-8');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

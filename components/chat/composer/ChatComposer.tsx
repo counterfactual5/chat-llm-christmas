@@ -46,6 +46,10 @@ import { skillSlashName } from '@/lib/skills/creator';
 import { compactQuoteMath } from '@/lib/markdown/math';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
+  PRODUCT_SLASH_COMMANDS,
+  slashCommandIcon,
+} from '@/components/chat/composer/slash-command-ui';
+import {
   ComposerQueuePanel,
   type ComposerQueuedTask,
 } from './ComposerQueuePanel';
@@ -694,152 +698,48 @@ export function ChatComposer(props: ChatComposerProps) {
                           }}
                           className="absolute bottom-0 left-[calc(100%+6px)] z-10 max-h-[min(22rem,calc(100dvh-5.5rem))] w-60 overflow-y-auto overflow-x-hidden rounded-xl border border-stone-200 bg-white/95 p-1.5 shadow-xl backdrop-blur-md max-sm:bottom-[calc(100%+6px)] max-sm:left-0 dark:border-stone-700 dark:bg-stone-900/95"
                         >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              setInput('/image ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                          >
-                            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('generateImage')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /image
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              setInput('/research ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                          >
-                            <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('deepResearchCommand')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /research
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              setInput('/papers ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                          >
-                            <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('papersCommand')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /papers
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              setInput('/books ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                          >
-                            <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('booksCommand')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /books
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              setInput('/skill ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                          >
-                            <Sparkles className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('createSkillCommand')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /skill
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!isAccountBound) {
-                                setIsSkillPickerOpen(false);
-                                setPlusFlyout(null);
-                                openLoginModal();
-                                return;
-                              }
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              setInput('/review ');
-                              textareaRef.current?.focus();
-                            }}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
-                          >
-                            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('requestReview')}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                              /review
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsSkillPickerOpen(false);
-                              setPlusFlyout(null);
-                              void resumeIncompleteReply({ force: true });
-                            }}
-                            disabled={!canResumeIncomplete}
-                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-200 dark:hover:bg-stone-800"
-                            title={t('continueCommandHint')}
-                          >
-                            <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                            <span className="min-w-0 flex-1">{t('continueCommand')}</span>
-                          </button>
+                          {PRODUCT_SLASH_COMMANDS.map((cmd) => {
+                            const Icon = slashCommandIcon(cmd.id);
+                            const disabled =
+                              cmd.action === 'continue' && !canResumeIncomplete;
+                            return (
+                              <button
+                                key={cmd.id}
+                                type="button"
+                                disabled={disabled}
+                                title={
+                                  cmd.action === 'continue'
+                                    ? t('continueCommandHint')
+                                    : undefined
+                                }
+                                onClick={() => {
+                                  if (cmd.requiresAccount && !isAccountBound) {
+                                    setIsSkillPickerOpen(false);
+                                    setPlusFlyout(null);
+                                    openLoginModal();
+                                    return;
+                                  }
+                                  setIsSkillPickerOpen(false);
+                                  setPlusFlyout(null);
+                                  if (cmd.action === 'continue') {
+                                    void resumeIncompleteReply({ force: true });
+                                    return;
+                                  }
+                                  setInput(cmd.insert);
+                                  textareaRef.current?.focus();
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-200 dark:hover:bg-stone-800"
+                              >
+                                <Icon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                                <span className="min-w-0 flex-1">{t(cmd.labelKey)}</span>
+                                {cmd.slash ? (
+                                  <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                    {cmd.slash}
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
                         </motion.div>
                       )}
 

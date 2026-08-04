@@ -1,47 +1,8 @@
 import type { ChatTool } from '@/lib/tools/registry';
+import { mimeFromFilename } from '@/lib/files/text-types';
 
 /** Soft cap for generated text files (UTF-8 bytes). */
 const MAX_FILE_BYTES = 512 * 1024;
-
-const EXT_MIME: Record<string, string> = {
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  txt: 'text/plain',
-  py: 'text/x-python',
-  js: 'text/javascript',
-  mjs: 'text/javascript',
-  cjs: 'text/javascript',
-  ts: 'text/typescript',
-  tsx: 'text/tsx',
-  jsx: 'text/jsx',
-  json: 'application/json',
-  csv: 'text/csv',
-  tsv: 'text/tab-separated-values',
-  yaml: 'text/yaml',
-  yml: 'text/yaml',
-  html: 'text/html',
-  htm: 'text/html',
-  css: 'text/css',
-  sql: 'application/sql',
-  sh: 'application/x-sh',
-  bash: 'application/x-sh',
-  xml: 'application/xml',
-  toml: 'application/toml',
-  ini: 'text/plain',
-  env: 'text/plain',
-  rs: 'text/x-rust',
-  go: 'text/x-go',
-  java: 'text/x-java-source',
-  kt: 'text/x-kotlin',
-  swift: 'text/x-swift',
-  rb: 'text/x-ruby',
-  php: 'application/x-httpd-php',
-  c: 'text/x-c',
-  h: 'text/x-c',
-  cpp: 'text/x-c++',
-  hpp: 'text/x-c++',
-  cs: 'text/x-csharp',
-};
 
 const CREATE_FILE_SYSTEM_PROMPT = [
   'You have a create_file tool that saves a downloadable text/code file into this chat’s Output panel.',
@@ -69,16 +30,7 @@ export function sanitizeGeneratedFilename(raw: string): string {
   return name;
 }
 
-export function mimeFromFilename(filename: string, explicit?: string): string {
-  const given = String(explicit || '')
-    .trim()
-    .toLowerCase();
-  if (given && /^[\w.+-]+\/[\w.+-]+$/.test(given)) return given;
-  const ext = filename.includes('.')
-    ? filename.slice(filename.lastIndexOf('.') + 1).toLowerCase()
-    : '';
-  return EXT_MIME[ext] || 'text/plain';
-}
+export { mimeFromFilename } from '@/lib/files/text-types';
 
 function localFileId(): string {
   return `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;

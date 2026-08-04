@@ -4,6 +4,11 @@
  * blocks instead of rendering them as real tool UI.
  */
 
+import {
+  createOpenCloseStreamParser,
+  incompleteTagHold,
+} from '@/lib/chat/message/stream-xml-tags';
+
 const TAG_NAMES = [
   'tool_call',
   'tool_calls',
@@ -14,28 +19,13 @@ const TAG_NAMES = [
   'tool',
 ] as const;
 
-const OPEN_RE = new RegExp(
-  `<(?:${TAG_NAMES.join('|')})\\b[^>]*>`,
-  'i',
-);
-const CLOSE_RE = new RegExp(
-  `</(?:${TAG_NAMES.join('|')})>`,
-  'i',
-);
+const OPEN_RE = new RegExp(`<(?:${TAG_NAMES.join('|')})\\b[^>]*>`, 'i');
+const CLOSE_RE = new RegExp(`</(?:${TAG_NAMES.join('|')})>`, 'i');
 
-/** Incomplete open/close tag stuck at the end of a chunk — hold until next chunk. */
-function incompleteTagHold(text: string): number {
-  const lastLt = text.lastIndexOf('<');
-  if (lastLt < 0) return -1;
-  const tail = text.slice(lastLt);
-  if (/>/.test(tail)) return -1;
-  const m = tail.match(/^<\/?([a-z_]*)/i);
-  if (!m) return -1;
-  const partial = m[1].toLowerCase();
-  // Bare "<" / "</" or a prefix / full name of a known tool tag.
-  if (!partial) return lastLt;
-  if (TAG_NAMES.some((n) => n.startsWith(partial))) return lastLt;
-  return -1;
+function hold(buffer: string): number {
+  return incompleteTagHold(buffer, (partial) =>
+    TAG_NAMES.some((n) => n.startsWith(partial)),
+  );
 }
 
 export type ToolCallStripper = {
@@ -45,59 +35,24 @@ export type ToolCallStripper = {
 
 /** Remove fake tool-call XML from a streaming content channel. */
 export function createToolCallStripper(): ToolCallStripper {
-  let buffer = '';
-  let inTool = false;
+  const parser = createOpenCloseStreamParser({
+    openRe: OPEN_RE,
+    closeRe: CLOSE_RE,
+    hold,
+  });
 
-  const consume = (final: boolean): string => {
-    let out = '';
-
-    while (buffer.length > 0) {
-      if (!inTool) {
-        const openMatch = buffer.match(OPEN_RE);
-        if (!openMatch || openMatch.index == null) {
-          if (!final) {
-            const holdAt = incompleteTagHold(buffer);
-            if (holdAt >= 0) {
-              out += buffer.slice(0, holdAt);
-              buffer = buffer.slice(holdAt);
-              break;
-            }
-          }
-          out += buffer;
-          buffer = '';
-          break;
-        }
-        out += buffer.slice(0, openMatch.index);
-        buffer = buffer.slice(openMatch.index + openMatch[0].length);
-        inTool = true;
-      } else {
-        const closeMatch = buffer.match(CLOSE_RE);
-        if (!closeMatch || closeMatch.index == null) {
-          if (!final) {
-            const holdAt = incompleteTagHold(buffer);
-            if (holdAt >= 0) {
-              buffer = buffer.slice(holdAt);
-              break;
-            }
-          }
-          buffer = '';
-          break;
-        }
-        buffer = buffer.slice(closeMatch.index + closeMatch[0].length);
-        inTool = false;
-      }
-    }
-
-    return out;
-  };
+  const fold = (batch: ReturnType<typeof parser.push>) =>
+    batch.segments
+      .filter((s) => s.kind === 'outside')
+      .map((s) => s.text)
+      .join('');
 
   return {
     push(chunk: string) {
-      buffer += chunk;
-      return consume(false);
+      return fold(parser.push(chunk));
     },
     flush() {
-      return consume(true);
+      return fold(parser.flush());
     },
   };
 }

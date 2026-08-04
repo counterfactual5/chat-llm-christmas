@@ -8,7 +8,6 @@ import {
   Terminal,
   Image as ImageIcon,
   ShieldCheck,
-  Play,
   Sparkles,
   ScrollText,
   Check,
@@ -19,7 +18,6 @@ import {
   FileSearch,
   SlidersHorizontal,
   ChevronDown,
-  FlaskConical,
   BookOpen,
   GraduationCap,
   Loader2,
@@ -52,6 +50,10 @@ import {
   formatDayGroupLabel,
   sessionsForSidebar,
 } from '@/lib/chat/context/sidebar';
+import {
+  PRODUCT_SLASH_COMMANDS,
+  slashCommandIcon,
+} from '@/components/chat/composer/slash-command-ui';
 
 export type ChatSidebarProps = {
   open: boolean;
@@ -321,117 +323,65 @@ export function ChatSidebar({
                       className="overflow-hidden pl-2"
                     >
                       <div className="space-y-0.5 pb-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isAccountBound) {
-                              onOpenLoginModal();
-                              return;
-                            }
-                            onInsertImageCommand();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('generateImage')}</span>
-                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                            /image
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isAccountBound) {
-                              onOpenLoginModal();
-                              return;
-                            }
-                            onInsertResearchCommand();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <FlaskConical className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('deepResearchCommand')}</span>
-                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                            /research
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isAccountBound) {
-                              onOpenLoginModal();
-                              return;
-                            }
-                            onInsertPapersCommand();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('papersCommand')}</span>
-                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                            /papers
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isAccountBound) {
-                              onOpenLoginModal();
-                              return;
-                            }
-                            onInsertBooksCommand();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('booksCommand')}</span>
-                          <span className="shrink-0 font-mono text-[10px] text-stone-400">
-                            /books
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isAccountBound) {
-                              onOpenLoginModal();
-                              return;
-                            }
-                            onInsertSkillCommand();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <Sparkles className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('createSkillCommand')}</span>
-                          <span className="shrink-0 font-mono text-[10px] text-stone-400">/skill</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!isAccountBound) {
-                              onOpenLoginModal();
-                              return;
-                            }
-                            onRequestClaimReview();
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                        >
-                          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('requestReview')}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onContinueReply();
-                          }}
-                          disabled={
-                            !canContinue
-                          }
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-300 dark:hover:bg-stone-800/50"
-                          title={t('continueCommandHint')}
-                        >
-                          <Play className="h-3.5 w-3.5 shrink-0 text-stone-500" />
-                          <span className="min-w-0 flex-1 truncate">{t('continueCommand')}</span>
-                        </button>
+                        {PRODUCT_SLASH_COMMANDS.map((cmd) => {
+                          const Icon = slashCommandIcon(cmd.id);
+                          const disabled = cmd.action === 'continue' && !canContinue;
+                          return (
+                            <button
+                              key={cmd.id}
+                              type="button"
+                              disabled={disabled}
+                              title={
+                                cmd.action === 'continue'
+                                  ? t('continueCommandHint')
+                                  : undefined
+                              }
+                              onClick={() => {
+                                if (cmd.requiresAccount && !isAccountBound) {
+                                  onOpenLoginModal();
+                                  return;
+                                }
+                                if (cmd.action === 'continue') {
+                                  onContinueReply();
+                                  return;
+                                }
+                                switch (cmd.id) {
+                                  case 'image':
+                                    onInsertImageCommand();
+                                    break;
+                                  case 'research':
+                                    onInsertResearchCommand();
+                                    break;
+                                  case 'papers':
+                                    onInsertPapersCommand();
+                                    break;
+                                  case 'books':
+                                    onInsertBooksCommand();
+                                    break;
+                                  case 'skill':
+                                    onInsertSkillCommand();
+                                    break;
+                                  case 'review':
+                                    onRequestClaimReview();
+                                    break;
+                                  default:
+                                    break;
+                                }
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm text-stone-600 hover:bg-stone-200/50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-stone-300 dark:hover:bg-stone-800/50"
+                            >
+                              <Icon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
+                              <span className="min-w-0 flex-1 truncate">
+                                {t(cmd.labelKey)}
+                              </span>
+                              {cmd.slash ? (
+                                <span className="shrink-0 font-mono text-[10px] text-stone-400">
+                                  {cmd.slash}
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
                       </div>
                     </motion.div>
                   )}

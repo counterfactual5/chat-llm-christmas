@@ -1,5 +1,7 @@
 /** Which generated/account files can be previewed in-product (not only downloaded). */
 
+import { fileExt, isKnownTextFileExt } from '@/lib/files/text-types';
+
 export function isPdfFile(file: { name?: string; mimeType?: string; mime?: string }): boolean {
   const mime = String(file.mimeType || file.mime || '').toLowerCase();
   const name = String(file.name || '').toLowerCase();
@@ -35,10 +37,14 @@ export function isPreviewableTextFile(file: {
 }): boolean {
   const mime = String(file.mimeType || file.mime || '').toLowerCase();
   if (mime.startsWith('text/')) return true;
-  const name = String(file.name || file.filename || '');
-  return /\.(?:md|markdown|txt|json|csv|tsv|ya?ml|js|jsx|ts|tsx|py|html?|css|sql|xml|toml|ini|sh|bash|rs|go|java|kt|swift|rb|php|c|h|cpp|hpp|cs|env)$/i.test(
-    name,
-  );
+  // application/json and other catalog MIME types without text/ prefix
+  if (mime === 'application/json' || mime === 'application/sql' || mime === 'application/xml') {
+    return true;
+  }
+  if (mime === 'application/x-sh' || mime === 'application/toml' || mime === 'application/x-httpd-php') {
+    return true;
+  }
+  return isKnownTextFileExt(String(file.name || file.filename || ''));
 }
 
 /** CSV / TSV / Excel extract — prefer HTML table preview over code fence. */

@@ -248,6 +248,31 @@ describe('formatLiteratureMarkdown', () => {
     expect(lg).toContain('12.3 MB');
   });
 
+  it('shows alternate downloads kept after title+author dedupe', () => {
+    const md = formatLiteratureMarkdown('books', '区块链', 'libgen', [
+      {
+        title: '区块链',
+        url: 'https://libgen.li/ads.php?md5=70a383c096ff335b1ec51de27571d04c',
+        md5: '70a383c096ff335b1ec51de27571d04c',
+        downloadable: true,
+        format: 'epub',
+        size: '6 MB',
+        sourceProvider: 'libgen',
+        alternates: [
+          {
+            format: 'mobi',
+            size: '7 MB',
+            md5: '313848e5d3427b4983b8f90162f59cea',
+          },
+        ],
+      },
+    ]);
+    expect(md).toContain('/books download libgen:70a383c096ff335b1ec51de27571d04c');
+    expect(md).toContain('Size: 6 MB');
+    expect(md).toContain('Alt download (mobi · 7 MB)');
+    expect(md).toContain('/books download libgen:313848e5d3427b4983b8f90162f59cea');
+  });
+
   it('uses gutenberg: id and Manual download when not API-downloadable', () => {
     const gut = formatLiteratureMarkdown('books', 'pride', 'gutenberg', [
       {
@@ -365,6 +390,34 @@ describe('formatHitsForModel', () => {
     expect(books.results[0].downloadCommand).toBe('/books download calculus');
     expect(books.results[1].downloadCommand).toBeUndefined();
     expect(books.results[1].url).toContain('openlibrary.org');
+
+    const withAlt = JSON.parse(
+      formatHitsForModel('books', '区块链', 'libgen', [
+        {
+          title: '区块链',
+          url: 'https://libgen.li/ads.php?md5=70a383c096ff335b1ec51de27571d04c',
+          md5: '70a383c096ff335b1ec51de27571d04c',
+          downloadable: true,
+          format: 'epub',
+          size: '6 MB',
+          alternates: [
+            {
+              format: 'mobi',
+              size: '7 MB',
+              md5: '313848e5d3427b4983b8f90162f59cea',
+            },
+          ],
+        },
+      ]),
+    );
+    expect(withAlt.results[0].downloadCommand).toContain('70a383c096ff335b1ec51de27571d04c');
+    expect(withAlt.results[0].alternateDownloads).toEqual([
+      {
+        format: 'mobi',
+        size: '7 MB',
+        downloadCommand: '/books download libgen:313848e5d3427b4983b8f90162f59cea',
+      },
+    ]);
 
     const papers = JSON.parse(
       formatHitsForModel('papers', 'attention', 'arxiv', [

@@ -130,6 +130,17 @@ export function formatHitsForModel(
           resolved && isValidBookDownloadIdentifier(resolved)
             ? formatBookDownloadCommand(resolved)
             : undefined;
+        const alternateDownloads = (r.alternates || [])
+          .map((alt) => {
+            const id = resolveBookDownloadIdentifier(alt);
+            if (!id || !isValidBookDownloadIdentifier(id)) return null;
+            return {
+              format: alt.format,
+              size: alt.size,
+              downloadCommand: formatBookDownloadCommand(id),
+            };
+          })
+          .filter(Boolean);
         return {
           title: r.title || '',
           url: r.url || '',
@@ -140,10 +151,15 @@ export function formatHitsForModel(
           downloadable,
           downloadCommand,
           size: r.size,
+          format: r.format,
+          alternateDownloads: alternateDownloads.length
+            ? alternateDownloads
+            : undefined,
         };
       }),
       hint:
-        'Only show /books download commands that appear as downloadCommand on a hit. ' +
+        'Only show /books download commands that appear as downloadCommand or alternateDownloads on a hit. ' +
+        'Prefer the primary downloadCommand; alternateDownloads are format/mirror fallbacks. ' +
         'If downloadCommand is missing, give the page url as a markdown Manual download link — never invent md5 or archive ids.',
     });
   }

@@ -39,6 +39,16 @@ export type LiteratureHit = {
   category?: string;
   md5?: string;
   size?: string;
+  /** Same title+author, different format / mirror — kept after API-side dedupe. */
+  alternates?: Array<{
+    format?: string;
+    size?: string;
+    md5?: string;
+    archiveId?: string;
+    downloadUrl?: string;
+    url?: string;
+    sourceProvider?: string;
+  }>;
 };
 
 export type LiteratureSearchResult =
@@ -396,8 +406,17 @@ export function formatLiteratureMarkdown(
         const label = markdownLinkLabel(hit.title || '', 'Page');
         lines.push(`   - Manual download: [${label}](${hit.url})`);
       }
+      if (hit.size) lines.push(`   - Size: ${hit.size}`);
+      for (const alt of hit.alternates || []) {
+        const altId = resolveBookDownloadIdentifier(alt);
+        if (!altId || !isValidBookDownloadIdentifier(altId)) continue;
+        const bits = [alt.format, alt.size].filter(Boolean).join(' · ');
+        lines.push(
+          `   - Alt download${bits ? ` (${bits})` : ''}: \`${formatBookDownloadCommand(altId)}\``,
+        );
+      }
     }
-    if (kind === 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);
+    if (kind !== 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);
     if (hit.doi) lines.push(`   - DOI: \`${hit.doi}\``);
     lines.push('');
   });

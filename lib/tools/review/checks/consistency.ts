@@ -55,10 +55,10 @@ function numbersInLine(line: string): string[] {
 
 /**
  * Two same-label hits with different values are still fine when their lines are
- * distinguished by other data — different table-row keys or different companion
- * numbers mean “enumeration over cases” (income brackets, product tiers), not a
- * contradiction. Only symmetric distinguishing evidence counts: each side must
- * have a token the other lacks.
+ * distinguished by other data — different table-row keys, different list items,
+ * or different companion numbers mean “enumeration over cases” (income brackets,
+ * product tiers, search result rows), not a contradiction. Only symmetric
+ * distinguishing evidence counts: each side must have a token the other lacks.
  */
 function hitsDistinguishable(a: ConsistencyHit, b: ConsistencyHit): boolean {
   if (a.rowKey && b.rowKey && a.rowKey !== b.rowKey) return true;
@@ -72,6 +72,22 @@ function hitsDistinguishable(a: ConsistencyHit, b: ConsistencyHit): boolean {
     (t) => !ignore.has(t) && !a.discriminators.has(t),
   );
   return aOnly && bOnly;
+}
+
+/** Treat numbered/bulleted list items like table rows for enumeration context. */
+function listItemKey(text: string, index: number): string {
+  const before = text.slice(0, Math.max(0, index));
+  // Horizontal whitespace only — `\s*` would swallow the blank line before `1.`
+  // and make lineStart land on `\n`, yielding an empty key.
+  let marker = [...before.matchAll(/^[^\S\n]*\d+\.[^\S\n]+/gm)].at(-1);
+  if (!marker) {
+    marker = [...before.matchAll(/^[^\S\n]*[-*+][^\S\n]+/gm)].at(-1);
+  }
+  if (!marker || marker.index == null) return '';
+  const lineStart = marker.index;
+  let lineEnd = text.indexOf('\n', lineStart);
+  if (lineEnd < 0) lineEnd = text.length;
+  return normalizeLabel(text.slice(lineStart, lineEnd)).slice(0, 96);
 }
 
 export function buildConsistencyCheck(assistantText: string): ReviewCheck | null {
@@ -90,7 +106,8 @@ export function buildConsistencyCheck(assistantText: string): ReviewCheck | null
     const index = match.index ?? 0;
     const line = lineAt(text, index);
     const discriminators = new Set(numbersInLine(line).filter((v) => v !== value));
-    const rowKey = line.includes('|') ? splitTableRow(line)[0] || '' : '';
+    const tableKey = line.includes('|') ? splitTableRow(line)[0] || '' : '';
+    const rowKey = tableKey || listItemKey(text, index);
     const key = `${label}|${unit}`;
     const list = byKey.get(key) || [];
     list.push({ value, index, discriminators, rowKey });
@@ -122,7 +139,7 @@ export function buildConsistencyCheck(assistantText: string): ReviewCheck | null
     items.push({
       severity: 'warn',
       title: `"${label}" stated as ${conflicting.map((h) => h.value).join(' vs ')}${unit ? ` ${unit}` : ''}`,
-      detail: 'The same metric carries different values in different parts of the answer, with no distinguishing context (different table rows or companion figures would exempt it).',
+      detail: 'The same metric carries different values in different parts of the answer, with no distinguishing context (different table rows, list items, or companion figures would exempt it).',
     });
   }
 

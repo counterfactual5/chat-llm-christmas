@@ -171,6 +171,19 @@ describe('file_read arg parsing', () => {
     expect(parseToolFileReadArgs('{"file_id":"abc"}', '')).toEqual({
       fileId: 'abc',
       focus: '',
+      startPage: 1,
+      maxPages: 8,
+    });
+    expect(
+      parseToolFileReadArgs(
+        '{"file_id":"abc","start_page":12,"max_pages":4,"focus":"bitcoin"}',
+        '',
+      ),
+    ).toEqual({
+      fileId: 'abc',
+      focus: 'bitcoin',
+      startPage: 12,
+      maxPages: 4,
     });
   });
 });

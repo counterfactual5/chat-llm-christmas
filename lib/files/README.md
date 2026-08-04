@@ -19,7 +19,7 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 
 Product-level attachment / vision / `file_read` flow: [`docs/images-and-files.md`](../../docs/images-and-files.md).
 
-Assistant-delivered files (`book_download` / `create_file`) are serialized as `【历史文件引用】` markers (same family as collapsed user attachments) via `formatChatFileHistoryRefs` so follow-up turns can call `file_read`. After book download, `ensure-file-extract.ts` may write the chat-api extract sidecar in the background.
+Assistant-delivered files (`book_download` / `create_file`) are serialized as `【历史文件引用】` markers (same family as collapsed user attachments) via `formatChatFileHistoryRefs` so follow-up turns can call `file_read`. After book download, `ensure-file-extract.ts` warms chat-api extract; `file_read` returns page slices via `extract-slice.ts`.
 
 ## Import rules
 

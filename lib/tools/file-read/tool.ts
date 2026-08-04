@@ -1,22 +1,32 @@
 /**
- * file_read — re-read an earlier attached document by fileId.
+ * file_read — on-demand slice of an earlier document by fileId.
  *
- * First-turn attaches inject full extracted text into the user message.
- * Older turns (prompt + persisted session) collapse to 【历史文件引用】 markers;
- * the model calls this tool when it needs the full body again. Prefers any
- * per-request extract cache, then chat-api `GET /v1/files/:id/extract` sidecar,
- * then raw text/* content.
+ * Context keeps 【历史文件引用】 only; this tool returns a short page window
+ * (start_page / max_pages / focus). Prefers chat-api extract sidecar.
  */
 
 import { filesGatewayBaseURL } from '@/lib/files/gateway';
+import { sliceExtractForRead } from '@/lib/files/extract-slice';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
-const MAX_RETURN_CHARS = 120_000;
+/** Per-call return cap — overview / chapter, not whole book. */
+const MAX_RETURN_CHARS = 28_000;
+const DEFAULT_MAX_PAGES = 8;
 
-export function parseFileReadArgs(
-  rawArgs: string,
-  fallback: string,
-): { fileId: string; focus: string } {
+export type FileReadArgs = {
+  fileId: string;
+  focus: string;
+  startPage: number;
+  maxPages: number;
+};
+
+export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadArgs {
+  const empty: FileReadArgs = {
+    fileId: '',
+    focus: '',
+    startPage: 1,
+    maxPages: DEFAULT_MAX_PAGES,
+  };
   try {
     const args = JSON.parse(rawArgs || '{}') as Record<string, unknown>;
     if (args && typeof args === 'object' && !Array.isArray(args)) {
@@ -24,14 +34,25 @@ export function parseFileReadArgs(
         args.file_id || args.fileId || args.id || args.path || args.url || '',
       ).trim();
       const focus = String(args.focus || args.query || args.instruction || '').trim();
-      if (fileId) return { fileId: normalizeFileId(fileId), focus };
+      const startPage = Math.max(
+        1,
+        Math.floor(Number(args.start_page ?? args.startPage ?? 1)) || 1,
+      );
+      const maxPagesRaw = Number(args.max_pages ?? args.maxPages ?? DEFAULT_MAX_PAGES);
+      const maxPages = Math.min(
+        40,
+        Math.max(1, Math.floor(maxPagesRaw) || DEFAULT_MAX_PAGES),
+      );
+      if (fileId) {
+        return { fileId: normalizeFileId(fileId), focus, startPage, maxPages };
+      }
     }
   } catch {
     // fall through
   }
   const bare = String(rawArgs || fallback || '').trim();
-  if (bare) return { fileId: normalizeFileId(bare), focus: '' };
-  return { fileId: '', focus: '' };
+  if (bare) return { ...empty, fileId: normalizeFileId(bare) };
+  return empty;
 }
 
 /** Accept bare ids, `/api/files/<id>`, or `fileId: xxx` scraps from markers. */
@@ -46,17 +67,35 @@ export function normalizeFileId(raw: string): string {
   return s.replace(/^['"]|['"]$/g, '').trim();
 }
 
+type FetchOk = {
+  ok: true;
+  name: string;
+  text: string;
+  mime: string;
+  partial?: boolean;
+  totalPages?: number | null;
+  extractedPages?: number | null;
+};
+type FetchErr = { ok: false; error: string; code?: string };
+
 async function fetchGatewayFileText(
   fileId: string,
   apiKey: string | undefined,
-): Promise<{ ok: true; name: string; text: string; mime: string } | { ok: false; error: string }> {
+): Promise<FetchOk | FetchErr> {
   if (!apiKey) {
-    return { ok: false, error: 'file_read requires a logged-in account.' };
+    return { ok: false, error: 'file_read requires a logged-in account.', code: 'UNAUTHORIZED' };
   }
   const base = filesGatewayBaseURL();
   const metaRes = await fetch(`${base}/files/${encodeURIComponent(fileId)}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  if (metaRes.status === 404) {
+    return {
+      ok: false,
+      error: `File not found: ${fileId}`,
+      code: 'FILE_NOT_FOUND',
+    };
+  }
   let filename = fileId;
   let mime = 'application/octet-stream';
   if (metaRes.ok) {
@@ -69,7 +108,6 @@ async function fetchGatewayFileText(
     }
   }
 
-  // Prefer upload-time text sidecar (PDF/DOCX/Excel) — survives history collapse.
   const extractRes = await fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -79,6 +117,9 @@ async function fetchGatewayFileText(
         text?: string;
         filename?: string;
         mime?: string;
+        partial?: boolean;
+        total_pages?: number | null;
+        extracted_pages?: number | null;
       };
       const text = String(data.text || '');
       if (text.trim()) {
@@ -87,10 +128,44 @@ async function fetchGatewayFileText(
           name: data.filename ? String(data.filename) : filename,
           text,
           mime: data.mime ? String(data.mime) : mime,
+          partial: Boolean(data.partial),
+          totalPages: data.total_pages ?? null,
+          extractedPages: data.extracted_pages ?? null,
         };
       }
     } catch {
-      /* fall through to raw content */
+      /* fall through */
+    }
+  } else if (extractRes.status === 404) {
+    let code = 'EXTRACT_NOT_FOUND';
+    let detail = '';
+    try {
+      const body = (await extractRes.json()) as { code?: string; message?: string; error?: string };
+      if (body.code) code = String(body.code);
+      detail = String(body.message || body.error || '');
+    } catch {
+      /* ignore */
+    }
+    if (code === 'FILE_NOT_FOUND') {
+      return { ok: false, error: detail || `File not found: ${fileId}`, code };
+    }
+    // EXTRACT_NOT_FOUND on a known file — unusual if auto-build is on; surface clearly.
+  } else if (extractRes.status === 422) {
+    let detail = `Could not extract text from ${filename}`;
+    try {
+      const body = (await extractRes.json()) as {
+        code?: string;
+        message?: string;
+        error?: string;
+      };
+      detail = String(body.message || body.error || detail);
+      return {
+        ok: false,
+        error: detail,
+        code: String(body.code || 'EXTRACT_FAILED'),
+      };
+    } catch {
+      return { ok: false, error: detail, code: 'EXTRACT_FAILED' };
     }
   }
 
@@ -98,9 +173,11 @@ async function fetchGatewayFileText(
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) {
+    const code = res.status === 404 ? 'FILE_NOT_FOUND' : 'CONTENT_FETCH_FAILED';
     return {
       ok: false,
       error: `Could not fetch file ${fileId}: HTTP ${res.status}`,
+      code,
     };
   }
   const ct = (res.headers.get('content-type') || mime || '').split(';')[0].trim().toLowerCase();
@@ -113,16 +190,14 @@ async function fetchGatewayFileText(
       filename,
     );
 
-  // PDF/EPUB extraction runs on chat-api (Node) via GET /extract above —
-  // never import unpdf/pdfjs here: /api/chat is Edge and the bundle would exceed
-  // Vercel's 1MB limit (and pdfjs needs DOM).
   if (!looksText) {
     return {
       ok: false,
       error: [
         `File ${filename} (${ct || 'binary'}) has no readable text extract yet.`,
-        'Ask again in a moment after the extract finishes, or re-download / re-attach the file.',
+        'Wait a moment for background extraction, then call file_read again.',
       ].join(' '),
+      code: 'EXTRACT_PENDING',
     };
   }
 
@@ -132,41 +207,19 @@ async function fetchGatewayFileText(
     return {
       ok: false,
       error: `File ${filename} produced an empty text extract.`,
+      code: 'EXTRACT_EMPTY',
     };
   }
-  return { ok: true, name: filename, text, mime: ct || mime };
-}
-
-function formatForModel(opts: {
-  fileId: string;
-  name: string;
-  text: string;
-  focus?: string;
-}): string {
-  let body = opts.text;
-  let truncated = false;
-  if (body.length > MAX_RETURN_CHARS) {
-    body = body.slice(0, MAX_RETURN_CHARS);
-    truncated = true;
-  }
-  return [
-    `file_id: ${opts.fileId}`,
-    `name: ${opts.name}`,
-    opts.focus ? `focus: ${opts.focus}` : '',
-    truncated ? `truncated: true (first ${MAX_RETURN_CHARS} chars)` : '',
-    '---',
-    body,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  return { ok: true, name: filename, text, mime: ct || mime, partial: false };
 }
 
 const FILE_READ_SYSTEM_PROMPT = [
-  'You also have a file_read tool to read the full text of documents in this chat.',
-  'Sources: (1) user attachments, (2) assistant-delivered files from book_download / create_file / create_spreadsheet.',
-  'They appear as 【历史文件引用】 markers with fileId — call file_read with that file_id when the user asks you to read, summarize, quote, or analyze the file.',
-  'Do not invent file contents. Prefer the extract returned by the tool over guessing from the filename or preview.',
-  'Never claim you cannot read a downloaded book or Output file when a 【历史文件引用】 marker with fileId is present.',
+  'You also have a file_read tool for documents in this chat (user attachments and book_download / create_file outputs).',
+  'They appear as 【历史文件引用】 with fileId — call file_read with that file_id.',
+  'file_read returns a SHORT slice by default (about 8 pages), not the whole book — this saves context.',
+  'Workflow: first call with only file_id for an overview; then call again with start_page or focus to drill into chapters.',
+  'When has_more is true, continue with a higher start_page. Never invent file contents.',
+  'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',
 ].join(' ');
 
 export function createFileReadTool(): ChatTool {
@@ -177,7 +230,7 @@ export function createFileReadTool(): ChatTool {
       function: {
         name: 'file_read',
         description:
-          'Read the full extracted text of a document in this chat. Pass the file_id from a 【历史文件引用】 marker (user attachment, book download, or create_file). Use when the user asks you to read/summarize/analyze that file, or when the short preview is insufficient.',
+          'Read a slice of a document in this chat (default ~8 pages). Pass file_id from 【历史文件引用】. Use start_page / max_pages / focus to dig deeper — do not expect the whole book in one call.',
         parameters: {
           type: 'object',
           properties: {
@@ -186,10 +239,18 @@ export function createFileReadTool(): ChatTool {
               description:
                 'Gateway file id from 【历史文件引用】 / (fileId: …) / (stored fileId: …)',
             },
+            start_page: {
+              type: 'number',
+              description: '1-based page to start from (default 1)',
+            },
+            max_pages: {
+              type: 'number',
+              description: 'Max pages to return this call (default 8, max 40)',
+            },
             focus: {
               type: 'string',
               description:
-                'Optional note about what you need (for your own planning; full text is still returned)',
+                'Optional keyword/topic; returns a window around the first match when found',
             },
           },
           required: ['file_id'],
@@ -197,10 +258,9 @@ export function createFileReadTool(): ChatTool {
       },
     },
     systemPrompt: FILE_READ_SYSTEM_PROMPT,
-    // Lazy-stripped in chat-request when the thread has no attached files.
     enabled: () => true,
     async execute({ rawArguments, fallbackQuery }, ctx) {
-      const { fileId, focus } = parseFileReadArgs(
+      const { fileId, focus, startPage, maxPages } = parseFileReadArgs(
         rawArguments,
         fallbackQuery || ctx.userAsk,
       );
@@ -210,7 +270,9 @@ export function createFileReadTool(): ChatTool {
         };
       }
 
-      const query = focus || fileId.slice(0, 80);
+      const query =
+        focus ||
+        (startPage > 1 ? `p.${startPage}+${maxPages}` : fileId.slice(0, 80));
       ctx.send({
         tool: {
           status: 'start',
@@ -224,6 +286,9 @@ export function createFileReadTool(): ChatTool {
         const cached = ctx.fileExtracts?.[fileId];
         let name = cached?.name || fileId;
         let text = cached?.text || '';
+        let partialExtract = false;
+        let extractTotal: number | null | undefined;
+        let extractPages: number | null | undefined;
 
         if (!text) {
           const fetched = await fetchGatewayFileText(
@@ -241,11 +306,33 @@ export function createFileReadTool(): ChatTool {
                 error: fetched.error,
               },
             });
-            return { content: JSON.stringify({ ok: false, error: fetched.error }) };
+            return {
+              content: JSON.stringify({
+                ok: false,
+                error: fetched.error,
+                code: fetched.code,
+              }),
+            };
           }
           name = fetched.name;
           text = fetched.text;
+          partialExtract = Boolean(fetched.partial);
+          extractTotal = fetched.totalPages;
+          extractPages = fetched.extractedPages;
         }
+
+        const slice = sliceExtractForRead(text, {
+          startPage,
+          maxPages,
+          focus,
+          maxChars: MAX_RETURN_CHARS,
+        });
+        const totalPages = extractTotal || slice.totalPages;
+        const tip = slice.hasMore
+          ? `More pages available — call file_read again with start_page=${slice.endPage + 1}.`
+          : partialExtract
+            ? 'Extract may still be growing in the background; retry later for later pages.'
+            : '';
 
         ctx.send({
           tool: {
@@ -257,7 +344,7 @@ export function createFileReadTool(): ChatTool {
               {
                 title: name,
                 url: `/api/files/${encodeURIComponent(fileId)}`,
-                snippet: text.slice(0, 240),
+                snippet: slice.text.slice(0, 240),
               },
             ],
           },
@@ -267,10 +354,17 @@ export function createFileReadTool(): ChatTool {
             ok: true,
             file_id: fileId,
             name,
-            text: text.length > MAX_RETURN_CHARS ? text.slice(0, MAX_RETURN_CHARS) : text,
-            truncated: text.length > MAX_RETURN_CHARS,
+            start_page: slice.startPage,
+            end_page: slice.endPage,
+            total_pages: totalPages || null,
+            extracted_pages: extractPages ?? null,
+            has_more: slice.hasMore,
+            partial_extract: partialExtract,
+            matched_focus: slice.matchedFocus,
+            tip: tip || undefined,
+            text: slice.text,
           }),
-          data: { fileId, name, text },
+          data: { fileId, name, text: slice.text },
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err || 'failed');
@@ -296,5 +390,19 @@ export function formatFileReadForModel(opts: {
   text: string;
   focus?: string;
 }): string {
-  return formatForModel(opts);
+  const slice = sliceExtractForRead(opts.text, {
+    focus: opts.focus,
+    maxChars: MAX_RETURN_CHARS,
+  });
+  return [
+    `file_id: ${opts.fileId}`,
+    `name: ${opts.name}`,
+    opts.focus ? `focus: ${opts.focus}` : '',
+    `pages: ${slice.startPage}-${slice.endPage} / ${slice.totalPages || '?'}`,
+    slice.hasMore ? 'has_more: true' : '',
+    '---',
+    slice.text,
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

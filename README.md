@@ -11,6 +11,7 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Docs
 
 - [图片与文件附件](docs/images-and-files.md) — 直传、上下文折叠、`file_read` / 视觉路径
+- Agent placement: [`AGENTS.md`](AGENTS.md) → [`lib/chat/README.md`](lib/chat/README.md), [`lib/files/README.md`](lib/files/README.md), [`lib/images/README.md`](lib/images/README.md), [`lib/markdown/README.md`](lib/markdown/README.md)
 
 ## Notion (hosted MCP)
 

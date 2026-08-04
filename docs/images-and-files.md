@@ -121,7 +121,13 @@ ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上
 |------|------|
 | 直传 | `lib/files/direct-upload.ts`，chat-api `routes/files.js` + `uploadToken.js` |
 | 抽取 / 直传准备 | `lib/files/ingest/*` |
+| 文本扩展名 / MIME / 高亮 | `lib/files/text-types.ts`（`create_file`、预览路由、FilePreviewOverlay 共用） |
+| 预览字节拉取 | `lib/files/direct-content.ts` → `fetchFileContentForPreview` |
+| 浏览器下载 | `lib/files/download.ts`（composer 包装：`lib/chat/composer/download.ts`） |
 | 历史折叠 | `lib/files/attached-file-blocks.ts` |
+| 生图 + 入库 | `lib/images/generate-and-store.ts`（`/api/images` 与 `generate_image` 工具共用） |
 | 视觉组装 / 转写 | `lib/chat/server/chat-request.ts`，`lib/tools/image-understand/*` |
 | file_read | `lib/tools/file-read/tool.ts` |
+| 斜杠命令目录（UI） | `lib/chat/composer/slash-commands.ts` + `components/chat/composer/slash-command-ui.ts` |
 | 产品说明（注入模型） | `lib/chat/server/product-guide.ts` |
+| 模块地图 | `lib/files/README.md`，`lib/images/README.md`，`lib/chat/README.md` |

@@ -7,3 +7,5 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Chat layout & placement: see `lib/chat/README.md` (read first). Do not pile new logic into `components/chat-container.tsx` — follow that README’s placement section.
 Server tool loop: `lib/chat/server/README.md`.
 When touching claim review / markdown: `lib/tools/review/README.md`, `lib/markdown/README.md`.
+Files / preview / downloads: `lib/files/README.md` (MIME+lang catalog, preview fetch, download helpers).
+Image generate+store: `lib/images/README.md` (shared by `/api/images` and `generate_image`).

@@ -156,14 +156,15 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
   if (!open) return null;
 
   const previewOpen = Boolean(imagePreview || textPreview);
+  const confirmOpen = Boolean(pendingDelete);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={() => {
-        // Keep Files open while a nested preview is showing; closing preview
-        // must not dismiss the manager (overlay clicks bubble here otherwise).
-        if (deleting || previewOpen) return;
+        // Keep Files open while a nested preview / delete confirm is showing;
+        // those overlays sit inside this backdrop and must not dismiss it.
+        if (deleting || previewOpen || confirmOpen) return;
         onClose();
       }}
     >
@@ -259,8 +260,18 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
       />
 
       {pendingDelete && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
-          <section className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-stone-900">
+        <div
+          className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4"
+          onClick={(event) => {
+            // Do not bubble to the Files backdrop (that would close the manager).
+            event.stopPropagation();
+            if (!deleting) setPendingDelete(null);
+          }}
+        >
+          <section
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-stone-900"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h3 className="text-base font-semibold text-stone-900 dark:text-stone-100">Delete file?</h3>
             <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
               “{pendingDelete.filename || pendingDelete.id}” will be permanently deleted from your account. Messages that reference it may no longer be able to load it.

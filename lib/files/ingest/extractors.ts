@@ -14,19 +14,13 @@ const PDF_PAGE_LIMIT = 40;
 export async function extractPdfTextFromBytes(data: Uint8Array): Promise<string> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   // Node / server: no worker. Browser ingest still uses extractPdfText(File).
-  const doc = await pdfjs.getDocument({
-    data,
-    useSystemFonts: true,
-    isEvalSupported: false,
-    useWorkerFetch: false,
-    isOffscreenCanvasSupported: false,
-  }).promise;
+  const doc = await pdfjs.getDocument({ data }).promise;
   const pages: string[] = [];
   const limit = Math.min(doc.numPages, PDF_PAGE_LIMIT);
   for (let i = 1; i <= limit; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    pages.push(content.items.map((item: { str?: string }) => item.str || '').join(' '));
+    pages.push(content.items.map((item: any) => item.str || '').join(' '));
   }
   if (doc.numPages > limit) {
     pages.push(`\n[…truncated: showing first ${limit} of ${doc.numPages} pages]`);

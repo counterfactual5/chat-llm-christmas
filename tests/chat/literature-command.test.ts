@@ -264,6 +264,20 @@ describe('formatLiteratureMarkdown', () => {
     expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);
   });
 
+  it('omits download command when there is no open-access PDF signal', () => {
+    const md = formatLiteratureMarkdown('papers', 'paywall', 'semantic', [
+      {
+        title: 'Paywalled Paper',
+        url: 'https://www.semanticscholar.org/paper/abc',
+        paperId: 'abcdef0123456789',
+        doi: '10.1038/s41586-023-06592-0',
+        sourceProvider: 'semantic-scholar',
+      },
+    ]);
+    expect(md).not.toContain('/papers download');
+    expect(md).toContain('/papers details abcdef0123456789');
+  });
+
   it('renders author hits', () => {
     const md = formatLiteratureMarkdown('papers', 'LeCun', 'semantic-scholar', [], {
       action: 'author',
@@ -407,12 +421,12 @@ describe('inferPaperDownloadProvider / resolvePaperDownloadIdentifier', () => {
         paperId: 'abcdefghijklmnop',
         pdfUrl: 'https://example.com/a.pdf',
       }),
-    ).toBe('abcdefghijklmnop');
+    ).toBe('https://example.com/a.pdf');
     expect(
       resolvePaperDownloadIdentifier({
         pdfUrl: 'https://arxiv.org/pdf/1706.03762.pdf',
       }),
-    ).toBe('https://arxiv.org/pdf/1706.03762.pdf');
+    ).toBe('ARXIV:1706.03762');
     expect(
       resolvePaperDownloadIdentifier({
         url: 'https://arxiv.org/abs/1706.03762',
@@ -422,7 +436,12 @@ describe('inferPaperDownloadProvider / resolvePaperDownloadIdentifier', () => {
       resolvePaperDownloadIdentifier({
         doi: '10.1038/s41586-023-06592-0',
       }),
-    ).toBe('DOI:10.1038/s41586-023-06592-0');
+    ).toBe('');
+    expect(
+      resolvePaperDownloadIdentifier({
+        paperId: 'abcdefghijklmnop',
+      }),
+    ).toBe('');
     expect(isValidPaperDownloadIdentifier('ARXIV:1706.03762')).toBe(true);
     expect(isValidPaperDownloadIdentifier('1706.03762v2')).toBe(true);
     expect(isValidPaperDownloadIdentifier('short')).toBe(false);

@@ -1823,6 +1823,20 @@ export default function ChatContainer() {
         setEditingMessageContent('');
         setEditingMessageAttachments([]);
         if (literatureCmd.action === 'download') {
+          if (literatureCmd.error) {
+            const missing =
+              literatureCmd.kind === 'papers'
+                ? t('papersDownloadMissingId')
+                : t('booksDownloadMissingId');
+            const invalid =
+              literatureCmd.kind === 'papers'
+                ? t('papersDownloadInvalidId')
+                : t('booksDownloadInvalidId');
+            setAttachError(
+              literatureCmd.error === 'missing_identifier' ? missing : invalid,
+            );
+            return;
+          }
           if (literatureCmd.kind === 'papers') {
             await runPaperDownload(literatureCmd.identifier, {
               sessionId: activeSessionId,

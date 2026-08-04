@@ -72,9 +72,10 @@ export type LiteratureCommand =
       error?: 'missing_identifier' | 'invalid_identifier';
     };
 
-const BARE_ARXIV_RE = /^\d{4}\.\d{4,5}(v\d+)?$/i;
-const ARXIV_PREFIXED_RE = /^ARXIV:(\d{4}\.\d{4,5}(v\d+)?)$/i;
+const BARE_ARXIV_RE = /^([0-9]{4}\.[0-9]{4,5}|[a-z\-]+\/[0-9]{7})(v\d+)?$/i;
+const ARXIV_PREFIXED_RE = /^ARXIV:(([0-9]{4}\.[0-9]{4,5}|[a-z\-]+\/[0-9]{7})(v\d+)?)$/i;
 const DOI_PREFIXED_RE = /^DOI:\S+$/i;
+const BARE_DOI_RE = /^10\.\d{4,9}\/\S+$/i;
 /** Semantic Scholar-style opaque ids (hex / alphanumeric, len ≥ 8). */
 const S2_PAPER_ID_RE = /^[A-Za-z0-9]{8,}$/;
 
@@ -105,6 +106,7 @@ export function isValidPaperDownloadIdentifier(identifier: string): boolean {
   if (/^https?:\/\/\S+$/i.test(id)) return true;
   if (ARXIV_PREFIXED_RE.test(id)) return true;
   if (DOI_PREFIXED_RE.test(id)) return true;
+  if (BARE_DOI_RE.test(id)) return true;
   if (BARE_ARXIV_RE.test(id)) return true;
   if (S2_PAPER_ID_RE.test(id)) return true;
   return false;
@@ -175,37 +177,30 @@ export type PaperDownloadHitFields = {
 /** Extract bare arXiv id from abs/pdf/html URLs. */
 export function arxivIdFromUrl(url: string): string {
   const m = String(url || '').match(
-    /arxiv\.org\/(?:abs|pdf|html)\/(\d{4}\.\d{4,5}(?:v\d+)?)/i,
+    /arxiv\.org\/(?:abs|pdf|html)\/(([0-9]{4}\.[0-9]{4,5}|[a-z\-]+\/[0-9]{7})(?:v\d+)?)/i,
   );
   return m?.[1] || '';
 }
 
-function isPreferablePaperId(paperId: string): boolean {
-  if (ARXIV_PREFIXED_RE.test(paperId) || DOI_PREFIXED_RE.test(paperId)) return true;
-  if (BARE_ARXIV_RE.test(paperId)) return true;
-  // S2 opaque ids — exclude bare arXiv which is also alphanumeric-ish via digits+dot.
-  if (S2_PAPER_ID_RE.test(paperId) && !BARE_ARXIV_RE.test(paperId)) return true;
-  return false;
-}
-
 /**
- * Prefer identifiers the paper download API can resolve:
- * ARXIV/DOI/S2 paperId → https pdfUrl → arXiv from url → DOI:doi.
+ * Prefer identifiers that almost always resolve to an open-access PDF:
+ * pdfUrl → ARXIV id → arXiv abs URL. Skip bare DOI/S2 without pdfUrl
+ * (those often 404 with NO_OA_PDF after the user clicks Download).
  */
 export function resolvePaperDownloadIdentifier(hit: PaperDownloadHitFields): string {
-  const paperId = String(hit.paperId || '').trim();
-  if (paperId && isPreferablePaperId(paperId)) return paperId;
-
   const pdfUrl = String(hit.pdfUrl || '').trim();
-  if (/^https?:\/\/\S+$/i.test(pdfUrl)) return pdfUrl;
+  if (/^https?:\/\/\S+$/i.test(pdfUrl)) {
+    const fromPdf = arxivIdFromUrl(pdfUrl);
+    if (fromPdf) return `ARXIV:${fromPdf}`;
+    return pdfUrl;
+  }
+
+  const paperId = String(hit.paperId || '').trim();
+  if (ARXIV_PREFIXED_RE.test(paperId)) return paperId;
+  if (BARE_ARXIV_RE.test(paperId)) return paperId;
 
   const fromUrl = arxivIdFromUrl(String(hit.url || ''));
   if (fromUrl) return `ARXIV:${fromUrl}`;
-
-  const doi = String(hit.doi || '')
-    .trim()
-    .replace(/^doi:\s*/i, '');
-  if (doi) return `DOI:${doi}`;
 
   return '';
 }

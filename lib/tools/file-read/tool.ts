@@ -441,7 +441,7 @@ async function fetchGatewayFileText(
 }
 
 const FILE_READ_SYSTEM_PROMPT = [
-  'You also have a file_read tool for documents in this chat (user attachments and book_download / create_file outputs).',
+  'You also have a file_read tool for documents in this chat (user attachments and book_download / paper_download / create_file outputs).',
   'They appear as 【历史文件引用】 with fileId — call file_read with that file_id (parameter name is file_id, not query).',
   'file_read returns a SHORT slice by default (about 8 pages), not the whole book — this saves context.',
   'First call with only file_id auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body.',

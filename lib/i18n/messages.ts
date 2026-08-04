@@ -299,7 +299,7 @@ export const dict = {
     researchSourceMixedHint: 'Web + papers + news + wiki',
     papersCommand: 'Papers',
     papersCommandHint:
-      'Search papers — /papers [arxiv|semantic|openalex] <q>; click Details/Citations/References',
+      'Search papers — /papers [arxiv|semantic|openalex] <q>; /papers download <ARXIV:|pdf-url>; click Details/Citations/References',
     booksCommand: 'Books',
     booksCommandHint:
       'Books — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>; /books download <ia-id|libgen:md5|gutenberg:id|url>',
@@ -697,7 +697,7 @@ export const dict = {
     researchSourceMixedHint: '网页 + 论文 + 新闻 + 维基',
     papersCommand: '论文检索',
     papersCommandHint:
-      '论文检索 — /papers [arxiv|semantic|openalex] <q>；可点 Details/Citations/References',
+      '论文检索 — /papers [arxiv|semantic|openalex] <q>；/papers download <ARXIV:|pdf-url>；可点 Details/Citations/References',
     booksCommand: '书籍检索',
     booksCommandHint:
       '找书 — /books [libgen|archive|gutenberg|fpb|aibooks|trading] <q>；/books download <ia-id|libgen:md5|gutenberg:id|url>',

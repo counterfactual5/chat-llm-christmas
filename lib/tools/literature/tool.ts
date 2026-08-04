@@ -200,7 +200,7 @@ export function formatHitsForModel(
     }),
     hint:
       'Only show /papers details|citations|references|download commands from the receipt fields. ' +
-      'Never invent paper ids. Prefer downloadCommand when present; otherwise use pdfUrl as a markdown Open PDF link.',
+      'Never invent paper ids. Prefer downloadCommand when present (open-access only); otherwise use pdfUrl as a markdown Open PDF link — do not invent /papers download for paywalled papers.',
   });
 }
 

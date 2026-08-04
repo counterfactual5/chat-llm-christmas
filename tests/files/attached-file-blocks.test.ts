@@ -187,5 +187,25 @@ describe('file_read arg parsing', () => {
       maxPages: 4,
       startPageExplicit: true,
     });
+    // glm-style misuse: search-tool arg name `query` instead of `file_id`
+    expect(
+      parseToolFileReadArgs(
+        '{"query":"file-9ca12cbaf7f93be7d9722cb38d24605f"}',
+        '',
+      ),
+    ).toEqual({
+      fileId: 'file-9ca12cbaf7f93be7d9722cb38d24605f',
+      focus: '',
+      startPage: 1,
+      maxPages: 8,
+      startPageExplicit: false,
+    });
+    expect(parseToolFileReadArgs('{"focus":"目录"}', '')).toEqual({
+      fileId: '',
+      focus: '',
+      startPage: 1,
+      maxPages: 8,
+      startPageExplicit: false,
+    });
   });
 });

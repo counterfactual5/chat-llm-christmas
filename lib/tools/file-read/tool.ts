@@ -37,10 +37,21 @@ export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadAr
   try {
     const args = JSON.parse(rawArgs || '{}') as Record<string, unknown>;
     if (args && typeof args === 'object' && !Array.isArray(args)) {
-      const fileId = String(
+      let fileId = String(
         args.file_id || args.fileId || args.id || args.path || args.url || '',
       ).trim();
-      const focus = String(args.focus || args.query || args.instruction || '').trim();
+      // Weaker models reuse search-tool shape: {"query":"file-…"}.
+      const queryRaw = String(args.query || '').trim();
+      if (!fileId && looksLikeFileIdToken(queryRaw)) {
+        fileId = queryRaw;
+      }
+      if (!fileId) {
+        fileId = scrapeFileIdToken(JSON.stringify(args));
+      }
+      const focusExplicit = String(args.focus || args.instruction || '').trim();
+      const focus =
+        focusExplicit ||
+        (queryRaw && !looksLikeFileIdToken(queryRaw) ? queryRaw : '');
       const startPageExplicit =
         args.start_page != null || args.startPage != null;
       const startPage = Math.max(
@@ -61,19 +72,46 @@ export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadAr
           startPageExplicit,
         };
       }
+      // Parsed JSON but no file id — do not treat the whole blob as an id.
+      return empty;
     }
   } catch {
     // fall through
   }
   const bare = String(rawArgs || fallback || '').trim();
-  if (bare) return { ...empty, fileId: normalizeFileId(bare) };
-  return empty;
+  if (!bare) return empty;
+  if (bare.startsWith('{') || bare.startsWith('[')) {
+    const scraped = scrapeFileIdToken(bare);
+    if (scraped) return { ...empty, fileId: normalizeFileId(scraped) };
+    return empty;
+  }
+  return { ...empty, fileId: normalizeFileId(bare) };
+}
+
+/** True when a string is plausibly a gateway file id (not a search phrase). */
+export function looksLikeFileIdToken(raw: string): boolean {
+  const s = String(raw || '').trim();
+  if (!s || s.length > 160) return false;
+  if (/^\/api\/files\//i.test(s)) return true;
+  return /^file-[a-zA-Z0-9_-]+$/i.test(s);
+}
+
+function scrapeFileIdToken(raw: string): string {
+  const s = String(raw || '');
+  const m =
+    s.match(/\bfile-[a-f0-9]{20,}\b/i) ||
+    s.match(/\bfile-[a-zA-Z0-9_-]{12,}\b/);
+  return m?.[0] || '';
 }
 
 /** Accept bare ids, `/api/files/<id>`, or `fileId: xxx` scraps from markers. */
 export function normalizeFileId(raw: string): string {
   let s = String(raw || '').trim();
   if (!s) return '';
+  // Never keep a JSON arguments blob as the id.
+  if (s.startsWith('{') || s.startsWith('[')) {
+    return scrapeFileIdToken(s);
+  }
   const fromMarker = s.match(/fileId:\s*([^\s),，]+)/i);
   if (fromMarker?.[1]) s = fromMarker[1].trim();
   if (s.startsWith('/api/files/')) {
@@ -237,7 +275,7 @@ async function fetchGatewayFileText(
 
 const FILE_READ_SYSTEM_PROMPT = [
   'You also have a file_read tool for documents in this chat (user attachments and book_download / create_file outputs).',
-  'They appear as 【历史文件引用】 with fileId — call file_read with that file_id.',
+  'They appear as 【历史文件引用】 with fileId — call file_read with that file_id (parameter name is file_id, not query).',
   'file_read returns a SHORT slice by default (about 8 pages), not the whole book — this saves context.',
   'First call with only file_id auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body.',
   'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',

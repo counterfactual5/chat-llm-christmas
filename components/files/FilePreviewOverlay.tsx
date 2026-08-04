@@ -14,7 +14,7 @@ import {
 import {
   parseSpreadsheetPreviewText,
   type ParsedSpreadsheetSection,
-} from '@/lib/files/spreadsheet';
+} from '@/lib/files/spreadsheet-text';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { cn } from '@/lib/utils';
 
@@ -236,7 +236,10 @@ function SpreadsheetTablePreview({ sections }: { sections: ParsedSpreadsheetSect
       {sections.map((section) => {
         const colCount = Math.max(1, ...section.rows.map((r) => r.length));
         const [header, ...body] = section.rows;
-        const hasHeader = Boolean(header && header.some((c) => c.trim()));
+        // Only promote row 0 to <thead> when there is at least one data row.
+        const hasHeader = Boolean(
+          section.rows.length > 1 && header && header.some((c) => c.trim()),
+        );
         return (
           <div key={section.name} className="min-w-0">
             {sections.length > 1 || section.name !== 'Sheet1' ? (

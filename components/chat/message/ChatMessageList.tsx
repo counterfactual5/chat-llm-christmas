@@ -484,6 +484,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isCreateFile,
                     isFileRead,
                     isDocxExtract,
+                    isXlsxExtract,
                     isSaveSkill,
                     isClaimReviewer,
                     isReviewAudit,
@@ -521,6 +522,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       isCreateFile ||
                       isFileRead ||
                       isDocxExtract ||
+                      isXlsxExtract ||
                       isSaveSkill ||
                       isWebRead ||
                       isPaperRead ||
@@ -538,6 +540,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         !isCreateFile &&
                         !isFileRead &&
                         !isDocxExtract &&
+                        !isXlsxExtract &&
                         !isSaveSkill &&
                         !isClaimReviewer));
                   return (
@@ -596,7 +599,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <FilePlus className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isFileRead ? (
                           <FileSearch className="h-3 w-3 shrink-0 opacity-60" />
-                        ) : isDocxExtract ? (
+                        ) : isDocxExtract || isXlsxExtract ? (
                           <Layers className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isSaveSkill ? (
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
@@ -622,6 +625,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isCreateFile &&
                           !isFileRead &&
                           !isDocxExtract &&
+                          !isXlsxExtract &&
                           !isSaveSkill &&
                           !isClaimReviewer &&
                           !isReviewAudit &&

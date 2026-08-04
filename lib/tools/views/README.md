@@ -4,8 +4,8 @@
 
 | 概念 | 做什么 | 不做什么 |
 |------|--------|----------|
-| **专项视图** | 工具通过 SSE `view_created` 写入 `Message.views`，按 `viewType` 用注册表渲染（如 `docx.extract`） | 不当作可下载文件；不扩展 `canPreviewGeneratedFile` |
-| **文件预览** | Output / 对话里的生成文件（md/pdf/图等）用 `ChatPreviewPanel` | 不把 docx/xlsx 当成通用可预览 MIME |
+| **专项视图** | 工具通过 SSE `view_created` 写入 `Message.views`，按 `viewType` 用注册表渲染 | 不当作可下载文件；不扩展 `canPreviewGeneratedFile` 去认 docx/xlsx |
+| **文件预览** | Output / 对话里的生成文件（md/pdf/epub/csv 表等）用 `ChatPreviewPanel` | 不把 docx/xlsx 二进制当成通用可预览 MIME |
 | **完整 Office** | — | 本仓库不做在线 Word/Excel |
 
 ## 数据流
@@ -15,6 +15,17 @@
 3. 客户端 SSE（`lib/chat/stream/client.ts`）调用 `withAppendedAssistantToolView`，写入 `views` + activity `kind: 'view'`。
 4. 侧栏 / 消息卡片通过 `lib/tools/views/registry.tsx` 按 `viewType` 渲染。
 
+## 生产者 ↔ viewType
+
+| 工具 | 参数 | viewType | `data` |
+|------|------|----------|--------|
+| `docx_extract` | `file_id`, `mode=extract`（默认） | `docx.extract` | `{ sections: [{ title?, markdown }] }` |
+| `docx_extract` | `mode=outline` | `docx.outline` | `{ headings: [{ level, text }] }` |
+| `docx_extract` | `mode=comments` | `docx.comments` | `{ comments: [{ id?, author?, body, date? }] }` |
+| `xlsx_extract` | `file_id`, 可选 `sheet` | `xlsx.table` | `{ sheetName?, headers?, rows }` |
+
+无附件的会话会从可用工具中剥离 `file_read` / `docx_extract` / `xlsx_extract`。
+
 ## 注册新 viewType
 
-在 `registry.tsx` 增加映射，并（可选）在 `types.ts` 声明 `data` 形状。
+在 `registry.tsx` 增加映射，并（可选）在 `types.ts` 声明 `data` 形状；再补一个工具（或扩展现有工具）发 `view_created`。

@@ -209,7 +209,10 @@ export async function handleChatRequest(req: NextRequest) {
       );
     if (!hasAttachedDocs) {
       enabledTools = enabledTools.filter(
-        (t) => t.name !== 'file_read' && t.name !== 'docx_extract',
+        (t) =>
+          t.name !== 'file_read' &&
+          t.name !== 'docx_extract' &&
+          t.name !== 'xlsx_extract',
       );
     }
     const toolDefs = openaiToolDefinitions(enabledTools);

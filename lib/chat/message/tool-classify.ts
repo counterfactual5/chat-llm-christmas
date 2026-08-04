@@ -22,6 +22,7 @@ export type ToolRunClassification = {
   isCreateFile: boolean;
   isFileRead: boolean;
   isDocxExtract: boolean;
+  isXlsxExtract: boolean;
   isSaveSkill: boolean;
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
@@ -75,6 +76,8 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
   const isFileRead = run.name === 'file_read' || run.provider === 'file-read';
   const isDocxExtract =
     run.name === 'docx_extract' || run.provider === 'docx-extract';
+  const isXlsxExtract =
+    run.name === 'xlsx_extract' || run.provider === 'xlsx-extract';
   const isSaveSkill = run.name === 'save_skill' || run.provider === 'skills';
   const isImageUnderstand =
     run.name === 'image_understand' ||
@@ -123,6 +126,7 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isCreateFile,
     isFileRead,
     isDocxExtract,
+    isXlsxExtract,
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
@@ -166,6 +170,7 @@ export function getToolRunLabelKey(
     isCreateFile,
     isFileRead,
     isDocxExtract,
+    isXlsxExtract,
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
@@ -251,6 +256,7 @@ export function getToolRunLabelKey(
     if (isCreateFile) return 'creatingFile';
     if (isFileRead) return 'readingFile';
     if (isDocxExtract) return 'extractingDocx';
+    if (isXlsxExtract) return 'extractingXlsx';
     if (isSaveSkill) return 'savingSkill';
     if (isWebRead) return 'readingWeb';
     return 'searchingWeb';
@@ -268,6 +274,7 @@ export function getToolRunLabelKey(
   if (isCreateFile) return 'createdFile';
   if (isFileRead) return 'readFile';
   if (isDocxExtract) return 'extractedDocx';
+  if (isXlsxExtract) return 'extractedXlsx';
   if (isSaveSkill) return 'savedSkill';
   if (isWebRead) return 'readWeb';
   return 'searchedWeb';
@@ -292,6 +299,7 @@ export function toolRunShowsFetchingResults(
     classification.isCreateFile ||
     classification.isFileRead ||
     classification.isDocxExtract ||
+    classification.isXlsxExtract ||
     classification.isSaveSkill ||
     classification.isImageUnderstand ||
     classification.isClaimReviewer ||

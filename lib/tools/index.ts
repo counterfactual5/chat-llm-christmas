@@ -8,6 +8,7 @@ import { createCreateFileTool } from '@/lib/tools/create-file/tool';
 import { createCreateSpreadsheetTool } from '@/lib/tools/create-spreadsheet/tool';
 import { createFileReadTool } from '@/lib/tools/file-read/tool';
 import { createDocxExtractTool } from '@/lib/tools/docx-extract/tool';
+import { createXlsxExtractTool } from '@/lib/tools/xlsx-extract/tool';
 import {
   createPaperSearchTool,
   createBookSearchTool,
@@ -29,6 +30,7 @@ export function builtinToolRegistry(): ChatTool[] {
     createImageUnderstandTool(),
     createFileReadTool(),
     createDocxExtractTool(),
+    createXlsxExtractTool(),
     createSaveSkillTool(),
     createCreateFileTool(),
     createCreateSpreadsheetTool(),
@@ -128,8 +130,15 @@ export {
   createDocxExtractTool,
   parseDocxExtractArgs,
   sectionsFromDocxHtml,
+  outlineFromDocxHtml,
+  commentsFromCommentsXml,
   htmlFragmentToMarkdown,
 } from '@/lib/tools/docx-extract/tool';
+
+export {
+  createXlsxExtractTool,
+  parseXlsxExtractArgs,
+} from '@/lib/tools/xlsx-extract/tool';
 
 export {
   createPaperSearchTool,

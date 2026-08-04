@@ -84,6 +84,8 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     let book: Book | null = null;
     let rendition: Rendition | null = null;
     let started = false;
+    /** continuous manager is only safe to resize after first display(). */
+    let readyForResize = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
     const prefs = loadEpubReaderPrefs(fileId);
@@ -150,15 +152,25 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
         const { fetchFileContentForPreview } = await import('@/lib/files/direct-content');
         const { buf } = await fetchFileContentForPreview(url);
         if (cancelled) return;
+        if (!layoutReady(host)) {
+          // Panel collapsed while downloading — allow a later retry.
+          started = false;
+          return;
+        }
 
-        book = ePub(buf);
+        // Copy into a fresh buffer; some gateways return a detached/shared view.
+        const bytes = buf.byteLength ? buf.slice(0) : buf;
+        book = ePub(bytes);
         bookRef.current = book;
+
+        const size = hostSize(host);
+        lastSizeRef.current = size;
 
         // Continuous vertical scroll. Explicit pixel size avoids measuring a
         // collapsing side-panel (width animates 0→460) as a tiny column.
         rendition = book.renderTo(host, {
-          width,
-          height,
+          width: size.width,
+          height: size.height,
           flow: 'scrolled',
           manager: 'continuous',
           allowScriptedContent: false,
@@ -172,22 +184,33 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
 
         await book.ready;
         if (cancelled) return;
+
         applyTheme(rendition, initialSize, initialFamily);
 
         const nav = await book.loaded.navigation;
         if (!cancelled) setToc(flattenToc(nav?.toc));
 
-        // Re-measure after paint — panel animation may have finished.
-        const next = hostSize(host);
-        if (next.width !== width || next.height !== height) {
-          lastSizeRef.current = next;
-          rendition.resize(next.width, next.height);
-        }
-
         if (prefs?.cfi) {
           await rendition.display(prefs.cfi);
         } else {
           await rendition.display();
+        }
+        if (cancelled) return;
+
+        readyForResize = true;
+        // Re-measure after first paint — panel animation may have finished.
+        const next = hostSize(host);
+        const prev = lastSizeRef.current;
+        if (
+          Math.abs(next.width - prev.width) >= 2 ||
+          Math.abs(next.height - prev.height) >= 2
+        ) {
+          lastSizeRef.current = next;
+          try {
+            rendition.resize(next.width, next.height);
+          } catch {
+            /* ignore */
+          }
         }
         if (!cancelled) setLoading(false);
       } catch (cause) {
@@ -206,7 +229,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
           void startReader();
           return;
         }
-        if (!rendition || !layoutReady(host)) return;
+        if (!readyForResize || !rendition || !layoutReady(host)) return;
         const next = hostSize(host);
         const prev = lastSizeRef.current;
         if (

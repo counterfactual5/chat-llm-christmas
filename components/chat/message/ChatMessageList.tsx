@@ -848,10 +848,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   const waitingRow = showWaitingRow ? (
                     <div
                       key={`${seg.id}-waiting`}
-                      className="flex items-start gap-1.5 py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400"
+                      className="py-0.5 text-[12px] leading-5 text-stone-500 dark:text-stone-400"
                     >
-                      <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-stone-500 dark:text-stone-400" />
-                      <span>{t('processWaitingDetail')}</span>
+                      {t('processWaitingDetail')}
                     </div>
                   ) : null;
 

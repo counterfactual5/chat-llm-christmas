@@ -183,7 +183,7 @@ export function collapseAttachedFileBodiesInMessages<
   return changed ? next : messages;
 }
 
-/** Bubble/UI: never dump full PDF/DOCX extract into the chat transcript. */
+/** Bubble/UI: never dump full PDF/DOCX/Excel extract into the chat transcript. */
 export function attachedFilesForUserBubbleDisplay(content: string): string {
   return collapseAttachedFileBlocksForHistory(String(content || ''));
 }

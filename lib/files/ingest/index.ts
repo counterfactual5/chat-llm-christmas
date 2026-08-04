@@ -1,8 +1,8 @@
 /** Client-side file ingestion: read/extract dropped files into attachments. */
 
 import type { IngestedAttachment } from './types';
-import { extractDocxText, extractPdfText } from './extractors';
-import { isSupportedDropFile } from './support';
+import { extractDocxText, extractPdfText, extractSpreadsheetText } from './extractors';
+import { isSpreadsheetWorkbookFile, isSupportedDropFile } from './support';
 import { truncateAttachmentText } from './text-limit';
 import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
 
@@ -72,6 +72,20 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
 
   if (name.endsWith('.doc')) {
     throw new Error('Legacy .doc is not supported — please save as .docx and try again');
+  }
+
+  if (isSpreadsheetWorkbookFile(file)) {
+    const text = await extractSpreadsheetText(file);
+    if (!text) throw new Error(`Could not extract cells from ${file.name}`);
+    return {
+      ...base,
+      type:
+        file.type ||
+        (name.endsWith('.xls')
+          ? 'application/vnd.ms-excel'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      ...withUploadBlob(file, text),
+    };
   }
 
   const text = await file.text();

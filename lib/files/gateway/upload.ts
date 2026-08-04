@@ -22,7 +22,7 @@ export async function uploadGatewayFile(opts: {
   purpose?: string;
   /** Gateway routing model — required by NewAPI; defaults from env or gpt-4o. */
   model?: string;
-  /** Optional client-extracted text sidecar for PDF/DOCX (chat-api). */
+  /** Optional client-extracted text sidecar for PDF/DOCX/Excel (chat-api). */
   extractText?: string;
 }): Promise<GatewayFileRef> {
   const baseURL = (opts.baseURL || filesGatewayBaseURL()).replace(/\/$/, '');

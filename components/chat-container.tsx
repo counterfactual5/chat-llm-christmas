@@ -2164,7 +2164,7 @@ export default function ChatContainer() {
         <div className="pointer-events-none absolute inset-0 z-[60] flex items-center justify-center bg-orange-500/10 backdrop-blur-[1px]">
           <div className="rounded-2xl border-2 border-dashed border-orange-400 bg-white/90 px-8 py-6 text-center shadow-lg dark:bg-stone-900/90">
             <div className="text-sm font-semibold text-orange-700 dark:text-orange-300">Drop to attach</div>
-            <div className="mt-1 text-xs text-stone-500">Images, PDF, Word, or text files</div>
+            <div className="mt-1 text-xs text-stone-500">Images, PDF, Word, Excel, or text files</div>
           </div>
         </div>
       )}

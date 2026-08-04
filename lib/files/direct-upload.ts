@@ -53,7 +53,7 @@ export async function uploadAttachmentDirect(opts: {
   dataUrl?: string | null;
   filename: string;
   mime?: string;
-  /** Client-extracted text for PDF/DOCX/plain — stored as chat-api sidecar for file_read. */
+  /** Client-extracted text for PDF/DOCX/Excel/plain — stored as chat-api sidecar for file_read. */
   extractText?: string | null;
 }): Promise<{ id: string; filename?: string; bytes?: number }> {
   let blob = opts.blob || null;

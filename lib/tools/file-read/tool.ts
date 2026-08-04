@@ -69,7 +69,7 @@ async function fetchGatewayFileText(
     }
   }
 
-  // Prefer upload-time text sidecar (PDF/DOCX) — survives history collapse.
+  // Prefer upload-time text sidecar (PDF/DOCX/Excel) — survives history collapse.
   const extractRes = await fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });

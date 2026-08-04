@@ -145,7 +145,13 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
       lastSizeRef.current = { width, height };
 
       try {
-        book = ePub(url);
+        // Fetch once (prefer direct chat-api) then open from ArrayBuffer so
+        // epubjs does not re-request the URL through the Vercel proxy.
+        const { fetchFileContentForPreview } = await import('@/lib/files/direct-content');
+        const { buf } = await fetchFileContentForPreview(url);
+        if (cancelled) return;
+
+        book = ePub(buf);
         bookRef.current = book;
 
         // Continuous vertical scroll. Explicit pixel size avoids measuring a

@@ -15,6 +15,7 @@ import {
 } from '@/lib/files/preview';
 import { parseSpreadsheetPreviewText } from '@/lib/files/spreadsheet-text';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
+import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { cn } from '@/lib/utils';
 
 export type FilePreviewPayload = {
@@ -149,53 +150,24 @@ function PdfPreviewFrame({
 
     void (async () => {
       try {
-        const response = await fetch(url, { credentials: 'same-origin' });
-        if (!response.ok) {
-          const detail = await response.text().catch(() => '');
-          const hint = detail.trim().slice(0, 120);
-          throw new Error(
-            hint
-              ? `Failed to load PDF (${response.status}): ${hint}`
-              : `Failed to load PDF (${response.status})`,
-          );
-        }
-        const ct = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-        if (ct === 'application/epub+zip') {
-          // Abort body; EpubReader will load the same URL.
-          try {
-            await response.body?.cancel();
-          } catch {
-            /* ignore */
-          }
-          if (!cancelled) setAsEpub(true);
-          return;
-        }
-        if (ct === 'application/pdf') {
-          // Same-origin + correct type → Chrome iframe works without a second copy.
-          try {
-            await response.body?.cancel();
-          } catch {
-            /* ignore */
-          }
-          if (!cancelled) setSrc(`${url}#toolbar=0`);
-          return;
-        }
+        const { buf, contentType: ct } = await fetchFileContentForPreview(url);
+        if (cancelled) return;
 
-        const buf = await response.arrayBuffer();
-        if (isEpubBytes(buf)) {
-          if (!cancelled) setAsEpub(true);
+        if (ct === 'application/epub+zip' || isEpubBytes(buf)) {
+          setAsEpub(true);
           return;
         }
-        if (!isPdfBytes(buf)) {
-          throw new Error(describeNonPdf(buf, ct));
-        }
-        objectUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
-        if (cancelled) {
-          URL.revokeObjectURL(objectUrl);
-          objectUrl = '';
+        if (ct === 'application/pdf' || isPdfBytes(buf)) {
+          objectUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
+          if (cancelled) {
+            URL.revokeObjectURL(objectUrl);
+            objectUrl = '';
+            return;
+          }
+          setSrc(`${objectUrl}#toolbar=0`);
           return;
         }
-        setSrc(`${objectUrl}#toolbar=0`);
+        throw new Error(describeNonPdf(buf, ct));
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : 'Failed to load PDF');

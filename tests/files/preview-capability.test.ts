@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canPreviewGeneratedFile,
+  isEpubFile,
   isPdfFile,
   isPreviewableImageFile,
   isPreviewableTextFile,
@@ -51,6 +52,16 @@ describe('canPreviewGeneratedFile', () => {
     ).toBe(true);
   });
 
+  it('allows url-only EPUB', () => {
+    expect(
+      canPreviewGeneratedFile({
+        name: 'novel.epub',
+        mimeType: 'application/epub+zip',
+        url: '/api/files/file_epub',
+      }),
+    ).toBe(true);
+  });
+
   it('rejects url-only non-previewable binaries', () => {
     expect(
       canPreviewGeneratedFile({
@@ -72,8 +83,10 @@ describe('canPreviewGeneratedFile', () => {
 });
 
 describe('preview mime helpers', () => {
-  it('detects pdf / image / text', () => {
+  it('detects pdf / epub / image / text', () => {
     expect(isPdfFile({ name: 'a.pdf', mimeType: 'application/octet-stream' })).toBe(true);
+    expect(isEpubFile({ name: 'a.epub', mimeType: 'application/octet-stream' })).toBe(true);
+    expect(isEpubFile({ mimeType: 'application/epub+zip' })).toBe(true);
     expect(isPreviewableImageFile({ name: 'a.webp' })).toBe(true);
     expect(isPreviewableTextFile({ name: 'a.csv', mime: 'application/octet-stream' })).toBe(
       true,

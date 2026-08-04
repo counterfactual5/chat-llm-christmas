@@ -10,7 +10,7 @@ import {
   FilePreviewOverlay,
   type FilePreviewPayload,
 } from '@/components/files/FilePreviewOverlay';
-import { isPreviewableImageFile, isPreviewableTextFile } from '@/lib/files/preview';
+import { isEpubFile, isPdfFile, isPreviewableImageFile, isPreviewableTextFile } from '@/lib/files/preview';
 import { useLocale } from '@/lib/i18n';
 
 export type AccountFile = {
@@ -113,6 +113,23 @@ export function FileManagerModal({ open, onClose }: FileManagerModalProps) {
     const url = `/api/files/${encodeURIComponent(file.id)}`;
     if (isImageFile(file)) {
       setImagePreview(url);
+      return;
+    }
+    const asBinaryBook =
+      isEpubFile({ name: file.filename, mime: file.mime }) ||
+      isPdfFile({ name: file.filename, mime: file.mime });
+    if (asBinaryBook) {
+      setTextPreview({
+        id: file.id,
+        name: file.filename || file.id,
+        mimeType:
+          file.mime ||
+          (isEpubFile({ name: file.filename, mime: file.mime })
+            ? 'application/epub+zip'
+            : 'application/pdf'),
+        url,
+        size: Number(file.bytes || 0),
+      });
       return;
     }
     if (!isTextFile(file)) {

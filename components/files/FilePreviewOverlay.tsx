@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { Download, FileText, Loader2, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
+import { EpubReader } from '@/components/files/EpubReader';
 import { CodeBlock } from '@/components/markdown/code/code-block';
-import { isPdfFile, isPreviewableImageFile } from '@/lib/files/preview';
+import { isEpubFile, isPdfFile, isPreviewableImageFile } from '@/lib/files/preview';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { cn } from '@/lib/utils';
 
@@ -14,7 +15,7 @@ export type FilePreviewPayload = {
   mimeType: string;
   /** Inline UTF-8 text (create_file / text extracts). */
   content?: string;
-  /** Gateway /api/files/... URL for PDF / image binary preview. */
+  /** Gateway /api/files/... URL for PDF / EPUB / image binary preview. */
   url?: string;
   size?: number;
 };
@@ -105,7 +106,7 @@ type FilePreviewOverlayProps = {
 function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
   const ct = String(contentType || '').split(';')[0].trim() || 'unknown type';
   if (isEpubBytes(buf) || ct === 'application/epub+zip') {
-    return 'This file is an EPUB (often mislabeled as .pdf by the downloader). Download it and open in an e-reader — in-chat PDF preview cannot render EPUB.';
+    return 'EPUB_BYTES';
   }
   const head = new Uint8Array(buf.slice(0, 8));
   const hex = [...head].map((b) => b.toString(16).padStart(2, '0')).join(' ');
@@ -117,18 +118,27 @@ function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
  * bare hash id and Content-Type is application/octet-stream. Fetch → blob with
  * an explicit application/pdf type (cookies still sent same-origin).
  *
- * Also guards against LibGen downloads that were stored as *.pdf / application/pdf
- * while the bytes are actually EPUB (ZIP).
+ * LibGen downloads sometimes store EPUB bytes as *.pdf — hand off to EpubReader.
  */
-function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
+function PdfPreviewFrame({
+  url,
+  title,
+  fileId,
+}: {
+  url: string;
+  title: string;
+  fileId: string;
+}) {
   const [src, setSrc] = useState('');
   const [error, setError] = useState('');
+  const [asEpub, setAsEpub] = useState(false);
 
   useEffect(() => {
     let objectUrl = '';
     let cancelled = false;
     setSrc('');
     setError('');
+    setAsEpub(false);
 
     void (async () => {
       try {
@@ -143,6 +153,10 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
           );
         }
         const buf = await response.arrayBuffer();
+        if (isEpubBytes(buf)) {
+          if (!cancelled) setAsEpub(true);
+          return;
+        }
         if (!isPdfBytes(buf)) {
           throw new Error(
             describeNonPdf(buf, response.headers.get('content-type') || ''),
@@ -167,6 +181,10 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [url]);
+
+  if (asEpub) {
+    return <EpubReader fileId={fileId || url} url={url} title={title} />;
+  }
 
   if (error) {
     return (
@@ -203,11 +221,14 @@ function PdfPreviewFrame({ url, title }: { url: string; title: string }) {
   );
 }
 
-/** Pure content renderer (markdown / code / PDF / image) — overlay + side panel. */
+/** Pure content renderer (markdown / code / PDF / EPUB / image) — overlay + side panel. */
 export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   const url = String(file.url || '').trim();
+  if (!file.content && url && isEpubFile(file)) {
+    return <EpubReader fileId={file.id || url} url={url} title={file.name} />;
+  }
   if (!file.content && url && isPdfFile(file)) {
-    return <PdfPreviewFrame url={url} title={file.name} />;
+    return <PdfPreviewFrame url={url} title={file.name} fileId={file.id || url} />;
   }
   if (!file.content && url && isPreviewableImageFile(file)) {
     return (

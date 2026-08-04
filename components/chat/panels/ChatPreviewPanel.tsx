@@ -17,6 +17,7 @@ import {
 } from '@/components/files/FilePreviewOverlay';
 import {
   canPreviewGeneratedFile,
+  isEpubFile,
   isPdfFile,
   isPreviewableImageFile,
   isPreviewableTextFile,
@@ -69,6 +70,7 @@ export function ChatPreviewPanel({
     Boolean(sourceUrl) &&
     isPreviewableTextFile(file!) &&
     !isPdfFile(file!) &&
+    !isEpubFile(file!) &&
     !isPreviewableImageFile(file!);
 
   useEffect(() => {
@@ -112,7 +114,7 @@ export function ChatPreviewPanel({
         size: file.size,
       };
     }
-    if (sourceUrl && (isPdfFile(file) || isPreviewableImageFile(file))) {
+    if (sourceUrl && (isPdfFile(file) || isEpubFile(file) || isPreviewableImageFile(file))) {
       return {
         id: file.id,
         name: file.name,

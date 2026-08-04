@@ -6,6 +6,16 @@ export function isPdfFile(file: { name?: string; mimeType?: string; mime?: strin
   return mime.includes('pdf') || name.endsWith('.pdf');
 }
 
+export function isEpubFile(file: { name?: string; mimeType?: string; mime?: string }): boolean {
+  const mime = String(file.mimeType || file.mime || '').toLowerCase();
+  const name = String(file.name || '').toLowerCase();
+  return (
+    mime.includes('epub') ||
+    name.endsWith('.epub') ||
+    mime === 'application/epub+zip'
+  );
+}
+
 export function isPreviewableImageFile(file: {
   name?: string;
   mimeType?: string;
@@ -32,7 +42,7 @@ export function isPreviewableTextFile(file: {
 }
 
 /**
- * Inline `content`, or a fetchable `url` for PDF / image / text
+ * Inline `content`, or a fetchable `url` for PDF / EPUB / image / text
  * (text is lazy-fetched by the preview panel — not embedded in session JSON).
  */
 export function canPreviewGeneratedFile(file: {
@@ -46,5 +56,10 @@ export function canPreviewGeneratedFile(file: {
   if (typeof file.content === 'string') return true;
   const url = String(file.url || '').trim();
   if (!url) return false;
-  return isPdfFile(file) || isPreviewableImageFile(file) || isPreviewableTextFile(file);
+  return (
+    isPdfFile(file) ||
+    isEpubFile(file) ||
+    isPreviewableImageFile(file) ||
+    isPreviewableTextFile(file)
+  );
 }

@@ -117,7 +117,7 @@ function PdfPreviewFrame({
             objectUrl = '';
             return;
           }
-          setSrc(`${objectUrl}#toolbar=0`);
+          setSrc(`${objectUrl}#toolbar=0&navpanes=0&view=FitH`);
           return;
         }
         throw new Error(describeNonPdf(buf, ct));
@@ -140,43 +140,40 @@ function PdfPreviewFrame({
         fileId={fileId || url}
         url={url}
         title={title}
-        className="h-full min-h-[20rem] rounded-none border-0"
+        className="h-full min-h-0 rounded-none border-0"
       />
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex min-h-[24rem] flex-col items-center justify-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-4 text-center text-xs text-stone-500 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
-        <FileText className="h-8 w-8 opacity-40" />
-        <span className="max-w-sm leading-relaxed">{error}</span>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-        >
-          Download / open in new tab
-        </a>
-      </div>
-    );
-  }
-
-  if (!src) {
-    return (
-      <div className="flex min-h-[24rem] items-center justify-center gap-2 rounded-lg border border-stone-200 bg-stone-50 text-xs text-stone-400 dark:border-stone-800 dark:bg-stone-900">
-        <Loader2 className="h-5 w-5 animate-spin opacity-60" />
-        <span>Loading PDF…</span>
-      </div>
-    );
-  }
-
+  // Fill the preview pane / modal body — min-h alone collapses to a short square.
   return (
-    <iframe
-      title={title}
-      src={src}
-      className="h-full min-h-[24rem] w-full rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"
-    />
+    <div className="relative h-full min-h-0 w-full bg-stone-100 dark:bg-stone-900">
+      {error ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-xs text-stone-500 dark:text-stone-400">
+          <FileText className="h-8 w-8 opacity-40" />
+          <span className="max-w-sm leading-relaxed">{error}</span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300 dark:hover:bg-stone-800"
+          >
+            Download / open in new tab
+          </a>
+        </div>
+      ) : !src ? (
+        <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-stone-400">
+          <Loader2 className="h-5 w-5 animate-spin opacity-60" />
+          <span>Loading PDF…</span>
+        </div>
+      ) : (
+        <iframe
+          title={title}
+          src={src}
+          className="absolute inset-0 h-full w-full border-0 bg-stone-200 dark:bg-stone-800"
+        />
+      )}
+    </div>
   );
 }
 
@@ -221,7 +218,11 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
     );
   }
   if (!file.content && url && isPdfFile(file)) {
-    return <PdfPreviewFrame url={url} title={file.name} fileId={file.id || url} />;
+    return (
+      <div className="h-full min-h-0 w-full">
+        <PdfPreviewFrame url={url} title={file.name} fileId={file.id || url} />
+      </div>
+    );
   }
   if (!file.content && url && isPreviewableImageFile(file)) {
     return (
@@ -273,6 +274,10 @@ export function FilePreviewOverlay({
 
   if (!file) return null;
 
+  const binaryFill =
+    !file.content &&
+    (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file));
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm sm:p-6"
@@ -285,7 +290,13 @@ export function FilePreviewOverlay({
       }}
     >
       <div
-        className="flex max-h-[min(92vh,1100px)] min-h-0 w-full min-w-0 max-w-4xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-950"
+        className={cn(
+          'flex min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl dark:border-stone-700 dark:bg-stone-950',
+          // Explicit height so flex-1 PDF/EPUB body can fill; max-w wider for books.
+          binaryFill
+            ? 'h-[min(92vh,1100px)] max-w-[min(96vw,72rem)]'
+            : 'max-h-[min(92vh,1100px)] max-w-4xl',
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800">
@@ -328,17 +339,21 @@ export function FilePreviewOverlay({
 
         <div
           className={cn(
-            'min-h-0 min-w-0 flex-1',
-            file &&
-              !file.content &&
-              (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file))
+            'relative min-h-0 min-w-0 flex-1',
+            binaryFill
               ? 'overflow-hidden p-0'
               : isSpreadsheetPreviewFile(file)
                 ? 'overflow-auto px-4 py-4 sm:px-6'
                 : 'overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6',
           )}
         >
-          <FilePreviewContent file={file} />
+          {binaryFill ? (
+            <div className="absolute inset-0 min-h-0 min-w-0">
+              <FilePreviewContent file={file} />
+            </div>
+          ) : (
+            <FilePreviewContent file={file} />
+          )}
         </div>
       </div>
     </div>

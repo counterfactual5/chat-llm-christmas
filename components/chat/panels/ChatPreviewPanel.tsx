@@ -204,7 +204,7 @@ export function ChatPreviewPanel({
 
           <div
             className={cn(
-              'min-h-0 min-w-0 flex-1 overscroll-contain',
+              'relative min-h-0 min-w-0 flex-1 overscroll-contain',
               file &&
                 (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)) &&
                 !file.content
@@ -224,7 +224,7 @@ export function ChatPreviewPanel({
                 className={cn(
                   'min-h-0 min-w-0 max-w-full',
                   isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)
-                    ? 'flex h-full flex-col p-0'
+                    ? 'absolute inset-0 flex min-h-0 flex-col p-0'
                     : 'px-4 py-4',
                 )}
               >

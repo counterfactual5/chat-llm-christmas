@@ -16,6 +16,18 @@ import {
 import type { ToolRunInput, ToolRunUpsertResult } from '@/lib/chat/session/mutations/types';
 import { touchSession } from '@/lib/chat/session/mutations/shared';
 
+/** Normalize tool-run query for matching parallel same-tool calls. */
+function toolRunQueryKey(query: string | undefined): string {
+  return String(query || '').trim();
+}
+
+function sameToolQuery(
+  a: { name: string; query?: string },
+  b: { name: string; query?: string },
+): boolean {
+  return a.name === b.name && toolRunQueryKey(a.query) === toolRunQueryKey(b.query);
+}
+
 export function withUpsertedAssistantToolRun(
   sessions: ChatSession[],
   sessionId: string,
@@ -30,14 +42,24 @@ export function withUpsertedAssistantToolRun(
       if (m.id !== assistantId) return m;
       if (run.provider === 'claim-reviewer') return m;
       const existing = m.toolRuns || [];
+      // Prefer name+query so parallel paper_search (different queries) don't steal
+      // each other's done events. Name-only fallback only when the event has no query
+      // (tools that never send one) or exactly one pending start remains for that name.
       const idx = existing.findIndex(
-        (r) => r.name === run.name && r.query === run.query && r.status === 'start',
+        (r) => sameToolQuery(r, run) && r.status === 'start',
       );
+      const nameOnlyPending = existing
+        .map((r, i) => ({ r, i }))
+        .filter(({ r }) => r.name === run.name && r.status === 'start');
       const pendingIdx =
         idx >= 0
           ? idx
           : run.status === 'done' || run.status === 'awaiting_approval'
-            ? existing.findIndex((r) => r.name === run.name && r.status === 'start')
+            ? toolRunQueryKey(run.query)
+              ? nameOnlyPending.length === 1
+                ? nameOnlyPending[0]!.i
+                : -1
+              : nameOnlyPending[0]?.i ?? -1
             : -1;
       const awaitingIdx =
         run.status === 'done'
@@ -53,11 +75,10 @@ export function withUpsertedAssistantToolRun(
       let activity = [...(m.activity || [])];
       if (run.status === 'start') {
         const toolRunId = crypto.randomUUID();
-        // A new start for the same tool while a previous one is still pending
-        // usually means the earlier done was lost — close the orphan so it
-        // doesn't spin forever under the new call.
+        // Only close a pending start with the *same* name+query (retry / lost done).
+        // Different queries for the same tool are parallel calls — keep them all.
         const closedOrphans = existing.map((r) =>
-          r.name === run.name && r.status === 'start'
+          sameToolQuery(r, run) && r.status === 'start'
             ? {
                 ...r,
                 status: 'done' as const,

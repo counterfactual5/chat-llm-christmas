@@ -15,6 +15,22 @@ function fluidSvg(svg: string): string {
   );
 }
 
+/**
+ * Rendered output keyed by theme + source. Re-entering a conversation (or a
+ * re-mount) then paints the diagram on the first frame instead of flashing a
+ * spinner while mermaid is imported and re-run.
+ */
+const SVG_CACHE = new Map<string, string>();
+const SVG_CACHE_LIMIT = 60;
+
+function cacheSvg(key: string, svg: string): void {
+  if (SVG_CACHE.size >= SVG_CACHE_LIMIT) {
+    const oldest = SVG_CACHE.keys().next().value;
+    if (oldest !== undefined) SVG_CACHE.delete(oldest);
+  }
+  SVG_CACHE.set(key, svg);
+}
+
 /** mermaid.render()/parse() can leave temp or error nodes attached to <body>. */
 function removeStrayMermaidNodes(id: string): void {
   for (const el of [document.getElementById(id), document.getElementById(`d${id}`)]) {
@@ -37,15 +53,17 @@ type MermaidBlockProps = {
 export function MermaidBlock({ value, className, streaming = false }: MermaidBlockProps) {
   const { theme } = useTheme();
   const reactId = useId().replace(/:/g, '');
-  const [svg, setSvg] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const [showSource, setShowSource] = useState(false);
-  const [fit, setFit] = useState(true);
 
   const rawSource = String(value || '').trim();
   const source = sanitizeMermaidForRender(rawSource);
+  const cacheKey = `${theme}::${source}`;
+
+  const [svg, setSvg] = useState<string>(() => SVG_CACHE.get(cacheKey) ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(() => !SVG_CACHE.has(cacheKey));
+  const [copied, setCopied] = useState(false);
+  const [showSource, setShowSource] = useState(false);
+  const [fit, setFit] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +73,17 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
       queueMicrotask(() => {
         if (cancelled) return;
         setSvg('');
+        setError(null);
+        setPending(false);
+      });
+      return;
+    }
+
+    const cached = SVG_CACHE.get(cacheKey);
+    if (cached) {
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setSvg(cached);
         setError(null);
         setPending(false);
       });
@@ -87,8 +116,10 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
             return;
           }
           const { svg: rendered } = await mermaid.render(id, source);
+          const ready = fluidSvg(rendered);
+          cacheSvg(cacheKey, ready);
           if (cancelled) return;
-          setSvg(fluidSvg(rendered));
+          setSvg(ready);
           setError(null);
         } catch (err) {
           if (cancelled) return;
@@ -98,13 +129,14 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
           if (!cancelled) setPending(false);
         }
       })();
-    }, streaming ? 400 : 120);
+      // Streaming sources change on every chunk; a settled message renders now.
+    }, streaming ? 400 : 0);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [source, theme, reactId, streaming]);
+  }, [source, theme, reactId, streaming, cacheKey]);
 
   const copyToClipboard = async () => {
     try {

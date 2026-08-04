@@ -71,6 +71,24 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/\n2\. 加入群/);
   });
 
+  it('keeps a bold last cell inside its row instead of starting a paragraph', () => {
+    const smashed =
+      '| 维度 | HTTP/1.1 | HTTP/2 | HTTP/3 | | :--- | :--- | :--- | :--- | | **传输协议** | TCP | TCP | **UDP (QUIC)** | | **连接建立** | TCP → TLS | TCP → TLS | **QUIC (合并握手，支持 0-RTT)** |';
+    const out = reflowCollapsedMarkdownBlocks(smashed);
+    expect(out).toContain('| **传输协议** | TCP | TCP | **UDP (QUIC)** |');
+    expect(out).toContain(
+      '| **连接建立** | TCP → TLS | TCP → TLS | **QUIC (合并握手，支持 0-RTT)** |',
+    );
+    expect(out).not.toMatch(/\n\*\*UDP \(QUIC\)\*\* \|/);
+  });
+
+  it('isolates a thematic break glued straight onto a sentence', () => {
+    const out = reflowCollapsedMarkdownBlocks(
+      '每个库都有其特定的应用场景。---\n\n数据分析的基本流程如下。',
+    );
+    expect(out).toMatch(/应用场景。\n\n---\n\n数据分析/);
+  });
+
   it('keeps the last table cell intact (no false split before CJK cell text)', () => {
     const smashed =
       '⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 | 说明 | |------|------|------| | 登链社区主站 (dengchain.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 | | Dework (dework.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 |';

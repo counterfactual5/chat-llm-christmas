@@ -51,16 +51,13 @@ function reflowHeadingsListsHrs(chunk: string): string {
   out = out.replace(/([.!?])\s+(#{1,6}\s+\S)/g, '$1\n\n$2');
 
   // Thematic breaks jammed into prose. Blank line BEFORE `---` so CommonMark
-  // does not treat it as a setext underline.
+  // does not treat it as a setext underline. The space between prose and `---`
+  // is optional: models write both `场景。 ---` and `场景。---`.
   out = out.replace(
-    new RegExp(`([${BREAK_TEXT}])\\s+(---+)(?=\\s|#{1,6}\\s|$)`, 'g'),
+    new RegExp(`([${BREAK_TEXT}])\\s*(---+)(?=\\s|#{1,6}\\s|$)`, 'g'),
     '$1\n\n$2',
   );
   out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
-
-  // If prose ends with `---` on the same line (common model output),
-  // treat it as a thematic break even when the previous char isn't CJK.
-  out = out.replace(/([A-Za-z0-9])\s+(---{3,})\s*$/gm, '$1\n\n$2');
 
   // Unordered: only field labels / slash commands / bold-leading items —
   // never bare `汉字 - 散文`.
@@ -104,10 +101,13 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '$1\n\n',
   );
 
-  // Table row ended, prose resumes — only clear new-block tokens.
+  // Table row ended, prose resumes — only clear new-block tokens, and only when
+  // what follows has no pipes left: `| a | **bold cell** |` is still one row,
+  // not a row followed by a bold paragraph.
   out = out.replace(
-    /((?:\|[^|\n]*){2,}\|)\s+(?=(?:\*\*|#{1,6}\s|-\s+\S|\d{1,2}\.\s+\S))/g,
-    '$1\n\n',
+    /((?:\|[^|\n]*){2,}\|)[ \t]+((?:\*\*|#{1,6}\s|-\s+|\d{1,2}\.\s+)[^\n]*)/g,
+    (full, row: string, rest: string) =>
+      rest.includes('|') ? full : `${row}\n\n${rest}`,
   );
 
   return out;
@@ -118,8 +118,11 @@ export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   const src = String(markdown || '');
   if (!src) return src;
 
-  let out = reflowOutsideFences(src, reflowHeadingsListsHrs);
-  out = reflowOutsideFences(out, reflowCollapsedMarkdownTables);
+  // Tables first: while a smashed table is still one line, the prose-level rules
+  // below (`| … | **next**` → new block) cannot tell a row boundary from a
+  // table→prose boundary and would tear the last cell out of its row.
+  let out = reflowOutsideFences(src, reflowCollapsedMarkdownTables);
+  out = reflowOutsideFences(out, reflowHeadingsListsHrs);
   out = out.replace(/\n{3,}/g, '\n\n');
   return out;
 }

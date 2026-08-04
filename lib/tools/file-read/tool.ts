@@ -6,7 +6,11 @@
  */
 
 import { filesGatewayBaseURL } from '@/lib/files/gateway';
-import { sliceExtractForRead } from '@/lib/files/extract-slice';
+import {
+  parseExtractPages,
+  resolveAutoStartPage,
+  sliceExtractForRead,
+} from '@/lib/files/extract-slice';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 /** Per-call return cap — overview / chapter, not whole book. */
@@ -18,6 +22,8 @@ export type FileReadArgs = {
   focus: string;
   startPage: number;
   maxPages: number;
+  /** True when the model/user passed start_page (including 1). */
+  startPageExplicit: boolean;
 };
 
 export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadArgs {
@@ -26,6 +32,7 @@ export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadAr
     focus: '',
     startPage: 1,
     maxPages: DEFAULT_MAX_PAGES,
+    startPageExplicit: false,
   };
   try {
     const args = JSON.parse(rawArgs || '{}') as Record<string, unknown>;
@@ -34,6 +41,8 @@ export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadAr
         args.file_id || args.fileId || args.id || args.path || args.url || '',
       ).trim();
       const focus = String(args.focus || args.query || args.instruction || '').trim();
+      const startPageExplicit =
+        args.start_page != null || args.startPage != null;
       const startPage = Math.max(
         1,
         Math.floor(Number(args.start_page ?? args.startPage ?? 1)) || 1,
@@ -44,7 +53,13 @@ export function parseFileReadArgs(rawArgs: string, fallback: string): FileReadAr
         Math.max(1, Math.floor(maxPagesRaw) || DEFAULT_MAX_PAGES),
       );
       if (fileId) {
-        return { fileId: normalizeFileId(fileId), focus, startPage, maxPages };
+        return {
+          fileId: normalizeFileId(fileId),
+          focus,
+          startPage,
+          maxPages,
+          startPageExplicit,
+        };
       }
     }
   } catch {
@@ -75,6 +90,8 @@ type FetchOk = {
   partial?: boolean;
   totalPages?: number | null;
   extractedPages?: number | null;
+  bodyStartPage?: number | null;
+  outline?: Array<{ title?: string; page?: number | null }>;
 };
 type FetchErr = { ok: false; error: string; code?: string };
 
@@ -120,6 +137,8 @@ async function fetchGatewayFileText(
         partial?: boolean;
         total_pages?: number | null;
         extracted_pages?: number | null;
+        body_start_page?: number | null;
+        outline?: Array<{ title?: string; page?: number | null }>;
       };
       const text = String(data.text || '');
       if (text.trim()) {
@@ -131,6 +150,9 @@ async function fetchGatewayFileText(
           partial: Boolean(data.partial),
           totalPages: data.total_pages ?? null,
           extractedPages: data.extracted_pages ?? null,
+          bodyStartPage:
+            Number(data.body_start_page) > 0 ? Number(data.body_start_page) : null,
+          outline: Array.isArray(data.outline) ? data.outline : [],
         };
       }
     } catch {
@@ -217,7 +239,9 @@ const FILE_READ_SYSTEM_PROMPT = [
   'You also have a file_read tool for documents in this chat (user attachments and book_download / create_file outputs).',
   'They appear as 【历史文件引用】 with fileId — call file_read with that file_id.',
   'file_read returns a SHORT slice by default (about 8 pages), not the whole book — this saves context.',
-  'Workflow: first call with only file_id for an overview; then call again with start_page or focus to drill into chapters.',
+  'First call with only file_id auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body.',
+  'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
+  'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
   'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',
 ].join(' ');
@@ -230,7 +254,7 @@ export function createFileReadTool(): ChatTool {
       function: {
         name: 'file_read',
         description:
-          'Read a slice of a document in this chat (default ~8 pages). Pass file_id from 【历史文件引用】. Use start_page / max_pages / focus to dig deeper — do not expect the whole book in one call.',
+          'Read a slice of a document in this chat (default ~8 pages). Pass file_id from 【历史文件引用】. Omitting start_page auto-skips TOC when possible. Use start_page / max_pages / focus to dig deeper — do not expect the whole book in one call.',
         parameters: {
           type: 'object',
           properties: {
@@ -241,7 +265,8 @@ export function createFileReadTool(): ChatTool {
             },
             start_page: {
               type: 'number',
-              description: '1-based page to start from (default 1)',
+              description:
+                '1-based page to start from. Omit for auto body start (skip TOC); pass 1 to include cover/TOC.',
             },
             max_pages: {
               type: 'number',
@@ -250,7 +275,7 @@ export function createFileReadTool(): ChatTool {
             focus: {
               type: 'string',
               description:
-                'Optional keyword/topic; returns a window around the first match when found',
+                'Optional keyword/topic; returns a window around the first match. Use "contents"/"目录" to read the TOC.',
             },
           },
           required: ['file_id'],
@@ -260,10 +285,8 @@ export function createFileReadTool(): ChatTool {
     systemPrompt: FILE_READ_SYSTEM_PROMPT,
     enabled: () => true,
     async execute({ rawArguments, fallbackQuery }, ctx) {
-      const { fileId, focus, startPage, maxPages } = parseFileReadArgs(
-        rawArguments,
-        fallbackQuery || ctx.userAsk,
-      );
+      const { fileId, focus, startPage, maxPages, startPageExplicit } =
+        parseFileReadArgs(rawArguments, fallbackQuery || ctx.userAsk);
       if (!fileId) {
         return {
           content: JSON.stringify({ ok: false, error: 'file_id is required' }),
@@ -272,7 +295,9 @@ export function createFileReadTool(): ChatTool {
 
       const query =
         focus ||
-        (startPage > 1 ? `p.${startPage}+${maxPages}` : fileId.slice(0, 80));
+        (startPageExplicit && startPage > 1
+          ? `p.${startPage}+${maxPages}`
+          : fileId.slice(0, 80));
       ctx.send({
         tool: {
           status: 'start',
@@ -289,6 +314,8 @@ export function createFileReadTool(): ChatTool {
         let partialExtract = false;
         let extractTotal: number | null | undefined;
         let extractPages: number | null | undefined;
+        let bodyStartFromMeta: number | null = null;
+        let outline: Array<{ title?: string; page?: number | null }> = [];
 
         if (!text) {
           const fetched = await fetchGatewayFileText(
@@ -319,20 +346,41 @@ export function createFileReadTool(): ChatTool {
           partialExtract = Boolean(fetched.partial);
           extractTotal = fetched.totalPages;
           extractPages = fetched.extractedPages;
+          bodyStartFromMeta = fetched.bodyStartPage ?? null;
+          outline = fetched.outline || [];
         }
 
-        const slice = sliceExtractForRead(text, {
+        const pages = parseExtractPages(text);
+        const auto = resolveAutoStartPage({
+          pages,
+          startPageExplicit,
           startPage,
+          focus,
+          outlineBodyStart: bodyStartFromMeta,
+        });
+        const slice = sliceExtractForRead(text, {
+          startPage: auto.startPage,
           maxPages,
           focus,
           maxChars: MAX_RETURN_CHARS,
         });
         const totalPages = extractTotal || slice.totalPages;
-        const tip = slice.hasMore
-          ? `More pages available — call file_read again with start_page=${slice.endPage + 1}.`
-          : partialExtract
-            ? 'Extract may still be growing in the background; retry later for later pages.'
-            : '';
+        const tips: string[] = [];
+        if (auto.skippedToc && auto.bodyStartPage) {
+          tips.push(
+            `Skipped front matter/TOC; started at page ${auto.bodyStartPage} (${auto.source}). Pass start_page=1 or focus="contents" to read the TOC.`,
+          );
+        }
+        if (slice.hasMore) {
+          tips.push(
+            `More pages available — call file_read again with start_page=${slice.endPage + 1}.`,
+          );
+        } else if (partialExtract) {
+          tips.push(
+            'Extract may still be growing in the background; retry later for later pages.',
+          );
+        }
+        const tip = tips.join(' ');
 
         ctx.send({
           tool: {
@@ -361,6 +409,13 @@ export function createFileReadTool(): ChatTool {
             has_more: slice.hasMore,
             partial_extract: partialExtract,
             matched_focus: slice.matchedFocus,
+            skipped_toc: auto.skippedToc,
+            body_start_page: auto.bodyStartPage,
+            auto_start_source: auto.source,
+            outline_preview: outline.slice(0, 12).map((e) => ({
+              title: e.title,
+              page: e.page ?? null,
+            })),
             tip: tip || undefined,
             text: slice.text,
           }),

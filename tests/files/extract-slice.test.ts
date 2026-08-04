@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  findBodyStartPage,
+  looksLikeTocPage,
   parseExtractPages,
+  resolveAutoStartPage,
   sliceExtractForRead,
 } from '@/lib/files/extract-slice';
 
@@ -16,6 +19,34 @@ const sample = [
   '',
   '--- page 4 ---',
   'Chapter three risk',
+].join('\n');
+
+const withToc = [
+  '--- page 1 ---',
+  'Title page Bitcoin Guide',
+  '',
+  '--- page 2 ---',
+  'Contents',
+  'Chapter 1 .......... 5',
+  'Chapter 2 .......... 12',
+  'Chapter 3 .......... 20',
+  'Chapter 4 .......... 28',
+  'Appendix .......... 40',
+  '',
+  '--- page 3 ---',
+  'Contents continued',
+  'More chapter .......... 45',
+  'Index .......... 50',
+  'Notes .......... 55',
+  'Glossary .......... 60',
+  '',
+  '--- page 4 ---',
+  'Chapter 1 Getting started with bitcoin wallets and exchanges in practice. '.repeat(
+    4,
+  ),
+  '',
+  '--- page 5 ---',
+  'Chapter 1 continued with more trading detail.',
 ].join('\n');
 
 describe('extract-slice', () => {
@@ -58,5 +89,69 @@ describe('extract-slice', () => {
     expect(slice.matchedFocus).toBe(true);
     expect(slice.startPage).toBe(3);
     expect(slice.text).toContain('wallets');
+  });
+
+  it('detects TOC pages via headings and dot leaders', () => {
+    expect(
+      looksLikeTocPage(
+        'Contents\nA .......... 1\nB .......... 2\nC .......... 3\nD .......... 4',
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeTocPage('Chapter one trading narrative without leaders'),
+    ).toBe(false);
+  });
+
+  it('finds body start after TOC stretch', () => {
+    const pages = parseExtractPages(withToc);
+    expect(findBodyStartPage(pages)).toBe(4);
+  });
+
+  it('auto-starts from heuristic when start_page omitted', () => {
+    const pages = parseExtractPages(withToc);
+    const auto = resolveAutoStartPage({
+      pages,
+      startPageExplicit: false,
+      startPage: 1,
+    });
+    expect(auto).toMatchObject({
+      startPage: 4,
+      skippedToc: true,
+      source: 'heuristic',
+    });
+  });
+
+  it('prefers outline body_start when in extracted range', () => {
+    const pages = parseExtractPages(withToc);
+    const auto = resolveAutoStartPage({
+      pages,
+      startPageExplicit: false,
+      startPage: 1,
+      outlineBodyStart: 5,
+    });
+    expect(auto).toMatchObject({
+      startPage: 5,
+      skippedToc: true,
+      source: 'outline',
+    });
+  });
+
+  it('keeps page 1 when start_page is explicit or focus is TOC', () => {
+    const pages = parseExtractPages(withToc);
+    expect(
+      resolveAutoStartPage({
+        pages,
+        startPageExplicit: true,
+        startPage: 1,
+      }).startPage,
+    ).toBe(1);
+    expect(
+      resolveAutoStartPage({
+        pages,
+        startPageExplicit: false,
+        startPage: 1,
+        focus: '目录',
+      }).startPage,
+    ).toBe(1);
   });
 });

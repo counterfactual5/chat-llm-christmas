@@ -173,6 +173,7 @@ describe('file_read arg parsing', () => {
       focus: '',
       startPage: 1,
       maxPages: 8,
+      startPageExplicit: false,
     });
     expect(
       parseToolFileReadArgs(
@@ -184,6 +185,7 @@ describe('file_read arg parsing', () => {
       focus: 'bitcoin',
       startPage: 12,
       maxPages: 4,
+      startPageExplicit: true,
     });
   });
 });

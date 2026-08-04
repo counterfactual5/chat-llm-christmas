@@ -143,8 +143,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
     const startReader = async () => {
       if (cancelled || started || !layoutReady(host)) return;
       started = true;
-      const { width, height } = hostSize(host);
-      lastSizeRef.current = { width, height };
+      lastSizeRef.current = hostSize(host);
 
       try {
         // Fetch once (prefer direct chat-api) then open from ArrayBuffer so

@@ -2,10 +2,6 @@
 
 import { useState } from 'react';
 import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Plus,
@@ -47,17 +43,13 @@ import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message, ModelOption, SkillItem } from '@/lib/chat/types';
 import { skillSlashName } from '@/lib/skills/creator';
-import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
+import { compactQuoteMath } from '@/lib/markdown/math';
+import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
   ComposerQueuePanel,
   type ComposerQueuedTask,
 } from './ComposerQueuePanel';
 import { ComposerModelMenu } from './ComposerModelMenu';
-
-const KATEX_OPTIONS = {
-  throwOnError: false,
-  errorColor: 'var(--chat-math-error, #a8a29e)',
-} as const;
 
 export type SlashMenuItem =
   | { kind: 'command'; id: string; title: string; insert: string; hint: string }
@@ -457,26 +449,12 @@ export function ChatComposer(props: ChatComposerProps) {
                 className="group flex items-start gap-1"
               >
                 <blockquote className="min-w-0 flex-1 border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500">
-                  <div className="chat-markdown chat-quote line-clamp-3 text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkMath, remarkGfm]}
-                      rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                      components={{
-                        p({ children }: any) {
-                          return <p className="whitespace-pre-wrap">{children}</p>;
-                        },
-                        code({ children }: any) {
-                          return (
-                            <code className="rounded bg-stone-200/60 px-1 py-0.5 font-mono text-[11px] dark:bg-stone-800">
-                              {children}
-                            </code>
-                          );
-                        },
-                      }}
-                    >
-                      {prepareChatMarkdown(compactQuoteMath(quote))}
-                    </ReactMarkdown>
-                  </div>
+                  <AnswerMarkdown
+                    text={compactQuoteMath(quote)}
+                    streaming={false}
+                    reflowBlocks={false}
+                    className="chat-quote line-clamp-3 space-y-0 text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4"
+                  />
                 </blockquote>
                 <button
                   type="button"

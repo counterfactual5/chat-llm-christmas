@@ -1,10 +1,6 @@
 'use client';
 
 import type { ClipboardEvent, KeyboardEvent, RefObject, MutableRefObject } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import {
   Loader2,
   RefreshCw,
@@ -64,14 +60,9 @@ import {
   type GeneratedImageEntry,
 } from '../panels/OutputPanel';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
-import { compactQuoteMath, prepareChatMarkdown } from '@/lib/markdown/math';
+import { compactQuoteMath } from '@/lib/markdown/math';
 
 import type { ReviewCheckKind } from '@/lib/tools/review/claim-reviewer';
-
-const KATEX_OPTIONS = {
-  throwOnError: false,
-  errorColor: 'var(--chat-math-error, #a8a29e)',
-} as const;
 
 export type ChatMessageListProps = {
   messages: Message[];
@@ -377,28 +368,12 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                   key={qi}
                                   className="border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500"
                                 >
-                                  <div className="chat-markdown chat-quote text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4">
-                                    <ReactMarkdown
-                                      remarkPlugins={[remarkMath, remarkGfm]}
-                                      rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                                      components={{
-                                        p({ children }: any) {
-                                          return (
-                                            <p className="whitespace-pre-wrap">{children}</p>
-                                          );
-                                        },
-                                        code({ children }: any) {
-                                          return (
-                                            <code className="rounded bg-stone-300/50 px-1 py-0.5 font-mono text-[11px] dark:bg-stone-700/60">
-                                              {children}
-                                            </code>
-                                          );
-                                        },
-                                      }}
-                                    >
-                                      {prepareChatMarkdown(compactQuoteMath(quote))}
-                                    </ReactMarkdown>
-                                  </div>
+                                  <AnswerMarkdown
+                                    text={compactQuoteMath(quote)}
+                                    streaming={false}
+                                    reflowBlocks={false}
+                                    className="chat-quote space-y-0 text-[12px] leading-4 text-stone-500 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-4"
+                                  />
                                 </blockquote>
                               ))}
                             </div>
@@ -746,68 +721,12 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                       {r.title || r.url}
                                     </a>
                                   ) : isImageUnderstand ? (
-                                    <div className="chat-markdown text-[12px] leading-5 text-stone-500 dark:text-stone-400">
-                                      <ReactMarkdown
-                                        remarkPlugins={[remarkMath, remarkGfm]}
-                                        rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
-                                        components={{
-                                          p({ children }) {
-                                            return (
-                                              <p className="m-0 whitespace-pre-wrap leading-5">
-                                                {children}
-                                              </p>
-                                            );
-                                          },
-                                          h1({ children }) {
-                                            return (
-                                              <h3 className="mb-1 mt-2 text-[12px] font-semibold text-stone-600 dark:text-stone-300">
-                                                {children}
-                                              </h3>
-                                            );
-                                          },
-                                          h2({ children }) {
-                                            return (
-                                              <h3 className="mb-1 mt-2 text-[12px] font-semibold text-stone-600 dark:text-stone-300">
-                                                {children}
-                                              </h3>
-                                            );
-                                          },
-                                          h3({ children }) {
-                                            return (
-                                              <h3 className="mb-1 mt-2 text-[12px] font-semibold text-stone-600 dark:text-stone-300">
-                                                {children}
-                                              </h3>
-                                            );
-                                          },
-                                          ul({ children }) {
-                                            return (
-                                              <ul className="my-1 list-disc space-y-0.5 pl-5">
-                                                {children}
-                                              </ul>
-                                            );
-                                          },
-                                          ol({ children }) {
-                                            return (
-                                              <ol className="my-1 list-decimal space-y-0.5 pl-5">
-                                                {children}
-                                              </ol>
-                                            );
-                                          },
-                                          li({ children }) {
-                                            return <li className="leading-5">{children}</li>;
-                                          },
-                                          code({ children }) {
-                                            return (
-                                              <code className="rounded bg-stone-200/60 px-1 py-0.5 font-mono text-[11px] dark:bg-stone-800">
-                                                {children}
-                                              </code>
-                                            );
-                                          },
-                                        }}
-                                      >
-                                        {prepareChatMarkdown(r.snippet || r.title || '')}
-                                      </ReactMarkdown>
-                                    </div>
+                                    <AnswerMarkdown
+                                      text={r.snippet || r.title || ''}
+                                      streaming={false}
+                                      reflowBlocks={false}
+                                      className="space-y-1 text-[12px] leading-5 text-stone-500 dark:text-stone-400 [&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-[12px] [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-[12px] [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-[12px] [&_p]:mb-0 [&_p]:leading-5 [&_ul]:my-1 [&_ol]:my-1"
+                                    />
                                   ) : (
                                     <span title={r.snippet || r.title}>{r.title}</span>
                                   )}

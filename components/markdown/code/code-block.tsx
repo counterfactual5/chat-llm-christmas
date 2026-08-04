@@ -11,6 +11,8 @@ interface CodeBlockProps {
   value: string;
   /** Soft-wrap long lines (Preview panels). Default keeps horizontal scroll. */
   wrap?: boolean;
+  /** Forwarded to Mermaid so fallback copy distinguishes stream vs final parse errors. */
+  streaming?: boolean;
 }
 
 const LANGUAGE_ALIASES: Record<string, string> = {
@@ -54,12 +56,12 @@ function highlightCode(value: string, language: string) {
   }
 }
 
-export function CodeBlock({ language, value, wrap = false }: CodeBlockProps) {
+export function CodeBlock({ language, value, wrap = false, streaming = false }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const highlighted = useMemo(() => highlightCode(value, language), [value, language]);
 
   if (isMermaidLanguage(language)) {
-    return <MermaidBlock value={value} />;
+    return <MermaidBlock value={value} streaming={streaming} />;
   }
 
   const copyToClipboard = async () => {

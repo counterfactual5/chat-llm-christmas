@@ -4,10 +4,13 @@ import { useEffect, useId, useState } from 'react';
 import { Check, Copy, Loader2 } from 'lucide-react';
 import { useTheme } from '@/components/theme/ThemeProvider';
 import { cn } from '@/lib/utils';
+import { sanitizeMermaidForRender } from '@/lib/markdown/core/mermaid';
 
 type MermaidBlockProps = {
   value: string;
   className?: string;
+  /** When true, parse failures are treated as incomplete stream (softer copy). */
+  streaming?: boolean;
 };
 
 /**
@@ -15,7 +18,7 @@ type MermaidBlockProps = {
  * Falls back to the source text when the diagram is incomplete (streaming)
  * or fails to parse.
  */
-export function MermaidBlock({ value, className }: MermaidBlockProps) {
+export function MermaidBlock({ value, className, streaming = false }: MermaidBlockProps) {
   const { theme } = useTheme();
   const reactId = useId().replace(/:/g, '');
   const [svg, setSvg] = useState<string>('');
@@ -24,7 +27,8 @@ export function MermaidBlock({ value, className }: MermaidBlockProps) {
   const [copied, setCopied] = useState(false);
   const [showSource, setShowSource] = useState(false);
 
-  const source = String(value || '').trim();
+  const rawSource = String(value || '').trim();
+  const source = sanitizeMermaidForRender(rawSource);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +75,7 @@ export function MermaidBlock({ value, className }: MermaidBlockProps) {
 
   const copyToClipboard = async () => {
     try {
-      await navigator.clipboard.writeText(source);
+      await navigator.clipboard.writeText(rawSource || source);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -80,6 +84,9 @@ export function MermaidBlock({ value, className }: MermaidBlockProps) {
   };
 
   const showFallback = Boolean(error) || (!pending && !svg);
+  const fallbackHint = streaming
+    ? 'Diagram not ready yet (incomplete or invalid while streaming).'
+    : 'Could not render this diagram — showing source. Check Mermaid syntax.';
 
   return (
     <div
@@ -138,15 +145,15 @@ export function MermaidBlock({ value, className }: MermaidBlockProps) {
         />
       ) : null}
 
-      {(showFallback || showSource) && source ? (
+      {(showFallback || showSource) && (rawSource || source) ? (
         <pre className="overflow-x-auto border-t border-stone-200/70 p-4 text-sm leading-relaxed text-stone-700 dark:border-stone-800 dark:text-stone-200">
-          <code className="font-mono whitespace-pre">{source}</code>
+          <code className="font-mono whitespace-pre">{rawSource || source}</code>
         </pre>
       ) : null}
 
       {error && !svg ? (
         <p className="border-t border-stone-200/70 px-4 py-2 text-[11px] text-stone-400 dark:border-stone-800">
-          Diagram not ready yet (incomplete or invalid while streaming).
+          {fallbackHint}
         </p>
       ) : null}
     </div>

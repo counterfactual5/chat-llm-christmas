@@ -102,7 +102,9 @@ export function AnswerMarkdown({
               Boolean(match) ||
               value.includes('\n') ||
               (looksLikeAsciiArt(value) && value.length >= 12);
-            if (isBlock && match) return <CodeBlock language={match[1]} value={value} />;
+            if (isBlock && match) {
+              return <CodeBlock language={match[1]} value={value} streaming={streaming} />;
+            }
             if (isBlock) return <pre className="my-4 max-w-full min-w-0 overflow-x-auto whitespace-pre rounded-lg bg-stone-100 p-4 font-mono text-[13px] leading-5 text-stone-800 dark:bg-stone-900/60 dark:text-stone-300"><code {...props}>{value}</code></pre>;
             const cmd = value.trim();
             if (onSendCommand && isClickableSlashCommand(cmd)) {

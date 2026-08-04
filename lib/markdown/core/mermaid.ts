@@ -43,3 +43,18 @@ export function promoteInlineMermaidToFences(markdown: string): string {
 export function normalizeMermaidMarkdown(markdown: string): string {
   return promoteInlineMermaidToFences(labelUnfencedMermaidBlocks(markdown));
 }
+
+/**
+ * Prep source for mermaid.render: drop theme/style directives models often add
+ * (UI already themes diagrams), and normalize curly quotes that break parsers.
+ */
+export function sanitizeMermaidForRender(source: string): string {
+  return String(source || '')
+    .replace(/^\s*(?:%%\{[\s\S]*?\}%%)\s*$/gm, '')
+    .replace(/^\s*style\s+\S+.*$/gim, '')
+    .replace(/^\s*classDef\s+\S+.*$/gim, '')
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}

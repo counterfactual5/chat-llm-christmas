@@ -2,8 +2,24 @@ import { describe, expect, it } from 'vitest';
 import {
   looksLikeMermaidSource,
   normalizeMermaidMarkdown,
+  sanitizeMermaidForRender,
 } from '@/lib/markdown/core/mermaid';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
+
+describe('sanitizeMermaidForRender', () => {
+  it('strips style/classDef/init directives and normalizes curly quotes', () => {
+    const out = sanitizeMermaidForRender(`flowchart TD
+  A[点击“登录”] --> B
+  style A fill:#e1f5ff
+  classDef foo fill:#fff
+  %%{init: {'theme':'dark'}}%%
+`);
+    expect(out).toContain('A[点击"登录"]');
+    expect(out).not.toMatch(/style\s+A/i);
+    expect(out).not.toMatch(/classDef/i);
+    expect(out).not.toContain('%%{init');
+  });
+});
 
 describe('Mermaid Markdown recovery', () => {
   it('recognizes supported Mermaid diagram starts', () => {

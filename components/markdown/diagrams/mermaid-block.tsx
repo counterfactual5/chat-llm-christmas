@@ -50,13 +50,22 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
   useEffect(() => {
     let cancelled = false;
     if (!source) {
-      setSvg('');
-      setError(null);
-      setPending(false);
+      // Clear state asynchronously to satisfy react-hooks linting and avoid
+      // synchronous cascading renders while the input is changing.
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setSvg('');
+        setError(null);
+        setPending(false);
+      });
       return;
     }
 
-    setPending(true);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setPending(true);
+      setError(null);
+    });
 
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -174,8 +183,10 @@ export function MermaidBlock({ value, className, streaming = false }: MermaidBlo
       {svg && !showSource ? (
         <div
           className={cn(
-            'overflow-auto px-3 py-4 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full',
-            fit ? 'max-h-[60vh] [&_svg]:max-h-[56vh]' : 'max-h-[85vh]',
+            'overflow-auto px-3 py-4 [&_svg]:h-auto',
+            fit
+              ? 'max-h-[60vh] [&_svg]:max-h-[56vh] [&_svg]:mx-auto [&_svg]:max-w-full'
+              : 'max-h-none [&_svg]:max-h-none [&_svg]:mx-0 [&_svg]:max-w-none',
           )}
           dangerouslySetInnerHTML={{ __html: svg }}
         />

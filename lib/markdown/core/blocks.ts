@@ -58,6 +58,10 @@ function reflowHeadingsListsHrs(chunk: string): string {
   );
   out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
 
+  // If prose ends with `---` on the same line (common model output),
+  // treat it as a thematic break even when the previous char isn't CJK.
+  out = out.replace(/([A-Za-z0-9])\s+(---{3,})\s*$/gm, '$1\n\n$2');
+
   // Unordered: only field labels / slash commands / bold-leading items —
   // never bare `汉字 - 散文`.
   out = out.replace(

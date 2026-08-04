@@ -106,6 +106,24 @@ describe('ASCII art Markdown recovery', () => {
     expect(fenced).not.toMatch(/│\n│\n│/);
   });
 
+  it('does not shred well-formed multi-line trees or strip their indentation', () => {
+    const unicode = 'Root\n  ├─ a\n  ├─ b\n  └─ c';
+    expect(reflowCollapsedAsciiArt(unicode)).toBe(unicode);
+
+    const ascii = ['app', '|-- src', '|   `-- main.ts', '`-- README.md'].join('\n');
+    expect(reflowCollapsedAsciiArt(ascii)).toBe(ascii);
+
+    const fenced = prepareChatMarkdown(`\`\`\`text\n${unicode}\n\`\`\``);
+    expect(fenced).toContain('  ├─ a');
+    expect(fenced).not.toMatch(/Root\n\n├─/);
+  });
+
+  it('does not treat GFM table separators as ASCII tree branches', () => {
+    const table = ['| a | b |', '| --- | --- |', '| 1 | 2 |'].join('\n');
+    expect(looksLikeAsciiTree(table)).toBe(false);
+    expect(normalizeAsciiArtMarkdown(table)).toBe(table);
+  });
+
   it('does not reflow weak bare fences that only mention a few box chars', () => {
     const md = 'Example glyph: ```\nsee ┌ here\n```\n';
     expect(normalizeAsciiArtMarkdown(md)).toBe(md);

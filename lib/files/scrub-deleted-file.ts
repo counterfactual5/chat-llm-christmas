@@ -104,10 +104,12 @@ export function scrubFileIdFromMessage(message: Message, fileId: string): Messag
   const id = String(fileId || '').trim();
   if (!id) return message;
 
-  const files = message.files?.filter((f) => f.id !== id);
-  const images = message.images?.filter((img) => img.fileId !== id);
-  const activity = (message.activity || []).filter(
-    (step) => !(step.kind === 'file' && step.fileId === id),
+  // Keep Output / timeline cards as production records; mark storage gone.
+  const files = message.files?.map((f) =>
+    f.id === id ? { ...f, unavailable: true } : f,
+  );
+  const images = message.images?.map((img) =>
+    img.fileId === id ? { ...img, unavailable: true } : img,
   );
   const toolRuns = message.toolRuns?.map((run) => {
     if (!run.results?.length) return run;
@@ -124,10 +126,10 @@ export function scrubFileIdFromMessage(message: Message, fileId: string): Messag
 
   return {
     ...message,
+    // Drop prompt markers that would invite file_read / image_understand on ghosts.
     content: scrubFileIdFromContent(message.content || '', id),
     files: files?.length ? files : undefined,
     images: images?.length ? images : undefined,
-    activity: activity.length ? activity : undefined,
     toolRuns,
   };
 }

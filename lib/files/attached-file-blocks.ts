@@ -107,11 +107,12 @@ export function formatAttachedFileHistoryRef(
  * file_read can open them on demand (image-ref pattern for documents).
  */
 export function formatChatFileHistoryRefs(
-  files: Array<{ id?: string; name?: string; mimeType?: string }>,
+  files: Array<{ id?: string; name?: string; mimeType?: string; unavailable?: boolean }>,
 ): string {
   const lines: string[] = [];
   const seen = new Set<string>();
   for (const f of files || []) {
+    if (f.unavailable) continue;
     const fileId = String(f.id || '').trim();
     if (!fileId || seen.has(fileId)) continue;
     seen.add(fileId);
@@ -251,11 +252,14 @@ export function messagesHaveAttachedFiles(
   messages: Array<{
     role?: string;
     content?: unknown;
-    files?: Array<{ id?: string }>;
+    files?: Array<{ id?: string; unavailable?: boolean }>;
   }>,
 ): boolean {
   for (const m of messages) {
-    if (Array.isArray(m.files) && m.files.some((f) => String(f?.id || '').trim())) {
+    if (
+      Array.isArray(m.files) &&
+      m.files.some((f) => String(f?.id || '').trim() && !f.unavailable)
+    ) {
       return true;
     }
     const text = messageTextContent(m.content);

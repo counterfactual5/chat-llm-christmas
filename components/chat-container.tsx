@@ -756,6 +756,7 @@ export default function ChatContainer() {
           prompt: img.prompt || fromCmd || img.name || 'Image',
           model: img.model || 'GPT Image',
           timestamp: m.timestamp,
+          unavailable: Boolean(img.unavailable),
         });
       });
     }
@@ -777,6 +778,7 @@ export default function ChatContainer() {
           url: file.url,
           content: file.content,
           createdAt: file.createdAt || m.timestamp,
+          unavailable: Boolean(file.unavailable),
         });
       });
     }

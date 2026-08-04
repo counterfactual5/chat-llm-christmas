@@ -21,6 +21,7 @@ export type GeneratedImageEntry = {
   prompt: string;
   model: string;
   timestamp: number;
+  unavailable?: boolean;
 };
 
 export type GeneratedFileEntry = {
@@ -33,6 +34,8 @@ export type GeneratedFileEntry = {
   url: string;
   content?: string;
   createdAt: number;
+  /** Storage deleted from Files; kept as Output history. */
+  unavailable?: boolean;
 };
 
 export type ToolViewEntry = ToolViewPayload & {
@@ -221,13 +224,23 @@ export function OutputPanel({
                           {files.map((entry) => (
                             <div
                               key={`${entry.messageId}-${entry.id}-${entry.fileIndex}`}
-                              className="flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40"
+                              className={cn(
+                                'flex items-stretch gap-2 rounded-lg border border-stone-200 bg-white/80 p-1.5 dark:border-stone-700 dark:bg-stone-950/40',
+                                entry.unavailable && 'opacity-70',
+                              )}
                             >
                               <button
                                 type="button"
-                                title={t('previewFile')}
-                                onClick={() => onPreviewFile(entry)}
-                                className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 dark:hover:bg-stone-900/60"
+                                title={
+                                  entry.unavailable
+                                    ? t('fileUnavailable')
+                                    : t('previewFile')
+                                }
+                                disabled={entry.unavailable}
+                                onClick={() => {
+                                  if (!entry.unavailable) onPreviewFile(entry);
+                                }}
+                                className="flex min-w-0 flex-1 items-stretch gap-2 rounded-md text-left hover:bg-stone-50 disabled:cursor-not-allowed disabled:hover:bg-transparent dark:hover:bg-stone-900/60"
                               >
                                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-stone-200/80 dark:bg-stone-800">
                                   <FileText className="h-4 w-4 text-stone-500" />
@@ -245,11 +258,20 @@ export function OutputPanel({
                                   <span className="mt-0.5 block truncate text-[12px] leading-4 font-medium text-stone-700 dark:text-stone-200">
                                     {entry.name}
                                   </span>
+                                  {entry.unavailable && (
+                                    <span className="mt-0.5 block truncate text-[10px] leading-4 text-amber-700 dark:text-amber-400">
+                                      {t('fileUnavailable')}
+                                    </span>
+                                  )}
                                 </span>
                               </button>
                               <div className="flex shrink-0 items-center self-center">
                                 <FileEntryActions
-                                  onDownload={() => onDownloadFile(entry)}
+                                  onDownload={
+                                    entry.unavailable
+                                      ? undefined
+                                      : () => onDownloadFile(entry)
+                                  }
                                   downloadLabel={t('download')}
                                   moreLabel={t('moreActions')}
                                   items={[

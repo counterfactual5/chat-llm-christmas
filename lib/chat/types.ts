@@ -49,6 +49,8 @@ export type Message = {
     model?: string;
     /** Gateway Files API id — prefer this over re-sending base64. */
     fileId?: string;
+    /** Account storage was deleted; keep as Output history. */
+    unavailable?: boolean;
   }>;
   /** Files created via create_file for this assistant turn (Output panel). */
   files?: Array<{
@@ -60,6 +62,8 @@ export type Message = {
     /** Inline UTF-8 text for local/gateway-backed downloads. */
     content?: string;
     createdAt: number;
+    /** Account storage was deleted; keep as Output history, not file_read-able. */
+    unavailable?: boolean;
   }>;
   /**
    * Specialized tool-result views for this assistant turn (Output / side panel).

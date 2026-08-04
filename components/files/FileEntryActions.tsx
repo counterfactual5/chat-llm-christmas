@@ -13,7 +13,7 @@ export type FileEntryMenuItem = {
 };
 
 type FileEntryActionsProps = {
-  onDownload: () => void;
+  onDownload?: () => void;
   downloadLabel: string;
   moreLabel: string;
   items: FileEntryMenuItem[];
@@ -36,9 +36,11 @@ export function FileEntryActions({
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      <button type="button" title={downloadLabel} onClick={onDownload} className={btnClass}>
-        <Download className={iconClass} />
-      </button>
+      {onDownload && (
+        <button type="button" title={downloadLabel} onClick={onDownload} className={btnClass}>
+          <Download className={iconClass} />
+        </button>
+      )}
 
       <Menu.Root>
         <Menu.Trigger type="button" title={moreLabel} className={btnClass} aria-label={moreLabel}>

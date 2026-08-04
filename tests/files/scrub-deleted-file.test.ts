@@ -76,8 +76,11 @@ describe('scrub-deleted-file', () => {
       activity: [{ id: 'a1', kind: 'file', fileId: FILE_ID }],
     };
     const scrubbed = scrubFileIdFromMessage(msg, FILE_ID);
-    expect(scrubbed.files).toBeUndefined();
-    expect(scrubbed.activity).toBeUndefined();
+    expect(scrubbed.files?.[0]).toMatchObject({
+      id: FILE_ID,
+      unavailable: true,
+    });
+    expect(scrubbed.activity?.[0]).toMatchObject({ fileId: FILE_ID });
     expect(scrubbed.content).not.toContain(FILE_ID);
 
     const session: ChatSession = {
@@ -99,7 +102,7 @@ describe('scrub-deleted-file', () => {
       ],
     };
     const sessions = scrubFileIdFromSessions([session], FILE_ID);
-    expect(sessions[0]?.messages[0]?.files).toBeUndefined();
+    expect(sessions[0]?.messages[0]?.files?.[0]?.unavailable).toBe(true);
     expect(sessions[0]?.webSources?.some((s) => s.url.includes(FILE_ID))).toBe(
       false,
     );

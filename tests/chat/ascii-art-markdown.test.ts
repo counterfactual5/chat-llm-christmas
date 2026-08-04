@@ -85,6 +85,27 @@ describe('ASCII art Markdown recovery', () => {
     expect(out).toContain('└────┘');
   });
 
+  it('does not shred a nested multi-line CSS box model', () => {
+    const nested = [
+      '┌─────────────────────────┐',
+      '│         Margin          │',
+      '│  ┌───────────────────┐  │',
+      '│  │      Border       │  │',
+      '│  │  ┌─────────────┐  │  │',
+      '│  │  │   Padding   │  │  │',
+      '│  │  │  ┌───────┐  │  │  │',
+      '│  │  │  │Content│  │  │  │',
+      '│  │  │  └───────┘  │  │  │',
+      '│  │  └─────────────┘  │  │',
+      '│  └───────────────────┘  │',
+      '└─────────────────────────┘',
+    ].join('\n');
+    expect(reflowCollapsedAsciiArt(nested)).toBe(nested);
+    const fenced = normalizeAsciiArtMarkdown(`\`\`\`text\n${nested}\n\`\`\``);
+    expect(fenced).toContain('│  │      Border       │  │');
+    expect(fenced).not.toMatch(/│\n│\n│/);
+  });
+
   it('does not reflow weak bare fences that only mention a few box chars', () => {
     const md = 'Example glyph: ```\nsee ┌ here\n```\n';
     expect(normalizeAsciiArtMarkdown(md)).toBe(md);

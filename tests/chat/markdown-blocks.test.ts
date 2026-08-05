@@ -284,4 +284,23 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     ].join('\n');
     expect(reflowCollapsedMarkdownBlocks(ok)).toBe(ok);
   });
+
+  it('splits ordered lists that trail a heading on the same line', () => {
+    const src =
+      '## ⚡ 快速操作步骤 1. 打开资源管理器 2. **新建文件夹** 3. 放入模型';
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^## ⚡ 快速操作步骤$/m);
+    expect(out).toMatch(/^1\. 打开资源管理器$/m);
+    expect(out).toMatch(/^2\. \*\*新建文件夹\*\*$/m);
+    expect(out).toMatch(/^3\. 放入模型$/m);
+  });
+
+  it('splits backtick bullets after a colon', () => {
+    const src =
+      '创建以下文件夹： - `checkpoints` - `clip_vision` - `vae`';
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/文件夹：\n- `checkpoints`/);
+    expect(out).toMatch(/^-\s+`clip_vision`$/m);
+    expect(out).toMatch(/^-\s+`vae`$/m);
+  });
 });

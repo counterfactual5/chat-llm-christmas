@@ -93,6 +93,11 @@ import {
 } from '@/lib/chat/composer/download';
 import { downloadTextContent } from '@/lib/files/download';
 import {
+  normalizeSameLineFences,
+  unwrapMarkdownDocumentFence,
+} from '@/lib/markdown/core/document-fence';
+import { reflowCollapsedMarkdownBlocks } from '@/lib/markdown/core/blocks';
+import {
   type GeneratedFileEntry,
   type GeneratedImageEntry,
   type ToolViewEntry,
@@ -2174,7 +2179,19 @@ export default function ChatContainer() {
     e.stopPropagation();
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
-    const md = session.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${m.content}\n`).join('\n---\n\n');
+    // Reflow smashed GLM replies so the .md matches what the chat bubble shows.
+    // Avoid full prepareChatMarkdown — that adds KaTeX escapes / fences for display.
+    const md = session.messages
+      .map((m) => {
+        let body = String(m.content || '');
+        if (m.role === 'assistant') {
+          body = reflowCollapsedMarkdownBlocks(
+            normalizeSameLineFences(unwrapMarkdownDocumentFence(body)),
+          );
+        }
+        return `### ${m.role === 'user' ? 'User' : 'Assistant'}\n\n${body}\n`;
+      })
+      .join('\n---\n\n');
     downloadTextContent(`${session.title}.md`, md, 'text/markdown;charset=utf-8');
   };
 

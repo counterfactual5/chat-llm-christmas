@@ -16,3 +16,44 @@ export function unwrapMarkdownDocumentFence(content: string): string {
     /(^|\n)\|[^\n]+\|\s*\n\|?\s*:?-{3,}/.test(document);
   return looksLikeDocument ? document.trim() : source;
 }
+
+const FENCE_LANG =
+  'bash|sh|zsh|shell|powershell|cmd|console|python|py|javascript|js|typescript|ts|json|yaml|yml|text|txt|sql|rust|go|java|c|cpp|html|css|xml';
+
+/**
+ * When GLM collapses newlines, a one-line fence often appears as:
+ * - ` ```D:\\ComfyUI\\models\\``` ` — meant as a path (inline code)
+ * - ` ```bash git clone …``` ` — language + body jammed; restore a real fence
+ * Multi-line fences are left alone.
+ */
+export function normalizeSameLineFences(content: string): string {
+  return String(content || '').replace(/```([^\n`]+)```/g, (full, body: string, offset: number, whole: string) => {
+    const raw = String(body || '');
+    const t = raw.trim();
+    if (!t) return full;
+
+    const leadBreak =
+      offset > 0 && whole[offset - 1] !== '\n' ? '\n\n' : '';
+
+    // Windows / Unix path — demote to inline code.
+    if (/^[A-Za-z]:[\\/]/.test(t) || /^[~\/](?:[\w.-]+[\\/])+/.test(t)) {
+      return `\`${t}\``;
+    }
+
+    // `bash git clone …` / `python print(1)` jammed on one line.
+    const langBody = t.match(
+      new RegExp(String.raw`^(${FENCE_LANG})\s+(\S[\s\S]*)$`, 'i'),
+    );
+    if (langBody) {
+      return `${leadBreak}\`\`\`${langBody[1]}\n${langBody[2]!.trim()}\n\`\`\``;
+    }
+
+    // Numbered steps jammed into a language-less same-line fence
+    // (` ``` 1. foo 2. bar ``` `) — restore a real block so lists can reflow.
+    if (/(?:^|\s)\d{1,2}\.\s+\S/.test(t) && t.length >= 24) {
+      return `${leadBreak}\`\`\`\n${t}\n\`\`\``;
+    }
+
+    return full;
+  });
+}

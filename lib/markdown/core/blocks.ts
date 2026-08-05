@@ -237,6 +237,8 @@ function reflowHeadingsListsHrs(chunk: string): string {
     new RegExp(String.raw`(\|[^\n]*\|)[ \t]+(${hrDashes})[ \t]*$`, 'gm'),
     '$1\n\n---',
   );
+  // Inline/path code then HR with no space: `` `D:\path\`--- ``
+  out = out.replace(/(`)(-{3,})/g, '$1\n\n$2');
 
   // Unordered: only field labels / slash commands / bold-leading items —
   // never bare `汉字 - 散文`.
@@ -253,6 +255,11 @@ function reflowHeadingsListsHrs(chunk: string): string {
   );
   // After Latin when the item starts with CJK (`Telegram 2. 加入`)
   out = out.replace(/([A-Za-z0-9])\s+(\d{1,2}\.\s+[\u4e00-\u9fff])/g, '$1\n$2');
+  // Heading then first ordered item on the same line: `## 快速操作步骤 1. 打开`
+  out = out.replace(
+    /(^|\n)(#{1,6}[ \t]+[^\n]*?)\s+(\d{1,2}\.\s+\S)/gm,
+    '$1$2\n$3',
+  );
   // Continue splitting `1. foo 2. bar` once an item already starts a line —
   // does not fire on mid-prose `图 1. …表 2.`.
   for (let i = 0; i < 8; i++) {
@@ -274,13 +281,24 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // CTA after list prose: `建立人脉 需要我帮你：`
   out = out.replace(/([^\n])\s+(需要我(?:帮你|协助)[:：])/g, '$1\n\n$2');
 
-  // Colon then a real bullet: `支持有限： - Mac通常…` (not `价格：约一百`).
-  out = out.replace(/([：:])[ \t]+(-\s+[\u4e00-\u9fffA-Za-z])/g, '$1\n$2');
+  // Colon then a real bullet: `支持有限： - Mac通常…` / `文件夹： - \`checkpoints\``
+  // (not `价格：约一百`).
+  out = out.replace(/([：:])[ \t]+(-\s+[`\u4e00-\u9fffA-Za-z*])/g, '$1\n$2');
+  // Sibling inline-code bullets on the SAME line: `- \`a\` - \`b\` - \`c\``.
+  // Use [ \t]+ (not \s+) so an already-split `\n- \`next\`` is not re-matched.
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(
+      /(^|\n)(-\s+`[^`\n]+`)[ \t]+(-\s+`)/g,
+      '$1$2\n$3',
+    );
+    if (next === out) break;
+    out = next;
+  }
   // Continue splitting sibling bullets once a line already starts with `- `,
   // but never catalog lines (`- **/image** - 说明`).
   for (let i = 0; i < 8; i++) {
     const next = out.replace(
-      /(^|\n)(-\s+(?!\*\*)[^\n]*?)\s+(-\s+(?!\*\*)[\u4e00-\u9fffA-Za-z])/g,
+      /(^|\n)(-\s+(?!\*\*)[^\n]*?)\s+(-\s+(?!\*\*)[`\u4e00-\u9fffA-Za-z*])/g,
       '$1$2\n$3',
     );
     if (next === out) break;

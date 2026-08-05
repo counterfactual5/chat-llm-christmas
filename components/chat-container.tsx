@@ -2582,6 +2582,7 @@ export default function ChatContainer() {
             <ToolViewPanel
               open={isPreviewPanelOpen}
               onClose={() => setIsPreviewPanelOpen(false)}
+              contextOpen={isContextPanelOpen}
               view={previewTarget.view}
               messageId={previewTarget.messageId}
               onJumpToMessage={() => {
@@ -2593,6 +2594,7 @@ export default function ChatContainer() {
             <ChatPreviewPanel
               open={isPreviewPanelOpen}
               onClose={() => setIsPreviewPanelOpen(false)}
+              contextOpen={isContextPanelOpen}
               file={previewTarget?.kind === 'file' ? previewTarget.entry : null}
               onExpandFullscreen={(payload) => {
                 setFilePreview(payload);

@@ -16,6 +16,7 @@ import {
   type GeneratedImageEntry,
   type ToolViewEntry,
 } from './OutputPanel';
+import { CONTEXT_PANEL_WIDTH } from './panel-widths';
 import { ReferencePanel } from './ReferencePanel';
 
 const SYSTEM_PRESETS = [
@@ -125,8 +126,9 @@ export function ChatContextPanel({
       {open && (
         <motion.div
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 280, opacity: 1 }}
+          animate={{ width: CONTEXT_PANEL_WIDTH, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
+          transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
           className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
         >
           <div className="relative flex h-14 shrink-0 items-center justify-center border-b border-stone-200/50 px-4 dark:border-stone-800/50">

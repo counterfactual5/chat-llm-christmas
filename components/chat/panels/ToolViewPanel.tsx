@@ -7,10 +7,13 @@ import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
 import { renderToolView } from '@/lib/tools/views/registry';
+import { previewPanelWidth } from './panel-widths';
 
 export type ToolViewPanelProps = {
   open: boolean;
   onClose: () => void;
+  /** When Context is closed, Preview absorbs its width. */
+  contextOpen?: boolean;
   view: ToolViewPayload | null;
   messageId?: string;
   onJumpToMessage?: () => void;
@@ -19,18 +22,20 @@ export type ToolViewPanelProps = {
 export function ToolViewPanel({
   open,
   onClose,
+  contextOpen = false,
   view,
   messageId,
   onJumpToMessage,
 }: ToolViewPanelProps) {
   const { t } = useLocale();
+  const width = previewPanelWidth(contextOpen);
 
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 460, opacity: 1 }}
+          animate={{ width, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
           className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"

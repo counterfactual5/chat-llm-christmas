@@ -27,10 +27,13 @@ import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GeneratedFileEntry } from './OutputPanel';
+import { previewPanelWidth } from './panel-widths';
 
 export type ChatPreviewPanelProps = {
   open: boolean;
   onClose: () => void;
+  /** When Context is closed, Preview absorbs its width. */
+  contextOpen?: boolean;
   file: GeneratedFileEntry | null;
   onExpandFullscreen: (payload: FilePreviewPayload) => void;
   onJumpToMessage: () => void;
@@ -54,6 +57,7 @@ function fileSourceUrl(file: GeneratedFileEntry): string {
 export function ChatPreviewPanel({
   open,
   onClose,
+  contextOpen = false,
   file,
   onExpandFullscreen,
   onJumpToMessage,
@@ -62,6 +66,7 @@ export function ChatPreviewPanel({
   const { t } = useLocale();
   const [fetchedContent, setFetchedContent] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState('');
+  const width = previewPanelWidth(contextOpen);
 
   const previewable = Boolean(file && canPreviewGeneratedFile(file));
   const sourceUrl = file ? fileSourceUrl(file) : '';
@@ -142,7 +147,7 @@ export function ChatPreviewPanel({
       {open && (
         <motion.div
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 460, opacity: 1 }}
+          animate={{ width, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
           className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"

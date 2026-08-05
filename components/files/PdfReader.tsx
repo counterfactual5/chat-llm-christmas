@@ -11,6 +11,7 @@ import { EpubReader } from '@/components/files/EpubReader';
 import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
 import { cn } from '@/lib/utils';
+import { bindPdfTextLayerSelection } from '@/components/files/pdf-text-layer-selection';
 import './pdf-reader.css';
 
 export type PdfReaderProps = {
@@ -73,6 +74,7 @@ function PdfPage({
     let cancelled = false;
     let textLayer: { cancel: () => void } | null = null;
     let renderTask: { cancel: () => void } | null = null;
+    let unbindSelection: (() => void) | null = null;
     const textElForCleanup = textRef.current;
 
     void (async () => {
@@ -142,6 +144,8 @@ function PdfPage({
         textEl.style.top = '0';
         textEl.style.right = 'auto';
         textEl.style.bottom = 'auto';
+        // TextLayer (core) does not install endOfContent — TextLayerBuilder does.
+        unbindSelection = bindPdfTextLayerSelection(textEl);
       } catch (err) {
         if (cancelled) return;
         // Keep canvas blank; selection simply unavailable for this page.
@@ -155,6 +159,12 @@ function PdfPage({
 
     return () => {
       cancelled = true;
+      try {
+        unbindSelection?.();
+      } catch {
+        /* ignore */
+      }
+      unbindSelection = null;
       try {
         renderTask?.cancel();
       } catch {

@@ -73,6 +73,25 @@
   background: transparent !important;
 }
 
+/*
+ * pdf.js TextLayerBuilder selection helper: a full-page underlay while dragging
+ * (see .selecting .endOfContent). Without this, Chrome selection across
+ * absolute glyph spans often jumps many lines below the pointer.
+ */
+.pdf-reader-page .textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pdf-reader-page .textLayer.selecting .endOfContent {
+  top: 0;
+}
+
 .pdf-reader-page canvas {
   position: relative;
   z-index: 1;

@@ -4,7 +4,10 @@
  */
 import { fixGreedyAutolinks } from '@/lib/markdown/core/autolinks';
 import { normalizeAsciiArtMarkdown } from '@/lib/markdown/core/ascii-art';
-import { reflowCollapsedMarkdownBlocks } from '@/lib/markdown/core/blocks';
+import {
+  reflowCollapsedMarkdownBlocks,
+  reflowCollapsedMarkdownTablesOnly,
+} from '@/lib/markdown/core/blocks';
 import { normalizeMermaidMarkdown } from '@/lib/markdown/core/mermaid';
 import { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
 import { hasUnclosedDisplayMath } from './detect';
@@ -29,11 +32,13 @@ export function prepareChatMarkdown(
   out = normalizeMermaidMarkdown(out);
   // GLM often collapses block markdown (headings/lists/hrs/tables) into one
   // paragraph — restore line breaks so remark can parse structure.
-  // Thought/CoT skips this: English verifier prose is easily shredded, and
-  // smashed answer tables belong in the reply bubble, not reasoning.
-  if (opts?.reflowBlocks !== false) {
-    out = reflowCollapsedMarkdownBlocks(out);
-  }
+  // Thought/CoT opts out of the prose-level rules (English verifier text is
+  // easily shredded) but still gets table recovery: a model that puts its
+  // tables in reasoning would otherwise show them as raw pipes.
+  out =
+    opts?.reflowBlocks === false
+      ? reflowCollapsedMarkdownTablesOnly(out)
+      : reflowCollapsedMarkdownBlocks(out);
 
   // Unclosed $$ must be escaped for display — otherwise remark-math swallows the
   // rest of the message into one giant math/“quote-looking” block (even after

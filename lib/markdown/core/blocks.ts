@@ -306,6 +306,19 @@ function reflowHeadingsListsHrs(chunk: string): string {
 }
 
 /** Full structural repair: unwrap hard-wraps, then tables, then headings/lists/hrs. */
+/**
+ * Table-only recovery. Safe for Thought/CoT, where the prose-level reflows are
+ * too aggressive but a smashed table is just as unreadable as in an answer.
+ */
+export function reflowCollapsedMarkdownTablesOnly(markdown: string): string {
+  const src = normalizeMarkdownLineEndings(String(markdown || ''));
+  if (!src) return src;
+
+  let out = reflowOutsideFences(src, normalizePipeLookalikesInTableishLines);
+  out = reflowOutsideFences(out, reflowCollapsedMarkdownTables);
+  return out.replace(/\n{3,}/g, '\n\n');
+}
+
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   const src = normalizeMarkdownLineEndings(String(markdown || ''));
   if (!src) return src;

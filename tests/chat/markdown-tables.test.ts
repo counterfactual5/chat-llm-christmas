@@ -196,4 +196,20 @@ describe('breakInlineCellBullets', () => {
     expect(out).toContain('<br>• **Monash Data Science Club**');
     expect(reflowInlineListsInTableCells(raw)).toContain('<br>•');
   });
+
+  it('repairs tables in Thought (reflowBlocks=false) without prose reflow', () => {
+    const raw = [
+      '2. 找到以下选项并勾选： | 设置项 | 作用 |',
+      '   |--------|------|',
+      '   | Use xFormers | 节省显存 |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw, { reflowBlocks: false });
+    // Title peeled off the header so remark-gfm sees a table.
+    expect(out).toMatch(/找到以下选项并勾选：\n/);
+    expect(out).toContain('| 设置项 | 作用 |');
+
+    // Prose-level reflow stays off: a smashed heading is left alone.
+    const prose = 'Some verifier prose ## Not A Heading and more text';
+    expect(prepareChatMarkdown(prose, { reflowBlocks: false })).toBe(prose);
+  });
 });

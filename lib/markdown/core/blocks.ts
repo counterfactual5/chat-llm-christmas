@@ -178,11 +178,6 @@ function reflowOutsideFences(
 function reflowHeadingsListsHrs(chunk: string): string {
   let out = chunk;
 
-  // Models sometimes emit “thematic break dashes” using dash-like characters
-  // (em/en/minus/fullwidth) instead of ASCII hyphen. Normalize to `-` so
-  // Markdown treats it as `---` HR.
-  out = out.replace(/[—–−－]{3,}/g, '---');
-
   // Headings: allow CJK lead-in — `渠道 ### 1.` is common in smashed replies.
   out = out.replace(
     new RegExp(`([${BREAK_TEXT}])\\s+(#{1,6}\\s+\\S)`, 'g'),
@@ -193,24 +188,47 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // Already-correct `\n### ` is a no-op; skip `|` so table cells stay intact.
   out = out.replace(/([^\n#|])[ \t]+(#{1,6}[ \t]+\S)/g, '$1\n\n$2');
 
-  // Thematic breaks jammed into prose. Blank line BEFORE `---` so CommonMark
-  // does not treat it as a setext underline. The space between prose and `---`
-  // is optional: models write both `场景。 ---` and `场景。---`.
+  // Thematic breaks: ASCII `---` or dash-lookalikes (em/en/minus/fullwidth),
+  // but ONLY in HR position — never rewrite mid-prose `前后———中间`.
+  const hrDashes = String.raw`(?:-{3,}|[—–−－]{3,})`;
+  // Standalone HR line.
   out = out.replace(
-    new RegExp(`([${BREAK_TEXT}])\\s*(---+)(?=\\s|#{1,6}\\s|$)`, 'g'),
-    '$1\n\n$2',
+    new RegExp(String.raw`(^|\n)[ \t]*(${hrDashes})[ \t]*(?=\n|$)`, 'g'),
+    '$1---',
+  );
+  // Thematic breaks jammed into prose. Blank line BEFORE so CommonMark
+  // does not treat it as a setext underline. Space optional: `场景。 ---`
+  // and `场景。———` / `场景。---`.
+  out = out.replace(
+    new RegExp(
+      `([${BREAK_TEXT}])\\s*(${hrDashes})(?=\\s|#{1,6}\\s|$)`,
+      'g',
+    ),
+    '$1\n\n---',
   );
   // After Latin/code only at line-end / before a heading — NOT `A --- not B`
   // (English em-dash prose must stay intact).
   out = out.replace(
-    /([A-Za-z0-9`*_）)」』])[ \t]+(---+)(?=[ \t]*$|\n|#{1,6}\s)/gm,
-    '$1\n\n$2',
+    new RegExp(
+      String.raw`([A-Za-z0-9\`*_）)」』])[ \t]+(${hrDashes})(?=[ \t]*$|\n|#{1,6}\s)`,
+      'gm',
+    ),
+    '$1\n\n---',
   );
   // Prose glued onto the same line after an HR: `--- 需要我帮你…`
-  out = out.replace(/(^|\n)(---+)[ \t]+(?=\S)/g, '$1$2\n\n');
-  out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
+  out = out.replace(
+    new RegExp(String.raw`(^|\n)(${hrDashes})[ \t]+(?=\S)`, 'g'),
+    '$1---\n\n',
+  );
+  out = out.replace(
+    new RegExp(String.raw`(${hrDashes})\s+(?=#{1,6}\s)`, 'g'),
+    '---\n\n',
+  );
   // Trailing HR jammed onto a finished pipe row: `| … | ---`
-  out = out.replace(/(\|[^\n]*\|)[ \t]+(---+)[ \t]*$/gm, '$1\n\n$2');
+  out = out.replace(
+    new RegExp(String.raw`(\|[^\n]*\|)[ \t]+(${hrDashes})[ \t]*$`, 'gm'),
+    '$1\n\n---',
+  );
 
   // Unordered: only field labels / slash commands / bold-leading items —
   // never bare `汉字 - 散文`.

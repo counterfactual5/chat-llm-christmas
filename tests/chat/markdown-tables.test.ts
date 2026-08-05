@@ -128,6 +128,19 @@ describe('repairGfmTableStructure', () => {
     expect(out).toContain('|------|---------|------|');
     expect(out).toContain('| 已经有 NVIDIA 驱动/CUDA | `nvidia` | 体积更小 |');
   });
+
+  it('does not insert a placeholder header before a valid pipe header without leading |', () => {
+    const raw = [
+      'Very long column name here | Col2 | Col3 | Col4 |',
+      '|------|------|------|------|',
+      '| a | b | c | d |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw);
+    expect(out).not.toContain('| - | - | - | - |');
+    expect(out).toContain('Very long column name here | Col2 | Col3 | Col4 |');
+    expect(out).toContain('|------|------|------|------|');
+    expect(out).toContain('| a | b | c | d |');
+  });
 });
 
 describe('breakInlineCellBullets', () => {

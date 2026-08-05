@@ -125,6 +125,9 @@ export function repairGfmTableStructure(markdown: string): string {
     // Orphan separator after prose/heading (model dropped the header row):
     // `### 第二步\n|------|------|\n| a | b |` → insert an empty header so GFM
     // still builds a table.
+    // Do NOT insert when the previous line already has `|` — it is likely a
+    // valid header without a leading pipe (`Name | Age | City`), and inserting
+    // `| - | - |` would duplicate/break it.
     if (isSeparatorLine(line)) {
       const prev = [...out].reverse().find((l) => String(l || '').trim()) || '';
       const prevTrim = prev.trim();
@@ -135,7 +138,7 @@ export function repairGfmTableStructure(markdown: string): string {
       if (
         cols >= 2 &&
         prevTrim &&
-        !prevTrim.startsWith('|') &&
+        !prevTrim.includes('|') &&
         !isSeparatorLine(prevTrim) &&
         nextLine.trim().startsWith('|') &&
         !isSeparatorLine(nextLine)

@@ -96,6 +96,11 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/应用场景。\n\n---\n\n数据分析/);
   });
 
+  it('does not rewrite mid-prose Chinese em-dashes into HR markers', () => {
+    const src = '前后———中间内容———后面';
+    expect(reflowCollapsedMarkdownBlocks(src)).toBe(src);
+  });
+
   it('keeps the last table cell intact (no false split before CJK cell text)', () => {
     const smashed =
       '⚠️ 已经失效/关停的平台（不要浪费时间） | 平台 | 状态 | 说明 | |------|------|------| | 登链社区主站 (dengchain.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 | | Dework (dework.com) | ❌ 域名已售卖 | 已被 GoDaddy 挂售 |';

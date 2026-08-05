@@ -131,6 +131,16 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('Do not paste the full Skill body');
     expect(parts).toContain('Past tool results');
   });
+
+  it('skips Known facts and uses off behavior when memoriesEnabled is false', () => {
+    const parts = buildChatSystemParts({
+      ...base,
+      memoriesEnabled: false,
+    }).join('\n');
+    expect(parts).toContain('Memory feature is OFF');
+    expect(parts).not.toContain('Known facts about the user');
+    expect(parts).not.toContain('Prefer Chinese');
+  });
 });
 
 describe('cursorWebChatPrompt', () => {

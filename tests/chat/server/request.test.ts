@@ -15,6 +15,7 @@ describe('chat request parsing', () => {
       referenceText: '',
       skills: [],
       memories: [],
+      memoriesEnabled: true,
       conversationId: '',
       enableSearch: true,
       integrations: [],
@@ -23,6 +24,12 @@ describe('chat request parsing', () => {
       reviewContext: null,
       fileExtracts: {},
     });
+  });
+
+  it('honors memoriesEnabled: false', () => {
+    expect(parseChatRequestBody({ memoriesEnabled: false }).memoriesEnabled).toBe(
+      false,
+    );
   });
 
   it('keeps non-array messages for later validation', () => {

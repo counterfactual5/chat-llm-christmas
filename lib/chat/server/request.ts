@@ -53,6 +53,8 @@ export type ChatRequestBody = {
   referenceText: string;
   skills: ChatSkillInput[];
   memories: ChatMemoryInput[];
+  /** Client master switch; false = do not auto-extract/inject account memory. Default true. */
+  memoriesEnabled: boolean;
   conversationId: string;
   enableSearch: boolean;
   integrations: string[];
@@ -113,6 +115,7 @@ export function parseChatRequestBody(raw: unknown): ChatRequestBody {
     referenceText: body.referenceText == null ? '' : String(body.referenceText),
     skills,
     memories,
+    memoriesEnabled: body.memoriesEnabled !== false,
     conversationId: body.conversationId == null ? '' : String(body.conversationId),
     enableSearch: body.enableSearch !== false,
     integrations: normalizeIntegrationIds(body.integrations),

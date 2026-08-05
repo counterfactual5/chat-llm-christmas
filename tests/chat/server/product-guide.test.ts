@@ -59,6 +59,12 @@ describe('memoryBehaviorPrompt', () => {
     expect(text).toContain('No memory-write tool');
     expect(text).toContain('do NOT claim it was saved');
   });
+
+  it('tells the model memory is off when disabled', () => {
+    const text = memoryBehaviorPrompt({ enabled: false });
+    expect(text).toContain('Memory feature is OFF');
+    expect(text).toContain('Do not claim you will remember');
+  });
 });
 
 describe('autoReviewStatusPrompt', () => {

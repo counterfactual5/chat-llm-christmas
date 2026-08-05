@@ -58,7 +58,14 @@ export function productUsageGuideDetailPrompt(): string {
 }
 
 /** Always-on memory behavior contract (separate from the optional facts block). */
-export function memoryBehaviorPrompt(): string {
+export function memoryBehaviorPrompt(opts?: { enabled?: boolean }): string {
+  if (opts?.enabled === false) {
+    return [
+      'Memory feature is OFF for this client.',
+      'Do not claim you will remember facts across chats, that memories were saved, or that Known facts apply.',
+      'No memory-write tool.',
+    ].join(' ');
+  }
   return [
     'Memory: facts may be auto-extracted into the Memories UI. No memory-write tool.',
     'If asked to “remember” something, acknowledge it — do NOT claim it was saved unless it already appears in Known facts below.',

@@ -13,6 +13,9 @@ type MemoryManagerModalProps = {
   loading: boolean;
   saving: boolean;
   error: string;
+  /** Master switch: when false, no auto-extract and no injection into chats. */
+  featureEnabled: boolean;
+  onFeatureEnabledChange: (enabled: boolean) => void;
   onRefresh: () => void | Promise<void>;
   onUpdate: (
     id: string,
@@ -38,6 +41,8 @@ export function MemoryManagerModal({
   loading,
   saving,
   error,
+  featureEnabled,
+  onFeatureEnabledChange,
   onRefresh,
   onUpdate,
   onDelete,
@@ -82,10 +87,22 @@ export function MemoryManagerModal({
               Memory
             </h2>
             <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
-              {enabledCount} enabled · {memories.length} total · export/import as MEMORY.md
+              {featureEnabled
+                ? `${enabledCount} enabled · ${memories.length} total · export/import as MEMORY.md`
+                : `Memory off · ${memories.length} stored (not used in chat)`}
             </p>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            <label className="mr-1 flex cursor-pointer items-center gap-2 text-xs text-stone-600 dark:text-stone-300">
+              <span className="hidden sm:inline">Use memory</span>
+              <Switch
+                size="sm"
+                checked={featureEnabled}
+                disabled={saving}
+                onCheckedChange={(checked) => onFeatureEnabledChange(Boolean(checked))}
+                aria-label="Use memory"
+              />
+            </label>
             <Button
               type="button"
               variant="ghost"
@@ -138,6 +155,13 @@ export function MemoryManagerModal({
         {error && (
           <p className="mx-5 mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-300">
             {error}
+          </p>
+        )}
+
+        {!featureEnabled && (
+          <p className="mx-5 mt-4 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            Memory is off for this browser. Chats will not auto-save or inject
+            known facts. Existing entries stay here until you delete them.
           </p>
         )}
 

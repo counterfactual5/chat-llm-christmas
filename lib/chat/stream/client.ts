@@ -56,6 +56,8 @@ export type StreamChatDeps = {
     sessionId: string,
   ) => Array<{ id: string; title: string; content: string }>;
   memoriesPayload: () => Array<{ id: string; kind: string; content: string }>;
+  /** When false, server should not promise auto-memory and client sends no facts. Default true. */
+  memoriesEnabled?: () => boolean;
   getNotionConnected: () => boolean;
   getGitHubConnected: () => boolean;
   getGoogleConnected: () => boolean;
@@ -164,6 +166,7 @@ export async function streamChatResponse(
       referenceText: combinedReference,
       skills: deps.skillsPayloadForSession(sessionId),
       memories: deps.memoriesPayload(),
+      memoriesEnabled: deps.memoriesEnabled ? deps.memoriesEnabled() !== false : true,
       conversationId: sessionId,
       integrations,
       enableSearch: requestOpts?.enableSearch !== false,

@@ -401,6 +401,9 @@ export default function ChatContainer() {
     exportMarkdown,
     importMarkdown,
     memoriesPayload,
+    memoriesEnabled,
+    memoryFeatureEnabled,
+    setMemoryFeatureEnabled,
     memoriesManagerOpen,
     openMemoriesModal,
     closeMemoriesModal,
@@ -1185,6 +1188,7 @@ export default function ChatContainer() {
         systemPrompt,
         skillsPayloadForSession,
         memoriesPayload,
+        memoriesEnabled,
         getNotionConnected: () => Boolean(notionStatusRef.current?.connected),
         getGitHubConnected: () => Boolean(githubStatusRef.current?.connected),
         getGoogleConnected: () => Boolean(googleStatusRef.current?.connected),
@@ -2682,6 +2686,8 @@ export default function ChatContainer() {
         loading={memoriesLoading}
         saving={memoriesSaving}
         error={memoriesError}
+        featureEnabled={memoryFeatureEnabled}
+        onFeatureEnabledChange={setMemoryFeatureEnabled}
         onRefresh={fetchMemories}
         onUpdate={updateMemory}
         onDelete={deleteMemory}

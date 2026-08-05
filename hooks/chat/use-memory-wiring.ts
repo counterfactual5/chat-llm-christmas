@@ -8,6 +8,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatSession } from '@/lib/chat/types';
 import { scheduleMemoryExtraction } from '@/lib/memories/scheduler';
+import {
+  readMemoryFeatureEnabled,
+  writeMemoryFeatureEnabled,
+} from '@/lib/memories/prefs';
 import { useChatMemories } from '@/hooks/chat/use-memories';
 
 type SessionUpdater = (updater: (prev: ChatSession[]) => ChatSession[]) => void;
@@ -35,9 +39,23 @@ export function useMemoryWiring(opts: {
   getSessionRef.current = getSession;
 
   const [memoriesManagerOpen, setMemoriesManagerOpen] = useState(false);
+  const [memoryFeatureEnabled, setMemoryFeatureEnabledState] = useState(true);
   const [memorySavedNotice, setMemorySavedNotice] =
     useState<MemorySavedNotice | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const memoryFeatureEnabledRef = useRef(true);
+
+  useEffect(() => {
+    const enabled = readMemoryFeatureEnabled();
+    setMemoryFeatureEnabledState(enabled);
+    memoryFeatureEnabledRef.current = enabled;
+  }, []);
+
+  const setMemoryFeatureEnabled = useCallback((enabled: boolean) => {
+    memoryFeatureEnabledRef.current = enabled;
+    setMemoryFeatureEnabledState(enabled);
+    writeMemoryFeatureEnabled(enabled);
+  }, []);
 
   const {
     memories,
@@ -98,10 +116,12 @@ export function useMemoryWiring(opts: {
     [setSessions],
   );
 
-  const memoriesPayload = useCallback(
-    () => enabledMemoriesPayload(),
-    [enabledMemoriesPayload],
-  );
+  const memoriesPayload = useCallback(() => {
+    if (!memoryFeatureEnabledRef.current) return [];
+    return enabledMemoriesPayload();
+  }, [enabledMemoriesPayload]);
+
+  const memoriesEnabled = useCallback(() => memoryFeatureEnabledRef.current, []);
 
   const onReplySettled = useCallback(
     ({
@@ -113,6 +133,7 @@ export function useMemoryWiring(opts: {
       requestReview?: boolean;
       incomplete?: boolean;
     }) => {
+      if (!memoryFeatureEnabledRef.current) return;
       scheduleMemoryExtraction(
         {
           getSession: (id) => getSessionRef.current(id),
@@ -149,6 +170,9 @@ export function useMemoryWiring(opts: {
     exportMarkdown,
     importMarkdown,
     memoriesPayload,
+    memoriesEnabled,
+    memoryFeatureEnabled,
+    setMemoryFeatureEnabled,
     memoriesManagerOpen,
     openMemoriesModal,
     closeMemoriesModal,

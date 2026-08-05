@@ -36,6 +36,8 @@ export type BuildChatSystemPartsOpts = {
   toolsGuidance: string;
   skills: ChatSkillInput[];
   memories?: Array<{ kind?: string; content?: string }>;
+  /** Client master switch for account memory. Default true. */
+  memoriesEnabled?: boolean;
   requestReview: boolean;
   autoReview: boolean;
   referenceText: string;
@@ -65,7 +67,9 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
     systemParts.push(productUsageGuideDetailPrompt());
   }
   systemParts.push(skillPersistenceGatePrompt(skillCreatorOn));
-  systemParts.push(memoryBehaviorPrompt());
+  systemParts.push(
+    memoryBehaviorPrompt({ enabled: opts.memoriesEnabled !== false }),
+  );
   const domainPolicy = domainPolicyPrompt(opts.userAsk || '');
   if (domainPolicy) systemParts.push(domainPolicy);
   systemParts.push(
@@ -99,14 +103,17 @@ export function buildChatSystemParts(opts: BuildChatSystemPartsOpts): string[] {
   if (String(opts.accountSkillCatalog || '').trim()) {
     systemParts.push(String(opts.accountSkillCatalog).trim());
   }
-  const memoryBlock = formatMemoriesForSystemPrompt(
-    (opts.memories || [])
-      .map((m) => ({
-        kind: String(m?.kind || '').trim(),
-        content: String(m?.content || '').trim(),
-      }))
-      .filter((m) => m.content),
-  );
+  const memoryBlock =
+    opts.memoriesEnabled === false
+      ? ''
+      : formatMemoriesForSystemPrompt(
+          (opts.memories || [])
+            .map((m) => ({
+              kind: String(m?.kind || '').trim(),
+              content: String(m?.content || '').trim(),
+            }))
+            .filter((m) => m.content),
+        );
   if (memoryBlock) systemParts.push(memoryBlock);
   if (opts.requestReview) {
     systemParts.push(

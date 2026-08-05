@@ -1,10 +1,12 @@
 /**
- * Restore block-level Markdown when models (esp. GLM) collapse newlines into
- * spaces. Without line starts, remark leaves `##`, `-`, `---`, and tables as
- * literal text inside one giant paragraph.
+ * Restore block-level Markdown when models (esp. GLM / Gemma) collapse newlines
+ * into spaces. Without line starts, remark leaves `##`, `-`, `---`, and tables
+ * as literal text inside one giant paragraph.
  *
  * Rules stay narrow on purpose: a broad “any CJK + `- ` / `1. `” break turns
- * normal prose (`价格 - 约一百`, `见图 1. 架构`) into fake lists.
+ * normal prose (`价格 - 约一百`, `见图 1. 架构`) into fake lists. Mid-line
+ * `###` / `---` splits only fire when the marker is not already at line start,
+ * so correct Markdown is a no-op.
  */
 
 import { reflowCollapsedMarkdownTables } from '@/lib/markdown/core/tables';
@@ -54,6 +56,9 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '$1\n\n$2',
   );
   out = out.replace(/([.!?])\s+(#{1,6}\s+\S)/g, '$1\n\n$2');
+  // Mid-line only (Gemma/GLM after Latin/code): `选 intel ### 第二步`.
+  // Already-correct `\n### ` is a no-op; skip `|` so table cells stay intact.
+  out = out.replace(/([^\n#|])[ \t]+(#{1,6}[ \t]+\S)/g, '$1\n\n$2');
 
   // Thematic breaks jammed into prose. Blank line BEFORE `---` so CommonMark
   // does not treat it as a setext underline. The space between prose and `---`
@@ -62,7 +67,17 @@ function reflowHeadingsListsHrs(chunk: string): string {
     new RegExp(`([${BREAK_TEXT}])\\s*(---+)(?=\\s|#{1,6}\\s|$)`, 'g'),
     '$1\n\n$2',
   );
+  // Mid-line after Latin/code: `下 intel ---` / `即可。 --- 需要我…` leftover.
+  // Exclude `|` / `-` so table rows and existing `---` lines stay put.
+  out = out.replace(
+    /([^\n|\-])[ \t]+(---+)(?=[ \t]|$|\n|#{1,6}\s)/g,
+    '$1\n\n$2',
+  );
+  // Prose glued onto the same line after an HR: `--- 需要我帮你…`
+  out = out.replace(/(^|\n)(---+)[ \t]+(?=\S)/g, '$1$2\n\n');
   out = out.replace(/(---+)\s+(?=#{1,6}\s)/g, '$1\n\n');
+  // Trailing HR jammed onto a finished pipe row: `| … | ---`
+  out = out.replace(/(\|[^\n]*\|)[ \t]+(---+)[ \t]*$/gm, '$1\n\n$2');
 
   // Unordered: only field labels / slash commands / bold-leading items —
   // never bare `汉字 - 散文`.

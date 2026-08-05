@@ -159,4 +159,44 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     );
     expect(out).toMatch(/应该是：\n1\. 本周内投简历\n2\. 同时逛 GitHub\n3\. 长期加人脉/);
   });
+
+  it('splits mid-line headings/HRs after Latin (gemma-style smash)', () => {
+    const smashed = [
+      '有 NVIDIA → 选 nvidia 或 nvidia_cu126',
+      '- 有 AMD → 选 amd',
+      '- 只有 Intel 核显 → 选 intel ### 第二步：区分 nvidia vs nvidia_cu126 | 情况 | 推荐选择 | 原因 |',
+      '|------|---------|------|',
+      '| 已安装 CUDA Toolkit（比如 12.x） | nvidia_cu126 | 匹配系统 CUDA，启动更快 |',
+      '| 没装 CUDA / 不确定 | nvidia | 自带运行时，避免报错「找不到 CUDA」 | ---',
+      '',
+      '**简单选择口诀：**',
+      '- Intel 核显 → 下 intel ---',
+      '',
+      '建议下载：`ComfyUI_windows_portable_nvidia_cu126.7z` 即可。 --- 需要我帮你确认你的显卡型号吗？',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(smashed);
+
+    expect(out).toMatch(/选 intel\n\n### 第二步：区分 nvidia vs nvidia_cu126/);
+    expect(out).toMatch(/\n\| 情况 \| 推荐选择 \| 原因 \|/);
+    expect(out).toMatch(/\|\n\n---\n/);
+    expect(out).toMatch(/下 intel\n\n---/);
+    expect(out).toMatch(/即可。\n\n---\n\n需要我帮你确认/);
+  });
+
+  it('does not rewrite already-correct headings, hrs, or tables', () => {
+    const ok = [
+      '选 intel',
+      '',
+      '### 第二步：区分版本',
+      '',
+      '| 情况 | 推荐 |',
+      '| --- | --- |',
+      '| 已装 CUDA | cu126 |',
+      '',
+      '---',
+      '',
+      '需要我帮你确认吗？',
+    ].join('\n');
+    expect(reflowCollapsedMarkdownBlocks(ok)).toBe(ok);
+  });
 });

@@ -260,8 +260,36 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toMatch(
       /Actions: `\/papers details ARXIV:1706\.03762` · `\/papers citations ARXIV:1706\.03762` · `\/papers references ARXIV:1706\.03762`/,
     );
-    expect(md).toContain('[Open PDF](https://arxiv.org/pdf/1706.03762.pdf)');
+    expect(md).not.toContain('[Open PDF]');
     expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);
+  });
+
+  it('uses Open PDF only when in-app download is unavailable', () => {
+    // No pdfUrl and no arXiv id → resolver returns empty; if we somehow only
+    // had a non-OA landing page, markdown would not invent a download command.
+    // When pdfUrl exists, in-app download is preferred (API can fetch that URL).
+    const withPdf = formatLiteratureMarkdown('papers', 'oa-pdf', 'semantic', [
+      {
+        title: 'Has PDF URL',
+        url: 'https://example.com/paper',
+        paperId: 'abcdefghijklmnop',
+        pdfUrl: 'https://example.com/paper.pdf',
+        sourceProvider: 'semantic-scholar',
+      },
+    ]);
+    expect(withPdf).toContain('/papers download https://example.com/paper.pdf');
+    expect(withPdf).not.toContain('[Open PDF]');
+
+    const noPdf = formatLiteratureMarkdown('papers', 'no-pdf', 'semantic', [
+      {
+        title: 'Metadata only',
+        url: 'https://www.semanticscholar.org/paper/abcdefghijklmnop',
+        paperId: 'abcdefghijklmnop',
+        sourceProvider: 'semantic-scholar',
+      },
+    ]);
+    expect(noPdf).not.toContain('/papers download');
+    expect(noPdf).not.toContain('[Open PDF]');
   });
 
   it('omits download command when there is no open-access PDF signal', () => {
@@ -560,6 +588,7 @@ describe('formatHitsForModel', () => {
     expect(papers.results[0].downloadCommand).toBe(
       '/papers download ARXIV:1706.03762',
     );
+    expect(papers.results[0].pdfUrl).toBeUndefined();
   });
 });
 

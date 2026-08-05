@@ -187,8 +187,13 @@ export function formatHitsForModel(
         year: r.year,
         source: r.sourceProvider,
         paperId,
-        pdfUrl: r.pdfUrl,
-        downloadCommand,
+        // Only expose pdfUrl when API download is unavailable — otherwise models
+        // turn it into a “下载” markdown link and skip /papers download → Files.
+        ...(downloadCommand
+          ? { downloadCommand }
+          : r.pdfUrl
+            ? { pdfUrl: r.pdfUrl }
+            : {}),
         detailsCommand: paperId ? formatPaperActionCommand('details', paperId) : undefined,
         citationsCommand: paperId
           ? formatPaperActionCommand('citations', paperId)
@@ -199,8 +204,9 @@ export function formatHitsForModel(
       };
     }),
     hint:
-      'Only show /papers details|citations|references|download commands from the receipt fields. ' +
-      'Never invent paper ids. Prefer downloadCommand when present (open-access only); otherwise use pdfUrl as a markdown Open PDF link — do not invent /papers download for paywalled papers.',
+      'Only show /papers details|citations|references|download commands copied from receipt fields. ' +
+      'When downloadCommand is present, show it as inline code (clickable) — that stores the PDF in Files. ' +
+      'Never invent download commands. When only pdfUrl is present (no downloadCommand), link it as Open PDF in the browser.',
   });
 }
 
@@ -209,8 +215,9 @@ const PAPER_SYSTEM = [
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
   'After results, cite title + URL from the tool receipt only.',
-  'For follow-ups (/papers details|citations|references|download): copy the exact command fields from the receipt (detailsCommand / citationsCommand / referencesCommand / downloadCommand). Never invent ids or download commands.',
-  'When downloadCommand is absent but pdfUrl is present, show pdfUrl as a markdown Open PDF link.',
+  'For follow-ups: copy exact receipt fields (detailsCommand / citationsCommand / referencesCommand / downloadCommand) as inline code — never invent ids.',
+  'downloadCommand saves the PDF into the user Files store (in-app). When a hit has downloadCommand, show that — do not turn an external URL into a “download” link.',
+  'Only when a hit has pdfUrl and no downloadCommand, link pdfUrl as Open PDF in the browser.',
 ].join(' ');
 
 const BOOK_SYSTEM = [

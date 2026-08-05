@@ -463,9 +463,12 @@ export function formatLiteratureMarkdown(
     if (kind === 'papers') {
       const dlId = resolvePaperDownloadIdentifier(hit);
       if (dlId && isValidPaperDownloadIdentifier(dlId)) {
+        // In-app Files download — do not also emit an Open PDF link here or the
+        // model/UI will treat the external URL as the primary “下载” CTA.
         lines.push(`   - Download: \`${formatPaperDownloadCommand(dlId)}\``);
+      } else if (hit.pdfUrl) {
+        lines.push(`   - PDF: [Open PDF](${hit.pdfUrl})`);
       }
-      if (hit.pdfUrl) lines.push(`   - PDF: [Open PDF](${hit.pdfUrl})`);
     }
     if (kind === 'books') {
       const dlId = hit.downloadable ? resolveBookDownloadIdentifier(hit) : '';

@@ -29,6 +29,24 @@ export function normalizeUrl(raw: string): string {
   }
 }
 
+/**
+ * Citation-receipt identity. Starts from {@link normalizeUrl}, then applies a
+ * **narrow** arXiv equivalence only:
+ * `abs` / `pdf` / `html` (+ optional `vN` / `.pdf`) of the same paper id → one key.
+ *
+ * Does not fuzzy-match other hosts or invent cross-paper links — invented arXiv
+ * ids and unrelated URLs still miss.
+ */
+export function citationUrlKey(raw: string): string {
+  const key = normalizeUrl(raw);
+  const m = key.match(
+    /^arxiv\.org\/(?:abs|pdf|html)\/((?:[0-9]{4}\.[0-9]{4,5}|[a-z0-9\-]+\/[0-9]{7})(?:v\d+)?)(?:\.pdf)?$/i,
+  );
+  if (!m?.[1]) return key;
+  const baseId = m[1].replace(/v\d+$/i, '').toLowerCase();
+  return `arxiv.org/abs/${baseId}`;
+}
+
 export function extractUrls(text: string, limit = 60): string[] {
   const out: string[] = [];
   const seen = new Set<string>();

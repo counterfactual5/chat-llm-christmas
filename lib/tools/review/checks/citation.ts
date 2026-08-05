@@ -12,6 +12,7 @@ import type { CitationAnchor, CitationAudit, ExecutionRecordEntry, ReviewCheck, 
 import {
   clauseAfter,
   clauseBefore,
+  citationUrlKey,
   collectSources,
   hasRetrievalReceipt,
   hostOf,
@@ -130,9 +131,10 @@ export function auditCitations(
   const units = collectEvidenceUnits(record);
   const index = buildEvidenceIndex(units.length ? units : collectEvidenceUnits(
     sources.map((s) => ({ sources: [s], tool: 'unknown' })),
-  ), normalizeUrl);
+  ), citationUrlKey);
 
-  const byUrl = new Map(sources.map((s) => [normalizeUrl(s.url), s]));
+  // arXiv abs↔pdf share a key; other URLs stay exact (via citationUrlKey → normalizeUrl).
+  const byUrl = new Map(sources.map((s) => [citationUrlKey(s.url), s]));
   const anchors = extractCitationAnchors(assistantText);
   if (!anchors.length) return null;
 
@@ -142,7 +144,7 @@ export function auditCitations(
   let matched = 0;
 
   for (const anchor of anchors) {
-    const key = normalizeUrl(anchor.url);
+    const key = citationUrlKey(anchor.url);
     const source = byUrl.get(key);
     if (!source) {
       if (!seenUnsupported.has(key)) {
@@ -203,7 +205,7 @@ export function buildCitationCheck(
   const audit = auditCitations(assistantText, record);
   if (!audit) return null;
 
-  const index = buildEvidenceIndex(collectEvidenceUnits(record), normalizeUrl);
+  const index = buildEvidenceIndex(collectEvidenceUnits(record), citationUrlKey);
   const items: ReviewCheckItem[] = [];
   for (const url of audit.unsupported.slice(0, 8)) {
     items.push({
@@ -215,7 +217,7 @@ export function buildCitationCheck(
     });
   }
   for (const row of audit.unsupportedClaims.slice(0, 8)) {
-    const best = strongestFor(index, normalizeUrl(row.url));
+    const best = strongestFor(index, citationUrlKey(row.url));
     const evidenceNote = citeEvidence(best);
     const isStrong = row.verdict === 'unsupported' || row.verdict === 'contradicted';
     items.push({

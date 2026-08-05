@@ -28,6 +28,13 @@ import { ensureFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
 import { isAssistantError } from '@/lib/chat/message/display';
+import {
+  cleanBaseMessagesForSend,
+  hasUploadingAttachments,
+  messageImagesFromAttachments,
+  resolvePendingAttachments,
+  titleForNewConversation,
+} from '@/lib/chat/turn/attachments';
 import { compactConversationHistory } from '@/lib/chat/turn/compact';
 import {
   clearPauseForSession,
@@ -46,12 +53,6 @@ import {
   clearedEmptyAssistant,
   gateResumeIncompleteReply,
 } from '@/lib/chat/turn/continuation';
-import {
-  cleanBaseMessagesForSend,
-  messageImagesFromAttachments,
-  resolvePendingAttachments,
-  titleForNewConversation,
-} from '@/lib/chat/turn/attachments';
 import { collapseAttachedFileBodiesInMessages } from '@/lib/files/attached-file-blocks';
 import { webSourcesForThread } from '@/lib/chat/context/references';
 import {
@@ -283,7 +284,18 @@ export function useChatLogic(props: UseChatLogicProps) {
     const textToSend = formatQuotedMessage(commandText, quotes);
     const hasPending = fromComposer && attachments.length > 0;
     if (!textToSend.trim() && !hasPending) return;
+    // Mainstream UX: block send while uploads run — never clear the draft first.
+    if (fromComposer && hasUploadingAttachments(attachments)) {
+      setAttachError(t('waitForUpload'));
+      return;
+    }
     const sessionId = activeSessionId;
+
+    const restoreComposerDraft = () => {
+      if (!fromComposer) return;
+      setInput(raw);
+      setQuotedSelections(quotes);
+    };
 
     if (isSessionLoading(sessionId)) {
       if (!textToSend.trim()) return;
@@ -298,7 +310,9 @@ export function useChatLogic(props: UseChatLogicProps) {
         baseMessagesOverride ??
         sessionsRef.current.find((s) => s.id === sessionId)?.messages;
       window.setTimeout(() => {
-        void handleSubmit(textToSend.trim(), snapshot, false, sessionId);
+        void handleSubmit(textToSend.trim(), snapshot, false, sessionId).then((ok) => {
+          if (!ok) restoreComposerDraft();
+        });
       }, 50);
       return;
     }
@@ -311,7 +325,10 @@ export function useChatLogic(props: UseChatLogicProps) {
     void handleSubmit(textToSend, baseMessagesOverride, false, sessionId, {
       alreadyLoading: true,
     }).then((ok) => {
-      if (!ok) endLoading(sessionId);
+      if (!ok) {
+        endLoading(sessionId);
+        restoreComposerDraft();
+      }
     });
   };
 
@@ -925,9 +942,9 @@ export function useChatLogic(props: UseChatLogicProps) {
       if (resolved.error === 'images_need_vision' && sessionId === activeSessionId) {
         setAttachError(t('imagesNeedVision'));
       } else if (resolved.error === 'upload_in_progress') {
-        setAttachError('Wait for image upload to finish');
+        setAttachError(t('waitForUpload'));
       } else if (resolved.error === 'upload_failed') {
-        setAttachError('Remove or re-add images that failed to upload');
+        setAttachError(t('uploadFailedRetry'));
       }
       return false;
     }
@@ -1345,12 +1362,12 @@ export function useChatLogic(props: UseChatLogicProps) {
     const hasTextFiles = editingMessageAttachments.some((a) => a.text);
     // Do not bail on isActiveLoading — stop the in-flight turn then resubmit with force.
     if (!content && resendImages.length === 0 && !hasTextFiles) return;
-    if (editingMessageAttachments.some((a) => a.uploading)) {
-      setAttachError('Wait for image upload to finish');
+    if (hasUploadingAttachments(editingMessageAttachments)) {
+      setAttachError(t('waitForUpload'));
       return;
     }
     if (editingMessageAttachments.some((a) => a.uploadError)) {
-      setAttachError('Remove or re-add images that failed to upload');
+      setAttachError(t('uploadFailedRetry'));
       return;
     }
     if (resendImages.length > 0 && !selectedSpec.vision && !zhipuVisionOn) {

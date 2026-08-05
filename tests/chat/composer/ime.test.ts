@@ -22,12 +22,6 @@ describe('isEnterSubmitBlockedByIme', () => {
     expect(isEnterSubmitBlockedByIme(keyEvent(), composing, lock)).toBe(true);
   });
 
-  it('blocks when the enter lock ref is set', () => {
-    const composing = { current: false };
-    const lock = { current: true };
-    expect(isEnterSubmitBlockedByIme(keyEvent(), composing, lock)).toBe(true);
-  });
-
   it('blocks on the legacy IME keyCode 229', () => {
     const composing = { current: false };
     const lock = { current: false };
@@ -39,36 +33,34 @@ describe('isEnterSubmitBlockedByIme', () => {
     const lock = { current: false };
     expect(isEnterSubmitBlockedByIme(keyEvent(), composing, lock)).toBe(false);
   });
+
+  it('ignores enterLockRef (no timed lock)', () => {
+    const composing = { current: false };
+    const lock = { current: true };
+    expect(isEnterSubmitBlockedByIme(keyEvent(), composing, lock)).toBe(false);
+  });
 });
 
 describe('bindImeGuards', () => {
-  it('flips the composing ref while composition is active', () => {
-    const composing = { current: false };
-    const lock = { current: false };
-    const { onCompositionStart, onCompositionEnd } = bindImeGuards(composing, lock);
-
-    onCompositionStart();
-    expect(composing.current).toBe(true);
-
-    onCompositionEnd();
-    expect(composing.current).toBe(false);
-  });
-
-  it('locks Enter briefly after composition ends, then releases it', () => {
+  it('keeps composing true through compositionend until the next task', () => {
     vi.useFakeTimers();
     try {
       const composing = { current: false };
       const lock = { current: false };
-      const { onCompositionEnd } = bindImeGuards(composing, lock);
+      const { onCompositionStart, onCompositionEnd } = bindImeGuards(composing, lock);
+
+      onCompositionStart();
+      expect(composing.current).toBe(true);
 
       onCompositionEnd();
-      expect(lock.current).toBe(true);
+      // Same turn as confirm Enter keydown — still blocked.
+      expect(composing.current).toBe(true);
+      expect(isEnterSubmitBlockedByIme(keyEvent(), composing, lock)).toBe(true);
 
-      vi.advanceTimersByTime(29);
-      expect(lock.current).toBe(true);
-
-      vi.advanceTimersByTime(1);
-      expect(lock.current).toBe(false);
+      vi.runAllTimers();
+      // Next Enter can send immediately.
+      expect(composing.current).toBe(false);
+      expect(isEnterSubmitBlockedByIme(keyEvent(), composing, lock)).toBe(false);
     } finally {
       vi.useRealTimers();
     }

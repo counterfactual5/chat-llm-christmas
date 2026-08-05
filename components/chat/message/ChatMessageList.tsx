@@ -343,6 +343,11 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                 (isImageAttachment(a) && (a.dataUrl || a.fileId)),
                             ))
                         }
+                        title={
+                          editingMessageAttachments.some((a) => a.uploading)
+                            ? t('waitForUpload')
+                            : undefined
+                        }
                         className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900"
                       >
                         Save & resend

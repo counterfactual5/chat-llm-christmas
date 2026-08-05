@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleUserContent,
   cleanBaseMessagesForSend,
+  hasUploadingAttachments,
   messageImagesFromAttachments,
   resolvePendingAttachments,
   titleForNewConversation,
@@ -137,6 +138,11 @@ describe('attachments', () => {
         isLoading: false,
       }),
     ).toMatchObject({ ok: true });
+
+    expect(hasUploadingAttachments([{ uploading: true }])).toBe(true);
+    expect(hasUploadingAttachments([{ uploading: false }, { uploading: true }])).toBe(true);
+    expect(hasUploadingAttachments([{ uploading: false }])).toBe(false);
+    expect(hasUploadingAttachments([])).toBe(false);
 
     expect(
       resolvePendingAttachments({

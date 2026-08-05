@@ -285,6 +285,8 @@ export function ChatComposer(props: ChatComposerProps) {
     cancelResearch,
   } = props;
 
+  const attachmentsUploading = attachments.some((a) => a.uploading);
+
   return (
     <>
       {/* Floating Input Area */}
@@ -1224,12 +1226,16 @@ export function ChatComposer(props: ChatComposerProps) {
           ) : (
             <Button 
               onClick={() => enqueueOrSubmit()}
-              disabled={(!input.trim() && quotedSelections.length === 0 && attachments.length === 0) || isCompacting}
+              disabled={
+                (!input.trim() && quotedSelections.length === 0 && attachments.length === 0) ||
+                isCompacting ||
+                attachmentsUploading
+              }
               size="icon" 
-              title="Send"
+              title={attachmentsUploading ? t('waitForUpload') : 'Send'}
               className={cn(
                 "h-8 w-8 rounded-full transition-all active:scale-95",
-                (input.trim() || attachments.length > 0)
+                (input.trim() || attachments.length > 0) && !attachmentsUploading
                   ? "bg-stone-900 hover:bg-stone-800 text-white dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
                   : "bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-500"
               )}

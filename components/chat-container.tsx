@@ -76,6 +76,7 @@ import {
 } from '@/lib/chat/turn/research-command';
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
+import { hasUploadingAttachments } from '@/lib/chat/turn/attachments';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   clearOAuthReturnQuery,
@@ -231,7 +232,7 @@ export default function ChatContainer() {
   const quoteExtraRoots = useMemo(() => [previewQuoteRootRef], []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerImeComposingRef = useRef(false);
-  /** Suppress Enter-to-send right after IME commits (same key often confirms composition). */
+  /** Unused timed-lock leftover; bindImeGuards still accepts the ref for API compat. */
   const composerImeEnterLockRef = useRef(false);
   const editImeComposingRef = useRef(false);
   const editImeEnterLockRef = useRef(false);
@@ -1649,6 +1650,10 @@ export default function ChatContainer() {
   );
 
   const submitComposer = useCallback(() => {
+    if (hasUploadingAttachments(attachments)) {
+      setAttachError(t('waitForUpload'));
+      return;
+    }
     const researchCmd = parseResearchCommand(input);
     if (researchCmd) {
       setInput('');
@@ -1676,6 +1681,9 @@ export default function ChatContainer() {
     }
     enqueueOrSubmit();
   }, [
+    attachments,
+    setAttachError,
+    t,
     input,
     setInput,
     startResearchTurn,
@@ -2217,6 +2225,10 @@ export default function ChatContainer() {
       e.preventDefault();
       // Prevent holding down Enter to spawn dozens of identical tasks
       if (e.repeat) return;
+      if (hasUploadingAttachments(attachments)) {
+        setAttachError(t('waitForUpload'));
+        return;
+      }
       submitComposer();
     }
   };
@@ -2228,6 +2240,10 @@ export default function ChatContainer() {
       }
       e.preventDefault();
       if (e.repeat) return;
+      if (hasUploadingAttachments(editingMessageAttachments)) {
+        setAttachError(t('waitForUpload'));
+        return;
+      }
       void saveEditedMessageOrResearch(messageId);
       return;
     }

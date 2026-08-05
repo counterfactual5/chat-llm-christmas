@@ -39,6 +39,13 @@ export type ResolvePendingAttachmentsResult =
   | ResolvedPendingAttachments
   | { ok: false; error: AttachmentGateError };
 
+/** True while any composer/edit attachment is still uploading to storage. */
+export function hasUploadingAttachments(
+  attachments: Pick<IngestedAttachment, 'uploading'>[],
+): boolean {
+  return attachments.some((a) => a.uploading);
+}
+
 export function resolvePendingAttachments(
   opts: ResolvePendingAttachmentsOpts,
 ): ResolvePendingAttachmentsResult {
@@ -82,7 +89,7 @@ export function resolvePendingAttachments(
     return { ok: false, error: 'images_need_vision' };
   }
   const uploadChecks = resendAttachments ?? (isActiveSession ? attachments : []);
-  if (uploadChecks.some((a) => a.uploading)) {
+  if (hasUploadingAttachments(uploadChecks)) {
     return { ok: false, error: 'upload_in_progress' };
   }
   // Only images hard-block on upload failure (vision needs the stored file).

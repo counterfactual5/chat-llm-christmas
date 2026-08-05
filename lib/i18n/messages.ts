@@ -74,6 +74,8 @@ export const dict = {
     imageUnderstandBuiltIn: 'Built-in · auto',
     imagesNeedVision: 'This conversation has images. Pick a Vision model to continue.',
     imagesPreferVision: 'Images will be processed via Image Understand. For best accuracy, use a Vision model.',
+    waitForUpload: 'Wait for uploads to finish before sending.',
+    uploadFailedRetry: 'Remove or re-add files that failed to upload.',
     booksDownloadMissingId:
       'Add a book id after /books download (e.g. libgen: followed by a 32-char MD5).',
     booksDownloadInvalidId:
@@ -476,6 +478,8 @@ export const dict = {
     imageUnderstandBuiltIn: '内置 · 自动',
     imagesNeedVision: '对话中包含图片，请切换到 Vision 模型。',
     imagesPreferVision: '图片将通过视觉理解处理。为获得更好的效果，建议使用 Vision 模型。',
+    waitForUpload: '请等待附件上传完成后再发送。',
+    uploadFailedRetry: '请移除或重新添加上传失败的附件。',
     booksDownloadMissingId: '请在 /books download 后填写书籍标识（例如 libgen: + 32 位 MD5）。',
     booksDownloadInvalidId:
       '下载标识无效。请使用真实的 32 位 MD5（libgen:…）或归档 ID，不要使用 <md5> 这类占位符。',

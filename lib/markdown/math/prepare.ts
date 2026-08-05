@@ -2,6 +2,7 @@
  * Top-level orchestration: the single entry point chat rendering calls to
  * turn raw model markdown into something remark-math/KaTeX can render safely.
  */
+import { fixGreedyAutolinks } from '@/lib/markdown/core/autolinks';
 import { normalizeAsciiArtMarkdown } from '@/lib/markdown/core/ascii-art';
 import { reflowCollapsedMarkdownBlocks } from '@/lib/markdown/core/blocks';
 import { normalizeMermaidMarkdown } from '@/lib/markdown/core/mermaid';
@@ -19,6 +20,8 @@ export function prepareChatMarkdown(
   // Flanking first (while `$` is still raw), then escape currency for remark-math.
   out = fixFlankingEmphasis(out);
   out = fixBoldWrappedUrls(out);
+  // After bold-URL rewrite: stop bare GFM autolinks from swallowing glued CJK.
+  out = fixGreedyAutolinks(out);
   out = escapeCurrencyDollars(out);
   // Before remark parses: inline diagram code loses newlines (CommonMark), and
   // language-less Mermaid fences cannot reach the Mermaid renderer.
@@ -54,6 +57,7 @@ export function prepareQuoteMarkdown(content: string): string {
   out = liftQuotedMathBlocks(out);
   out = fixFlankingEmphasis(out);
   out = fixBoldWrappedUrls(out);
+  out = fixGreedyAutolinks(out);
   out = escapeCurrencyDollars(out);
   if (hasUnclosedDisplayMath(out)) {
     out = escapeIncompleteBlockMath(out);

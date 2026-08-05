@@ -48,7 +48,9 @@ export function AnswerMarkdown({
   return (
     <div
       className={cn(
-        'chat-markdown w-full min-w-0 max-w-full overflow-x-hidden text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3 [overflow-wrap:anywhere] [&_sup]:text-[0.7em] [&_sup_a]:text-orange-700 [&_sup_a]:no-underline dark:[&_sup_a]:text-orange-300 [&_section[data-footnotes]]:mt-6 [&_section[data-footnotes]]:border-t [&_section[data-footnotes]]:border-stone-200 [&_section[data-footnotes]]:pt-3 [&_section[data-footnotes]]:text-[13px] [&_section[data-footnotes]]:text-stone-500 dark:[&_section[data-footnotes]]:border-stone-700 dark:[&_section[data-footnotes]]:text-stone-400 [&_section[data-footnotes]_h2]:text-xs [&_section[data-footnotes]_h2]:font-semibold [&_section[data-footnotes]_h2]:uppercase [&_section[data-footnotes]_h2]:tracking-wider [&_section[data-footnotes]_h2]:text-stone-400',
+        // overflow-wrap:anywhere for prose; tables opt out so wide cells scroll
+        // horizontally instead of shredding (see SpreadsheetTable).
+        'chat-markdown w-full min-w-0 max-w-full overflow-x-hidden text-stone-800 dark:text-stone-200 leading-relaxed text-[15px] space-y-3 [overflow-wrap:anywhere] [&_table]:[overflow-wrap:normal] [&_sup]:text-[0.7em] [&_sup_a]:text-orange-700 [&_sup_a]:no-underline dark:[&_sup_a]:text-orange-300 [&_section[data-footnotes]]:mt-6 [&_section[data-footnotes]]:border-t [&_section[data-footnotes]]:border-stone-200 [&_section[data-footnotes]]:pt-3 [&_section[data-footnotes]]:text-[13px] [&_section[data-footnotes]]:text-stone-500 dark:[&_section[data-footnotes]]:border-stone-700 dark:[&_section[data-footnotes]]:text-stone-400 [&_section[data-footnotes]_h2]:text-xs [&_section[data-footnotes]_h2]:font-semibold [&_section[data-footnotes]_h2]:uppercase [&_section[data-footnotes]_h2]:tracking-wider [&_section[data-footnotes]_h2]:text-stone-400',
         className,
       )}
     >
@@ -85,9 +87,11 @@ export function AnswerMarkdown({
           },
           table({ children }: any) {
             // Keep wide tables inside this scroller — never expand the chat page.
+            // overscroll-x-contain: trackpad horizontal scroll stays here (not the
+            // outer overflow-x-hidden message list).
             return (
-              <div className="my-4 max-w-full min-w-0 overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
-                <table className="w-max min-w-full text-left text-sm">{children}</table>
+              <div className="my-4 max-w-full min-w-0 overflow-x-auto overscroll-x-contain rounded-lg border border-stone-200 pb-2 dark:border-stone-800">
+                <table className="w-max min-w-full border-collapse text-left text-sm">{children}</table>
               </div>
             );
           },
@@ -101,10 +105,10 @@ export function AnswerMarkdown({
             return <tr className="hover:bg-stone-50/50 dark:hover:bg-stone-900/50">{children}</tr>;
           },
           th({ children }: any) {
-            return <th className="px-3.5 py-2.5 font-semibold whitespace-normal break-words [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</th>;
+            return <th className="px-3.5 py-2.5 font-semibold whitespace-nowrap [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</th>;
           },
           td({ children }: any) {
-            return <td className="px-3.5 py-2.5 align-top whitespace-normal break-words [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</td>;
+            return <td className="px-3.5 py-2.5 align-top whitespace-nowrap [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</td>;
           },
           code({ className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');

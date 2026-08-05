@@ -91,8 +91,9 @@ function reflowHeadingsListsHrs(chunk: string): string {
   }
 
   // URL then another field bullet: `https://eleduck.com - 特点：…`
+  // Stop the URL at CJK/fullwidth so glued `…com/搜索 - 特点：` does not ingest 搜索.
   out = out.replace(
-    /(https?:\/\/\S+)\s+(-\s+(?:状态|网址|特点|链接|注意|路径)[:：])/g,
+    /(https?:\/\/[^\s\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]+)\s+(-\s+(?:状态|网址|特点|链接|注意|路径)[:：])/g,
     '$1\n$2',
   );
 

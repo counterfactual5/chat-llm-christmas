@@ -68,7 +68,18 @@ describe('ASCII art Markdown recovery', () => {
     expect(prepareChatMarkdown(prose)).not.toContain('```');
   });
 
-  it('never fences a smashed GFM table as a diagram', () => {
+    it('never fences a separator-less table (data rows only) as a diagram', () => {
+      const body = [
+        '**| 分辨率 | 512×512 | 高 |',
+        '| 帧数 | 14 | 中 |',
+        '| 步数 | 15-20 | 快 |',
+      ].join('\n');
+      const out = normalizeAsciiArtMarkdown(body);
+      expect(out).not.toContain('```text');
+      expect(out).toContain('| 分辨率 |');
+    });
+
+    it('never fences a smashed GFM table as a diagram', () => {
     const smashed = [
       '**方案 1: SVD 量化版（最推荐）** | 模型 | 显存需求 | 说明 |',
       '|-------|----------|-------| | **SVD-INT8** | ~5.4 GB | 画质几乎无损 | | **xFormers** | 节省 30-40% | ✅ 必须开启 |',

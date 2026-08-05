@@ -219,11 +219,45 @@ export function looksLikeAsciiLineArt(text: string): boolean {
  * A GFM table — even one whose rows the model smashed onto a single line — must
  * never be fenced as a diagram: fencing hides it from the table repair pass and
  * leaves the reader with a horizontally scrolling code block.
+ *
+ * Two escape hatches:
+ * - a `|---|---|` delimiter somewhere in the block (classic table source);
+ * - a run of 2+ rows that each look like a pipe row (tables deleting/forgetting
+ *   their delimiter — the repair pass will re-fill it, but only if we let them
+ *   through unfenced).
  */
 export function looksLikeGfmTableSource(text: string): boolean {
   const t = String(text || '');
-  if (!GFM_SEPARATOR_RE.test(t)) return false;
-  return (t.match(/\|/g) || []).length >= 6;
+  if (GFM_SEPARATOR_RE.test(t) && (t.match(/\|/g) || []).length >= 6) {
+    return true;
+  }
+  // Separator-less table body: several consecutive rows sharing the same
+  // pipe-heavy shape. This is the shape `insertMissingTableSeparator` repairs —
+  // keep it out of `text` fences so that pass can run.
+  // Separator-less table body: at least 2 consecutive lines that are each
+  // pipe-heavy (3+ pipes with content between) — mirrors what
+  // `insertMissingTableSeparator` repairs. Two rows keeps ASCII tree one-offs
+  // (`|`, `|\`) from being mistaken for tables.
+  const lines = t.split('\n');
+  let run = 0;
+  for (const line of lines) {
+    const trim = line.trim();
+    const cells = trim.startsWith('|') && trim.endsWith('|')
+      ? trim.split('|').slice(1, -1)
+      : [];
+    // A table cell carries real words (≥2 letters/digits/CJK). ASCII frame
+    // tops/bottoms (`|______|`), single-char stubs (`|__|`), padding — don't.
+    const meaty = cells.filter(
+      (c) => c.replace(/[^\p{L}\p{N}]/gu, '').length >= 2,
+    );
+    if (cells.length >= 3 && meaty.length >= 3) {
+      run += 1;
+      if (run >= 2) return true;
+    } else {
+      run = 0;
+    }
+  }
+  return false;
 }
 
 export function looksLikeAsciiArt(text: string): boolean {

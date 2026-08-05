@@ -1,0 +1,55 @@
+/* Minimal pdf.js text-layer styles so selection sits over the canvas. */
+.pdf-reader-page .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  caret-color: CanvasText;
+  pointer-events: auto;
+}
+
+.pdf-reader-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.pdf-reader-page .textLayer {
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor, 1) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pdf-reader-page .textLayer > :not(.markedContent),
+.pdf-reader-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+    scale(var(--min-font-size-inv));
+}
+
+.pdf-reader-page .textLayer .markedContent {
+  display: contents;
+}
+
+.pdf-reader-page .textLayer ::selection {
+  background: rgb(0 100 255 / 0.28);
+}
+
+.pdf-reader-page canvas {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}

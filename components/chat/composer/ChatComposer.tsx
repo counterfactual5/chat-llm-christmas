@@ -43,6 +43,10 @@ import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message, ModelOption, SkillItem } from '@/lib/chat/types';
 import { QuoteMarkdown } from '@/components/chat/message/QuoteMarkdown';
+import {
+  quotedSelectionMeta,
+  type QuotedSelection,
+} from '@/lib/chat/message/quotes';
 import { skillSlashName } from '@/lib/skills/creator';
 import {
   PRODUCT_SLASH_COMMANDS,
@@ -95,8 +99,10 @@ export type ChatComposerProps = {
   toggleSkill: (skillId: string) => void;
   onPreviewSkill: (skill: SkillItem) => void;
 
-  quotedSelections: string[];
-  setQuotedSelections: (v: string[] | ((prev: string[]) => string[])) => void;
+  quotedSelections: QuotedSelection[];
+  setQuotedSelections: (
+    v: QuotedSelection[] | ((prev: QuotedSelection[]) => QuotedSelection[]),
+  ) => void;
   removeQuotedSelection: (index: number) => void;
 
   slashMenuItems: SlashMenuItem[];
@@ -446,14 +452,21 @@ export function ChatComposer(props: ChatComposerProps) {
             )}
           </div>
           <div className="space-y-1">
-            {quotedSelections.map((quote, index) => (
+            {quotedSelections.map((quote, index) => {
+              const meta = quotedSelectionMeta(quote);
+              return (
               <div
-                key={`${index}-${quote.slice(0, 24)}`}
+                key={`${index}-${quote.text.slice(0, 24)}`}
                 className="group flex items-start gap-1"
               >
                 <blockquote className="min-w-0 flex-1 border-l-2 border-stone-400/70 py-0 pl-2.5 dark:border-stone-500">
+                  {meta ? (
+                    <div className="mb-0.5 text-[10px] font-medium text-stone-400">
+                      {meta}
+                    </div>
+                  ) : null}
                   <QuoteMarkdown
-                    text={quote}
+                    text={quote.text}
                     className="line-clamp-3"
                   />
                 </blockquote>
@@ -467,7 +480,8 @@ export function ChatComposer(props: ChatComposerProps) {
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

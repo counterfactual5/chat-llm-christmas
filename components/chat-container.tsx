@@ -108,6 +108,7 @@ import type { ToolViewPayload } from '@/lib/tools/views/types';
 import {
   appendQuotedSelection,
   parseQuotedUserMessage,
+  type QuotedSelection,
 } from '@/lib/chat/message/quotes';
 import {
   messageImagesToIngested,
@@ -221,10 +222,13 @@ export default function ChatContainer() {
   const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({});
   const [toolRunOpen, setToolRunOpen] = useState<Record<string, boolean>>({});
   /** Text snippets quoted from message selection into the composer (multi-select). */
-  const [quotedSelections, setQuotedSelections] = useState<string[]>([]);
+  const [quotedSelections, setQuotedSelections] = useState<QuotedSelection[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messagesContentRef = useRef<HTMLDivElement>(null);
+  /** Side Preview only — chat messages already use messagesContentRef. */
+  const previewQuoteRootRef = useRef<HTMLDivElement>(null);
+  const quoteExtraRoots = useMemo(() => [previewQuoteRootRef], []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerImeComposingRef = useRef(false);
   /** Suppress Enter-to-send right after IME commits (same key often confirms composition). */
@@ -2132,10 +2136,12 @@ export default function ChatContainer() {
     };
   }, [isSkillPickerOpen]);
 
-  const quoteSelectedText = (text: string) => {
-    const clean = text.trim();
+  const quoteSelectedText = (quote: QuotedSelection) => {
+    const clean = String(quote?.text || '').trim();
     if (!clean) return;
-    setQuotedSelections((prev) => appendQuotedSelection(prev, clean));
+    setQuotedSelections((prev) =>
+      appendQuotedSelection(prev, { ...quote, text: clean }),
+    );
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
@@ -2595,6 +2601,7 @@ export default function ChatContainer() {
               open={isPreviewPanelOpen}
               onClose={() => setIsPreviewPanelOpen(false)}
               contextOpen={isContextPanelOpen}
+              quoteRootRef={previewQuoteRootRef}
               file={previewTarget?.kind === 'file' ? previewTarget.entry : null}
               onExpandFullscreen={(payload) => {
                 setFilePreview(payload);
@@ -2663,6 +2670,7 @@ export default function ChatContainer() {
       <ChatQuoteToolbar
         messagesContentRef={messagesContentRef}
         scrollRef={scrollRef}
+        extraRoots={quoteExtraRoots}
         onQuote={quoteSelectedText}
       />
 

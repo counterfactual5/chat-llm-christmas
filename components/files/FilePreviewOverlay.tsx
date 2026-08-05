@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Download, FileText, Loader2, X } from 'lucide-react';
+import { useEffect } from 'react';
+import { Download, FileText, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { EpubReader } from '@/components/files/EpubReader';
+import { PdfReader } from '@/components/files/PdfReader';
 import { SpreadsheetTable } from '@/components/files/SpreadsheetTable';
 import { CodeBlock } from '@/components/markdown/code/code-block';
 import {
@@ -14,8 +15,6 @@ import {
   formatPreviewTypeLabel,
 } from '@/lib/files/preview';
 import { parseSpreadsheetPreviewText } from '@/lib/files/spreadsheet-text';
-import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
-import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { fileExt, languageFromFilename } from '@/lib/files/text-types';
 import { cn } from '@/lib/utils';
 
@@ -65,118 +64,6 @@ type FilePreviewOverlayProps = {
   };
 };
 
-function describeNonPdf(buf: ArrayBuffer, contentType: string): string {
-  const ct = String(contentType || '').split(';')[0].trim() || 'unknown type';
-  if (isEpubBytes(buf) || ct === 'application/epub+zip') {
-    return 'This file is an EPUB, not a PDF. Re-download or rename to .epub to preview.';
-  }
-  const head = new Uint8Array(buf.slice(0, 8));
-  const hex = [...head].map((b) => b.toString(16).padStart(2, '0')).join(' ');
-  return `Response is not a PDF (${ct || 'no content-type'}; first bytes: ${hex || 'empty'})`;
-}
-
-/**
- * Chrome’s PDF plugin inside an iframe is unreliable when Content-Type is
- * application/octet-stream. Prefer the proxied URL when the sniff already
- * returned application/pdf; otherwise fetch → blob. EPUB bytes (or sniffed
- * epub Content-Type) hand off to EpubReader.
- */
-function PdfPreviewFrame({
-  url,
-  title,
-  fileId,
-}: {
-  url: string;
-  title: string;
-  fileId: string;
-}) {
-  const [src, setSrc] = useState('');
-  const [error, setError] = useState('');
-  const [asEpub, setAsEpub] = useState(false);
-
-  useEffect(() => {
-    let objectUrl = '';
-    let cancelled = false;
-    setSrc('');
-    setError('');
-    setAsEpub(false);
-
-    void (async () => {
-      try {
-        const { buf, contentType: ct } = await fetchFileContentForPreview(url);
-        if (cancelled) return;
-
-        if (ct === 'application/epub+zip' || isEpubBytes(buf)) {
-          setAsEpub(true);
-          return;
-        }
-        if (ct === 'application/pdf' || isPdfBytes(buf)) {
-          objectUrl = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
-          if (cancelled) {
-            URL.revokeObjectURL(objectUrl);
-            objectUrl = '';
-            return;
-          }
-          setSrc(`${objectUrl}#toolbar=0&navpanes=0&view=FitH`);
-          return;
-        }
-        throw new Error(describeNonPdf(buf, ct));
-      } catch (cause) {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Failed to load PDF');
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [url]);
-
-  if (asEpub) {
-    return (
-      <EpubReader
-        fileId={fileId || url}
-        url={url}
-        title={title}
-        className="h-full min-h-0 rounded-none border-0"
-      />
-    );
-  }
-
-  // Fill the preview pane / modal body — min-h alone collapses to a short square.
-  return (
-    <div className="relative h-full min-h-0 w-full bg-stone-100 dark:bg-stone-900">
-      {error ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-xs text-stone-500 dark:text-stone-400">
-          <FileText className="h-8 w-8 opacity-40" />
-          <span className="max-w-sm leading-relaxed">{error}</span>
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300 dark:hover:bg-stone-800"
-          >
-            Download / open in new tab
-          </a>
-        </div>
-      ) : !src ? (
-        <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-stone-400">
-          <Loader2 className="h-5 w-5 animate-spin opacity-60" />
-          <span>Loading PDF…</span>
-        </div>
-      ) : (
-        <iframe
-          title={title}
-          src={src}
-          className="absolute inset-0 h-full w-full border-0 bg-stone-200 dark:bg-stone-800"
-        />
-      )}
-    </div>
-  );
-}
-
 function SpreadsheetTablePreview({
   sections,
 }: {
@@ -220,7 +107,7 @@ export function FilePreviewContent({ file }: { file: FilePreviewPayload }) {
   if (!file.content && url && isPdfFile(file)) {
     return (
       <div className="h-full min-h-0 w-full">
-        <PdfPreviewFrame url={url} title={file.name} fileId={file.id || url} />
+        <PdfReader url={url} title={file.name} fileId={file.id || url} />
       </div>
     );
   }

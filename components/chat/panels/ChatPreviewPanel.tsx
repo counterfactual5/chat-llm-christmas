@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowUpRight,
@@ -34,6 +34,8 @@ export type ChatPreviewPanelProps = {
   onClose: () => void;
   /** When Context is closed, Preview absorbs its width. */
   contextOpen?: boolean;
+  /** Root for chat Quote selection inside the preview body. */
+  quoteRootRef?: RefObject<HTMLDivElement | null>;
   file: GeneratedFileEntry | null;
   onExpandFullscreen: (payload: FilePreviewPayload) => void;
   onJumpToMessage: () => void;
@@ -58,6 +60,7 @@ export function ChatPreviewPanel({
   open,
   onClose,
   contextOpen = false,
+  quoteRootRef,
   file,
   onExpandFullscreen,
   onJumpToMessage,
@@ -208,6 +211,7 @@ export function ChatPreviewPanel({
           </div>
 
           <div
+            ref={quoteRootRef}
             className={cn(
               'relative min-h-0 min-w-0 flex-1 overscroll-contain',
               file &&

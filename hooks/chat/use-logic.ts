@@ -22,7 +22,7 @@ import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
 import { parseSkillCommand } from '@/lib/chat/turn/skill-command';
 import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { useLocale } from '@/lib/i18n';
-import { formatQuotedMessage } from '@/lib/chat/message/quotes';
+import { formatQuotedMessage, type QuotedSelection } from '@/lib/chat/message/quotes';
 import { toApiMessages, ingestedToMessageImages } from '@/lib/chat/message/api-messages';
 import { ensureFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
@@ -118,8 +118,8 @@ export type UseChatLogicProps = {
   
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
-  quotedSelections: string[];
-  setQuotedSelections: React.Dispatch<React.SetStateAction<string[]>>;
+  quotedSelections: QuotedSelection[];
+  setQuotedSelections: React.Dispatch<React.SetStateAction<QuotedSelection[]>>;
   attachments: IngestedAttachment[];
   setAttachments: React.Dispatch<React.SetStateAction<IngestedAttachment[]>>;
   setAttachError: React.Dispatch<React.SetStateAction<string>>;

@@ -206,6 +206,19 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/租算力”\n- 唯一可能/);
   });
 
+  it('does not glue a closed code span onto 第二步', () => {
+    const src = [
+      '- 只有 Intel → 选 `_intel`',
+      '第二步：区分 nvidia VS nvidia_cu126 | 情况 | 推荐选择 | 原因 |',
+      '|------|---------|------|',
+      '| 已装 | nvidia | 小 |',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toContain('选 `_intel`\n第二步：');
+    expect(out).not.toContain('`_intel`第二步');
+    expect(out).toMatch(/第二步：区分 nvidia VS nvidia_cu126\n\n\| 情况 \|/);
+  });
+
   it('joins long hard-wrapped CJK prose lines', () => {
     const line1 =
       '- Mac 通常使用 Apple Silicon (M1/M2/M3) 或 Intel 芯片 - 官方 portable 包主要是为 Windows 设计的 - Mac 上运';

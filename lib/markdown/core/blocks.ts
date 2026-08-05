@@ -37,15 +37,16 @@ function isMarkdownBlockStart(line: string): boolean {
     return true;
   }
   if (/^-{3,}\s*$/.test(t)) return true;
+  // Numbered Chinese steps often follow a list without a blank line.
+  if (/^第[一二三四五六七八九十百\d]+步/.test(t)) return true;
   // Table row or separator.
   if (/^\|/.test(t) && t.includes('|', 1)) return true;
   return false;
 }
 
 /**
- * Step / some chat models hard-wrap around ~40 cols, often mid-CJK word
- * (`备选方\n案，` or `**备选方**\n案`). Join only those single-newline wraps —
- * blank lines and real block starts stay put (so short poem lines survive).
+ * Models sometimes hard-wrap mid-CJK word (`**备选方**\n案，`). Join only those
+ * single-newline wraps — blank lines and real block starts stay put.
  */
 function shouldJoinHardWrap(prev: string, next: string): boolean {
   if (!prev.trim() || !next.trim()) return false;
@@ -58,19 +59,30 @@ function shouldJoinHardWrap(prev: string, next: string): boolean {
   const a = prev.trimEnd();
   const b = next.trimStart();
   const aLast = a.charAt(a.length - 1);
-  const bFirst = b.charAt(0);
   const cjk = /[\u4e00-\u9fff]/;
 
-  // Emphasis/code closed right before the wrap: `**备选方**\n案，`
-  if (/[*`）)」』"'”’]$/.test(a) && cjk.test(bFirst)) return true;
-  // Clear mid-word wrap: next CJK is immediately followed by clause punct.
+  // `**备选方**\n案，` — closing * / ` then a short CJK remnant + clause punct.
+  // Do NOT join `` `_intel` `` + `第二步` (下一行是新段落，不是词内折行).
+  if (
+    /[*`）)」』"'”’]$/.test(a) &&
+    /^[\u4e00-\u9fff]{1,2}[，、]/.test(b)
+  ) {
+    return true;
+  }
+  // Clear mid-word wrap: CJK\nCJK+punct.
   if (cjk.test(aLast) && /^[\u4e00-\u9fff][，、]/.test(b)) return true;
   // Long hard-wrapped prose line continuing with CJK/Latin.
   const prevLen = a.replace(/\s+/g, '').length;
-  if (prevLen >= 36 && cjk.test(aLast) && (cjk.test(bFirst) || /[A-Za-z0-9]/.test(bFirst))) {
+  if (
+    prevLen >= 36 &&
+    cjk.test(aLast) &&
+    (cjk.test(b.charAt(0)) || /[A-Za-z0-9]/.test(b.charAt(0)))
+  ) {
     return true;
   }
-  if (prevLen >= 36 && /[A-Za-z0-9]$/.test(a) && cjk.test(bFirst)) return true;
+  if (prevLen >= 36 && /[A-Za-z0-9]$/.test(a) && cjk.test(b.charAt(0))) {
+    return true;
+  }
   return false;
 }
 

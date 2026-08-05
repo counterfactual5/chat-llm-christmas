@@ -58,8 +58,13 @@ function nextNonEmptyLineIndex(lines: string[], from: number): number {
 }
 
 export function repairGfmTableStructure(markdown: string): string {
+  // Pipes / line endings are normalized in reflowCollapsedMarkdownBlocks; keep a
+  // local copy so this helper stays safe when called alone in tests.
   let src = String(markdown || '')
-    .replace(/\uFF5C/g, '|') // fullwidth ｜
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u2028|\u2029/g, '\n')
+    .replace(/[\uFF5C\u2502\u2503\u2223\u4E28\u00A6\uFFE8]/g, '|')
     // Fancy dashes in separator rows — GFM only accepts ASCII `-`.
     .replace(/[—–−－─━═]/g, '-');
   if (!src.includes('|')) return src;

@@ -14,6 +14,20 @@ import { reflowCollapsedMarkdownTables } from '@/lib/markdown/core/tables';
 const FENCE_SPLIT = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
 /**
+ * Models sometimes emit U+2028/U+2029 or lone `\r` as row breaks, and
+ * box-drawing / fullwidth “pipes”. Normalize before any structure repair so
+ * GFM table peel can see real `\n` + `|` rows.
+ */
+export function normalizeMarkdownLineEndingsAndPipes(markdown: string): string {
+  return String(markdown || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\u2028|\u2029/g, '\n')
+    // Fullwidth / box-drawing / CJK / math lookalikes for `|`
+    .replace(/[\uFF5C\u2502\u2503\u2223\u4E28\u00A6\uFFE8]/g, '|');
+}
+
+/**
  * Sentence / closing markers for list/HR breaks — NOT the full CJK range.
  * Keep ASCII `]` out of interpolated classes (it would terminate `[...]` early).
  */
@@ -208,6 +222,13 @@ function reflowHeadingsListsHrs(chunk: string): string {
     out = next;
   }
 
+  // End list lazy-continuation so `第N步` / tables are not trapped in the
+  // previous bullet (`- Intel → x\n第二步：…`).
+  out = out.replace(
+    /(^|\n)([-*+] |\d{1,2}\. )([^\n]+)\n(第[一二三四五六七八九十百\d]+步)/g,
+    '$1$2$3\n\n$4',
+  );
+
   // Closed emphasis then a heading / ordered list. Do NOT break before `- `
   // (`**/image** - 生成图片` must stay one catalog line).
   out = out.replace(
@@ -229,7 +250,7 @@ function reflowHeadingsListsHrs(chunk: string): string {
 
 /** Full structural repair: unwrap hard-wraps, then tables, then headings/lists/hrs. */
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
-  const src = String(markdown || '');
+  const src = normalizeMarkdownLineEndingsAndPipes(String(markdown || ''));
   if (!src) return src;
 
   // Undo mid-word hard wraps before structural splits so titles/tables see

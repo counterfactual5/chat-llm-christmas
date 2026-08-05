@@ -214,9 +214,21 @@ describe('reflowCollapsedMarkdownBlocks', () => {
       '| 已装 | nvidia | 小 |',
     ].join('\n');
     const out = reflowCollapsedMarkdownBlocks(src);
-    expect(out).toContain('选 `_intel`\n第二步：');
+    expect(out).toContain('选 `_intel`\n\n第二步：');
     expect(out).not.toContain('`_intel`第二步');
     expect(out).toMatch(/第二步：区分 nvidia VS nvidia_cu126\n\n\| 情况 \|/);
+  });
+
+  it('recovers tables that use U+2028 row breaks or box-drawing pipes', () => {
+    const src = [
+      '第二步：区分 nvidia VS nvidia_cu126 │ 情况 │ 推荐选择 │ 原因 │',
+      '│------│---------│------│',
+      '│ 已装 CUDA │ nvidia │ 小 │',
+    ].join('\u2028');
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/第二步：区分 nvidia VS nvidia_cu126\n\n\| 情况 \|/);
+    expect(out).toContain('|------|---------|------|');
+    expect(out).toContain('| 已装 CUDA | nvidia | 小 |');
   });
 
   it('joins long hard-wrapped CJK prose lines', () => {

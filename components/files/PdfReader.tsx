@@ -85,7 +85,8 @@ function PdfPage({
 
         const canvas = canvasRef.current;
         const textEl = textRef.current;
-        if (!canvas || !textEl) return;
+        const wrap = wrapRef.current;
+        if (!canvas || !textEl || !wrap) return;
 
         const outputScale = Math.min(2, window.devicePixelRatio || 1);
         canvas.width = Math.floor(viewport.width * outputScale);
@@ -107,11 +108,15 @@ function PdfPage({
         await task.promise;
         if (cancelled) return;
 
-        textEl.replaceChildren();
-        textEl.style.width = `${Math.floor(viewport.width)}px`;
-        textEl.style.height = `${Math.floor(viewport.height)}px`;
+        // Match pdf.js viewer: TextLayer layout is driven by --total-scale-factor.
+        wrap.style.setProperty('--scale-factor', String(viewport.scale));
+        wrap.style.setProperty('--user-unit', '1');
+        wrap.style.width = `${Math.floor(viewport.width)}px`;
+        wrap.style.height = `${Math.floor(viewport.height)}px`;
 
+        textEl.replaceChildren();
         const pdfjs = await import('pdfjs-dist');
+        pdfjs.setLayerDimensions(textEl, viewport);
         const textContent = await page.getTextContent();
         if (cancelled) return;
         const layer = new pdfjs.TextLayer({

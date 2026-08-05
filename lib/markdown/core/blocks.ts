@@ -200,10 +200,10 @@ function reflowHeadingsListsHrs(chunk: string): string {
     new RegExp(`([${BREAK_TEXT}])\\s*(---+)(?=\\s|#{1,6}\\s|$)`, 'g'),
     '$1\n\n$2',
   );
-  // Mid-line after Latin/code: `下 intel ---` / `即可。 --- 需要我…` leftover.
-  // Exclude `|` / `-` so table rows and existing `---` lines stay put.
+  // After Latin/code only at line-end / before a heading — NOT `A --- not B`
+  // (English em-dash prose must stay intact).
   out = out.replace(
-    /([^\n|\-])[ \t]+(---+)(?=[ \t]|$|\n|#{1,6}\s)/g,
+    /([A-Za-z0-9`*_）)」』])[ \t]+(---+)(?=[ \t]*$|\n|#{1,6}\s)/gm,
     '$1\n\n$2',
   );
   // Prose glued onto the same line after an HR: `--- 需要我帮你…`

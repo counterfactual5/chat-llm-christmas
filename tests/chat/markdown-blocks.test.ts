@@ -244,6 +244,11 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).not.toContain('- 先注册\n\n第二步去');
   });
 
+  it('does not turn English em-dash prose into thematic breaks', () => {
+    const src = 'Choose option A --- not B when both look valid.';
+    expect(reflowCollapsedMarkdownBlocks(src)).toBe(src);
+  });
+
   it('joins long hard-wrapped CJK prose lines', () => {
     const line1 =
       '- Mac 通常使用 Apple Silicon (M1/M2/M3) 或 Intel 芯片 - 官方 portable 包主要是为 Windows 设计的 - Mac 上运';

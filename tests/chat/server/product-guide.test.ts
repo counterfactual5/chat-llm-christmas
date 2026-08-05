@@ -13,18 +13,24 @@ describe('productUsageGuidePrompt', () => {
     expect(text).toContain('quick product map');
     expect(text).toContain('/image');
     expect(text).toContain('/skill');
-    expect(text).toContain('/skill singular');
+    expect(text).toContain('singular');
     expect(text).toContain('Request review');
     expect(text).toContain('Continue reply');
     expect(text).toContain('手动添加');
     expect(text).toContain('create_file');
     expect(text).toContain('create_spreadsheet');
-    expect(text).toContain('/research [quick|standard|rigorous]');
-    expect(text).toContain('web|literature|mixed');
+    expect(text).toContain('/research');
+    expect(text).toContain('/papers');
+    expect(text).toContain('/books');
     expect(text).toContain('Notion');
     expect(text).toContain('[ACTIVE]');
     expect(text).toContain('follow the user’s language');
+    expect(text).toContain('detailed guide when the user asks');
     expect(text).not.toContain('detailed product guide');
+    // Feature-specific mechanics stay out of the always-on map.
+    expect(text).not.toContain('docx_extract');
+    expect(text).not.toContain('[quick|standard|rigorous]');
+    expect(text).not.toContain('libgen|archive');
   });
 });
 

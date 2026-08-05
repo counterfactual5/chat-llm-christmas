@@ -43,8 +43,10 @@ describe('buildChatSystemParts', () => {
     expect(parts).toContain('Never claim an image or downloadable file was created');
     expect(parts).toContain('Active Skills are user-selected per conversation');
     expect(parts).toContain('There is NO /news or /wiki slash command');
-    expect(parts).toContain('use it first for github.com');
     expect(parts).toContain('file_read is lazy');
+    expect(parts).toContain('Never invent file contents');
+    expect(parts).not.toContain('use start_page / focus to continue');
+    expect(parts).not.toContain('use it first for github.com');
     expect(parts).toContain('/skill (singular) is always available');
     expect(parts).not.toContain('Block Markdown MUST keep real newlines');
     expect(parts).not.toContain('Prefer Mermaid over Unicode');

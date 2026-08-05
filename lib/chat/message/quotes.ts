@@ -132,21 +132,26 @@ export function encodeQuotedSelectionBody(q: QuotedSelection): string {
   const src = q.source;
   if (!src?.page) return text;
 
+  const page = Math.floor(Number(src.page));
   const labelParts = [
     src.name || 'PDF',
-    `p.${src.page}`,
+    page >= 1 ? `p.${page}` : '',
     src.fileId ? `fileId:${src.fileId}` : '',
   ].filter(Boolean);
   const label = labelParts.join(' · ');
+  // Local contract travels with the quote only — not the always-on system prompt.
+  const hint =
+    page >= 1
+      ? `(use quote first; if more context needed: file_read start_page=${page} max_pages≤2)`
+      : '';
 
   const before = String(src.before || '').trim();
   const after = String(src.after || '').trim();
-  if (!before && !after) {
-    return `${label}\n${text}`;
-  }
-  const left = before ? `…${before}` : '';
-  const right = after ? `${after}…` : '';
-  return `${label}\n${left}【${text}】${right}`;
+  const body =
+    before || after
+      ? `${before ? `…${before}` : ''}【${text}】${after ? `${after}…` : ''}`
+      : text;
+  return [label, hint, body].filter(Boolean).join('\n');
 }
 
 /** Encode one or more quotes as Markdown blockquotes ahead of the user body. */

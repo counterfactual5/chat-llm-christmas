@@ -471,11 +471,9 @@ const FILE_READ_SYSTEM_PROMPT = [
   'Each call returns a SHORT slice (~8 pages by default), not the whole book — this is a context budget, separate from TOC skipping.',
   'Omitting start_page auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body; you still only get ~8 pages from that start.',
   'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
-  'Scanned or Mixed PDFs OCR empty pages in the current window on demand; TextBased also OCRs known-empty pages as a misclassification fallback (not whole-book OCR). Never say you cannot read a scanned PDF when a 【历史文件引用】 marker is present.',
-  'Comic / image-heavy EPUBs and image-only PPTX slides also OCR on demand in the current window (same file_read tool; start_page = chapter or slide number). Prefer file_read over inventing slide/chapter text.',
+  'Empty or image-only pages in the current window may be OCR’d on demand — never say you cannot read a file when a 【历史文件引用】 marker is present.',
   'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
-  'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',
 ].join(' ');
 
 export function createFileReadTool(): ChatTool {

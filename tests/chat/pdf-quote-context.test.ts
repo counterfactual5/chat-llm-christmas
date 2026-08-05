@@ -50,6 +50,9 @@ describe('encodeQuotedSelectionBody / formatQuotedMessage', () => {
       },
     });
     expect(body).toContain('paper.pdf · p.12 · fileId:file-1');
+    expect(body).toContain(
+      '(use quote first; if more context needed: file_read start_page=12 max_pages≤2)',
+    );
     expect(body).toContain('…estimate the【causal effect】of treatment…');
 
     const msg = formatQuotedMessage('explain', [
@@ -65,6 +68,7 @@ describe('encodeQuotedSelectionBody / formatQuotedMessage', () => {
     ]);
     expect(msg.startsWith('> ')).toBe(true);
     expect(msg).toContain('p.12');
+    expect(msg).toContain('max_pages≤2');
     expect(msg).toContain('explain');
     const parsed = parseQuotedUserMessage(msg);
     expect(parsed.body).toBe('explain');

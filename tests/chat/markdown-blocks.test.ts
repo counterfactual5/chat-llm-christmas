@@ -302,6 +302,17 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     );
   });
 
+  it('splits HR glued after a table row before trailing prose', () => {
+    const src = [
+      '| 优先级 | 方案 |',
+      '| --- | --- |',
+      '| 🥇 | 量化版 | --- 建议你先试这个。',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/\|\s*🥇\s*\|\s*量化版\s*\|\s*\n\n---\n\n\s*建议你先试/);
+    expect(out).toContain('--- | ---');
+  });
+
   it('keeps normal headings that contain version-like decimals', () => {
     expect(reflowCollapsedMarkdownBlocks('## HTTP 1.1 概述')).toBe('## HTTP 1.1 概述');
     expect(reflowCollapsedMarkdownBlocks('## 1. 介绍')).toBe('## 1. 介绍');

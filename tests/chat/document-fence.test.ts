@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  breakProseGluedToClosingFence,
   normalizeSameLineFences,
   unwrapMarkdownDocumentFence,
 } from '@/lib/markdown/core/document-fence';
@@ -18,7 +19,7 @@ describe('normalizeSameLineFences', () => {
         '```bash git clone https://github.com/comfy-org/ComfyUI-Manager.git```',
       ),
     ).toBe(
-      '```bash\ngit clone https://github.com/comfy-org/ComfyUI-Manager.git\n```',
+      '```bash\ngit clone https://github.com/comfy-org/ComfyUI-Manager.git\n```\n',
     );
   });
 
@@ -26,7 +27,7 @@ describe('normalizeSameLineFences', () => {
     const src =
       '混合方案： ``` 1. GPT Image 生成图 2. 上传到云端 SVD 3. 下载视频 ```';
     expect(normalizeSameLineFences(src)).toBe(
-      '混合方案： \n\n```\n1. GPT Image 生成图 2. 上传到云端 SVD 3. 下载视频\n```',
+      '混合方案： \n\n```\n1. GPT Image 生成图 2. 上传到云端 SVD 3. 下载视频\n```\n',
     );
   });
 
@@ -42,6 +43,36 @@ describe('normalizeSameLineFences', () => {
     expect(out).toContain('`D:\\ComfyUI\\ComfyUI\\models\\`');
     expect(out).not.toMatch(/```D:/);
     expect(out).toMatch(/\n## 下一步/);
+  });
+
+  it('does not let a glued closing fence swallow following tables', () => {
+    const src = [
+      '方案： ``` 1. 生成图 2. 上传云端 3. 下载视频 ```这样你本地只需要跑基础节点。',
+      '---',
+      '## 总结建议',
+      '| 优先级 | 方案 |',
+      '| --- | --- |',
+      '| 🥇 | 量化版 |',
+    ].join(' ');
+    const out = prepareChatMarkdown(src);
+    expect(out).toMatch(/```\n/);
+    expect(out).toMatch(/这样你本地/);
+    expect(out).toContain('| 优先级 | 方案 |');
+    // Must not keep the table inside an open fence.
+    const fenceEnd = out.lastIndexOf('```');
+    const tableAt = out.indexOf('| 优先级 |');
+    expect(tableAt).toBeGreaterThan(fenceEnd);
+  });
+});
+
+describe('breakProseGluedToClosingFence', () => {
+  it('breaks prose glued to a closing fence but keeps opening lang tags', () => {
+    expect(breakProseGluedToClosingFence('```\ncode\n```这样你')).toBe(
+      '```\ncode\n```\n\n这样你',
+    );
+    expect(breakProseGluedToClosingFence('```bash\necho hi\n```')).toBe(
+      '```bash\necho hi\n```',
+    );
   });
 });
 

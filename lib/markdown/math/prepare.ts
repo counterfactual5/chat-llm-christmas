@@ -8,7 +8,10 @@ import {
   reflowCollapsedMarkdownBlocks,
   reflowCollapsedMarkdownTablesOnly,
 } from '@/lib/markdown/core/blocks';
-import { normalizeSameLineFences } from '@/lib/markdown/core/document-fence';
+import {
+  breakProseGluedToClosingFence,
+  normalizeSameLineFences,
+} from '@/lib/markdown/core/document-fence';
 import { normalizeMermaidMarkdown } from '@/lib/markdown/core/mermaid';
 import { escapeIncompleteBlockMath, escapeIncompleteInlineMath } from './truncate';
 import { hasUnclosedDisplayMath } from './detect';
@@ -30,6 +33,7 @@ export function prepareChatMarkdown(
   // Same-line ```path``` / ```bash cmd``` from newline-collapsed replies —
   // before ascii/mermaid promotion so paths are not treated as diagrams.
   out = normalizeSameLineFences(out);
+  out = breakProseGluedToClosingFence(out);
   // Before remark parses: inline diagram code loses newlines (CommonMark), and
   // language-less Mermaid fences cannot reach the Mermaid renderer.
   out = normalizeAsciiArtMarkdown(out);

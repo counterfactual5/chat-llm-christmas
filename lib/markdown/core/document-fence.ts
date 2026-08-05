@@ -18,7 +18,7 @@ export function unwrapMarkdownDocumentFence(content: string): string {
 }
 
 const FENCE_LANG =
-  'bash|sh|zsh|shell|powershell|cmd|console|python|py|javascript|js|typescript|ts|json|yaml|yml|text|txt|sql|rust|go|java|c|cpp|html|css|xml';
+  'bash|sh|zsh|shell|powershell|cmd|console|python|py|javascript|js|typescript|ts|json|yaml|yml|text|txt|sql|rust|go|java|c|cpp|html|css|xml|md|markdown|diff|dockerfile|ini|toml|ruby|php|swift|kotlin|r';
 
 /**
  * When GLM collapses newlines, a one-line fence often appears as:
@@ -45,15 +45,37 @@ export function normalizeSameLineFences(content: string): string {
       new RegExp(String.raw`^(${FENCE_LANG})\s+(\S[\s\S]*)$`, 'i'),
     );
     if (langBody) {
-      return `${leadBreak}\`\`\`${langBody[1]}\n${langBody[2]!.trim()}\n\`\`\``;
+      // Trailing newline after the closer so following prose is not swallowed
+      // into an unclosed fence (` ```这样你本地 `).
+      return `${leadBreak}\`\`\`${langBody[1]}\n${langBody[2]!.trim()}\n\`\`\`\n`;
     }
 
     // Numbered steps jammed into a language-less same-line fence
     // (` ``` 1. foo 2. bar ``` `) — restore a real block so lists can reflow.
-    if (/(?:^|\s)\d{1,2}\.\s+\S/.test(t) && t.length >= 24) {
-      return `${leadBreak}\`\`\`\n${t}\n\`\`\``;
+    if (/(?:^|\s)\d{1,2}\.\s+\S/.test(t) && t.length >= 16) {
+      return `${leadBreak}\`\`\`\n${t}\n\`\`\`\n`;
     }
 
     return full;
   });
+}
+
+/**
+ * Closing ``` glued to following prose (` ```这样你本地 `) leaves the fence
+ * open in CommonMark and swallows the rest of the answer. Break only when the
+ * trailing token is not a language info string.
+ */
+export function breakProseGluedToClosingFence(content: string): string {
+  return String(content || '').replace(
+    /(^|\n)(```)[ \t]*([^\n`]+)/gm,
+    (full, lead: string, fence: string, rest: string) => {
+      const info = rest.trim();
+      // Opening fence with a language/info tag: ```bash / ```md / ```c++
+      if (/^[a-zA-Z][\w.+#-]*(?:\s|$)/.test(info)) {
+        return full;
+      }
+      // Anything else after ``` on the same line is glued prose (often CJK).
+      return `${lead}${fence}\n\n${rest}`;
+    },
+  );
 }

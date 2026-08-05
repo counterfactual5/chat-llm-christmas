@@ -234,11 +234,21 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '---\n\n',
   );
   // Trailing HR jammed onto a finished pipe row: `| … | ---`
+  // Also `| … | --- 建议你…` (HR then prose on the same line).
   // Skip separator lines themselves (`| --- | --- | ---`) — those dashes are cells.
   out = out.replace(
-    new RegExp(String.raw`(\|[^\n]*\|)[ \t]+(${hrDashes})[ \t]*$`, 'gm'),
-    (full, row: string) =>
-      /^[\s|:\-—–−－─━═]+$/.test(row) ? full : `${row}\n\n---`,
+    new RegExp(String.raw`(\|[^\n]*\|)[ \t]+(${hrDashes})(?=[ \t]+(?:$|\S)|$)`, 'gm'),
+    (full, row: string, hr: string, offset: number, whole: string) => {
+      if (/^[\s|:\-—–−－─━═]+$/.test(row)) return full;
+      // Consume optional spaces after the dashes; leave following prose in place.
+      let end = offset + full.length;
+      while (end < whole.length && (whole[end] === ' ' || whole[end] === '\t')) end++;
+      // Only treat as HR when dashes end the line or are followed by prose
+      // (not another delimiter cell like `| --- | ---`).
+      const next = whole.slice(end, end + 1);
+      if (next === '|') return full;
+      return `${row}\n\n---\n\n`;
+    },
   );
   // Inline/path code then HR with no space: `` `D:\path\`--- ``
   out = out.replace(/(`)(-{3,})/g, '$1\n\n$2');

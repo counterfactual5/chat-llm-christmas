@@ -25,6 +25,7 @@ const MAX_OCR_PAGES_PER_CALL = 8;
  * Scanned/ImageBased: empty/missing pages in the window.
  * Mixed / Unknown: known-empty pages in the extract (or classify-listed).
  * TextBased: known-empty pages as misclassification fallback (capped per call).
+ * EPUB / PPTX: only listed image pages (epub_image_pages / pptx_image_slides).
  */
 export function pagesNeedingOcrInWindow(opts: {
   pages: Array<{ page: number; text: string }>;
@@ -32,8 +33,11 @@ export function pagesNeedingOcrInWindow(opts: {
   maxPages: number;
   pagesNeedingOcr: number[];
   pdfType: string | null;
+  docKind?: string | null;
 }): number[] {
   const pdfType = String(opts.pdfType || '');
+  const docKind = String(opts.docKind || '').toLowerCase();
+  const isZipDoc = docKind === 'epub' || docKind === 'pptx';
   const listed = new Set(
     (opts.pagesNeedingOcr || [])
       .map((n) => Math.floor(Number(n)))
@@ -55,7 +59,11 @@ export function pagesNeedingOcrInWindow(opts: {
     const hasPage = byPage.has(p);
     const body = String(byPage.get(p) || '').trim();
     if (body.length >= MIN_PAGE_CHARS_FOR_OCR) continue;
-    if (scannedLike) {
+    if (isZipDoc) {
+      // Comic EPUB / image slides: only pages with known media refs.
+      if (!listed.has(p)) continue;
+      out.push(p);
+    } else if (scannedLike) {
       out.push(p);
     } else {
       // TextBased / Mixed / Unknown: don't OCR pages not yet in the sidecar.
@@ -242,6 +250,7 @@ type FetchOk = {
   pdfConfidence?: number | null;
   pagesNeedingOcr?: number[];
   needsOcr?: boolean;
+  docKind?: string | null;
 };
 type FetchErr = {
   ok: false;
@@ -300,11 +309,29 @@ async function fetchGatewayFileText(
         pdf_confidence?: number | null;
         pages_needing_ocr?: number[];
         needs_ocr?: boolean;
+        doc_kind?: string | null;
+        epub_image_pages?: number[];
+        pptx_image_slides?: number[];
       };
       const text = String(data.text || '');
       const needsOcrFlag = Boolean(data.needs_ocr);
+      const docKind = data.doc_kind
+        ? String(data.doc_kind)
+        : /\.epub$/i.test(filename) || mime === 'application/epub+zip'
+          ? 'epub'
+          : /\.pptx$/i.test(filename) ||
+              mime.includes('presentationml')
+            ? 'pptx'
+            : null;
+      const listedNeed = Array.isArray(data.pages_needing_ocr)
+        ? data.pages_needing_ocr
+        : Array.isArray(data.epub_image_pages)
+          ? data.epub_image_pages
+          : Array.isArray(data.pptx_image_slides)
+            ? data.pptx_image_slides
+            : [];
       // Empty placeholder extract is OK when OCR is available on demand.
-      if (text.trim() || needsOcrFlag) {
+      if (text.trim() || needsOcrFlag || listedNeed.length) {
         return {
           ok: true,
           name: data.filename ? String(data.filename) : filename,
@@ -319,10 +346,9 @@ async function fetchGatewayFileText(
           pdfType: data.pdf_type ?? null,
           pdfConfidence:
             Number(data.pdf_confidence) > 0 ? Number(data.pdf_confidence) : null,
-          pagesNeedingOcr: Array.isArray(data.pages_needing_ocr)
-            ? data.pages_needing_ocr
-            : [],
-          needsOcr: needsOcrFlag,
+          pagesNeedingOcr: listedNeed,
+          needsOcr: needsOcrFlag || listedNeed.length > 0,
+          docKind,
         };
       }
     } catch {
@@ -446,6 +472,7 @@ const FILE_READ_SYSTEM_PROMPT = [
   'Omitting start_page auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body; you still only get ~8 pages from that start.',
   'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
   'Scanned or Mixed PDFs OCR empty pages in the current window on demand; TextBased also OCRs known-empty pages as a misclassification fallback (not whole-book OCR). Never say you cannot read a scanned PDF when a 【历史文件引用】 marker is present.',
+  'Comic / image-heavy EPUBs and image-only PPTX slides also OCR on demand in the current window (same file_read tool; start_page = chapter or slide number). Prefer file_read over inventing slide/chapter text.',
   'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
   'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',
@@ -459,7 +486,7 @@ export function createFileReadTool(): ChatTool {
       function: {
         name: 'file_read',
         description:
-          'Read a slice of a document in this chat (default ~8 pages). Pass file_id from 【历史文件引用】. Omitting start_page auto-skips TOC when possible. Use start_page / max_pages / focus to dig deeper — do not expect the whole book in one call.',
+          'Read a slice of a document in this chat (PDF/EPUB/PPTX; default ~8 pages/slides). Pass file_id from 【历史文件引用】. Omitting start_page auto-skips TOC when possible. Use start_page / max_pages / focus to dig deeper — do not expect the whole book in one call.',
         parameters: {
           type: 'object',
           properties: {
@@ -471,11 +498,11 @@ export function createFileReadTool(): ChatTool {
             start_page: {
               type: 'number',
               description:
-                '1-based page to start from. Omit for auto body start (skip TOC); pass 1 to include cover/TOC.',
+                '1-based page/slide to start from. Omit for auto body start (skip TOC); pass 1 to include cover/TOC. For PPTX this is the slide number.',
             },
             max_pages: {
               type: 'number',
-              description: 'Max pages to return this call (default 8, max 40)',
+              description: 'Max pages/slides to return this call (default 8, max 40)',
             },
             focus: {
               type: 'string',
@@ -549,6 +576,7 @@ export function createFileReadTool(): ChatTool {
         let pdfType: string | null = null;
         let needsOcr = false;
         let pagesNeedingOcr: number[] = [];
+        let docKind: string | null = null;
 
         // Prefer gateway (may include freshly OCR'd pages); fall back to in-turn cache.
         const fetched = await fetchGatewayFileText(
@@ -577,7 +605,7 @@ export function createFileReadTool(): ChatTool {
                 pages_needing_ocr: fetched.pagesNeedingOcr || [],
                 tip:
                   fetched.needsOcr || fetched.code === 'NEEDS_OCR'
-                    ? 'This PDF looks scanned/image-based. Call file_read again after OCR is available, or ensure the gateway OCR endpoint is configured.'
+                    ? 'This document looks image-based. Call file_read again after OCR is available, or ensure the gateway OCR endpoint is configured.'
                     : undefined,
               }),
             };
@@ -593,6 +621,11 @@ export function createFileReadTool(): ChatTool {
           pdfType = fetched.pdfType ?? null;
           needsOcr = Boolean(fetched.needsOcr);
           pagesNeedingOcr = fetched.pagesNeedingOcr || [];
+          docKind = fetched.docKind ?? null;
+          if (!docKind) {
+            if (/\.epub$/i.test(name)) docKind = 'epub';
+            else if (/\.pptx$/i.test(name)) docKind = 'pptx';
+          }
         }
 
         const pages = parseExtractPages(text);
@@ -615,6 +648,7 @@ export function createFileReadTool(): ChatTool {
           maxPages,
           pagesNeedingOcr,
           pdfType,
+          docKind,
         });
         if (needOcrPages.length && apiKey) {
           const ocrQuery = `ocr p.${needOcrPages.join(',')}`;
@@ -712,8 +746,14 @@ export function createFileReadTool(): ChatTool {
         } else if (ocrError) {
           tips.push(`On-demand OCR failed: ${ocrError}`);
         } else if (needsOcr && pagesNeedingOcr.length) {
+          const kindLabel =
+            docKind === 'epub'
+              ? 'image-heavy EPUB'
+              : docKind === 'pptx'
+                ? 'image slides in PPTX'
+                : `PDF classified as ${pdfType || 'Mixed'}`;
           tips.push(
-            `PDF classified as ${pdfType || 'Mixed'}; pages still needing OCR: ${pagesNeedingOcr.slice(0, 12).join(', ')}${pagesNeedingOcr.length > 12 ? '…' : ''}.`,
+            `${kindLabel}; pages still needing OCR: ${pagesNeedingOcr.slice(0, 12).join(', ')}${pagesNeedingOcr.length > 12 ? '…' : ''}.`,
           );
         } else if (pdfType && pdfType !== 'TextBased') {
           tips.push(`PDF classified as ${pdfType}.`);
@@ -761,6 +801,7 @@ export function createFileReadTool(): ChatTool {
             body_start_page: auto.bodyStartPage,
             auto_start_source: auto.source,
             pdf_type: pdfType,
+            doc_kind: docKind,
             needs_ocr: needsOcr,
             pages_needing_ocr: pagesNeedingOcr,
             ocr_pages: ocrApplied.length ? ocrApplied : undefined,

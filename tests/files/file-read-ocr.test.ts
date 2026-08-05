@@ -74,4 +74,38 @@ describe('pagesNeedingOcrInWindow', () => {
       }),
     ).toEqual([]);
   });
+
+  it('EPUB only OCRs listed image pages, not empty text chapters', () => {
+    expect(
+      pagesNeedingOcrInWindow({
+        pages: [
+          { page: 1, text: '' },
+          { page: 2, text: '' },
+          { page: 3, text: 'chapter prose '.repeat(10) },
+        ],
+        startPage: 1,
+        maxPages: 8,
+        pagesNeedingOcr: [2],
+        pdfType: null,
+        docKind: 'epub',
+      }),
+    ).toEqual([2]);
+  });
+
+  it('PPTX OCRs listed image-only slides in the window', () => {
+    expect(
+      pagesNeedingOcrInWindow({
+        pages: [
+          { page: 1, text: 'Title slide with text '.repeat(5) },
+          { page: 2, text: '' },
+          { page: 3, text: '' },
+        ],
+        startPage: 1,
+        maxPages: 8,
+        pagesNeedingOcr: [2, 3],
+        pdfType: null,
+        docKind: 'pptx',
+      }),
+    ).toEqual([2, 3]);
+  });
 });

@@ -141,3 +141,94 @@ describe('withUpsertedAssistantToolRun parallel same-tool queries', () => {
     expect(runs.find((r) => r.callId === 'call_b')?.results?.[0]?.title).toBe('b');
   });
 });
+
+describe('withUpsertedAssistantToolRun openContextPanel', () => {
+  it('opens when a search adds new browseable Material URLs', () => {
+    let sessions = [sessionWithAssistant()];
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'start',
+      query: 'q',
+    }).sessions;
+    const done = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'done',
+      query: 'q',
+      results: [{ title: 'A', url: 'https://example.com/a', snippet: '' }],
+    });
+    expect(done.openContextPanel).toBe(true);
+    expect(done.sessions[0]!.webSources?.map((s) => s.url)).toEqual([
+      'https://example.com/a',
+    ]);
+  });
+
+  it('does not reopen for file_read when older Material already exists', () => {
+    let sessions = [sessionWithAssistant()];
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'start',
+      query: 'q',
+    }).sessions;
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'done',
+      query: 'q',
+      results: [{ title: 'A', url: 'https://example.com/a', snippet: '' }],
+    }).sessions;
+
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'file_read',
+      status: 'start',
+      query: 'file_x',
+    }).sessions;
+    const readDone = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'file_read',
+      status: 'done',
+      query: 'file_x',
+      provider: 'file-read',
+      results: [
+        {
+          title: 'doc.pdf',
+          url: '/api/files/file_x',
+          snippet: 'page text',
+        },
+      ],
+    });
+    expect(readDone.openContextPanel).toBe(false);
+    expect(readDone.sessions[0]!.webSources?.map((s) => s.url)).toEqual([
+      'https://example.com/a',
+    ]);
+  });
+
+  it('opens again when a later search adds another URL', () => {
+    let sessions = [sessionWithAssistant()];
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'start',
+      query: 'q1',
+    }).sessions;
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'done',
+      query: 'q1',
+      results: [{ title: 'A', url: 'https://example.com/a', snippet: '' }],
+    }).sessions;
+
+    sessions = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'start',
+      query: 'q2',
+    }).sessions;
+    const second = withUpsertedAssistantToolRun(sessions, 's1', 'a1', {
+      name: 'web_search',
+      status: 'done',
+      query: 'q2',
+      results: [{ title: 'B', url: 'https://example.com/b', snippet: '' }],
+    });
+    expect(second.openContextPanel).toBe(true);
+    expect(second.sessions[0]!.webSources?.map((s) => s.url).sort()).toEqual([
+      'https://example.com/a',
+      'https://example.com/b',
+    ]);
+  });
+});

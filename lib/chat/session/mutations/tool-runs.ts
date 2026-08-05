@@ -289,6 +289,15 @@ export function withUpsertedAssistantToolRun(
           }
         }
       } else {
+        const prevSourceUrls = new Set(
+          (
+            s.webSourcesCleared
+              ? s.webSources || []
+              : collectWebSourcesFromMessages(s.messages)
+          )
+            .map((source) => source.url)
+            .filter(Boolean),
+        );
         const nextSession = touchSession(s, { messages: mergedMsgs });
         if (s.webSourcesCleared) {
           const sourceByUrl = new Map((s.webSources || []).map((source) => [source.url, source]));
@@ -307,8 +316,15 @@ export function withUpsertedAssistantToolRun(
         } else {
           nextSession.webSources = collectWebSourcesFromMessages(mergedMsgs);
         }
-        if ((nextSession.webSources?.length || 0) > 0) {
-          if (!s.webSourcesCleared) unsetWebSourcesCleared = true;
+        // Only auto-open Context when this turn actually added browseable
+        // Material URLs (web/paper/… search). file_read (/api/files/…) and
+        // other non-Material tools must not reopen the panel just because
+        // older sources already exist.
+        const addedMaterial = (nextSession.webSources || []).some(
+          (source) => source.url && !prevSourceUrls.has(source.url),
+        );
+        if (addedMaterial) {
+          unsetWebSourcesCleared = true;
           openContextPanel = true;
         }
         return nextSession;

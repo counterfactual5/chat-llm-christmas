@@ -129,6 +129,37 @@ describe('repairGfmTableStructure', () => {
     expect(out).toContain('| 已经有 NVIDIA 驱动/CUDA | `nvidia` | 体积更小 |');
   });
 
+  it('drops blank lines that separate header, delimiter, and body rows', () => {
+    const raw = [
+      '📋 **推荐工作流配置（8GB 显存版）** | 参数 | 推荐值 | 说明 |',
+      '',
+      '|------|--------|------|',
+      '',
+      '| 分辨率 | 512×512 或 384×384 | 越高越吃显存 |',
+      '| 帧数 | 14 帧 | 最少 14 帧才有视频感 |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw);
+    expect(out).toMatch(
+      /\| 参数 \| 推荐值 \| 说明 \|\n\|------\|--------\|------\|\n\| 分辨率 \|/,
+    );
+    expect(out).toMatch(/^📋 \*\*推荐工作流配置（8GB 显存版）\*\*\n\n\| 参数 \|/);
+  });
+
+  it('keeps blank lines between separate tables and prose', () => {
+    const raw = [
+      '| A | B |',
+      '|---|---|',
+      '| 1 | 2 |',
+      '',
+      '中间说明文字。',
+      '',
+      '| C | D |',
+      '|---|---|',
+      '| 3 | 4 |',
+    ].join('\n');
+    expect(prepareChatMarkdown(raw)).toBe(raw);
+  });
+
   it('does not insert a placeholder header before a valid pipe header without leading |', () => {
     const raw = [
       'Very long column name here | Col2 | Col3 | Col4 |',

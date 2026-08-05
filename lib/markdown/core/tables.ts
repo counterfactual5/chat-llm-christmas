@@ -57,6 +57,49 @@ function nextNonEmptyLineIndex(lines: string[], from: number): number {
   return -1;
 }
 
+/** A row-ish line: enough pipes to be a header/body row, but not a delimiter. */
+function hasTablePipes(line: string): boolean {
+  const t = String(line || '').trim();
+  if (!t || isSeparatorLine(t)) return false;
+  return pipeCount(t) >= 2;
+}
+
+/**
+ * GFM requires header / delimiter / body rows to be adjacent. Models often put
+ * a blank line around `|---|`, which silently downgrades the whole table to
+ * literal text. Drop only blanks that bridge a delimiter to a row — blank lines
+ * between real paragraphs stay.
+ */
+function dropBlankLinesAroundSeparators(src: string): string {
+  if (!src.includes('|')) return src;
+  const lines = src.split('\n');
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.trim()) {
+      out.push(line);
+      continue;
+    }
+    // Consume the whole blank run so `prev` stays the adjacent content line.
+    let end = i;
+    while (end + 1 < lines.length && !lines[end + 1]!.trim()) end++;
+
+    const prev = out[out.length - 1] ?? '';
+    const next = lines[end + 1] ?? '';
+    const bridgesTable =
+      (isSeparatorLine(next) && hasTablePipes(prev)) ||
+      (isSeparatorLine(prev) && hasTablePipes(next));
+
+    if (!bridgesTable) {
+      for (let k = i; k <= end; k++) out.push(lines[k]!);
+    }
+    i = end;
+  }
+
+  return out.join('\n');
+}
+
 export function repairGfmTableStructure(markdown: string): string {
   // Line endings first; pipe lookalikes only on table-ish lines; fancy dashes
   // only on separator-like lines — never rewrite prose em-dashes globally.
@@ -85,6 +128,7 @@ export function repairGfmTableStructure(markdown: string): string {
     })
     .join('\n');
   if (!src.includes('|')) return src;
+  src = dropBlankLinesAroundSeparators(src);
 
   const lines = src.split('\n');
   const out: string[] = [];
@@ -98,11 +142,9 @@ export function repairGfmTableStructure(markdown: string): string {
     if (isSeparatorLine(next) && line.includes('|')) {
       const peeled = peelTitleFromHeaderLine(line, next);
       if (peeled) {
+        // Anything between header and delimiter is blank (sepIdx skips blanks)
+        // and must be dropped — GFM needs the two rows adjacent.
         out.push(...peeled);
-        // Keep any blank lines before the separator; then emit sep + continue.
-        if (sepIdx > i + 1) {
-          for (let b = i + 1; b < sepIdx; b++) out.push(lines[b]!);
-        }
         out.push(next);
         i = sepIdx;
         continue;

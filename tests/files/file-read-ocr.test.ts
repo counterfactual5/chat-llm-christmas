@@ -2,14 +2,30 @@ import { describe, expect, it } from 'vitest';
 import { pagesNeedingOcrInWindow } from '@/lib/tools/file-read/tool';
 
 describe('pagesNeedingOcrInWindow', () => {
-  it('never OCRs TextBased', () => {
+  it('OCRs known-empty TextBased pages (整本误判兜底)', () => {
     expect(
       pagesNeedingOcrInWindow({
-        pages: [{ page: 1, text: '' }],
+        pages: [
+          { page: 1, text: '' },
+          { page: 2, text: 'normal chapter text '.repeat(10) },
+        ],
         startPage: 1,
         maxPages: 8,
-        pagesNeedingOcr: [1],
-        needsOcr: true,
+        pagesNeedingOcr: [],
+        needsOcr: false,
+        pdfType: 'TextBased',
+      }),
+    ).toEqual([1]);
+  });
+
+  it('does not OCR TextBased pages not yet in the extract', () => {
+    expect(
+      pagesNeedingOcrInWindow({
+        pages: [{ page: 2, text: 'body '.repeat(20) }],
+        startPage: 1,
+        maxPages: 3,
+        pagesNeedingOcr: [],
+        needsOcr: false,
         pdfType: 'TextBased',
       }),
     ).toEqual([]);

@@ -22,8 +22,9 @@ const MAX_OCR_PAGES_PER_CALL = 8;
 
 /**
  * Which pages in the current read window should be OCR'd on demand.
- * TextBased: never. Scanned/ImageBased: empty/missing pages in the window.
- * Mixed: empty pages already in the extract, plus classify-listed pages (漏检兜底).
+ * Scanned/ImageBased: empty/missing pages in the window.
+ * Mixed / TextBased / Unknown: known-empty pages already in the extract
+ * (or classify-listed) — TextBased 空页兜底防止整本误判。
  */
 export function pagesNeedingOcrInWindow(opts: {
   pages: Array<{ page: number; text: string }>;
@@ -34,20 +35,11 @@ export function pagesNeedingOcrInWindow(opts: {
   pdfType: string | null;
 }): number[] {
   const pdfType = String(opts.pdfType || '');
-  if (pdfType === 'TextBased') return [];
-
   const listed = new Set(
     (opts.pagesNeedingOcr || [])
       .map((n) => Math.floor(Number(n)))
       .filter((n) => n >= 1),
   );
-  const typeOcr =
-    opts.needsOcr ||
-    pdfType === 'Scanned' ||
-    pdfType === 'ImageBased' ||
-    pdfType === 'Mixed' ||
-    listed.size > 0;
-  if (!typeOcr) return [];
 
   const start = Math.max(1, Math.floor(Number(opts.startPage)) || 1);
   const max = Math.min(
@@ -55,17 +47,21 @@ export function pagesNeedingOcrInWindow(opts: {
     Math.max(1, Math.floor(Number(opts.maxPages)) || DEFAULT_MAX_PAGES),
   );
   const byPage = new Map(opts.pages.map((p) => [p.page, p.text]));
+  const scannedLike =
+    pdfType === 'Scanned' || pdfType === 'ImageBased';
   const out: number[] = [];
   for (let p = start; p < start + max; p++) {
     const hasPage = byPage.has(p);
     const body = String(byPage.get(p) || '').trim();
     if (body.length >= MIN_PAGE_CHARS_FOR_OCR) continue;
-    if (pdfType === 'Mixed') {
-      // Don't OCR pages not yet in the sidecar (background unpdf may fill them).
-      // Do OCR known-empty pages (漏检) and classify-listed pages.
+    if (scannedLike) {
+      out.push(p);
+    } else {
+      // TextBased / Mixed / Unknown: don't OCR pages not yet in the sidecar.
+      // Do OCR known-empty pages (误判/漏检兜底) and classify-listed pages.
       if (!hasPage && !listed.has(p)) continue;
+      out.push(p);
     }
-    out.push(p);
     if (out.length >= MAX_OCR_PAGES_PER_CALL) break;
   }
   return out;
@@ -449,7 +445,7 @@ const FILE_READ_SYSTEM_PROMPT = [
   'Each call returns a SHORT slice (~8 pages by default), not the whole book — this is a context budget, separate from TOC skipping.',
   'Omitting start_page auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body; you still only get ~8 pages from that start.',
   'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
-  'Scanned or Mixed PDFs OCR empty pages in the current window on demand (not whole-book OCR). Never say you cannot read a scanned PDF when a 【历史文件引用】 marker is present.',
+  'Scanned or Mixed PDFs OCR empty pages in the current window on demand; TextBased also OCRs known-empty pages as a misclassification fallback (not whole-book OCR). Never say you cannot read a scanned PDF when a 【历史文件引用】 marker is present.',
   'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
   'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',

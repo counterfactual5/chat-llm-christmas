@@ -307,14 +307,15 @@ function reflowHeadingsListsHrs(chunk: string): string {
 
 /** Full structural repair: unwrap hard-wraps, then tables, then headings/lists/hrs. */
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
-  const src = normalizePipeLookalikesInTableishLines(
-    normalizeMarkdownLineEndings(String(markdown || '')),
-  );
+  const src = normalizeMarkdownLineEndings(String(markdown || ''));
   if (!src) return src;
 
+  // Fenced diagrams draw rows with `│` on purpose — rewriting those to `|`
+  // inside a fence shreds the figure, so stay outside fences here too.
+  let out = reflowOutsideFences(src, normalizePipeLookalikesInTableishLines);
   // Undo mid-word hard wraps before structural splits so titles/tables see
   // whole tokens (`方案`, not `方` + `案`).
-  let out = reflowOutsideFences(src, unwrapHardWrappedProse);
+  out = reflowOutsideFences(out, unwrapHardWrappedProse);
   // Tables next: while a smashed table is still one line, the prose-level rules
   // below (`| … | **next**` → new block) cannot tell a row boundary from a
   // table→prose boundary and would tear the last cell out of its row.

@@ -45,4 +45,16 @@ describe('eastAsianCharColumns (ASCII art grid)', () => {
     const out = prepareChatMarkdown(`\`\`\`text\n${nested}\n\`\`\``);
     expect(out).toContain(nested);
   });
+
+  it('keeps box-drawing pipes inside fences out of table normalization', () => {
+    const fenced = [
+      '```text',
+      '│ 浏览器 │ 服务端 │',
+      '│   A   │   B   │',
+      '```',
+    ].join('\n');
+    const out = prepareChatMarkdown(fenced);
+    expect(out).toContain('│ 浏览器 │ 服务端 │');
+    expect(out).not.toContain('| 浏览器 |');
+  });
 });

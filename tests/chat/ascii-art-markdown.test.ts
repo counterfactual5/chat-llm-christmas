@@ -68,6 +68,24 @@ describe('ASCII art Markdown recovery', () => {
     expect(prepareChatMarkdown(prose)).not.toContain('```');
   });
 
+  it('never fences a smashed GFM table as a diagram', () => {
+    const smashed = [
+      '**方案 1: SVD 量化版（最推荐）** | 模型 | 显存需求 | 说明 |',
+      '|-------|----------|-------| | **SVD-INT8** | ~5.4 GB | 画质几乎无损 | | **xFormers** | 节省 30-40% | ✅ 必须开启 |',
+    ].join('\n');
+    expect(looksLikeAsciiArt(smashed)).toBe(false);
+    expect(normalizeAsciiArtMarkdown(smashed)).not.toContain('```');
+
+    const out = prepareChatMarkdown(smashed);
+    expect(out).not.toContain('```');
+    expect(out).toMatch(/\*\*方案 1: SVD 量化版（最推荐）\*\*\n\n\| 模型 \|/);
+    expect(out).toContain('| **SVD-INT8** | ~5.4 GB | 画质几乎无损 |');
+  });
+
+  it('still fences portable pipe trees whose branches are not table separators', () => {
+    expect(looksLikeAsciiArt('app\n|-- src\n|-- lib\n`-- README.md')).toBe(true);
+  });
+
   it('peels leading prose out of a mixed ```text fence', () => {
     const art = ['┌───────┐', '│浏览器  │', '│Browser│', '└───┬───┘'].join('\n');
     const body = [

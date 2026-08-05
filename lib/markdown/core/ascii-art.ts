@@ -8,10 +8,16 @@
  */
 
 const UNICODE_BRANCH_RE = /(?:^|\s)[├└](?:[─━-]{1,3})/g;
-/** `|---` inside GFM tables (`| --- |`) is NOT a tree branch — negative lookahead. */
-const ASCII_BRANCH_RE = /(?:^|\s)(?:\+--+|\\--+|`--+|\|--+(?!\s*\|))\s*/g;
+/**
+ * `|---` inside GFM tables (`|------|---|`) is NOT a tree branch. `(?!-)` pins
+ * the dash run to its full length so the `(?!\s*\|)` guard cannot be dodged by
+ * backtracking to a shorter `|--` inside a longer separator cell.
+ */
+const ASCII_BRANCH_RE = /(?:^|\s)(?:\+--+|\\--+|`--+|\|--+(?!-)(?!\s*\|))\s*/g;
 const BRANCH_LINE_RE =
-  /^\s*(?:(?:[|│┃]\s*)*)(?:[├└](?:[─━-]{1,3})|\+--+|\|--+(?!\s*\|)|\\--+|`--+)\s*/;
+  /^\s*(?:(?:[|│┃]\s*)*)(?:[├└](?:[─━-]{1,3})|\+--+|\|--+(?!-)(?!\s*\|)|\\--+|`--+)\s*/;
+/** `| --- | --- |` style delimiter, even when rows were smashed onto one line. */
+const GFM_SEPARATOR_RE = /\|\s*:?-{3,}:?\s*\|/;
 const BOX_CHAR_RE = /[┌┐└┘╔╗╚╝╭╮╰╯│║┃─━═]/g;
 const BOX_TOP_RE = /[┌╔╭].*[┐╗╮]/;
 const BOX_BOTTOM_RE = /[└╚╰].*[┘╝╯]/;
@@ -209,7 +215,19 @@ export function looksLikeAsciiLineArt(text: string): boolean {
   return false;
 }
 
+/**
+ * A GFM table — even one whose rows the model smashed onto a single line — must
+ * never be fenced as a diagram: fencing hides it from the table repair pass and
+ * leaves the reader with a horizontally scrolling code block.
+ */
+export function looksLikeGfmTableSource(text: string): boolean {
+  const t = String(text || '');
+  if (!GFM_SEPARATOR_RE.test(t)) return false;
+  return (t.match(/\|/g) || []).length >= 6;
+}
+
 export function looksLikeAsciiArt(text: string): boolean {
+  if (looksLikeGfmTableSource(text)) return false;
   return (
     looksLikeAsciiTree(text) ||
     looksLikeUnicodeBox(text) ||
@@ -350,6 +368,7 @@ export function promoteInlineAsciiArtToFences(markdown: string): string {
 
 function paragraphLooksLikeAsciiArt(paragraph: string): boolean {
   const p = String(paragraph || '');
+  if (looksLikeGfmTableSource(p)) return false;
   if (looksLikeUnicodeBox(p)) return true;
   if (looksLikeAsciiLineArt(p)) return true;
   const branchLines = p.split('\n').filter((line) => BRANCH_LINE_RE.test(line)).length;

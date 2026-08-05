@@ -73,6 +73,7 @@ function PdfPage({
     let cancelled = false;
     let textLayer: { cancel: () => void } | null = null;
     let renderTask: { cancel: () => void } | null = null;
+    const textElForCleanup = textRef.current;
 
     void (async () => {
       try {
@@ -164,7 +165,7 @@ function PdfPage({
       } catch {
         /* ignore */
       }
-      textRef.current?.replaceChildren();
+      textElForCleanup?.replaceChildren();
     };
   }, [visible, doc, pageNumber, containerWidth]);
 

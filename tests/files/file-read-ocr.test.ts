@@ -15,7 +15,7 @@ describe('pagesNeedingOcrInWindow', () => {
     ).toEqual([]);
   });
 
-  it('OCRs listed empty Mixed pages only', () => {
+  it('OCRs listed and unlisted empty Mixed pages in the window (漏检兜底)', () => {
     expect(
       pagesNeedingOcrInWindow({
         pages: [
@@ -29,7 +29,7 @@ describe('pagesNeedingOcrInWindow', () => {
         needsOcr: true,
         pdfType: 'Mixed',
       }),
-    ).toEqual([1]);
+    ).toEqual([1, 3]);
   });
 
   it('OCRs empty Scanned window pages', () => {

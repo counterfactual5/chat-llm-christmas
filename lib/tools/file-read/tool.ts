@@ -22,7 +22,8 @@ const MAX_OCR_PAGES_PER_CALL = 8;
 
 /**
  * Which pages in the current read window should be OCR'd on demand.
- * TextBased: never. Mixed/Scanned/ImageBased: empty pages that need text.
+ * TextBased: never. Scanned/ImageBased: empty/missing pages in the window.
+ * Mixed: empty pages already in the extract, plus classify-listed pages (漏检兜底).
  */
 export function pagesNeedingOcrInWindow(opts: {
   pages: Array<{ page: number; text: string }>;
@@ -56,11 +57,13 @@ export function pagesNeedingOcrInWindow(opts: {
   const byPage = new Map(opts.pages.map((p) => [p.page, p.text]));
   const out: number[] = [];
   for (let p = start; p < start + max; p++) {
+    const hasPage = byPage.has(p);
     const body = String(byPage.get(p) || '').trim();
     if (body.length >= MIN_PAGE_CHARS_FOR_OCR) continue;
-    if (pdfType === 'Mixed' && listed.size > 0 && !listed.has(p)) {
-      // Mixed: only OCR pages classify flagged (unless list empty → empty pages).
-      continue;
+    if (pdfType === 'Mixed') {
+      // Don't OCR pages not yet in the sidecar (background unpdf may fill them).
+      // Do OCR known-empty pages (漏检) and classify-listed pages.
+      if (!hasPage && !listed.has(p)) continue;
     }
     out.push(p);
     if (out.length >= MAX_OCR_PAGES_PER_CALL) break;
@@ -443,10 +446,10 @@ async function fetchGatewayFileText(
 const FILE_READ_SYSTEM_PROMPT = [
   'You also have a file_read tool for documents in this chat (user attachments and book_download / paper_download / create_file outputs).',
   'They appear as 【历史文件引用】 with fileId — call file_read with that file_id (parameter name is file_id, not query).',
-  'file_read returns a SHORT slice by default (about 8 pages), not the whole book — this saves context.',
-  'First call with only file_id auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body.',
+  'Each call returns a SHORT slice (~8 pages by default), not the whole book — this is a context budget, separate from TOC skipping.',
+  'Omitting start_page auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body; you still only get ~8 pages from that start.',
   'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
-  'Scanned or mixed PDFs may OCR empty pages in the current window on demand (same as reading a slice — not whole-book OCR).',
+  'Scanned or Mixed PDFs OCR empty pages in the current window on demand (not whole-book OCR). Never say you cannot read a scanned PDF when a 【历史文件引用】 marker is present.',
   'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
   'Never claim you cannot read a downloaded book when a 【历史文件引用】 marker is present.',
@@ -617,6 +620,15 @@ export function createFileReadTool(): ChatTool {
           pdfType,
         });
         if (needOcrPages.length && apiKey) {
+          const ocrQuery = `ocr p.${needOcrPages.join(',')}`;
+          ctx.send({
+            tool: {
+              status: 'start',
+              name: 'file_read',
+              query: ocrQuery,
+              provider: 'pdf-ocr',
+            },
+          });
           const ocr = await requestOcrPages(fileId, needOcrPages, apiKey);
           if (ocr.ok && ocr.text?.trim()) {
             text = ocr.text;
@@ -642,9 +654,37 @@ export function createFileReadTool(): ChatTool {
                 .join('; ')
                 .slice(0, 240);
             }
+            ctx.send({
+              tool: {
+                status: 'done',
+                name: 'file_read',
+                query: ocrQuery,
+                provider: ocrProviders[0] || 'pdf-ocr',
+                results: ocrApplied.length
+                  ? [
+                      {
+                        title: name,
+                        url: `/api/files/${encodeURIComponent(fileId)}`,
+                        snippet: `OCR pages ${ocrApplied.join(', ')}`,
+                      },
+                    ]
+                  : [],
+                error: ocrError,
+              },
+            });
           } else if (!ocr.ok) {
             ocrError = ocr.error;
             console.warn('[file_read] on-demand OCR failed:', ocr.error);
+            ctx.send({
+              tool: {
+                status: 'done',
+                name: 'file_read',
+                query: ocrQuery,
+                provider: 'pdf-ocr',
+                results: [],
+                error: ocrError,
+              },
+            });
           }
         }
 

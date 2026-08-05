@@ -12,6 +12,7 @@ export { getModelSpec } from '@/lib/models/specs/catalog';
 export {
   isImageGenerationModel,
   isEmbeddingModel,
+  isNonChatSpecialistModel,
   isChatPickerModel,
   isCursorStyleModel,
 } from '@/lib/models/specs/filters';

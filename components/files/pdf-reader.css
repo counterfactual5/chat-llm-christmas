@@ -1,4 +1,4 @@
-/* pdf.js text layer — keep glyphs invisible; only the selection paint shows. */
+/* pdf.js text layer: invisible glyphs, selection highlight only. */
 .pdf-reader-page {
   position: relative;
   --scale-factor: 1;
@@ -10,38 +10,40 @@
 
 .pdf-reader-page .textLayer {
   position: absolute;
-  inset: 0;
-  overflow: clip;
-  opacity: 1;
+  left: 0;
+  top: 0;
+  overflow: hidden;
   line-height: 1;
   letter-spacing: normal;
   word-spacing: normal;
   text-size-adjust: none;
   transform-origin: 0 0;
   z-index: 2;
-  caret-color: CanvasText;
+  caret-color: transparent;
   pointer-events: auto;
   text-align: initial;
+  forced-color-adjust: none;
   --min-font-size: 1;
   --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
   --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
-.pdf-reader-page .textLayer :is(span, br) {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+.pdf-reader-page .textLayer span,
+.pdf-reader-page .textLayer br {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
   position: absolute;
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
   user-select: text;
+  -webkit-user-select: text;
 }
 
 .pdf-reader-page .textLayer > :not(.markedContent),
 .pdf-reader-page .textLayer .markedContent span:not(.markedContent) {
   z-index: 1;
-  --font-height: 0;
-  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  font-size: calc(var(--text-scale-factor) * var(--font-height, 0px));
   --scale-x: 1;
   --rotate: 0deg;
   transform: rotate(var(--rotate)) scaleX(var(--scale-x))
@@ -52,21 +54,23 @@
   display: contents;
 }
 
-/* Critical: selected glyphs must stay transparent or overlapping runs show. */
-.pdf-reader-page .textLayer ::selection {
-  background: rgb(0 100 255 / 0.28);
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+/* Keep selected glyphs invisible — only the blue wash should show. */
+.pdf-reader-page .textLayer span::selection,
+.pdf-reader-page .textLayer::selection {
+  background: rgb(0 100 255 / 0.28) !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
 }
 
-.pdf-reader-page .textLayer ::-moz-selection {
-  background: rgb(0 100 255 / 0.28);
-  color: transparent;
+.pdf-reader-page .textLayer span::-moz-selection,
+.pdf-reader-page .textLayer::-moz-selection {
+  background: rgb(0 100 255 / 0.28) !important;
+  color: transparent !important;
 }
 
 .pdf-reader-page .textLayer br::selection,
 .pdf-reader-page .textLayer br::-moz-selection {
-  background: transparent;
+  background: transparent !important;
 }
 
 .pdf-reader-page canvas {

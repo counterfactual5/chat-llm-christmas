@@ -88,6 +88,7 @@ function PdfPage({
         const wrap = wrapRef.current;
         if (!canvas || !textEl || !wrap) return;
 
+        // Keep canvas CSS size == text layer size (devicePixelRatio only for bitmap).
         const outputScale = Math.min(2, window.devicePixelRatio || 1);
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
@@ -108,15 +109,17 @@ function PdfPage({
         await task.promise;
         if (cancelled) return;
 
-        // Match pdf.js viewer: TextLayer layout is driven by --total-scale-factor.
+        const cssW = Math.floor(viewport.width);
+        const cssH = Math.floor(viewport.height);
+        // Font-size math uses --total-scale-factor; layout % is relative to layer box.
         wrap.style.setProperty('--scale-factor', String(viewport.scale));
         wrap.style.setProperty('--user-unit', '1');
-        wrap.style.width = `${Math.floor(viewport.width)}px`;
-        wrap.style.height = `${Math.floor(viewport.height)}px`;
+        wrap.style.setProperty('--total-scale-factor', String(viewport.scale));
+        wrap.style.width = `${cssW}px`;
+        wrap.style.height = `${cssH}px`;
 
         textEl.replaceChildren();
         const pdfjs = await import('pdfjs-dist');
-        pdfjs.setLayerDimensions(textEl, viewport);
         const textContent = await page.getTextContent();
         if (cancelled) return;
         const layer = new pdfjs.TextLayer({
@@ -126,6 +129,18 @@ function PdfPage({
         });
         textLayer = layer;
         await layer.render();
+        if (cancelled) {
+          textEl.replaceChildren();
+          return;
+        }
+        // Override setLayerDimensions' CSS round() (unsupported / wrong in some
+        // engines) so span % positions match the canvas box exactly.
+        textEl.style.width = `${cssW}px`;
+        textEl.style.height = `${cssH}px`;
+        textEl.style.left = '0';
+        textEl.style.top = '0';
+        textEl.style.right = 'auto';
+        textEl.style.bottom = 'auto';
       } catch (err) {
         if (cancelled) return;
         // Keep canvas blank; selection simply unavailable for this page.
@@ -149,6 +164,7 @@ function PdfPage({
       } catch {
         /* ignore */
       }
+      textRef.current?.replaceChildren();
     };
   }, [visible, doc, pageNumber, containerWidth]);
 

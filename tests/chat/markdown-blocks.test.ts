@@ -285,6 +285,36 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(reflowCollapsedMarkdownBlocks(ok)).toBe(ok);
   });
 
+  it('does not break GFM tables that omit outer pipes', () => {
+    const ok = ['Name | Age | City', '--- | --- | ---', 'Ann | 3 | NY'].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(ok);
+    // Separator must stay a delimiter row — never become a thematic break.
+    expect(out).toContain('--- | --- | ---');
+    expect(out).not.toMatch(/\n---\n\n\|/);
+    // Body row may gain outer pipes via orphan-row repair; header/sep stay.
+    expect(out).toMatch(/Name \| Age \| City/);
+    expect(out).toMatch(/Ann \| 3 \| NY/);
+  });
+
+  it('still splits HR-then-prose without touching table separators', () => {
+    expect(reflowCollapsedMarkdownBlocks('前言 --- 需要我帮你吗？')).toMatch(
+      /前言\n\n---\n\n需要我帮你吗？/,
+    );
+  });
+
+  it('keeps normal headings that contain version-like decimals', () => {
+    expect(reflowCollapsedMarkdownBlocks('## HTTP 1.1 概述')).toBe('## HTTP 1.1 概述');
+    expect(reflowCollapsedMarkdownBlocks('## 1. 介绍')).toBe('## 1. 介绍');
+    expect(reflowCollapsedMarkdownBlocks('## 步骤\n1. 打开\n2. 关闭')).toBe(
+      '## 步骤\n1. 打开\n2. 关闭',
+    );
+  });
+
+  it('keeps already-split backtick bullet lists', () => {
+    const ok = ['文件夹：', '- `checkpoints`', '- `vae`'].join('\n');
+    expect(reflowCollapsedMarkdownBlocks(ok)).toBe(ok);
+  });
+
   it('splits ordered lists that trail a heading on the same line', () => {
     const src =
       '## ⚡ 快速操作步骤 1. 打开资源管理器 2. **新建文件夹** 3. 放入模型';

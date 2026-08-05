@@ -224,8 +224,9 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '$1\n\n---',
   );
   // Prose glued onto the same line after an HR: `--- 需要我帮你…`
+  // Do NOT fire on GFM separators without leading pipes: `--- | --- | ---`.
   out = out.replace(
-    new RegExp(String.raw`(^|\n)(${hrDashes})[ \t]+(?=\S)`, 'g'),
+    new RegExp(String.raw`(^|\n)(${hrDashes})[ \t]+(?![|:\-])(?=\S)`, 'g'),
     '$1---\n\n',
   );
   out = out.replace(
@@ -233,9 +234,11 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '---\n\n',
   );
   // Trailing HR jammed onto a finished pipe row: `| … | ---`
+  // Skip separator lines themselves (`| --- | --- | ---`) — those dashes are cells.
   out = out.replace(
     new RegExp(String.raw`(\|[^\n]*\|)[ \t]+(${hrDashes})[ \t]*$`, 'gm'),
-    '$1\n\n---',
+    (full, row: string) =>
+      /^[\s|:\-—–−－─━═]+$/.test(row) ? full : `${row}\n\n---`,
   );
   // Inline/path code then HR with no space: `` `D:\path\`--- ``
   out = out.replace(/(`)(-{3,})/g, '$1\n\n$2');

@@ -160,7 +160,7 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/应该是：\n1\. 本周内投简历\n2\. 同时逛 GitHub\n3\. 长期加人脉/);
   });
 
-  it('splits mid-line headings/HRs after Latin (gemma-style smash)', () => {
+  it('splits mid-line headings/HRs after Latin (step-style smash)', () => {
     const smashed = [
       '有 NVIDIA → 选 nvidia 或 nvidia_cu126',
       '- 有 AMD → 选 amd',
@@ -181,6 +181,43 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/\|\n\n---\n/);
     expect(out).toMatch(/下 intel\n\n---/);
     expect(out).toMatch(/即可。\n\n---\n\n需要我帮你确认/);
+  });
+
+  it('splits colon-led bullets without breaking **/cmd** catalogs', () => {
+    const out = reflowCollapsedMarkdownBlocks(
+      'Windows 便携版对 Mac 支持有限： - Mac通常使用 Apple Silicon - 官方便携版主要面向 Windows',
+    );
+    expect(out).toMatch(/支持有限：\n- Mac通常使用 Apple Silicon\n- 官方便携版主要面向 Windows/);
+    expect(
+      reflowCollapsedMarkdownBlocks('- **/image** - 生成图片\n- **/research** - 深度研究'),
+    ).toContain('- **/image** - 生成图片');
+  });
+
+  it('joins Step mid-word hard wraps without merging real blocks', () => {
+    const smashed = [
+      '- **SVD 工作流 = 本地运行**，模型下载一次，之后完全离线',
+      '- **云端 = 备选方**',
+      '案，仅在你硬件跑不动时用来“租算力”',
+      '- 唯一可能涉及云端的部分是 **GPT Image API**',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(smashed);
+    expect(out).toContain('- **云端 = 备选方**案，仅在你硬件跑不动时用来“租算力”');
+    expect(out).toMatch(/离线\n- \*\*云端/);
+    expect(out).toMatch(/租算力”\n- 唯一可能/);
+  });
+
+  it('joins long hard-wrapped CJK prose lines', () => {
+    const line1 =
+      '- Mac 通常使用 Apple Silicon (M1/M2/M3) 或 Intel 芯片 - 官方 portable 包主要是为 Windows 设计的 - Mac 上运';
+    const line2 = '行 ComfyUI 通常需要：';
+    const out = reflowCollapsedMarkdownBlocks(`${line1}\n${line2}`);
+    expect(out).toContain('Mac 上运行 ComfyUI 通常需要：');
+    expect(out).not.toMatch(/运\n行/);
+  });
+
+  it('does not join short poem-like CJK lines', () => {
+    const poem = ['床前明月光', '疑是地上霜', '举头望明月'].join('\n');
+    expect(reflowCollapsedMarkdownBlocks(poem)).toBe(poem);
   });
 
   it('does not rewrite already-correct headings, hrs, or tables', () => {

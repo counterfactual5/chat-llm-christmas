@@ -1,5 +1,5 @@
 /**
- * Restore block-level Markdown when models (esp. GLM / Gemma) collapse newlines
+ * Restore block-level Markdown when models (esp. GLM / Step) collapse newlines
  * into spaces. Without line starts, remark leaves `##`, `-`, `---`, and tables
  * as literal text inside one giant paragraph.
  *
@@ -29,6 +29,74 @@ const BREAK_TEXT = `\u4e00-\u9fff${BREAK_HARD}`;
 const UL_ITEM =
   String.raw`-\s+(?:(?:状态|网址|特点|链接|注意|路径|直接)[:：]|/[A-Za-z*]|\*\*)`;
 
+/** Likely a new Markdown block — never glue the previous line onto it. */
+function isMarkdownBlockStart(line: string): boolean {
+  const t = String(line || '').trimStart();
+  if (!t) return true;
+  if (/^(#{1,6}\s|```|~~~|>\s|-\s+|\*\s+(?!\*)|_\s+(?!_)|\d{1,2}\.\s+)/.test(t)) {
+    return true;
+  }
+  if (/^-{3,}\s*$/.test(t)) return true;
+  // Table row or separator.
+  if (/^\|/.test(t) && t.includes('|', 1)) return true;
+  return false;
+}
+
+/**
+ * Step / some chat models hard-wrap around ~40 cols, often mid-CJK word
+ * (`备选方\n案，` or `**备选方**\n案`). Join only those single-newline wraps —
+ * blank lines and real block starts stay put (so short poem lines survive).
+ */
+function shouldJoinHardWrap(prev: string, next: string): boolean {
+  if (!prev.trim() || !next.trim()) return false;
+  if (isMarkdownBlockStart(next)) return false;
+  if (/^\s*#{1,6}\s/.test(prev)) return false;
+  // Keep table rows intact (neither glue two rows, nor glue a row into prose).
+  if (/^\s*\|/.test(prev.trimStart()) && prev.includes('|', 1)) return false;
+  if (/^\s*\|/.test(next.trimStart()) && next.includes('|', 1)) return false;
+
+  const a = prev.trimEnd();
+  const b = next.trimStart();
+  const aLast = a.charAt(a.length - 1);
+  const bFirst = b.charAt(0);
+  const cjk = /[\u4e00-\u9fff]/;
+
+  // Emphasis/code closed right before the wrap: `**备选方**\n案，`
+  if (/[*`）)」』"'”’]$/.test(a) && cjk.test(bFirst)) return true;
+  // Clear mid-word wrap: next CJK is immediately followed by clause punct.
+  if (cjk.test(aLast) && /^[\u4e00-\u9fff][，、]/.test(b)) return true;
+  // Long hard-wrapped prose line continuing with CJK/Latin.
+  const prevLen = a.replace(/\s+/g, '').length;
+  if (prevLen >= 36 && cjk.test(aLast) && (cjk.test(bFirst) || /[A-Za-z0-9]/.test(bFirst))) {
+    return true;
+  }
+  if (prevLen >= 36 && /[A-Za-z0-9]$/.test(a) && cjk.test(bFirst)) return true;
+  return false;
+}
+
+function joinHardWrap(prev: string, next: string): string {
+  const a = prev.trimEnd();
+  const b = next.trimStart();
+  const needSpace = /[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b);
+  return needSpace ? `${a} ${b}` : `${a}${b}`;
+}
+
+function unwrapHardWrappedProse(chunk: string): string {
+  const lines = String(chunk || '').split('\n');
+  if (lines.length < 2) return chunk;
+  const out: string[] = [lines[0]!];
+  for (let i = 1; i < lines.length; i++) {
+    const prev = out[out.length - 1]!;
+    const next = lines[i]!;
+    if (shouldJoinHardWrap(prev, next)) {
+      out[out.length - 1] = joinHardWrap(prev, next);
+    } else {
+      out.push(next);
+    }
+  }
+  return out.join('\n');
+}
+
 function reflowOutsideFences(
   markdown: string,
   transform: (chunk: string) => string,
@@ -56,7 +124,7 @@ function reflowHeadingsListsHrs(chunk: string): string {
     '$1\n\n$2',
   );
   out = out.replace(/([.!?])\s+(#{1,6}\s+\S)/g, '$1\n\n$2');
-  // Mid-line only (Gemma/GLM after Latin/code): `选 intel ### 第二步`.
+  // Mid-line only (Step/GLM after Latin/code): `选 intel ### 第二步`.
   // Already-correct `\n### ` is a no-op; skip `|` so table cells stay intact.
   out = out.replace(/([^\n#|])[ \t]+(#{1,6}[ \t]+\S)/g, '$1\n\n$2');
 
@@ -115,6 +183,19 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // CTA after list prose: `建立人脉 需要我帮你：`
   out = out.replace(/([^\n])\s+(需要我(?:帮你|协助)[:：])/g, '$1\n\n$2');
 
+  // Colon then a real bullet: `支持有限： - Mac通常…` (not `价格：约一百`).
+  out = out.replace(/([：:])[ \t]+(-\s+[\u4e00-\u9fffA-Za-z])/g, '$1\n$2');
+  // Continue splitting sibling bullets once a line already starts with `- `,
+  // but never catalog lines (`- **/image** - 说明`).
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(
+      /(^|\n)(-\s+(?!\*\*)[^\n]*?)\s+(-\s+(?!\*\*)[\u4e00-\u9fffA-Za-z])/g,
+      '$1$2\n$3',
+    );
+    if (next === out) break;
+    out = next;
+  }
+
   // Closed emphasis then a heading / ordered list. Do NOT break before `- `
   // (`**/image** - 生成图片` must stay one catalog line).
   out = out.replace(
@@ -134,15 +215,18 @@ function reflowHeadingsListsHrs(chunk: string): string {
   return out;
 }
 
-/** Full structural repair: headings / lists / hrs, then GFM table repair. */
+/** Full structural repair: unwrap hard-wraps, then tables, then headings/lists/hrs. */
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   const src = String(markdown || '');
   if (!src) return src;
 
-  // Tables first: while a smashed table is still one line, the prose-level rules
+  // Undo mid-word hard wraps before structural splits so titles/tables see
+  // whole tokens (`方案`, not `方` + `案`).
+  let out = reflowOutsideFences(src, unwrapHardWrappedProse);
+  // Tables next: while a smashed table is still one line, the prose-level rules
   // below (`| … | **next**` → new block) cannot tell a row boundary from a
   // table→prose boundary and would tear the last cell out of its row.
-  let out = reflowOutsideFences(src, reflowCollapsedMarkdownTables);
+  out = reflowOutsideFences(out, reflowCollapsedMarkdownTables);
   out = reflowOutsideFences(out, reflowHeadingsListsHrs);
   out = out.replace(/\n{3,}/g, '\n\n');
   return out;

@@ -87,4 +87,43 @@ describe('repairGfmTableStructure', () => {
     expect(out).toContain('|');
     expect(out).not.toContain('｜');
   });
+
+  it('peels a jammed title even when a blank line precedes the separator', () => {
+    const raw = [
+      '第二步：区分 nvidia vs nvidia_cu126 | 情况 | 推荐选择 | 原因 |',
+      '',
+      '|------|---------|------|',
+      '| 已经有 NVIDIA 驱动/CUDA | `nvidia` | 体积更小 |',
+      '| 没装 CUDA / 不想折腾 | `nvidia_cu126` | 开箱即用 |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw);
+    expect(out).toMatch(/^第二步：区分 nvidia vs nvidia_cu126\n\n\| 情况 \|/);
+    expect(out).not.toMatch(/nvidia_cu126 \| 情况/);
+    expect(out).toContain('|------|---------|------|');
+  });
+
+  it('normalizes unicode dashes inside separator rows', () => {
+    const raw = [
+      '第二步：区分版本 | 情况 | 推荐 | 原因 |',
+      '|──────|─────────|──────|',
+      '| 已装 CUDA | cu126 | 快 |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw);
+    expect(out).toMatch(/^第二步：区分版本\n\n\| 情况 \|/);
+    expect(out).toContain('|------|---------|------|');
+    expect(out).not.toMatch(/[─━═]/);
+  });
+
+  it('inserts an empty header when the model emits only sep + body rows', () => {
+    const raw = [
+      '### 第二步：区分 nvidia vs nvidia_cu126',
+      '|------|---------|------|',
+      '| 已经有 NVIDIA 驱动/CUDA | `nvidia` | 体积更小 |',
+      '| 没装 CUDA / 不想折腾 | `nvidia_cu126` | 开箱即用 |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw);
+    expect(out).toContain('| - | - | - |');
+    expect(out).toContain('|------|---------|------|');
+    expect(out).toContain('| 已经有 NVIDIA 驱动/CUDA | `nvidia` | 体积更小 |');
+  });
 });

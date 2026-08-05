@@ -49,8 +49,19 @@ export function looksLikeCollapsedMarkdownTable(text: string): boolean {
  * Example (GFM fails when header has 4 cells and sep has 3):
  * `⚠️ 标题 | 平台 | 状态 | 说明 |\n|------|------|------|`
  */
+/** Next non-empty line index after `from` (exclusive of blanks). */
+function nextNonEmptyLineIndex(lines: string[], from: number): number {
+  for (let j = from; j < lines.length; j++) {
+    if (String(lines[j] || '').trim()) return j;
+  }
+  return -1;
+}
+
 export function repairGfmTableStructure(markdown: string): string {
-  let src = String(markdown || '').replace(/\uFF5C/g, '|'); // fullwidth ｜
+  let src = String(markdown || '')
+    .replace(/\uFF5C/g, '|') // fullwidth ｜
+    // Fancy dashes in separator rows — GFM only accepts ASCII `-`.
+    .replace(/[—–−－─━═]/g, '-');
   if (!src.includes('|')) return src;
 
   const lines = src.split('\n');
@@ -58,12 +69,20 @@ export function repairGfmTableStructure(markdown: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i]!;
-    const next = lines[i + 1] ?? '';
+    // Models often leave a blank line between a jammed title+header and `|---|`.
+    const sepIdx = nextNonEmptyLineIndex(lines, i + 1);
+    const next = sepIdx >= 0 ? lines[sepIdx]! : '';
 
     if (isSeparatorLine(next) && line.includes('|')) {
       const peeled = peelTitleFromHeaderLine(line, next);
       if (peeled) {
         out.push(...peeled);
+        // Keep any blank lines before the separator; then emit sep + continue.
+        if (sepIdx > i + 1) {
+          for (let b = i + 1; b < sepIdx; b++) out.push(lines[b]!);
+        }
+        out.push(next);
+        i = sepIdx;
         continue;
       }
     }
@@ -79,6 +98,32 @@ export function repairGfmTableStructure(markdown: string): string {
     // Trailing empty cell: `| … | |` → `| … |`
     if (/\|[^|\n]+\|\s*\|\s*$/.test(line) && pipeCount(line) >= 4) {
       line = line.replace(/\|\s*\|\s*$/, '|');
+    }
+
+    // Orphan separator after prose/heading (model dropped the header row):
+    // `### 第二步\n|------|------|\n| a | b |` → insert an empty header so GFM
+    // still builds a table.
+    if (isSeparatorLine(line)) {
+      const prev = [...out].reverse().find((l) => String(l || '').trim()) || '';
+      const prevTrim = prev.trim();
+      const nextLine = lines[i + 1] ?? '';
+      const cols = splitMarkdownTableCells(line).filter((c) =>
+        /^:?-{3,}:?$/.test(c),
+      ).length;
+      if (
+        cols >= 2 &&
+        prevTrim &&
+        !prevTrim.startsWith('|') &&
+        !isSeparatorLine(prevTrim) &&
+        nextLine.trim().startsWith('|') &&
+        !isSeparatorLine(nextLine)
+      ) {
+        // Non-empty placeholders — blank cells (`|  |  |`) are mistaken for
+        // smashed row boundaries by reflowCollapsedMarkdownTables.
+        out.push(
+          formatMarkdownTableRow(Array.from({ length: cols }, () => '-')),
+        );
+      }
     }
 
     out.push(line);

@@ -144,7 +144,13 @@ export function repairGfmTableStructure(markdown: string): string {
       if (peeled) {
         // Anything between header and delimiter is blank (sepIdx skips blanks)
         // and must be dropped — GFM needs the two rows adjacent.
-        out.push(...peeled);
+        const [prefix, blank, header] = peeled;
+        // Prefix often still carries `| last row | ### heading` / `| row | ---`
+        // when the whole reply was newline-collapsed — break those here so the
+        // Thought path (table-only reflow) also gets readable structure.
+        out.push(...breakBlocksGluedToPipeRow(prefix));
+        out.push(blank);
+        out.push(header);
         out.push(next);
         i = sepIdx;
         continue;
@@ -199,6 +205,21 @@ export function repairGfmTableStructure(markdown: string): string {
   return out.join('\n');
 }
 
+/**
+ * After peeling a jammed header, the leftover prefix may still end a prior
+ * pipe row and then glue a heading/HR: `| 说明 | ### 方案` / `| 说明 | --- ##`.
+ * Split those so both answer and Thought (table-only) reflow stay readable.
+ */
+function breakBlocksGluedToPipeRow(prefix: string): string[] {
+  let s = String(prefix || '');
+  if (!s.includes('|')) return s ? [s] : [];
+  s = s.replace(/(\|[^\n]*\|)[ \t]+(#{1,6}[ \t]+\S)/g, '$1\n\n$2');
+  s = s.replace(/(\|[^\n]*\|)[ \t]+(---+)\s+(?=#{1,6}\s)/g, '$1\n\n$2\n\n');
+  // `| 说明 | ---` at end of prefix (HR with no following heading yet).
+  s = s.replace(/(\|[^\n]*\|)[ \t]+(---+)[ \t]*$/g, '$1\n\n$2');
+  return s.split('\n');
+}
+
 function peelTitleFromHeaderLine(
   line: string,
   sepLine: string,
@@ -208,25 +229,24 @@ function peelTitleFromHeaderLine(
   );
   if (sepCells.length < 2) return null;
 
-  // `title | 平台 | 状态 | 说明 |` — title has no pipes.
-  const jammed = line.match(
-    /^(.*?)(?:\s*)(\|\s*[^|\n]+(?:\s*\|\s*[^|\n]*){1,}\|\s*)$/u,
+  const cols = sepCells.length;
+  const cell = String.raw`[^|\n]+`;
+  // Exactly `cols` cells from the right — works for a plain title and for the
+  // newline-collapsed case where a previous table row + prose still sit on the
+  // same line: `| SVD-FP32 | 9GB | 说明 | ### 方案… 勾选： | 设置项 | 作用 | 建议 |`
+  const rightHeader = new RegExp(
+    String.raw`^(.*?)(?:\s*)(\|\s*${cell}(?:\s*\|\s*${cell}){${cols - 1}}\s*\|\s*)$`,
+    'u',
   );
+  const jammed = line.match(rightHeader);
   if (jammed) {
     const title = jammed[1]!.trim();
-    let header = jammed[2]!.trim();
-    if (
-      title &&
-      !title.includes('|') &&
-      !/^\s*\|/.test(title) &&
-      pipeCount(header) >= 2
-    ) {
-      const headerCells = splitMarkdownTableCells(header);
-      if (headerCells.length >= sepCells.length) {
-        // Prefer exactly sep column count from the right.
-        const cols = headerCells.slice(-sepCells.length);
-        return [title, '', formatMarkdownTableRow(cols)];
-      }
+    const header = jammed[2]!.trim();
+    const headerCells = splitMarkdownTableCells(header);
+    // Prefix may contain pipes (prior smashed row). Empty prefix = already a
+    // clean header line — leave it alone.
+    if (title && headerCells.length === cols) {
+      return [title, '', formatMarkdownTableRow(headerCells)];
     }
   }
 
@@ -243,18 +263,17 @@ function peelTitleFromHeaderLine(
 
   // No-space join: `时间）| 平台 | 状态 | 说明 |`
   const noSpace = line.match(
-    /^(.*?(?:\)|）|。|！|？|…|】|」))(\|\s*[^|\n]+(?:\s*\|\s*[^|\n]*){1,}\|\s*)$/u,
+    new RegExp(
+      String.raw`^(.*?(?:\)|）|。|！|？|…|】|」))(\|\s*${cell}(?:\s*\|\s*${cell}){${cols - 1}}\s*\|\s*)$`,
+      'u',
+    ),
   );
   if (noSpace) {
     const title = noSpace[1]!.trim();
     const header = noSpace[2]!.trim();
     const headerCells = splitMarkdownTableCells(header);
-    if (title && !title.includes('|') && headerCells.length >= sepCells.length) {
-      return [
-        title,
-        '',
-        formatMarkdownTableRow(headerCells.slice(-sepCells.length)),
-      ];
+    if (title && headerCells.length === cols) {
+      return [title, '', formatMarkdownTableRow(headerCells)];
     }
   }
 

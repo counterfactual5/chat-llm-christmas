@@ -212,4 +212,23 @@ describe('breakInlineCellBullets', () => {
     const prose = 'Some verifier prose ## Not A Heading and more text';
     expect(prepareChatMarkdown(prose, { reflowBlocks: false })).toBe(prose);
   });
+
+  it('peels the next table out of a fully newline-collapsed multi-table reply', () => {
+    // Real shape from a stored assistant message: every newline became a space,
+    // so the previous row, an HR, a heading, and the next header share one line.
+    const raw = [
+      '### 方案 1 | 模型 | 显存 | 说明 | |------|------|------| | **SVD-INT8** | ~5.4 GB | 推荐 | | **SVD-FP32** | ~19 GB | 不考虑 |',
+      '--- ## ⚙️ 必须开启 在界面： 1. **点击设置** 2. 找到以下选项并勾选： | 设置项 | 作用 | 建议 | |--------|------|------| | **Use xFormers** | 节省显存 | ✅ | | **Force FP16** | 半精度 | ✅ |',
+      '--- ## 📋 推荐工作流配置（8GB） | 参数 | 推荐值 | 说明 | |------|--------|------| | 分辨率 | 512×512 | 越高越吃 | | 帧数 | 14 帧 | 视频感 |',
+    ].join(' ');
+
+    for (const reflowBlocks of [true, false]) {
+      const out = prepareChatMarkdown(raw, { reflowBlocks });
+      expect(out).toContain('| 设置项 | 作用 | 建议 |');
+      expect(out).toContain('| 参数 | 推荐值 | 说明 |');
+      // Headers must sit on their own line — not glued to the list/title prose.
+      expect(out).toMatch(/勾选：\n\n\| 设置项 \|/);
+      expect(out).toMatch(/8GB）\n\n\| 参数 \|/);
+    }
+  });
 });

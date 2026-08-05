@@ -187,6 +187,14 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // Mid-line only (Step/GLM after Latin/code): `选 intel ### 第二步`.
   // Already-correct `\n### ` is a no-op; skip `|` so table cells stay intact.
   out = out.replace(/([^\n#|])[ \t]+(#{1,6}[ \t]+\S)/g, '$1\n\n$2');
+  // After a closed pipe row, a heading/HR often stays glued when the whole
+  // reply was newline-collapsed: `| 说明 | ### 方案` / `| 说明 | --- ## 标题`.
+  // (Bare `|` before `#` is skipped above so interior cells stay intact.)
+  out = out.replace(/(\|[^\n]*\|)[ \t]+(#{1,6}[ \t]+\S)/g, '$1\n\n$2');
+  out = out.replace(
+    /(\|[^\n]*\|)[ \t]+(---+)\s+(?=#{1,6}\s)/g,
+    '$1\n\n$2\n\n',
+  );
 
   // Thematic breaks: ASCII `---` or dash-lookalikes (em/en/minus/fullwidth),
   // but ONLY in HR position — never rewrite mid-prose `前后———中间`.

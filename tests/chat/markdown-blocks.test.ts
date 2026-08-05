@@ -231,6 +231,19 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toContain('| 已装 CUDA | nvidia | 小 |');
   });
 
+  it('does not rewrite plain-text pipe lookalikes or bare 第二步去…', () => {
+    const prose = [
+      '请在选项 A │ 选项 B 中二选一——不要改成 Markdown 表。',
+      '- 先注册',
+      '第二步去验证邮箱即可。',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(prose);
+    expect(out).toContain('选项 A │ 选项 B');
+    expect(out).toContain('二选一——不要改成');
+    expect(out).toContain('- 先注册\n第二步去验证邮箱即可。');
+    expect(out).not.toContain('- 先注册\n\n第二步去');
+  });
+
   it('joins long hard-wrapped CJK prose lines', () => {
     const line1 =
       '- Mac 通常使用 Apple Silicon (M1/M2/M3) 或 Intel 芯片 - 官方 portable 包主要是为 Windows 设计的 - Mac 上运';

@@ -13,18 +13,57 @@ import { reflowCollapsedMarkdownTables } from '@/lib/markdown/core/tables';
 
 const FENCE_SPLIT = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
-/**
- * Models sometimes emit U+2028/U+2029 or lone `\r` as row breaks, and
- * box-drawing / fullwidth “pipes”. Normalize before any structure repair so
- * GFM table peel can see real `\n` + `|` rows.
- */
-export function normalizeMarkdownLineEndingsAndPipes(markdown: string): string {
+/** Always-safe newline normalization (plain text keeps the same visual breaks). */
+export function normalizeMarkdownLineEndings(markdown: string): string {
   return String(markdown || '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/\u2028|\u2029/g, '\n')
-    // Fullwidth / box-drawing / CJK / math lookalikes for `|`
-    .replace(/[\uFF5C\u2502\u2503\u2223\u4E28\u00A6\uFFE8]/g, '|');
+    .replace(/\u2028|\u2029/g, '\n');
+}
+
+const PIPE_LIKE_CHAR = /[\uFF5C\u2502\u2503\u2223\u4E28\u00A6\uFFE8|]/;
+const PIPE_LIKE_ONLY = /[\uFF5C\u2502\u2503\u2223\u4E28\u00A6\uFFE8]/g;
+
+function pipeLikeCount(line: string): number {
+  return (String(line || '').match(new RegExp(PIPE_LIKE_CHAR.source, 'g')) || [])
+    .length;
+}
+
+/**
+ * True when a line already looks like a GFM row/separator — not prose
+ * `选项 A │ 选项 B` (only two marks, not pipe-wrapped).
+ */
+export function looksLikeTableishPipeLine(line: string): boolean {
+  const t = String(line || '').trim();
+  const n = pipeLikeCount(t);
+  if (n < 2) return false;
+  // Separator: mostly pipes + dashes (any dash style).
+  if (n >= 2 && /^[\s|｜│┃:\-—–−－─━═]+$/.test(t)) return true;
+  // Real / fake pipe-wrapped row: `| a | b |` or `│ a │ b │`
+  if (n >= 2 && /^[|｜│┃]/.test(t) && /[|｜│┃]$/.test(t)) return true;
+  // Jammed title + header needs ≥3 pipes: `第二步：… | 情况 | 推荐 | 原因 |`
+  if (n >= 3) return true;
+  return false;
+}
+
+/**
+ * Convert fullwidth / box-drawing pipes to `|` only on table-ish lines so
+ * plain `A │ B` and Unicode box diagrams stay untouched.
+ */
+export function normalizePipeLookalikesInTableishLines(markdown: string): string {
+  return String(markdown || '')
+    .split('\n')
+    .map((line) =>
+      looksLikeTableishPipeLine(line) ? line.replace(PIPE_LIKE_ONLY, '|') : line,
+    )
+    .join('\n');
+}
+
+/** @deprecated use normalizeMarkdownLineEndings + normalizePipeLookalikesInTableishLines */
+export function normalizeMarkdownLineEndingsAndPipes(markdown: string): string {
+  return normalizePipeLookalikesInTableishLines(
+    normalizeMarkdownLineEndings(markdown),
+  );
 }
 
 /**
@@ -51,8 +90,8 @@ function isMarkdownBlockStart(line: string): boolean {
     return true;
   }
   if (/^-{3,}\s*$/.test(t)) return true;
-  // Numbered Chinese steps often follow a list without a blank line.
-  if (/^第[一二三四五六七八九十百\d]+步/.test(t)) return true;
+  // Numbered Chinese steps with a delimiter — not bare `第二步去验证`.
+  if (/^第[一二三四五六七八九十百\d]+步(?:[:：]|[\s　])/.test(t)) return true;
   // Table row or separator.
   if (/^\|/.test(t) && t.includes('|', 1)) return true;
   return false;
@@ -222,10 +261,10 @@ function reflowHeadingsListsHrs(chunk: string): string {
     out = next;
   }
 
-  // End list lazy-continuation so `第N步` / tables are not trapped in the
-  // previous bullet (`- Intel → x\n第二步：…`).
+  // End list lazy-continuation so `第二步：…` / tables are not trapped in the
+  // previous bullet. Require `：`/`:`/space after 步 — not `第二步去验证`.
   out = out.replace(
-    /(^|\n)([-*+] |\d{1,2}\. )([^\n]+)\n(第[一二三四五六七八九十百\d]+步)/g,
+    /(^|\n)([-*+] |\d{1,2}\. )([^\n]+)\n(第[一二三四五六七八九十百\d]+步(?:[:：]|[\s　]))/g,
     '$1$2$3\n\n$4',
   );
 
@@ -250,7 +289,9 @@ function reflowHeadingsListsHrs(chunk: string): string {
 
 /** Full structural repair: unwrap hard-wraps, then tables, then headings/lists/hrs. */
 export function reflowCollapsedMarkdownBlocks(markdown: string): string {
-  const src = normalizeMarkdownLineEndingsAndPipes(String(markdown || ''));
+  const src = normalizePipeLookalikesInTableishLines(
+    normalizeMarkdownLineEndings(String(markdown || '')),
+  );
   if (!src) return src;
 
   // Undo mid-word hard wraps before structural splits so titles/tables see

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  breakInlineCellBullets,
   insertMissingTableSeparator,
   looksLikeCollapsedMarkdownTable,
   reflowCollapsedMarkdownTables,
+  reflowInlineListsInTableCells,
   repairGfmTableStructure,
 } from '@/lib/markdown/core/tables';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
@@ -125,5 +127,29 @@ describe('repairGfmTableStructure', () => {
     expect(out).toContain('| - | - | - |');
     expect(out).toContain('|------|---------|------|');
     expect(out).toContain('| 已经有 NVIDIA 驱动/CUDA | `nvidia` | 体积更小 |');
+  });
+});
+
+describe('breakInlineCellBullets', () => {
+  it('splits jammed • lists onto <br> lines', () => {
+    expect(
+      breakInlineCellBullets(
+        '例如：• “大家想不想一起做一个小型区块链项目？” • “我在读一个关于 NFT 的课程，想分享一下。”',
+      ),
+    ).toBe(
+      '例如：<br>• “大家想不想一起做一个小型区块链项目？”<br>• “我在读一个关于 NFT 的课程，想分享一下。”',
+    );
+  });
+
+  it('runs through prepareChatMarkdown on a full table', () => {
+    const raw = [
+      '| 方向 | 做法 |',
+      '| --- | --- |',
+      '| 技术社团 | 例如：• **Code for Monash** (软件开发) • **Monash Data Science Club** |',
+    ].join('\n');
+    const out = prepareChatMarkdown(raw);
+    expect(out).toContain('例如：<br>• **Code for Monash**');
+    expect(out).toContain('<br>• **Monash Data Science Club**');
+    expect(reflowInlineListsInTableCells(raw)).toContain('<br>•');
   });
 });

@@ -254,6 +254,37 @@ function isPipeRow(line: string): boolean {
 }
 
 /**
+ * GFM table cells are phrasing-only (no real `<ul>`). Models jam `•` bullets
+ * into one line — insert literal `<br>` so AnswerMarkdown’s expandLiteralBreaks
+ * can turn them into line breaks.
+ */
+export function breakInlineCellBullets(cell: string): string {
+  let s = String(cell || '');
+  if (!/[•·●▪]/.test(s)) return s;
+  // `例如：• foo` / `例如:• foo`
+  s = s.replace(/([：:;；])\s*([•·●▪])\s*/g, '$1<br>$2 ');
+  // Mid-cell siblings: `• foo • bar` / `foo • bar`
+  s = s.replace(/([^\n])\s+([•·●▪])\s+/g, '$1<br>$2 ');
+  s = s.replace(/^(?:<br\s*\/?>\s*)+/i, '');
+  return s;
+}
+
+/** Apply breakInlineCellBullets to every data/header pipe row. */
+export function reflowInlineListsInTableCells(markdown: string): string {
+  const src = String(markdown || '');
+  if (!src.includes('|') || !/[•·●▪]/.test(src)) return src;
+  return src
+    .split('\n')
+    .map((line) => {
+      if (!isPipeRow(line) || isSeparatorLine(line)) return line;
+      const cells = splitMarkdownTableCells(line);
+      if (!cells.some((c) => /[•·●▪]/.test(c))) return line;
+      return formatMarkdownTableRow(cells.map(breakInlineCellBullets));
+    })
+    .join('\n');
+}
+
+/**
  * Models sometimes drop the `|---|` delimiter row, leaving the whole table as
  * literal pipe text. Restore it when a run of rows with a consistent column
  * count starts outside any existing table.
@@ -301,44 +332,48 @@ export function insertMissingTableSeparator(markdown: string): string {
 export function reflowCollapsedMarkdownTables(markdown: string): string {
   // Peel jammed titles / orphan rows first (works when sep/rows already have newlines).
   let src = insertMissingTableSeparator(repairGfmTableStructure(String(markdown || '')));
-  if (!src.includes('|') || !SEP_ROW.test(src)) return src;
+  if (!src.includes('|')) return src;
 
-  src = src.replace(
-    /(^|\n)([^\n]*\|[^\n]*\|[^\n]*)(?=\n|$)/g,
-    (full, lead: string, block: string) => {
-      if (!looksLikeCollapsedMarkdownTable(block)) return full;
+  if (SEP_ROW.test(src)) {
+    src = src.replace(
+      /(^|\n)([^\n]*\|[^\n]*\|[^\n]*)(?=\n|$)/g,
+      (full, lead: string, block: string) => {
+        if (!looksLikeCollapsedMarkdownTable(block)) return full;
 
-      let out = block;
-      // `| cell | | --- |` → `| cell |\n| --- |`
-      out = out.replace(/\|\s+\|(?=\s*:?-{3,})/g, '|\n|');
-      // `| --- | --- | | cell` → `| --- | --- |\n| cell`
-      out = out.replace(
-        new RegExp(String.raw`((?:\|\s*${SEP_CELL}\s*)+\|)\s*\|`, 'g'),
-        '$1\n|',
-      );
-      // Remaining `| … | | … |` row boundaries (both sides have ≥2 pipes).
-      for (let i = 0; i < 12; i++) {
-        const next = out.replace(
-          /(\|[^\n]+?\|)\s+\|(?=[^\n]*\|)/g,
-          (m, left: string) => {
-            if (pipeCount(left) < 2) return m;
-            if (
-              new RegExp(String.raw`^\|\s*${SEP_CELL}`).test(
-                `|${m.slice(m.indexOf('|') + 1)}`,
-              )
-            ) {
-              return m;
-            }
-            return `${left}\n|`;
-          },
+        let out = block;
+        // `| cell | | --- |` → `| cell |\n| --- |`
+        out = out.replace(/\|\s+\|(?=\s*:?-{3,})/g, '|\n|');
+        // `| --- | --- | | cell` → `| --- | --- |\n| cell`
+        out = out.replace(
+          new RegExp(String.raw`((?:\|\s*${SEP_CELL}\s*)+\|)\s*\|`, 'g'),
+          '$1\n|',
         );
-        if (next === out) break;
-        out = next;
-      }
-      return `${lead}${out}`;
-    },
-  );
+        // Remaining `| … | | … |` row boundaries (both sides have ≥2 pipes).
+        for (let i = 0; i < 12; i++) {
+          const next = out.replace(
+            /(\|[^\n]+?\|)\s+\|(?=[^\n]*\|)/g,
+            (m, left: string) => {
+              if (pipeCount(left) < 2) return m;
+              if (
+                new RegExp(String.raw`^\|\s*${SEP_CELL}`).test(
+                  `|${m.slice(m.indexOf('|') + 1)}`,
+                )
+              ) {
+                return m;
+              }
+              return `${left}\n|`;
+            },
+          );
+          if (next === out) break;
+          out = next;
+        }
+        return `${lead}${out}`;
+      },
+    );
+    // After splitting a one-line smash, peel titles and fix orphan rows again.
+    src = repairGfmTableStructure(src);
+  }
 
-  // After splitting a one-line smash, peel titles and fix orphan rows again.
-  return repairGfmTableStructure(src);
+  // Valid tables still need jammed `•` lists broken onto <br> lines.
+  return reflowInlineListsInTableCells(src);
 }

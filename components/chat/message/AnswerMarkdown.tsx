@@ -108,7 +108,9 @@ export function AnswerMarkdown({
             return <th className="px-3.5 py-2.5 font-semibold whitespace-nowrap [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</th>;
           },
           td({ children }: any) {
-            return <td className="px-3.5 py-2.5 align-top whitespace-nowrap [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</td>;
+            // Allow wrap + <br> list lines in cells (GFM has no real <ul> in tables).
+            // Keep horizontal scroll on the outer wrapper for wide grids.
+            return <td className="px-3.5 py-2.5 align-top whitespace-normal break-words [&_p]:my-0 [&_blockquote]:my-0 [&_ul]:my-1 [&_ol]:my-1">{expandLiteralBreaks(children)}</td>;
           },
           code({ className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');

@@ -2,20 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { pagesNeedingOcrInWindow } from '@/lib/tools/file-read/tool';
 
 describe('pagesNeedingOcrInWindow', () => {
-  it('OCRs known-empty TextBased pages (整本误判兜底)', () => {
+  it('OCRs known-empty TextBased pages (整本误判兜底, capped at 2)', () => {
     expect(
       pagesNeedingOcrInWindow({
         pages: [
           { page: 1, text: '' },
           { page: 2, text: 'normal chapter text '.repeat(10) },
+          { page: 3, text: '' },
+          { page: 4, text: '' },
         ],
         startPage: 1,
         maxPages: 8,
         pagesNeedingOcr: [],
-        needsOcr: false,
         pdfType: 'TextBased',
       }),
-    ).toEqual([1]);
+    ).toEqual([1, 3]);
   });
 
   it('does not OCR TextBased pages not yet in the extract', () => {
@@ -25,7 +26,6 @@ describe('pagesNeedingOcrInWindow', () => {
         startPage: 1,
         maxPages: 3,
         pagesNeedingOcr: [],
-        needsOcr: false,
         pdfType: 'TextBased',
       }),
     ).toEqual([]);
@@ -42,7 +42,6 @@ describe('pagesNeedingOcrInWindow', () => {
         startPage: 1,
         maxPages: 8,
         pagesNeedingOcr: [1],
-        needsOcr: true,
         pdfType: 'Mixed',
       }),
     ).toEqual([1, 3]);
@@ -59,7 +58,6 @@ describe('pagesNeedingOcrInWindow', () => {
         startPage: 1,
         maxPages: 2,
         pagesNeedingOcr: [],
-        needsOcr: true,
         pdfType: 'Scanned',
       }),
     ).toEqual([1, 2]);
@@ -72,7 +70,6 @@ describe('pagesNeedingOcrInWindow', () => {
         startPage: 5,
         maxPages: 3,
         pagesNeedingOcr: [5],
-        needsOcr: true,
         pdfType: 'Mixed',
       }),
     ).toEqual([]);

@@ -23,15 +23,14 @@ const MAX_OCR_PAGES_PER_CALL = 8;
 /**
  * Which pages in the current read window should be OCR'd on demand.
  * Scanned/ImageBased: empty/missing pages in the window.
- * Mixed / TextBased / Unknown: known-empty pages already in the extract
- * (or classify-listed) — TextBased 空页兜底防止整本误判。
+ * Mixed / Unknown: known-empty pages in the extract (or classify-listed).
+ * TextBased: known-empty pages as misclassification fallback (capped per call).
  */
 export function pagesNeedingOcrInWindow(opts: {
   pages: Array<{ page: number; text: string }>;
   startPage: number;
   maxPages: number;
   pagesNeedingOcr: number[];
-  needsOcr: boolean;
   pdfType: string | null;
 }): number[] {
   const pdfType = String(opts.pdfType || '');
@@ -46,6 +45,8 @@ export function pagesNeedingOcrInWindow(opts: {
     MAX_OCR_PAGES_PER_CALL,
     Math.max(1, Math.floor(Number(opts.maxPages)) || DEFAULT_MAX_PAGES),
   );
+  /** Limit TextBased 误判兜底 so blank chapter dividers don't OCR a full window. */
+  const outCap = pdfType === 'TextBased' ? 2 : max;
   const byPage = new Map(opts.pages.map((p) => [p.page, p.text]));
   const scannedLike =
     pdfType === 'Scanned' || pdfType === 'ImageBased';
@@ -58,11 +59,10 @@ export function pagesNeedingOcrInWindow(opts: {
       out.push(p);
     } else {
       // TextBased / Mixed / Unknown: don't OCR pages not yet in the sidecar.
-      // Do OCR known-empty pages (误判/漏检兜底) and classify-listed pages.
       if (!hasPage && !listed.has(p)) continue;
       out.push(p);
     }
-    if (out.length >= MAX_OCR_PAGES_PER_CALL) break;
+    if (out.length >= outCap) break;
   }
   return out;
 }
@@ -489,7 +489,7 @@ export function createFileReadTool(): ChatTool {
     },
     systemPrompt: FILE_READ_SYSTEM_PROMPT,
     enabled: () => true,
-    async execute({ rawArguments, fallbackQuery }, ctx) {
+    async execute({ rawArguments, fallbackQuery, callId }, ctx) {
       const { fileId, focus, startPage, maxPages, startPageExplicit } =
         parseFileReadArgs(rawArguments, fallbackQuery || ctx.userAsk);
       if (!fileId) {
@@ -526,12 +526,14 @@ export function createFileReadTool(): ChatTool {
         (startPageExplicit && startPage > 1
           ? `p.${startPage}+${maxPages}`
           : fileId.slice(0, 80));
+      const parentCallId = String(callId || '').trim();
       ctx.send({
         tool: {
           status: 'start',
           name: 'file_read',
           query,
           provider: 'file-read',
+          ...(parentCallId ? { callId: parentCallId } : {}),
         },
       });
 
@@ -612,17 +614,19 @@ export function createFileReadTool(): ChatTool {
           startPage: auto.startPage,
           maxPages,
           pagesNeedingOcr,
-          needsOcr,
           pdfType,
         });
         if (needOcrPages.length && apiKey) {
           const ocrQuery = `ocr p.${needOcrPages.join(',')}`;
+          // Distinct from parent file_read callId so Process does not supersede it.
+          const ocrCallId = `${parentCallId || 'file_read'}:ocr:${needOcrPages.join('-')}`;
           ctx.send({
             tool: {
               status: 'start',
               name: 'file_read',
               query: ocrQuery,
               provider: 'pdf-ocr',
+              callId: ocrCallId,
             },
           });
           const ocr = await requestOcrPages(fileId, needOcrPages, apiKey);
@@ -656,6 +660,7 @@ export function createFileReadTool(): ChatTool {
                 name: 'file_read',
                 query: ocrQuery,
                 provider: ocrProviders[0] || 'pdf-ocr',
+                callId: ocrCallId,
                 results: ocrApplied.length
                   ? [
                       {
@@ -677,6 +682,7 @@ export function createFileReadTool(): ChatTool {
                 name: 'file_read',
                 query: ocrQuery,
                 provider: 'pdf-ocr',
+                callId: ocrCallId,
                 results: [],
                 error: ocrError,
               },
@@ -728,9 +734,8 @@ export function createFileReadTool(): ChatTool {
             status: 'done',
             name: 'file_read',
             query,
-            provider: ocrApplied.length
-              ? ocrProviders[0] || 'pdf-ocr'
-              : 'file-read',
+            provider: 'file-read',
+            ...(parentCallId ? { callId: parentCallId } : {}),
             results: [
               {
                 title: name,

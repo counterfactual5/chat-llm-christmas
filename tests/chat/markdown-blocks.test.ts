@@ -345,6 +345,13 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^5\. 放入 `D:\\x` 目录$/m);
   });
 
+  it('joins ordered list marker line with following year paragraph', () => {
+    const src =
+      '1.\n\n**2025年2月26日：** 正式开始计费\n- 此前为限时免费阶段\n';
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^1\. \*\*2025年2月26日：\*\*/m);
+  });
+
   it('does not split figure captions inside an ordered item', () => {
     const src = '1. 先做这一步。见图 1. 然后继续。\n2. 第二步';
     expect(reflowCollapsedMarkdownBlocks(src)).toBe(src);

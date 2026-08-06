@@ -274,6 +274,13 @@ function reflowHeadingsListsHrs(chunk: string): string {
     /(^|\n)(#{1,6}[ \t]+[^\n]*?)[ \t]+(\d{1,2}\.\s+\S)/gm,
     '$1$2\n$3',
   );
+  // Ordered list marker on its own line: `1.\n\n2025年...` should stay part of
+  // the list item (otherwise the number becomes a separate paragraph).
+  out = out.replace(
+    /(^|\n)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*\*{0,2}\s*\d{4}年[^\n]*)/g,
+    (full, lead: string, marker: string, rest: string) =>
+      `${lead}${marker} ${String(rest || '').trimStart()}`,
+  );
   // Smashed heading + body with no list/`---`: `## 小提示 如果你…` /
   // `## 为什么只有源码？ 因为…` / `## 总结 **…`. Keep titles that merely
   // contain `你` (`适合你`) intact — only peel known body openers.

@@ -447,7 +447,8 @@ export function applyResearchEvent(
         name: 'research_sources',
         status: 'done',
         provider: 'research',
-        query: 'collected sources',
+        // Label is i18n `collectedSources`; no redundant query subtitle.
+        query: '',
         results: results.map(({ title, url, snippet }) => ({ title, url, snippet })),
       };
       if (existingIdx >= 0) {

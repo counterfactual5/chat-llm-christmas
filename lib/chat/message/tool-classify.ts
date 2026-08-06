@@ -261,7 +261,7 @@ export function getToolRunLabelKey(
     return searching ? 'researchWriting' : 'researchWrote';
   }
   if (isResearchSources) {
-    return searching ? 'searchingWeb' : 'searchedSources';
+    return searching ? 'collectingSources' : 'collectedSources';
   }
   if (isResearchMixedSearch) {
     if (failed) return 'toolFailed';

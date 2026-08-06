@@ -19,10 +19,10 @@ export type BootSchedule = {
   authBeforeModelsCache: boolean;
 };
 
-/** Matches today's chat-container + use-session-persist wiring. */
+/** Matches chat-container + use-session-persist wiring. */
 export const CURRENT_BOOT_SCHEDULE: BootSchedule = {
-  hydrateReadyWhen: 'after-cloud',
-  modelsStartWhen: 'after-hydrate-ready',
+  hydrateReadyWhen: 'after-local',
+  modelsStartWhen: 'parallel-with-cloud',
   authBeforeModelsCache: true,
 };
 

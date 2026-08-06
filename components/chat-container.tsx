@@ -534,7 +534,7 @@ export default function ChatContainer() {
     authModalMode,
   });
 
-  // One-time startup: account → hydrate sessions → models/skills/integrations → OAuth return UI.
+  // One-time startup: account → local hydrate (ready) ∥ cloud merge + models/skills → OAuth UI.
   useEffect(() => {
     localStorage.removeItem('llm_christmas_user_key');
     const oauth = parseOAuthReturnParams(window.location.search);
@@ -542,12 +542,21 @@ export default function ChatContainer() {
 
     void refreshAccountStatus()
       .then(async ({ bound, username }) => {
-        if (bound) await hydrateBoundAccount(username);
-        else hydrateGuest();
-
-        const boot: Array<Promise<unknown>> = [fetchModels(bound)];
-        if (bound) boot.push(fetchSkills(), fetchMemories(), fetchIntegrations());
-        await Promise.all(boot);
+        if (bound) {
+          // hydrateBoundAccount marks chatsHydrated after local restore, then awaits cloud.
+          const hydrateP = hydrateBoundAccount(username);
+          const boot: Array<Promise<unknown>> = [
+            hydrateP,
+            fetchModels(bound),
+            fetchSkills(),
+            fetchMemories(),
+            fetchIntegrations(),
+          ];
+          await Promise.all(boot);
+        } else {
+          hydrateGuest();
+          await fetchModels(false);
+        }
 
         for (const action of planOAuthReturnUi(oauth, bound)) {
           if (action.type === 'close_modal') {

@@ -21,28 +21,27 @@ describe('boot critical path schedule', () => {
     expect(isBootScheduleValid(bad)).toBe(false);
   });
 
-  it('baseline: cloud hydrate blocks interactive and models', () => {
+  it('current schedule: local-first + parallel models (cloud off interactive path)', () => {
     const sim = simulateBootCriticalPath(
       CURRENT_BOOT_SCHEDULE,
       DEFAULT_BOOT_LATENCIES,
     );
-    // account(50)+local(5)+cloud(2000)+models(800) = 2855
-    expect(sim.interactive_ms).toBe(2855);
-    expect(sim.cloud_on_critical_path).toBe(1);
-    expect(sim.models_after_cloud).toBe(1);
-  });
-
-  it('after-local + parallel models removes cloud from interactive path', () => {
-    const schedule: BootSchedule = {
-      hydrateReadyWhen: 'after-local',
-      modelsStartWhen: 'parallel-with-cloud',
-      authBeforeModelsCache: true,
-    };
-    const sim = simulateBootCriticalPath(schedule, DEFAULT_BOOT_LATENCIES);
     // account+local+models = 50+5+800 = 855
     expect(sim.interactive_ms).toBe(855);
     expect(sim.cloud_on_critical_path).toBe(0);
     expect(sim.models_after_cloud).toBe(0);
-    expect(sim.full_boot_ms).toBe(2055); // cloud still finishes at 2055
+    expect(sim.full_boot_ms).toBe(2055);
+  });
+
+  it('legacy serial schedule keeps cloud on the critical path', () => {
+    const schedule: BootSchedule = {
+      hydrateReadyWhen: 'after-cloud',
+      modelsStartWhen: 'after-hydrate-ready',
+      authBeforeModelsCache: true,
+    };
+    const sim = simulateBootCriticalPath(schedule, DEFAULT_BOOT_LATENCIES);
+    expect(sim.interactive_ms).toBe(2855);
+    expect(sim.cloud_on_critical_path).toBe(1);
+    expect(sim.models_after_cloud).toBe(1);
   });
 });

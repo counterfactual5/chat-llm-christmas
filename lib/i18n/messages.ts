@@ -196,6 +196,11 @@ export const dict = {
     urlPreviewExtractFailed: 'Could not extract this page',
     urlPreviewShowExtract: 'Text',
     urlPreviewShowEmbed: 'Embed',
+    urlPreviewAuthGatedTitle: 'Needs your browser login',
+    urlPreviewAuthGatedBody:
+      'This site cannot reuse your logged-in session inside the preview panel (browser security). Open it in a new tab to keep cookies and avoid re-login / 2FA.',
+    urlPreviewOpenWithLogin: 'Open in browser (with login)',
+    urlPreviewTryExtractAnyway: 'Try text extract (no login)',
     openInNewTab: 'Open in new tab',
     toolViewPanel: 'View',
     toolViewPanelEmpty: 'Click a specialized view in the chat or Output to open it here',
@@ -609,6 +614,11 @@ export const dict = {
     urlPreviewExtractFailed: '无法抽取该网页',
     urlPreviewShowExtract: '正文',
     urlPreviewShowEmbed: '嵌入',
+    urlPreviewAuthGatedTitle: '需要浏览器登录态',
+    urlPreviewAuthGatedBody:
+      '受浏览器安全限制，侧栏预览无法复用你在该网站的登录 Cookie。请在新标签页打开以保留登录态，避免重新登录或触发二次验证。',
+    urlPreviewOpenWithLogin: '在浏览器中打开（带登录态）',
+    urlPreviewTryExtractAnyway: '尝试抽取正文（无登录）',
     openInNewTab: '新窗口打开',
     toolViewPanel: '专项视图',
     toolViewPanelEmpty: '在对话或产出框中点击专项视图，即可在此打开',

@@ -11,7 +11,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
-import { normalizePreviewHttpUrl } from '@/lib/files/url-preview';
+import {
+  isLikelyAuthGatedPreviewUrl,
+  normalizePreviewHttpUrl,
+} from '@/lib/files/url-preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { previewPanelWidth } from './panel-widths';
@@ -34,6 +37,14 @@ type ExtractState =
   | { status: 'loading' }
   | { status: 'done'; title?: string; content: string }
   | { status: 'error'; message: string };
+
+type PreviewMode = 'iframe' | 'extract' | 'auth';
+
+function initialPreviewMode(url: string, forceExtract: boolean): PreviewMode {
+  if (forceExtract) return 'extract';
+  if (isLikelyAuthGatedPreviewUrl(url)) return 'auth';
+  return 'iframe';
+}
 
 async function fetchWebReadExtract(
   url: string,
@@ -75,8 +86,9 @@ export function UrlPreviewPanel({
 }: UrlPreviewPanelProps) {
   const { t } = useLocale();
   const width = previewPanelWidth(contextOpen);
-  const [mode, setMode] = useState<'iframe' | 'extract'>(
-    forceExtract ? 'extract' : 'iframe',
+  const authGated = isLikelyAuthGatedPreviewUrl(url);
+  const [mode, setMode] = useState<PreviewMode>(() =>
+    initialPreviewMode(url, forceExtract),
   );
   const [extract, setExtract] = useState<ExtractState>({ status: 'idle' });
   const [displayTitle, setDisplayTitle] = useState(initialTitle || '');
@@ -84,14 +96,14 @@ export function UrlPreviewPanel({
   const prefetchRef = useRef<ExtractState>({ status: 'idle' });
 
   useEffect(() => {
-    setMode(forceExtract ? 'extract' : 'iframe');
+    setMode(initialPreviewMode(url, forceExtract));
     setExtract({ status: 'idle' });
     setDisplayTitle(initialTitle || '');
     iframeLoadedRef.current = false;
     prefetchRef.current = { status: 'idle' };
   }, [url, initialTitle, forceExtract]);
 
-  // Prefetch extract in parallel while iframe tries to load (needs login).
+  // Prefetch extract in parallel while iframe tries to load (skip auth-gated hosts).
   useEffect(() => {
     if (!open || !url || mode !== 'iframe') return;
     const ac = new AbortController();
@@ -156,6 +168,7 @@ export function UrlPreviewPanel({
   }, [open, url, mode, t]);
 
   const headerTitle = displayTitle || t('urlPreviewPanel');
+  const openExternally = () => window.open(url, '_blank', 'noopener,noreferrer');
 
   return (
     <AnimatePresence>
@@ -182,7 +195,7 @@ export function UrlPreviewPanel({
                 >
                   {t('urlPreviewShowExtract')}
                 </Button>
-              ) : (
+              ) : mode === 'extract' && !authGated ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -195,12 +208,12 @@ export function UrlPreviewPanel({
                 >
                   {t('urlPreviewShowEmbed')}
                 </Button>
-              )}
+              ) : null}
               <Button
                 variant="ghost"
                 size="icon"
-                title={t('openInNewTab')}
-                onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                title={authGated ? t('urlPreviewOpenWithLogin') : t('openInNewTab')}
+                onClick={openExternally}
                 className="h-8 w-8 text-stone-500"
               >
                 <ArrowUpRight className="h-4 w-4" />
@@ -228,7 +241,30 @@ export function UrlPreviewPanel({
               mode === 'iframe' ? 'overflow-hidden' : 'overflow-x-hidden overflow-y-auto',
             )}
           >
-            {mode === 'iframe' ? (
+            {mode === 'auth' ? (
+              <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
+                <Globe className="h-8 w-8 text-stone-300 opacity-60 dark:text-stone-600" />
+                <div className="max-w-sm space-y-2">
+                  <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
+                    {t('urlPreviewAuthGatedTitle')}
+                  </p>
+                  <p className="text-xs leading-relaxed text-stone-400 dark:text-stone-500">
+                    {t('urlPreviewAuthGatedBody')}
+                  </p>
+                </div>
+                <Button type="button" className="rounded-lg" onClick={openExternally}>
+                  <ArrowUpRight className="mr-1.5 h-4 w-4" />
+                  {t('urlPreviewOpenWithLogin')}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setMode('extract')}
+                  className="text-xs text-stone-500 underline-offset-2 hover:underline dark:text-stone-400"
+                >
+                  {t('urlPreviewTryExtractAnyway')}
+                </button>
+              </div>
+            ) : mode === 'iframe' ? (
               <iframe
                 key={url}
                 title={headerTitle}
@@ -251,10 +287,10 @@ export function UrlPreviewPanel({
                 <span>{extract.message || t('urlPreviewExtractFailed')}</span>
                 <button
                   type="button"
-                  onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+                  onClick={openExternally}
                   className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
                 >
-                  {t('openInNewTab')}
+                  {authGated ? t('urlPreviewOpenWithLogin') : t('openInNewTab')}
                 </button>
               </div>
             ) : (

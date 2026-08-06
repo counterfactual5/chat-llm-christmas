@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isLikelyAuthGatedPreviewUrl,
   isPreviewableHttpUrl,
   normalizePreviewHttpUrl,
   shouldOpenLinkExternally,
@@ -28,5 +29,14 @@ describe('url-preview helpers', () => {
     expect(shouldOpenLinkExternally({ metaKey: true })).toBe(true);
     expect(shouldOpenLinkExternally({ ctrlKey: true })).toBe(true);
     expect(shouldOpenLinkExternally({ button: 1 })).toBe(true);
+  });
+
+  it('flags auth-gated hosts that cannot reuse browser login in-panel', () => {
+    expect(isLikelyAuthGatedPreviewUrl('https://www.notion.so/Page-abc')).toBe(true);
+    expect(isLikelyAuthGatedPreviewUrl('https://foo.notion.site/bar')).toBe(true);
+    expect(isLikelyAuthGatedPreviewUrl('https://docs.google.com/document/d/x')).toBe(true);
+    expect(isLikelyAuthGatedPreviewUrl('https://linear.app/team/issue/ABC-1')).toBe(true);
+    expect(isLikelyAuthGatedPreviewUrl('https://example.com/page')).toBe(false);
+    expect(isLikelyAuthGatedPreviewUrl('not-a-url')).toBe(false);
   });
 });

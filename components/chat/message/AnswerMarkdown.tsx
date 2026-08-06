@@ -14,7 +14,7 @@ import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence'
 import { looksLikeAsciiArt, reflowCollapsedAsciiArt } from '@/lib/markdown/core/ascii-art';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
 import {
-  isPreviewableHttpUrl,
+  resolvePreviewHttpUrl,
   shouldOpenLinkExternally,
 } from '@/lib/files/url-preview';
 import { cn } from '@/lib/utils';
@@ -39,6 +39,7 @@ export function AnswerMarkdown({
   streaming,
   onSendCommand,
   onPreviewLink,
+  previewBaseUrl,
   reflowBlocks = true,
   className,
 }: {
@@ -48,6 +49,11 @@ export function AnswerMarkdown({
   onSendCommand?: (command: string) => void;
   /** Open an http(s) link in the side Preview panel (Cmd/Ctrl-click still opens a tab). */
   onPreviewLink?: (url: string) => void;
+  /**
+   * When set (URL Preview extract), relative / protocol-relative hrefs resolve
+   * against this page URL before in-panel navigation.
+   */
+  previewBaseUrl?: string;
   /**
    * Restore smashed headings/lists/tables. Thought/CoT keeps this off —
    * English verifier prose is easily shredded by answer-oriented reflow.
@@ -109,10 +115,11 @@ export function AnswerMarkdown({
                 rel="noreferrer"
                 className="text-orange-700 underline decoration-orange-300/80 underline-offset-2 hover:text-orange-800 dark:text-orange-300 dark:decoration-orange-700/80 dark:hover:text-orange-200"
                 onClick={(e) => {
-                  if (!onPreviewLink || !isPreviewableHttpUrl(link)) return;
+                  const resolved = resolvePreviewHttpUrl(link, previewBaseUrl);
+                  if (!onPreviewLink || !resolved) return;
                   if (shouldOpenLinkExternally(e)) return;
                   e.preventDefault();
-                  onPreviewLink(link);
+                  onPreviewLink(resolved);
                 }}
               >
                 {children}

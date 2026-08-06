@@ -15,6 +15,7 @@ import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
   isLikelyAuthGatedPreviewUrl,
   normalizePreviewHttpUrl,
+  previewNavigationTargetEquals,
 } from '@/lib/files/url-preview';
 import {
   EMBED_PROBE_TIMING,
@@ -531,6 +532,15 @@ export function UrlPreviewPanel({
                   <AnswerMarkdown
                     text={cleanedExtractContent}
                     streaming={false}
+                    previewBaseUrl={onNavigateUrl ? url : undefined}
+                    onPreviewLink={
+                      onNavigateUrl
+                        ? (next) => {
+                            if (previewNavigationTargetEquals(next, url)) return;
+                            onNavigateUrl(next);
+                          }
+                        : undefined
+                    }
                   />
                 </div>
               )}

@@ -83,6 +83,69 @@ export function normalizePreviewHttpUrl(raw: string): string {
   }
 }
 
+/**
+ * Resolve a markdown `href` into a previewable absolute http(s) URL.
+ * Relative and protocol-relative (`//host`) hrefs require an absolute http(s) `baseUrl`.
+ * Returns '' when the result is not previewable (or cannot be resolved).
+ */
+export function resolvePreviewHttpUrl(href: string, baseUrl?: string): string {
+  const raw = String(href || '').trim();
+  if (!raw) return '';
+  if (
+    raw.startsWith('/api/files/') ||
+    raw.startsWith('local://') ||
+    raw.startsWith('data:') ||
+    /^mailto:/i.test(raw) ||
+    /^javascript:/i.test(raw)
+  ) {
+    return '';
+  }
+
+  const base = String(baseUrl || '').trim();
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw);
+
+  let absolute = '';
+  try {
+    if (hasScheme) {
+      absolute = new URL(raw).href;
+    } else if (raw.startsWith('//')) {
+      // Protocol-relative: never invent https without a real page base (chat must not intercept).
+      if (!base || !isPreviewableHttpUrl(base)) return '';
+      absolute = new URL(raw, base).href;
+    } else {
+      if (!base || !isPreviewableHttpUrl(base)) return '';
+      absolute = new URL(raw, base).href;
+    }
+  } catch {
+    return '';
+  }
+
+  if (!isPreviewableHttpUrl(absolute)) return '';
+  try {
+    return new URL(absolute).href;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * True when two preview URLs are the same navigation target ignoring hash
+ * (same-document `#fragment` hops should not refetch extract).
+ */
+export function previewNavigationTargetEquals(a: string, b: string): boolean {
+  try {
+    const ua = new URL(String(a || '').trim());
+    const ub = new URL(String(b || '').trim());
+    if (ua.protocol !== 'http:' && ua.protocol !== 'https:') return false;
+    if (ub.protocol !== 'http:' && ub.protocol !== 'https:') return false;
+    ua.hash = '';
+    ub.hash = '';
+    return ua.href === ub.href;
+  } catch {
+    return false;
+  }
+}
+
 /** True when a click should open in a new tab instead of the Preview panel. */
 export function shouldOpenLinkExternally(e: {
   metaKey?: boolean;

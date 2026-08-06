@@ -214,9 +214,11 @@
   }
 
   /*
-   * While selecting in the messages root (data-selecting from ChatQuoteToolbar),
-   * disable interactive chrome so links / slash buttons / copy / table scroll
-   * do not steal three-finger hit-testing. Quote chip stays outside this root.
+   * While actively dragging a selection in the messages root (data-selecting
+   * from ChatQuoteToolbar: pointer-down + live selection), disable interactive
+   * chrome so links / slash buttons / copy / table scroll do not steal
+   * three-finger hit-testing. Quote chip stays outside this root.
+   * Must NOT arm on pointer-down alone — that blocks ordinary link clicks.
    */
   [data-selecting] a,
   [data-selecting] button,

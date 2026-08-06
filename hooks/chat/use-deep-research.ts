@@ -14,7 +14,7 @@ import {
   withResearchReport,
 } from '@/lib/chat/turn/research-activity';
 
-export type ResearchMode = 'quick' | 'standard' | 'rigorous';
+export type ResearchMode = 'standard' | 'rigorous';
 export type ResearchSources = 'web' | 'literature' | 'mixed';
 
 export type ResearchJob = {

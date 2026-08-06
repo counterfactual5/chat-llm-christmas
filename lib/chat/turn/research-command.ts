@@ -1,14 +1,15 @@
 /** Explicit deep-research command: `/research …` or `/研究 …`. */
 const RESEARCH_CMD_RE = /^(?:\/research|\/研究)\s+([\s\S]+)$/i;
 
-export type ResearchModeHint = 'quick' | 'standard' | 'rigorous';
+export type ResearchModeHint = 'standard' | 'rigorous';
 export type ResearchSourcesHint = 'web' | 'literature' | 'mixed';
 
-/** Optional leading mode keyword, e.g. `/research quick <query>` or `/research 深度 <query>`. */
+/** Optional leading mode keyword, e.g. `/research standard <query>` or `/research 深度 <query>`. */
 const MODE_ALIASES: Record<string, ResearchModeHint> = {
-  quick: 'quick',
-  fast: 'quick',
-  快速: 'quick',
+  // Legacy quick aliases fold into standard (quick mode removed).
+  quick: 'standard',
+  fast: 'standard',
+  快速: 'standard',
   standard: 'standard',
   normal: 'standard',
   标准: 'standard',
@@ -17,6 +18,7 @@ const MODE_ALIASES: Record<string, ResearchModeHint> = {
   thorough: 'rigorous',
   深度: 'rigorous',
   严谨: 'rigorous',
+  强力: 'rigorous',
 };
 
 /** Optional source lane after depth: `/research standard literature <query>`. */

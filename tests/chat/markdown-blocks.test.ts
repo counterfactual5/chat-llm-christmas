@@ -135,13 +135,13 @@ describe('reflowCollapsedMarkdownBlocks', () => {
       '📋 可用命令（在输入框输入 `/` 查看）',
       '',
       '- **/image** - 生成图片',
-      '- **/research** - 深度研究（快速/标准/严谨）',
+      '- **/research** - 深度研究（标准/严谨）',
       '- **/papers** - 搜论文',
       '- **/books** - 搜书籍',
     ].join('\n');
     const out = reflowCollapsedMarkdownBlocks(src);
     expect(out).toContain('- **/image** - 生成图片');
-    expect(out).toContain('- **/research** - 深度研究（快速/标准/严谨）');
+    expect(out).toContain('- **/research** - 深度研究（标准/严谨）');
     expect(out).not.toMatch(/\*\*\n\n- 生成图片/);
     expect(out).not.toMatch(/\*\*\n\n- 深度研究/);
   });

@@ -10,7 +10,7 @@ import type { MessageKey, MessageVars } from '@/lib/i18n/messages';
 import { SKILL_CREATOR_ID, skillSlashName } from '@/lib/skills/creator';
 import type { SlashMenuItem } from '@/components/chat/composer/ChatComposer';
 
-const MODE_TOKENS = new Set(['quick', 'standard', 'rigorous']);
+const MODE_TOKENS = new Set(['quick', 'standard', 'rigorous', '快速', '标准', '深度', '严谨', '强力']);
 const SOURCE_TOKENS = new Set(['web', 'literature', 'mixed']);
 
 export function useChatSlash(opts: {
@@ -65,13 +65,6 @@ export function useChatSlash(opts: {
           titleKey: MessageKey;
           hintKey: MessageKey;
         }> = [
-          {
-            id: 'research-mode-quick',
-            token: 'quick',
-            insert: '/research quick ',
-            titleKey: 'researchModeQuick' as MessageKey,
-            hintKey: 'researchModeQuickHint' as MessageKey,
-          },
           {
             id: 'research-mode-standard',
             token: 'standard',

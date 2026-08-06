@@ -1615,7 +1615,7 @@ export default function ChatContainer() {
         sessionId: session.id,
         assistantId: running.id,
         query: running.research?.query || '',
-        mode: (running.research?.mode as 'quick' | 'standard' | 'rigorous') || 'standard',
+        mode: (running.research?.mode as 'standard' | 'rigorous') || 'standard',
       }),
     ).finally(() => {
       researchReattachInFlightRef.current.delete(jobId);

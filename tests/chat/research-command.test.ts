@@ -16,10 +16,14 @@ describe('parseResearchCommand', () => {
   it('parses English and Chinese research-depth aliases', () => {
     expect(parseResearchCommand('/research quick AI regulation')).toEqual({
       query: 'AI regulation',
-      mode: 'quick',
+      mode: 'standard',
     });
     expect(parseResearchCommand('/研究 严谨 AI 监管')).toEqual({
       query: 'AI 监管',
+      mode: 'rigorous',
+    });
+    expect(parseResearchCommand('/research 强力 AI')).toEqual({
+      query: 'AI',
       mode: 'rigorous',
     });
   });
@@ -32,7 +36,7 @@ describe('parseResearchCommand', () => {
     });
     expect(parseResearchCommand('/research quick web 特斯拉')).toEqual({
       query: '特斯拉',
-      mode: 'quick',
+      mode: 'standard',
       sources: 'web',
     });
     expect(parseResearchCommand('/research standard mixed 注意力机制')).toEqual({

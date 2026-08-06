@@ -111,6 +111,7 @@ export const LITERATURE_TOOL_ANSWER_HINT = {
     'Prefer copying answerMarkdown verbatim for the results list (same shape as /books). ' +
     'Each hit: numbered title markdown link, optional meta line, then on its own line ' +
     'Download: `/books download …` with the exact downloadCommand in backticks (required for clickable UI buttons). ' +
+    'Put a blank line between numbered hits (after Download / Manual download, before the next `N.`) so items do not run together. ' +
     'Only use downloadCommand / alternateDownloads from this receipt — never invent md5 or archive ids, ' +
     'never bury commands in em-dash prose or narrative sentences. ' +
     'If downloadCommand is missing, use Manual download: [title](url).',
@@ -118,6 +119,7 @@ export const LITERATURE_TOOL_ANSWER_HINT = {
     'Prefer copying answerMarkdown verbatim for the results list (same shape as /papers). ' +
     'Each hit: numbered title markdown link, optional meta/TLDR, then Actions / Download lines with ' +
     'exact receipt commands in backticks (required for clickable UI buttons). ' +
+    'Put a blank line between numbered hits so items do not run together. ' +
     'When downloadCommand is present, show Download: `<downloadCommand>` — that stores the PDF in Files; ' +
     'do not turn an external URL into a “download” link. ' +
     'Never invent ids or bury commands in em-dash prose. ' +
@@ -237,6 +239,7 @@ export const PAPER_SYSTEM = [
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
   'After results, reply with a numbered list matching answerMarkdown / the /papers slash shape: title link, meta, then Actions and Download lines with commands in backticks — never invent ids, never bury commands in em-dash prose.',
+  'Put a blank line between numbered hits (do not pack `N.` items back-to-back).',
   'Copy exact receipt fields (detailsCommand / citationsCommand / referencesCommand / downloadCommand) as inline code so they become clickable buttons.',
   'downloadCommand saves the PDF into the user Files store (in-app). When a hit has downloadCommand, show Download: `<downloadCommand>` — do not turn an external URL into a “download” link.',
   'Only when a hit has pdfUrl and no downloadCommand, link pdfUrl as Open PDF in the browser.',
@@ -246,6 +249,7 @@ export const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
   'After results, reply with a numbered list matching answerMarkdown / the /books slash shape: title markdown link, optional meta, then Download: `/books download …` with the exact downloadCommand in backticks (clickable button) — never invent identifiers, never bury commands in em-dash prose.',
+  'Put a blank line between numbered hits (after each Download / Manual download line, before the next `N.`) so entries do not run together.',
   'When downloadCommand is absent, use Manual download: [title](url). Prefer copying answerMarkdown from the receipt when present.',
   'Never invent catalog entries; only cite title + URL and commands from the tool receipt.',
 ].join(' ');

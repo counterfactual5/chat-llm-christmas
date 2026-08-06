@@ -4,7 +4,6 @@
  */
 
 import { chatBackendLiteratureURL } from '@/lib/chat-backend';
-import type { LiteratureHit } from '@/lib/chat/turn/literature-search';
 import {
   formatBookDownloadCommand,
   formatPaperActionCommand,
@@ -14,6 +13,10 @@ import {
   resolveBookDownloadIdentifier,
   resolvePaperDownloadIdentifier,
 } from '@/lib/chat/turn/literature-command';
+import {
+  formatLiteratureMarkdown,
+  type LiteratureHit,
+} from '@/lib/chat/turn/literature-search';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 function parseQuery(
@@ -102,6 +105,25 @@ async function fetchLiterature(
   };
 }
 
+/** Shared answer-shape contract for book_search / paper_search (matches /books / /papers). */
+export const LITERATURE_TOOL_ANSWER_HINT = {
+  books:
+    'Prefer copying answerMarkdown verbatim for the results list (same shape as /books). ' +
+    'Each hit: numbered title markdown link, optional meta line, then on its own line ' +
+    'Download: `/books download …` with the exact downloadCommand in backticks (required for clickable UI buttons). ' +
+    'Only use downloadCommand / alternateDownloads from this receipt — never invent md5 or archive ids, ' +
+    'never bury commands in em-dash prose or narrative sentences. ' +
+    'If downloadCommand is missing, use Manual download: [title](url).',
+  papers:
+    'Prefer copying answerMarkdown verbatim for the results list (same shape as /papers). ' +
+    'Each hit: numbered title markdown link, optional meta/TLDR, then Actions / Download lines with ' +
+    'exact receipt commands in backticks (required for clickable UI buttons). ' +
+    'When downloadCommand is present, show Download: `<downloadCommand>` — that stores the PDF in Files; ' +
+    'do not turn an external URL into a “download” link. ' +
+    'Never invent ids or bury commands in em-dash prose. ' +
+    'When only pdfUrl is present (no downloadCommand), link it as Open PDF in the browser.',
+} as const;
+
 /** Shape tool receipts so the model can cite real download / paper-action commands. */
 export function formatHitsForModel(
   kind: 'papers' | 'books',
@@ -109,6 +131,8 @@ export function formatHitsForModel(
   provider: string,
   results: LiteratureHit[],
 ): string {
+  const answerMarkdown = formatLiteratureMarkdown(kind, query, provider, results);
+
   if (!results.length) {
     return JSON.stringify({
       ok: true,
@@ -116,7 +140,9 @@ export function formatHitsForModel(
       query,
       provider,
       results: [],
+      answerMarkdown,
       note: 'No results. Try a different query or source.',
+      hint: LITERATURE_TOOL_ANSWER_HINT[kind],
     });
   }
 
@@ -160,10 +186,8 @@ export function formatHitsForModel(
             : undefined,
         };
       }),
-      hint:
-        'Only show /books download commands that appear as downloadCommand or alternateDownloads on a hit. ' +
-        'Prefer the primary downloadCommand; alternateDownloads are format/mirror fallbacks. ' +
-        'If downloadCommand is missing, give the page url as a markdown Manual download link — never invent md5 or archive ids.',
+      answerMarkdown,
+      hint: LITERATURE_TOOL_ANSWER_HINT.books,
     });
   }
 
@@ -203,29 +227,27 @@ export function formatHitsForModel(
           : undefined,
       };
     }),
-    hint:
-      'Only show /papers details|citations|references|download commands copied from receipt fields. ' +
-      'When downloadCommand is present, show it as inline code (clickable) — that stores the PDF in Files. ' +
-      'Never invent download commands. When only pdfUrl is present (no downloadCommand), link it as Open PDF in the browser.',
+    answerMarkdown,
+    hint: LITERATURE_TOOL_ANSWER_HINT.papers,
   });
 }
 
-const PAPER_SYSTEM = [
+export const PAPER_SYSTEM = [
   'You have a paper_search tool for academic papers (arXiv / Semantic Scholar / OpenAlex).',
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
-  'After results, cite title + URL from the tool receipt only.',
-  'For follow-ups: copy exact receipt fields (detailsCommand / citationsCommand / referencesCommand / downloadCommand) as inline code — never invent ids.',
-  'downloadCommand saves the PDF into the user Files store (in-app). When a hit has downloadCommand, show that — do not turn an external URL into a “download” link.',
+  'After results, reply with a numbered list matching answerMarkdown / the /papers slash shape: title link, meta, then Actions and Download lines with commands in backticks — never invent ids, never bury commands in em-dash prose.',
+  'Copy exact receipt fields (detailsCommand / citationsCommand / referencesCommand / downloadCommand) as inline code so they become clickable buttons.',
+  'downloadCommand saves the PDF into the user Files store (in-app). When a hit has downloadCommand, show Download: `<downloadCommand>` — do not turn an external URL into a “download” link.',
   'Only when a hit has pdfUrl and no downloadCommand, link pdfUrl as Open PDF in the browser.',
 ].join(' ');
 
-const BOOK_SYSTEM = [
+export const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
-  'For downloads: only cite downloadCommand from the tool receipt — never invent identifiers.',
-  'When downloadCommand is absent, give the hit url as a markdown Manual download link for the user to open themselves.',
-  'After results, cite title + URL; never invent catalog entries.',
+  'After results, reply with a numbered list matching answerMarkdown / the /books slash shape: title markdown link, optional meta, then Download: `/books download …` with the exact downloadCommand in backticks (clickable button) — never invent identifiers, never bury commands in em-dash prose.',
+  'When downloadCommand is absent, use Manual download: [title](url). Prefer copying answerMarkdown from the receipt when present.',
+  'Never invent catalog entries; only cite title + URL and commands from the tool receipt.',
 ].join(' ');
 
 export function createPaperSearchTool(): ChatTool {

@@ -703,6 +703,7 @@ export async function handleChatRequest(req: NextRequest) {
               query: reportQuery,
             });
             let sawText = false;
+            let reportReasoning = '';
             let lastFinishReason: string | null = null;
             try {
               const streamed = await runPlainCompletionStream({
@@ -718,6 +719,7 @@ export async function handleChatRequest(req: NextRequest) {
                 },
                 onReasoning: (text) => {
                   sawText = true;
+                  reportReasoning += text;
                   send({ reasoning: text });
                 },
               });
@@ -729,6 +731,7 @@ export async function handleChatRequest(req: NextRequest) {
                     : 'Review complete — no unsupported tool claims found against the execution record.',
                 });
               }
+              const reportBody = reportReasoning.trim();
               emitReviewProcessCard(send, {
                 name: 'review_report',
                 status: 'done',
@@ -740,6 +743,7 @@ export async function handleChatRequest(req: NextRequest) {
                     snippet: findings.length
                       ? `${findings.length} tool-claim finding(s), ${reviewIssues.length} other issue(s)`
                       : 'No unsupported claims found',
+                    ...(reportBody ? { body: reportBody.slice(0, 4000) } : {}),
                   },
                 ],
               });

@@ -234,7 +234,7 @@ export async function runLlmVerifier(
       { role: 'system', content: buildVerifierSystemPrompt(lenses) },
       { role: 'user', content: buildVerifierUserPrompt(assistantText, record, userAsk) },
     ]);
-    return parseVerifierResponse(raw, lenses);
+    return { ...parseVerifierResponse(raw, lenses), raw };
   } catch (err) {
     // Propagate aborts so Process cards can close as failed instead of "clean".
     if (err && typeof err === 'object' && (err as { name?: string }).name === 'AbortError') {
@@ -341,6 +341,7 @@ export async function runFullClaimAudit(
       llmFindings = result.findings;
       lensFindings = result.lens;
       if (phase === 'requested') {
+        const rawBody = String(result.raw || '').trim();
         emitReviewProcessCard(send, {
           name: 'claim_verifier',
           status: 'done',
@@ -350,6 +351,7 @@ export async function runFullClaimAudit(
               title: 'Verifier result',
               url: '',
               snippet: `${llmFindings.length} claim finding(s) · ${lensFindings.length} lens finding(s)`,
+              ...(rawBody ? { body: rawBody.slice(0, 4000) } : {}),
             },
           ],
         });

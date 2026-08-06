@@ -212,6 +212,8 @@ export type LensFinding = {
 export type VerifierResult = {
   findings: ReviewFinding[];
   lens: LensFinding[];
+  /** Raw stream from the verifier model (shown in the claim_verifier Process card body). */
+  raw?: string;
 };
 
 /** Prefer createStreamingVerifierComplete so the audit phase streams into Thought. */

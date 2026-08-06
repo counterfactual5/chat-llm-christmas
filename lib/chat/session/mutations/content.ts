@@ -229,15 +229,16 @@ export function withAppendedAssistantReasoning(
       // stays chronological (think → search → think).
       if (last?.kind === 'content') {
         const idx = activity.findLastIndex((st) => st.kind === 'reasoning');
-        if (idx >= 0) {
+        const prev = idx >= 0 ? activity[idx] : undefined;
+        if (prev && prev.kind === 'reasoning') {
           const interveningTool = activity
             .slice(idx + 1)
             .some((st) => st.kind !== 'content');
           if (!interveningTool) {
-            const prev = activity[idx]!;
             activity.splice(idx, 1);
             activity.push({
-              ...prev,
+              id: prev.id,
+              kind: 'reasoning',
               text: prev.text + chunk,
             });
           } else {

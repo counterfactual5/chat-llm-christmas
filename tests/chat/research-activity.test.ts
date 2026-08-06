@@ -7,6 +7,23 @@ import {
 import { buildTimelineSegments } from '@/lib/chat/message/timeline';
 
 describe('research activity → timeline stages', () => {
+  it('clears truncationReason on queued without opening a stage', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a0',
+      jobId: 'rs_0',
+      query: 'BTC',
+      mode: 'standard',
+    });
+    m = { ...m, truncationReason: 'network' };
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'queued', detail: 'waiting' },
+    });
+    expect(m.truncationReason).toBeUndefined();
+    expect(m.research?.status).toBe('queued');
+    expect(m.activity?.filter((s) => s.kind === 'stage') || []).toHaveLength(0);
+  });
+
   it('opens Plan / Search panels from phase events', () => {
     let m = createResearchAssistantMessage({
       id: 'a1',

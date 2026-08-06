@@ -286,12 +286,23 @@ export function applyResearchEvent(
       (detail === 'claimed' &&
         (m.activity || []).some((s) => s.kind === 'stage'));
     if (
+      status === 'queued' ||
       status === 'planning' ||
       status === 'searching' ||
       status === 'synthesizing' ||
       status === 'verifying' ||
       status === 'writing'
     ) {
+      if (status === 'queued') {
+        return {
+          ...m,
+          incomplete: true,
+          truncationReason: undefined,
+          research: m.research
+            ? { ...m.research, status: 'queued' }
+            : m.research,
+        };
+      }
       if (isCheckpointSkip) {
         return {
           ...m,

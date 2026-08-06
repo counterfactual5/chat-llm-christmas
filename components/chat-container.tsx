@@ -1791,7 +1791,7 @@ export default function ChatContainer() {
     ).finally(() => {
       researchReattachInFlightRef.current.delete(jobId);
     });
-  }, [chatsHydrated, deepResearch.busy, researchBusySessionId, activeSessionId]);
+  }, [chatsHydrated, cloudHydrateEpoch, deepResearch.busy, researchBusySessionId, activeSessionId]);
 
   const startResearchTurn = useCallback(
     async (opts: {

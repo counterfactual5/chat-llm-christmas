@@ -135,6 +135,7 @@ import { FileManagerModal } from '@/components/files/FileManagerModal';
 import { MemoryManagerModal } from '@/components/memories/MemoryManagerModal';
 import { getModelSpec } from '@/lib/models/specs';
 import { estimateContextBreakdown } from '@/lib/chat/turn/context-estimate';
+import { estimateBuiltinToolsGuidance } from '@/lib/tools/builtin-guidance';
 import { useLocale } from '@/lib/i18n';
 import {
   isGoogleMcpId,
@@ -1486,9 +1487,13 @@ export default function ChatContainer() {
   }, [isAccountBound, selectedSpec.vision, hasImages, zhipuVisionOn]);
 
   // Isomorphic estimate: same buildChatSystemParts assembly the server uses
-  // (best-effort client opts — toolsGuidance / account catalog may drift).
+  // (best-effort — MCP tool guidance may still drift).
   const buildContextEstimateInput = useCallback(
-    (opts?: { userAsk?: string; messages?: Message[] }) => {
+    (opts?: {
+      userAsk?: string;
+      messages?: Message[];
+      webSources?: WebSearchSource[];
+    }) => {
       const authorizedIntegrations = [
         ...(notionMcpOn ? ['notion'] : []),
         ...(githubMcpOn ? ['github'] : []),
@@ -1499,7 +1504,16 @@ export default function ChatContainer() {
         ...(bookSearchEnabled ? ['book_search'] : []),
         ...(generateImageEnabled ? ['generate_image'] : []),
         ...(zhipuVisionOn ? ['zhipu-vision'] : []),
+        ...(activeSkillIds.includes(SKILL_CREATOR_ID) ? ['skill-creator'] : []),
       ];
+      const threadMessages = opts?.messages ?? messages;
+      const threadSources =
+        opts?.webSources ??
+        collectWebSourcesFromMessages(threadMessages);
+      const toolsGuidance = estimateBuiltinToolsGuidance({
+        searchEnabled: true,
+        integrations: authorizedIntegrations,
+      });
       return {
         model: selectedModel,
         systemPrompt,
@@ -1516,6 +1530,7 @@ export default function ChatContainer() {
           activeMcpIds.includes('notion') && !Boolean(notionStatus?.connected),
         githubRequestedButUnauthorized:
           activeMcpIds.includes('github') && !Boolean(githubStatus?.connected),
+        toolsGuidance,
         skills: activeSkills.map((s) => ({
           title: s.title,
           content: s.content,
@@ -1523,14 +1538,12 @@ export default function ChatContainer() {
         memories: memoriesEnabled() ? memoriesPayload() : [],
         memoriesEnabled: memoriesEnabled(),
         autoReview: activeAutoReview,
-        webSources,
+        webSources: threadSources,
         attachmentTexts: attachments
           .filter((a) => a.text)
           .map((a) => ({ name: a.name, text: String(a.text || '') })),
-        messages: opts?.messages ?? messages,
+        messages: threadMessages,
         pendingImageCount: attachments.filter((a) => a.dataUrl).length,
-        hasGeneratedImages: generatedImageHistory.length > 0,
-        hasGeneratedFiles: generatedFileHistory.length > 0,
         skillCreatorOn: activeSkillIds.includes(SKILL_CREATOR_ID),
         userAsk: opts?.userAsk,
       };
@@ -1538,7 +1551,6 @@ export default function ChatContainer() {
     [
       messages,
       systemPrompt,
-      webSources,
       attachments,
       activeSkills,
       selectedModel,
@@ -1560,8 +1572,6 @@ export default function ChatContainer() {
       memoriesPayload,
       memories,
       activeAutoReview,
-      generatedImageHistory.length,
-      generatedFileHistory.length,
       activeSkillIds,
     ],
   );
@@ -1571,17 +1581,20 @@ export default function ChatContainer() {
       estimateContextBreakdown(
         buildContextEstimateInput({
           userAsk: input.trim() || undefined,
+          webSources,
         }),
       ),
-    [buildContextEstimateInput, input],
+    [buildContextEstimateInput, input, webSources],
   );
 
   const estimateSystemForSend = useCallback(
-    (nextUserText: string, history: Message[]) =>
+    (nextUserText: string, history: Message[], threadWebSources?: WebSearchSource[]) =>
       estimateContextBreakdown(
         buildContextEstimateInput({
           userAsk: nextUserText,
           messages: history,
+          webSources:
+            threadWebSources ?? collectWebSourcesFromMessages(history),
         }),
       ).system,
     [buildContextEstimateInput],
@@ -1590,6 +1603,10 @@ export default function ChatContainer() {
   useEffect(() => {
     setLastTurnUsage(null);
   }, [activeSessionId]);
+
+  const clearMeasuredUsage = useCallback(() => {
+    setLastTurnUsage(null);
+  }, []);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -1649,6 +1666,7 @@ export default function ChatContainer() {
     usableLimit,
     contextBreakdown,
     estimateSystemForSend,
+    onHistoryTruncated: clearMeasuredUsage,
     setPicturesExpanded,
     setOutputGroupsOpen,
     setIsContextPanelOpen,

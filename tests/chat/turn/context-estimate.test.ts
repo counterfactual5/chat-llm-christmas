@@ -103,19 +103,118 @@ describe('estimateContextBreakdown', () => {
       history: [],
       nextUserText: 'hi',
       pendingImageCount: 0,
-      webSources: [],
       contextBreakdown: { system: isomorphic.system, skills: isomorphic.skills },
     });
     const legacy = estimateTokensForSend({
       history: [],
       nextUserText: 'hi',
       pendingImageCount: 0,
-      webSources: [],
       contextBreakdown: {
         system: estimateTokensFromText(DEFAULT_SYSTEM_PROMPT),
         skills: 0,
       },
     });
     expect(projected).toBeGreaterThan(legacy);
+  });
+
+  it('drops discarded-turn webSources from system when history is truncated', () => {
+    const staleSource = {
+      title: 'Old hit',
+      url: 'https://example.com/old',
+      snippet: 'from a rolled-back turn',
+    };
+    const withStale = estimateContextBreakdown({
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [],
+      skills: [],
+      webSources: [staleSource],
+      attachmentTexts: [],
+      messages: [],
+      pendingImageCount: 0,
+    });
+    const truncated = estimateContextBreakdown({
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [],
+      skills: [],
+      webSources: [],
+      attachmentTexts: [],
+      messages: [],
+      pendingImageCount: 0,
+    });
+    expect(withStale.system).toBeGreaterThan(truncated.system);
+    expect(withStale.reference).toBeGreaterThan(0);
+    expect(truncated.reference).toBe(0);
+  });
+
+  it('infers generated-image system block from assistant messages', () => {
+    const empty = estimateContextBreakdown({
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [],
+      skills: [],
+      webSources: [],
+      attachmentTexts: [],
+      messages: [],
+      pendingImageCount: 0,
+    });
+    const withImage = estimateContextBreakdown({
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [],
+      skills: [],
+      webSources: [],
+      attachmentTexts: [],
+      messages: [
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: 'here',
+          timestamp: 1,
+          images: [{ url: 'https://example.com/x.png' }],
+        },
+      ],
+      pendingImageCount: 0,
+    });
+    expect(withImage.system).toBeGreaterThan(empty.system);
+  });
+
+  it('increases system when toolsGuidance is provided', () => {
+    const bare = estimateContextBreakdown({
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [],
+      skills: [],
+      webSources: [],
+      attachmentTexts: [],
+      messages: [],
+      pendingImageCount: 0,
+      toolsGuidance: '',
+    });
+    const guided = estimateContextBreakdown({
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [],
+      skills: [],
+      webSources: [],
+      attachmentTexts: [],
+      messages: [],
+      pendingImageCount: 0,
+      toolsGuidance: 'You have a web_search tool. '.repeat(40),
+    });
+    expect(guided.system).toBeGreaterThan(bare.system);
   });
 });

@@ -138,7 +138,13 @@ export type UseChatLogicProps = {
   usableLimit: number | null;
   contextBreakdown: { system: number; skills: number };
   /** Rebuild isomorphic system tokens for the text about to send. */
-  estimateSystemForSend?: (nextUserText: string, history: Message[]) => number;
+  estimateSystemForSend?: (
+    nextUserText: string,
+    history: Message[],
+    threadWebSources?: import('@/lib/chat/types').WebSearchSource[],
+  ) => number;
+  /** Fired when submit truncates history (edit/resend). */
+  onHistoryTruncated?: () => void;
   
   setPicturesExpanded: React.Dispatch<React.SetStateAction<boolean>>;
   setOutputGroupsOpen: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
@@ -163,6 +169,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     isAccountBound, openLoginModal, stickToBottomRef, scrollToBottom, setIsSkillPickerOpen,
     selectedSpec, selectedModel, zhipuVisionOn, usableLimit, contextBreakdown,
     estimateSystemForSend,
+    onHistoryTruncated,
     setPicturesExpanded, setOutputGroupsOpen, setIsContextPanelOpen,
     editingMessageContent, setEditingMessageContent, editingMessageAttachments, setEditingMessageAttachments, setEditingMessageId,
     messages, messageImagesToIngested
@@ -995,17 +1002,23 @@ export function useChatLogic(props: UseChatLogicProps) {
 
     if (!opts?.alreadyLoading) beginLoading(sessionId);
 
+    if (baseMessagesOverride) {
+      onHistoryTruncated?.();
+    }
+
     const projectTokens = (history: Message[]) => {
       const session = sessionsRef.current.find((s) => s.id === sessionId);
+      const threadSources = webSourcesForThread(
+        [...history, userMessage],
+        session,
+      );
       const system =
-        estimateSystemForSend?.(fullContent, history) ?? contextBreakdown.system;
+        estimateSystemForSend?.(fullContent, history, threadSources) ??
+        contextBreakdown.system;
       return estimateTokensForSend({
         history,
         nextUserText: fullContent,
         pendingImageCount: pendingImages.length,
-        // Match the sources we will actually send (thread-derived), not a stale
-        // session.webSources left over from turns truncated by edit/resend.
-        webSources: webSourcesForThread([...history, userMessage], session),
         contextBreakdown: { system, skills: contextBreakdown.skills },
       });
     };

@@ -48,6 +48,10 @@ export type EstimateContextBreakdownInput = {
   attachmentTexts: Array<{ name: string; text: string }>;
   messages: Message[];
   pendingImageCount: number;
+  /**
+   * When omitted, inferred from `messages` (assistant images / files).
+   * Pass explicitly only when the caller already computed a matching flag.
+   */
   hasGeneratedImages?: boolean;
   hasGeneratedFiles?: boolean;
   skillCreatorOn?: boolean;
@@ -67,6 +71,18 @@ function latestUserAsk(messages: Message[], override?: string): string {
   return '';
 }
 
+function messagesHaveGeneratedImages(messages: Message[]): boolean {
+  return (messages || []).some(
+    (m) => m.role === 'assistant' && (m.images?.length || 0) > 0,
+  );
+}
+
+function messagesHaveGeneratedFiles(messages: Message[]): boolean {
+  return (messages || []).some(
+    (m) => m.role === 'assistant' && (m.files?.length || 0) > 0,
+  );
+}
+
 export function estimateContextBreakdown(
   input: EstimateContextBreakdownInput,
 ): ContextEstimateBreakdown {
@@ -74,6 +90,10 @@ export function estimateContextBreakdown(
   const expandProductGuide =
     input.expandProductGuide ?? wantsProductUsageHelp(userAsk);
   const referenceText = formatWebSourcesForReference(input.webSources || []);
+  const hasGeneratedImages =
+    input.hasGeneratedImages ?? messagesHaveGeneratedImages(input.messages);
+  const hasGeneratedFiles =
+    input.hasGeneratedFiles ?? messagesHaveGeneratedFiles(input.messages);
 
   const systemOpts: BuildChatSystemPartsOpts = {
     model: input.model,
@@ -91,8 +111,8 @@ export function estimateContextBreakdown(
     requestReview: Boolean(input.requestReview),
     autoReview: Boolean(input.autoReview),
     referenceText,
-    hasGeneratedImages: Boolean(input.hasGeneratedImages),
-    hasGeneratedFiles: Boolean(input.hasGeneratedFiles),
+    hasGeneratedImages,
+    hasGeneratedFiles,
     skillCreatorOn: Boolean(input.skillCreatorOn),
     accountSkillCatalog: input.accountSkillCatalog,
     expandProductGuide,

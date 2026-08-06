@@ -180,7 +180,6 @@ describe('send-estimate', () => {
       history: [msg({ role: 'user', content: 'hello world' })],
       nextUserText: 'next',
       pendingImageCount: 1,
-      webSources: [],
       contextBreakdown: { system: 10, skills: 5 },
     });
     // skills are ignored — already inside isomorphic system

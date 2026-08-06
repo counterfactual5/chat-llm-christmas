@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowUpRight, Layers, PanelRightClose } from 'lucide-react';
+import type { RefObject } from 'react';
 import { Button } from '@/components/ui/button';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -14,6 +15,8 @@ export type ToolViewPanelProps = {
   onClose: () => void;
   /** When Context is closed, Preview absorbs its width. */
   contextOpen?: boolean;
+  /** Root for chat Quote selection inside the tool view body. */
+  quoteRootRef?: RefObject<HTMLDivElement | null>;
   view: ToolViewPayload | null;
   messageId?: string;
   onJumpToMessage?: () => void;
@@ -23,6 +26,7 @@ export function ToolViewPanel({
   open,
   onClose,
   contextOpen = false,
+  quoteRootRef,
   view,
   messageId,
   onJumpToMessage,
@@ -74,6 +78,7 @@ export function ToolViewPanel({
           </div>
 
           <div
+            ref={quoteRootRef}
             className={cn(
               'min-h-0 min-w-0 flex-1 overscroll-contain',
               view?.viewType === 'xlsx.table'

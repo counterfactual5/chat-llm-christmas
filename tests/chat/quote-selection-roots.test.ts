@@ -34,4 +34,14 @@ describe('quote selection roots', () => {
     const root = { contains: () => true };
     expect(selectionInsideRoot(root, null, null)).toBe(false);
   });
+
+  it('accepts selection when any of multiple roots contains the nodes', () => {
+    const node = { id: 'text' };
+    const previewRoot = { contains: () => false };
+    const overlayRoot = { contains: (n: unknown) => n === node };
+    const roots = [previewRoot, overlayRoot];
+    expect(
+      roots.some((root) => selectionInsideRoot(root, node, node)),
+    ).toBe(true);
+  });
 });

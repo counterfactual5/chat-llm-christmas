@@ -284,7 +284,11 @@ export default function ChatContainer() {
   const messagesContentRef = useRef<HTMLDivElement>(null);
   /** Side Preview only — chat messages already use messagesContentRef. */
   const previewQuoteRootRef = useRef<HTMLDivElement>(null);
-  const quoteExtraRoots = useMemo(() => [previewQuoteRootRef], []);
+  const overlayQuoteRootRef = useRef<HTMLDivElement>(null);
+  const quoteExtraRoots = useMemo(
+    () => [previewQuoteRootRef, overlayQuoteRootRef],
+    [],
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerImeComposingRef = useRef(false);
   /** Unused timed-lock leftover; bindImeGuards still accepts the ref for API compat. */
@@ -2810,6 +2814,7 @@ export default function ChatContainer() {
               open={isPreviewPanelOpen}
               onClose={() => setIsPreviewPanelOpen(false)}
               contextOpen={isContextPanelOpen}
+              quoteRootRef={previewQuoteRootRef}
               view={previewTarget.view}
               messageId={previewTarget.messageId}
               onJumpToMessage={() => {
@@ -2997,6 +3002,7 @@ export default function ChatContainer() {
         setImagePreviewSrc={setImagePreviewSrc}
         filePreview={filePreview}
         setFilePreview={setFilePreview}
+        filePreviewQuoteRootRef={overlayQuoteRootRef}
         downloadGeneratedFile={downloadGeneratedFile}
       />
 

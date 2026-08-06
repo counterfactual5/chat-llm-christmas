@@ -1,6 +1,6 @@
 /**
  * Multi-provider web page reader — thin client to chat-api `/v1/tools/web_read`.
- * Engines (Zhipu → Tavily → Jina → Fetch MCP → bare) live on the product backend.
+ * Engines (Zhipu → Tavily → Jina → Fetch MCP → keyless → bare) live on the product backend.
  */
 
 import { chatBackendToolsURL } from '@/lib/chat-backend';

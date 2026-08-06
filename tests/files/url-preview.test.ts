@@ -50,6 +50,9 @@ describe('url-preview helpers', () => {
     expect(resolvePreviewHttpUrl('../x', 'https://example.com/a/b/')).toBe(
       'https://example.com/a/x',
     );
+    expect(resolvePreviewHttpUrl('?q=1', 'https://example.com/a/b')).toBe(
+      'https://example.com/a/b?q=1',
+    );
     expect(resolvePreviewHttpUrl('/wiki/Foo')).toBe('');
     expect(resolvePreviewHttpUrl('mailto:a@b.com', 'https://example.com')).toBe('');
     expect(resolvePreviewHttpUrl('/api/files/x', 'https://example.com')).toBe('');

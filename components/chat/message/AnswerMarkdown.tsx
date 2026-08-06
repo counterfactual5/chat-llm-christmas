@@ -14,6 +14,7 @@ import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence'
 import { looksLikeAsciiArt, reflowCollapsedAsciiArt } from '@/lib/markdown/core/ascii-art';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
 import {
+  previewNavigationTargetEquals,
   resolvePreviewHttpUrl,
   shouldOpenLinkExternally,
 } from '@/lib/files/url-preview';
@@ -118,6 +119,17 @@ export function AnswerMarkdown({
                   const resolved = resolvePreviewHttpUrl(link, previewBaseUrl);
                   if (!onPreviewLink || !resolved) return;
                   if (shouldOpenLinkExternally(e)) return;
+                  // Same-document `#fragment` (common in Wikipedia extracts): do not
+                  // refetch the panel. Relative `#id` hrefs must still preventDefault
+                  // or the SPA navigates; open the resolved absolute URL in a tab.
+                  if (
+                    previewBaseUrl &&
+                    previewNavigationTargetEquals(resolved, previewBaseUrl)
+                  ) {
+                    e.preventDefault();
+                    window.open(resolved, '_blank', 'noopener,noreferrer');
+                    return;
+                  }
                   e.preventDefault();
                   onPreviewLink(resolved);
                 }}

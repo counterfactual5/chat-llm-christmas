@@ -100,7 +100,13 @@ function isMarkdownBlockStart(line: string): boolean {
 /**
  * Models sometimes hard-wrap mid-CJK word (`**备选方**\n案，`). Join only those
  * single-newline wraps — blank lines and real block starts stay put.
+ *
+ * Prose wraps used to require ≥36 non-space chars on the previous line, which
+ * missed review-report wraps (~16–30). Floor is high enough that poem-like
+ * stacks (≈5 chars/line) stay unjoined.
  */
+const MIN_CJK_PROSE_WRAP_LEN = 16;
+
 function shouldJoinHardWrap(prev: string, next: string): boolean {
   if (!prev.trim() || !next.trim()) return false;
   if (isMarkdownBlockStart(next)) return false;
@@ -112,6 +118,7 @@ function shouldJoinHardWrap(prev: string, next: string): boolean {
   const a = prev.trimEnd();
   const b = next.trimStart();
   const aLast = a.charAt(a.length - 1);
+  const bFirst = b.charAt(0);
   const cjk = /[\u4e00-\u9fff]/;
 
   // `**备选方**\n案，` — closing * / ` then a short CJK remnant + clause punct.
@@ -124,16 +131,14 @@ function shouldJoinHardWrap(prev: string, next: string): boolean {
   }
   // Clear mid-word wrap: CJK\nCJK+punct.
   if (cjk.test(aLast) && /^[\u4e00-\u9fff][，、]/.test(b)) return true;
-  // Long hard-wrapped prose line continuing with CJK/Latin.
+  // Hard-wrapped prose continuing with CJK/Latin (review reports often wrap
+  // well below the old 36-char gate).
   const prevLen = a.replace(/\s+/g, '').length;
-  if (
-    prevLen >= 36 &&
-    cjk.test(aLast) &&
-    (cjk.test(b.charAt(0)) || /[A-Za-z0-9]/.test(b.charAt(0)))
-  ) {
+  if (prevLen < MIN_CJK_PROSE_WRAP_LEN) return false;
+  if (cjk.test(aLast) && (cjk.test(bFirst) || /[A-Za-z0-9]/.test(bFirst))) {
     return true;
   }
-  if (prevLen >= 36 && /[A-Za-z0-9]$/.test(a) && cjk.test(b.charAt(0))) {
+  if (/[A-Za-z0-9]$/.test(a) && cjk.test(bFirst)) {
     return true;
   }
   return false;

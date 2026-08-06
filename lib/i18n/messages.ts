@@ -29,7 +29,8 @@ export const dict = {
     exportMarkdown: 'Export Markdown',
     deleteChat: 'Delete Chat',
     deleteConversation: 'Delete conversation',
-    deleteConversationConfirm: 'Delete “{title}”? This cannot be undone.',
+    deleteConversationConfirm:
+      'Delete “{title}”? Uploads and files only used in this chat will also be removed. This cannot be undone.',
     cancel: 'Cancel',
     delete: 'Delete',
     deleting: 'Deleting…',
@@ -433,7 +434,8 @@ export const dict = {
     exportMarkdown: '导出 Markdown',
     deleteChat: '删除对话',
     deleteConversation: '删除对话',
-    deleteConversationConfirm: '确定删除「{title}」？此操作无法撤销。',
+    deleteConversationConfirm:
+      '确定删除「{title}」？仅用于本对话的上传与附件也会一并删除。此操作无法撤销。',
     cancel: '取消',
     delete: '删除',
     deleting: '删除中…',

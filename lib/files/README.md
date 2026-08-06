@@ -15,7 +15,7 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 | `direct-upload.ts` | Upload ticket mint for browser → chat-api multipart. |
 | `ingest/` | Client-side extract + prepare before upload (PDF/DOCX/Excel/text/images). |
 | `gateway/` | Server Files API base URL, upload helpers, content parts for tools. |
-| `attached-file-blocks.ts` | Fold older attachments into history reference blocks for the model. |
+| `scrub-deleted-file.ts` | Scrub deleted account file refs from sessions; collect exclusive file ids when deleting a conversation. |
 
 Product-level attachment / vision / `file_read` flow: [`docs/images-and-files.md`](../../docs/images-and-files.md).
 

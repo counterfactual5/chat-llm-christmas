@@ -100,7 +100,7 @@ flowchart TD
 - **按需切片（非整书）**：`file_read` 默认返回约 8 页；可用 `start_page` / `max_pages` / `focus` 继续读。首轮省略 `start_page` 时，优先用 PDF outline 的 `body_start_page`，否则用文本启发式跳过目录，从正文附近起读；显式 `start_page=1` 或 `focus=目录/contents` 可读目录。chat-api sidecar 用 `--- page N ---` 分页，meta 可含 `outline` / `body_start_page` / `pdf_type` / `needs_ocr` / `pages_needing_ocr`（pdf-inspector 分类；扫描件空文本返回 `NEEDS_OCR`，OCR 尚未启用）；同步先写 partial，后台续抽。
 - **重读靠 sidecar**：不每轮把全文塞进 `/api/chat` body；`GET /v1/files/:id/extract` 返回文本 + `partial` / `total_pages`。
 - **与图片引用同构**：书籍下载只留 fileId 引用；需要内容时再 `file_read`，类似 `【历史图片引用】` → 按需看图。
-- **删除同步**：Files 管理器删除账户文件时，会清掉会话正文里的 `【历史文件引用】` / `[Attached File]`（避免再调 `file_read`），并标记 Output 卡片为「已从 Files 删除」但仍保留为产出记录；在 Output 里手动删除才会拿掉该记录。打开 Files 时也会对账已缺失的 id。
+- **删除同步**：Files 管理器删除账户文件时，会清掉会话正文里的 `【历史文件引用】` / `[Attached File]`（避免再调 `file_read`），并标记 Output 卡片为「已从 Files 删除」但仍保留为产出记录；在 Output 里手动删除才会拿掉该记录。打开 Files 时也会对账已缺失的 id。**删除对话**时，会一并删除仅被该对话引用的账户附件（上传 / 生图 / 生成文件 / 书籍论文下载等）；仍被其他对话引用的文件保留。
 
 ---
 

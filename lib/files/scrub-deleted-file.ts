@@ -199,6 +199,25 @@ export function collectReferencedAccountFileIds(sessions: ChatSession[]): string
 }
 
 /**
+ * Account file ids that appear in doomedSessions (and optional extras such as
+ * composer pending uploads) but nowhere in keepSessions — safe to delete from
+ * storage when removing a conversation.
+ */
+export function accountFileIdsExclusiveToSessions(
+  doomedSessions: ChatSession[],
+  keepSessions: ChatSession[],
+  extraFileIds: Iterable<string> = [],
+): string[] {
+  const keep = new Set(collectReferencedAccountFileIds(keepSessions));
+  const doomed = new Set(collectReferencedAccountFileIds(doomedSessions));
+  for (const raw of extraFileIds) {
+    const id = String(raw || '').trim();
+    if (/^file-[a-zA-Z0-9_-]+$/i.test(id)) doomed.add(id);
+  }
+  return [...doomed].filter((id) => !keep.has(id));
+}
+
+/**
  * Scrub refs whose file ids are absent from the account file list.
  * Call only when the listing is known-complete (e.g. page size not full).
  */

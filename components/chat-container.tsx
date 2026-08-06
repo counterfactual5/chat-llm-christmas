@@ -49,7 +49,7 @@ import {
   referenceSourceKind,
   webSourcesForThread,
 } from '@/lib/chat/context/references';
-import { scrubFileIdFromSessions, scrubMissingAccountFiles } from '@/lib/files/scrub-deleted-file';
+import { scrubFileIdFromSessions, scrubMissingAccountFiles, accountFileIdsExclusiveToSessions } from '@/lib/files/scrub-deleted-file';
 import {
   analyzeTruncation,
   hasSuccessfulRetrievalTools,
@@ -1259,6 +1259,21 @@ export default function ChatContainer() {
     );
 
   const deleteSession = (id: string) => {
+    const all = sessionsRef.current;
+    const doomed = all.find((s) => s.id === id);
+    const keep = all.filter((s) => s.id !== id);
+    const composerExtras =
+      id === activeSessionId
+        ? attachments
+            .map((a) => a.fileId)
+            .filter((fid): fid is string => Boolean(fid))
+        : [];
+    const fileIdsToDelete = accountFileIdsExclusiveToSessions(
+      doomed ? [doomed] : [],
+      keep,
+      composerExtras,
+    );
+
     const controller = abortControllersRef.current.get(id);
     if (controller) controller.abort();
     clearSessionWork(id);
@@ -1269,6 +1284,21 @@ export default function ChatContainer() {
       }).catch(() => {
         // Portal down: deletion stays local until a future sync window.
       });
+      // Drop account files that only this conversation referenced (uploads,
+      // generated images/files, book/paper downloads). Shared ids stay.
+      for (const fileId of fileIdsToDelete) {
+        void deleteStoredFile(fileId)
+          .then(() => scrubDeletedAccountFile(fileId))
+          .catch((error) =>
+            console.warn('[files] delete session attachment failed:', error),
+          );
+      }
+    }
+    if (id === activeSessionId && attachments.length > 0) {
+      attachments.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+      setAttachments([]);
     }
     setSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== id && s.messages.length > 0);

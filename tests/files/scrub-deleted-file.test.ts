@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  accountFileIdsExclusiveToSessions,
   scrubFileIdFromContent,
   scrubFileIdFromMessage,
   scrubFileIdFromSessions,
@@ -135,5 +136,59 @@ describe('scrub-deleted-file', () => {
     const cleaned = scrubMissingAccountFiles([session], ['file-keep1234567890']);
     expect(cleaned[0]?.messages[0]?.content).not.toContain(FILE_ID);
     expect(cleaned[0]?.messages[0]?.content).toContain('file-keep1234567890');
+  });
+
+  it('lists account file ids exclusive to sessions being deleted', () => {
+    const shared = 'file-shared000000000000000000000001';
+    const onlyHere = FILE_ID;
+    const doomed: ChatSession = {
+      id: 'gone',
+      title: 'gone',
+      messages: [
+        {
+          id: 'm1',
+          role: 'user',
+          content: '',
+          timestamp: 1,
+          images: [{ url: `/api/files/${onlyHere}`, fileId: onlyHere }],
+          files: [
+            {
+              id: shared,
+              name: 'shared.pdf',
+              mimeType: 'application/pdf',
+              size: 1,
+              url: `/api/files/${shared}`,
+              createdAt: 1,
+            },
+          ],
+        },
+      ],
+      updatedAt: 1,
+    };
+    const keep: ChatSession = {
+      id: 'keep',
+      title: 'keep',
+      messages: [
+        {
+          id: 'm2',
+          role: 'assistant',
+          content: `【历史文件引用】\n- shared.pdf (fileId: ${shared})`,
+          timestamp: 1,
+        },
+      ],
+      updatedAt: 1,
+    };
+
+    expect(
+      accountFileIdsExclusiveToSessions([doomed], [keep]).sort(),
+    ).toEqual([onlyHere]);
+    expect(
+      accountFileIdsExclusiveToSessions([doomed], [keep], [
+        'file-pending0000000000000000000001',
+      ]).sort(),
+    ).toEqual(['file-pending0000000000000000000001', onlyHere].sort());
+    expect(accountFileIdsExclusiveToSessions([doomed], [doomed, keep])).toEqual(
+      [],
+    );
   });
 });

@@ -29,4 +29,20 @@ describe('stream completion codes', () => {
       code: 'upstream_error',
     });
   });
+
+  it('attaches usage when provided', () => {
+    expect(
+      streamCompletionPayload('stop', {
+        usage: { prompt_tokens: 1200, completion_tokens: 40, total_tokens: 1240 },
+      }),
+    ).toMatchObject({
+      finish_reason: 'stop',
+      truncated: false,
+      usage: { prompt_tokens: 1200, completion_tokens: 40, total_tokens: 1240 },
+    });
+  });
+
+  it('omits usage when missing', () => {
+    expect(streamCompletionPayload('stop')).not.toHaveProperty('usage');
+  });
 });

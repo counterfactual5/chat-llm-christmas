@@ -3,6 +3,8 @@
  * Prefer provider finish_reason / stream lifecycle over body heuristics.
  */
 
+import type { CompletionUsage } from '@/lib/chat/stream/usage';
+
 export const NATURAL_FINISH_REASONS = new Set(['stop', 'end_turn']);
 
 /**
@@ -86,12 +88,17 @@ export function truncationFromFinishReason(
 /** Payload fields sent on the last SSE event before [DONE]. */
 export function streamCompletionPayload(
   finishReason?: string | null,
-  opts?: { code?: StreamCompletionCode | string; truncationReason?: string },
+  opts?: {
+    code?: StreamCompletionCode | string;
+    truncationReason?: string;
+    usage?: CompletionUsage | null;
+  },
 ): {
   finish_reason: string | null;
   truncated: boolean;
   truncation_reason?: string;
   code?: string;
+  usage?: CompletionUsage;
 } {
   const fr = finishReason || 'stop';
   const fromCode = actionFromStreamCode(opts?.code);
@@ -99,10 +106,12 @@ export function streamCompletionPayload(
     ? { truncated: fromCode.truncated, reason: fromCode.reason }
     : truncationFromFinishReason(fr);
   const reason = opts?.truncationReason || verdict.reason;
+  const usage = opts?.usage || undefined;
   return {
     finish_reason: fr,
     truncated: verdict.truncated,
     ...(reason ? { truncation_reason: reason } : {}),
     ...(opts?.code ? { code: opts.code } : {}),
+    ...(usage ? { usage } : {}),
   };
 }

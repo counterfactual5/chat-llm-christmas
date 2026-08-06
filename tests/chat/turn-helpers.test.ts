@@ -175,7 +175,7 @@ describe('attachments', () => {
 });
 
 describe('send-estimate', () => {
-  it('sums overheads and history', () => {
+  it('sums system overheads and history (skills folded into system)', () => {
     const projected = estimateTokensForSend({
       history: [msg({ role: 'user', content: 'hello world' })],
       nextUserText: 'next',
@@ -183,7 +183,9 @@ describe('send-estimate', () => {
       webSources: [],
       contextBreakdown: { system: 10, skills: 5 },
     });
-    expect(projected).toBeGreaterThan(10 + 5 + 1000);
+    // skills are ignored — already inside isomorphic system
+    expect(projected).toBeGreaterThan(10 + 1000);
+    expect(projected).toBeLessThan(10 + 5 + 1000 + 500);
     expect(shouldCompactBeforeSend(91, 100)).toBe(true);
     expect(shouldCompactBeforeSend(90, 100)).toBe(false);
     expect(exceedsUsableWindow(101, 100)).toBe(true);

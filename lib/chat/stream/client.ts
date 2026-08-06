@@ -11,6 +11,10 @@ import {
   RECOVERABLE_TOOL_TIMEOUT_REASON,
 } from '@/lib/chat/stream/truncation';
 import {
+  readCompletionUsage,
+  type CompletionUsage,
+} from '@/lib/chat/stream/usage';
+import {
   contentHasThinkMarkup,
   createThinkStreamParser,
   extractThinkBlocks,
@@ -85,6 +89,8 @@ export type StreamChatDeps = {
   onGitHubAuthRequired?: () => void;
   /** Unreadable SSE payloads were skipped during this stream. */
   onMalformedSse?: (message: string) => void;
+  /** Gateway-reported usage from the final (or early-done) completion. */
+  onCompletionUsage?: (usage: CompletionUsage) => void;
 };
 
 export type StreamChatRequestOpts = {
@@ -496,6 +502,8 @@ export async function streamChatResponse(
             serverCode = parsed.code;
           }
         }
+        const usage = readCompletionUsage(parsed);
+        if (usage) deps.onCompletionUsage?.(usage);
         if (parsed.reasoning) {
           appendToAssistantReasoning(parsed.reasoning);
         }

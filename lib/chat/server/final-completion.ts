@@ -12,6 +12,10 @@ import {
   splitCompletionDelta,
   streamChatCompletionsRaw,
 } from '@/lib/chat/server/upstream';
+import {
+  readCompletionUsage,
+  type CompletionUsage,
+} from '@/lib/chat/stream/usage';
 
 export type FinalCompletionResult = {
   sawText: boolean;
@@ -19,6 +23,7 @@ export type FinalCompletionResult = {
   lastFinishReason: string | null;
   contentBuf: string;
   reasoningOnlyBuf: string;
+  usage: CompletionUsage | null;
 };
 
 export async function streamFinalCompletion(opts: {
@@ -38,6 +43,7 @@ export async function streamFinalCompletion(opts: {
     apiKey: opts.apiKey,
     baseURL: opts.baseURL,
     signal: opts.signal,
+    includeUsage: true,
     body: {
       model: opts.model,
       temperature: opts.temperature,
@@ -51,6 +57,7 @@ export async function streamFinalCompletion(opts: {
   let lastFinishReason: string | null = null;
   let contentBuf = '';
   let reasoningOnlyBuf = '';
+  let usage: CompletionUsage | null = null;
   const stampStripper = createStampLeakStripper();
 
   const bounded = boundedAsyncIterator(finalStream, {
@@ -60,6 +67,9 @@ export async function streamFinalCompletion(opts: {
   });
   try {
     for await (const chunk of bounded) {
+      const nextUsage = readCompletionUsage(chunk);
+      if (nextUsage) usage = nextUsage;
+
       const choice = chunk?.choices?.[0];
       const delta = choice?.delta || {};
       const finish_reason = choice?.finish_reason || null;
@@ -118,5 +128,12 @@ export async function streamFinalCompletion(opts: {
   if (!sawContent && reasoningOnlyBuf.trim()) {
     sawText = true;
   }
-  return { sawText, sawContent, lastFinishReason, contentBuf, reasoningOnlyBuf };
+  return {
+    sawText,
+    sawContent,
+    lastFinishReason,
+    contentBuf,
+    reasoningOnlyBuf,
+    usage,
+  };
 }

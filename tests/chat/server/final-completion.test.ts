@@ -53,6 +53,7 @@ describe('streamFinalCompletion', () => {
       lastFinishReason: 'stop',
       contentBuf: 'Hi there',
       reasoningOnlyBuf: '',
+      usage: null,
     });
     expect(sent).toEqual([{ content: 'Hi ', reasoning: undefined }, { content: 'there', reasoning: undefined }]);
   });
@@ -101,6 +102,7 @@ describe('streamFinalCompletion', () => {
       lastFinishReason: null,
       contentBuf: '',
       reasoningOnlyBuf: '',
+      usage: null,
     });
   });
 

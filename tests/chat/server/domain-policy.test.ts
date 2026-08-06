@@ -4,7 +4,7 @@ import {
   domainPolicyPrompt,
   researchDomainPayload,
   researchDomainPolicy,
-} from '@/lib/chat/server/domain-policy';
+} from '@/lib/chat/prompt/domain-policy';
 
 describe('domain policy', () => {
   it('keeps basic informational questions low risk', () => {

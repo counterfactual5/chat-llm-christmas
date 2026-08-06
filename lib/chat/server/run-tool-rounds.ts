@@ -384,8 +384,13 @@ export async function runToolRounds(
       }
       break;
     }
-    const { streamedContent, toolCalls, roundFinishReason, hasToolCallDeltas } =
-      roundResult;
+    const {
+      streamedContent,
+      toolCalls,
+      roundFinishReason,
+      hasToolCallDeltas,
+      usage,
+    } = roundResult;
 
     if (!toolCalls.length) {
       const decision = decideEmptyToolCallsBranch({
@@ -478,7 +483,9 @@ export async function runToolRounds(
               await deps.streamReviewCorrection(actionable, streamedContent);
             }
           }
-          deps.send(streamCompletionPayload(roundFinishReason || 'stop'));
+          deps.send(
+            streamCompletionPayload(roundFinishReason || 'stop', { usage }),
+          );
           deps.closeStreamDone();
           return { status: 'stream_closed' };
         }

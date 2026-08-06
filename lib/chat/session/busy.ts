@@ -29,6 +29,21 @@ export function isResearchSessionBusy(
   return Boolean(sessionId && researchBusySessionId === sessionId);
 }
 
+/**
+ * Whether Composer Stop should call research cancel (not chat stopGenerating).
+ * Unscoped busy (busy but no session id yet) still cancels — never chat-abort a
+ * research turn.
+ */
+export function shouldCancelResearch(
+  activeSessionId: string | null | undefined,
+  researchBusy: boolean,
+  researchBusySessionId: string | null,
+): boolean {
+  if (!researchBusy) return false;
+  if (!researchBusySessionId) return true;
+  return isResearchSessionBusy(activeSessionId, researchBusySessionId);
+}
+
 export function isSessionBusy(
   sessionId: string | null | undefined,
   input: SessionBusyInput,

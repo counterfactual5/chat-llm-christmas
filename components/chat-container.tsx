@@ -18,6 +18,7 @@
  *    continue / claim-review plan  lib/chat/turn/continuation.ts
  *  /image, /research, skill slash     lib/chat/turn/image-command.ts, research-command.ts, research-activity.ts, skill-command.ts
  *  Deep research (main-chat timeline) hooks/chat/use-deep-research.ts
+ *  Session busy SSOT (list/composer/sidebar) lib/chat/session/busy.ts
  *  Client SSE consumer             lib/chat/stream/client.ts
  *  Session normalize / LWW merge   lib/chat/session/store.ts
  *  Message list / composer / …     components/chat/*
@@ -77,6 +78,11 @@ import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
 import { hasUploadingAttachments } from '@/lib/chat/turn/attachments';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
+import {
+  isResearchSessionBusy,
+  isSessionBusy,
+  researchBusySessionIdFrom,
+} from '@/lib/chat/session/busy';
 import {
   clearOAuthReturnQuery,
   oauthReturnNeedsUrlClean,
@@ -1609,8 +1615,6 @@ export default function ChatContainer() {
     stopGenerating,
     handleSubmit,
     loadingBySession,
-    isSessionLoading,
-    isActiveLoading,
     beginLoading,
     endLoading,
     activeQueue,
@@ -1663,16 +1667,23 @@ export default function ChatContainer() {
     endLoading,
   });
 
-  // Deep Research busy must stay scoped to its session. Treating it as a
-  // global "chat loading" flag makes other sessions' orphan tool runs look
-  // live (Reading webpage…) while the sidebar spinner sits on a different row.
-  const researchSessionId = deepResearch.job?.sessionId || null;
-  const isResearchBusyFor = (sessionId: string | null | undefined) =>
-    Boolean(deepResearch.busy && sessionId && researchSessionId === sessionId);
-  const activeSessionBusy =
-    isActiveLoading || isResearchBusyFor(activeSessionId);
-  const sidebarSessionLoading = (sessionId: string) =>
-    isSessionLoading(sessionId) || isResearchBusyFor(sessionId);
+  // One busy predicate for MessageList / Composer / Sidebar / orphan cleanup.
+  // Do not OR deepResearch.busy ad hoc at call sites — see lib/chat/session/busy.ts.
+  const researchBusySessionId = researchBusySessionIdFrom(
+    deepResearch.busy,
+    deepResearch.job?.sessionId,
+  );
+  const sessionBusyInput = {
+    loadingBySession,
+    researchBusySessionId,
+  };
+  const activeSessionBusy = isSessionBusy(activeSessionId, sessionBusyInput);
+  const sessionIsBusy = (sessionId: string) =>
+    isSessionBusy(sessionId, sessionBusyInput);
+  const activeResearchBusy = isResearchSessionBusy(
+    activeSessionId,
+    researchBusySessionId,
+  );
 
   const researchReattachAttemptsRef = useRef(new Map<string, number>());
   const researchReattachInFlightRef = useRef(new Set<string>());
@@ -1820,12 +1831,12 @@ export default function ChatContainer() {
   ]);
 
   const stopOrCancel = useCallback(() => {
-    if (deepResearch.busy) {
+    if (activeResearchBusy) {
       void deepResearch.cancel();
       return;
     }
     stopGenerating();
-  }, [deepResearch, stopGenerating]);
+  }, [activeResearchBusy, deepResearch, stopGenerating]);
 
   const resumeIncompleteOrResearch = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -2049,8 +2060,7 @@ export default function ChatContainer() {
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {
-        if (loadingBySession[s.id]) return s;
-        if (isResearchBusyFor(s.id)) return s;
+        if (isSessionBusy(s.id, sessionBusyInput)) return s;
         let sessionChanged = false;
         const messages = s.messages.map((m) => {
           if (m.role !== 'assistant') return m;
@@ -2086,11 +2096,11 @@ export default function ChatContainer() {
       });
       return changed ? next : prev;
     });
-  }, [chatsHydrated, loadingBySession, deepResearch.busy, researchSessionId]);
+  }, [chatsHydrated, loadingBySession, researchBusySessionId]);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isActiveLoading]);
+  }, [messages, activeSessionBusy]);
 
   // Switching conversations should land at the latest message.
   // Clear the previewed file only when the session id actually changes — same-session
@@ -2164,7 +2174,7 @@ export default function ChatContainer() {
   // content / thought / tool), show a textless spinner under the bubble — including
   // the common gap after narration and before the next tool_call token.
   useEffect(() => {
-    if (!isActiveLoading || !activeSessionId) {
+    if (!activeSessionBusy || !activeSessionId) {
       setReplyWaitByMessage({});
       return;
     }
@@ -2208,7 +2218,7 @@ export default function ChatContainer() {
     }, idleMs);
     return () => window.clearTimeout(timer);
   }, [
-    isActiveLoading,
+    activeSessionBusy,
     activeSessionId,
     sessions
       .find((s) => s.id === activeSessionId)
@@ -2463,7 +2473,7 @@ export default function ChatContainer() {
         open={isSidebarOpen}
         sessions={sessions}
         activeSessionId={activeSessionId}
-        isSessionLoading={sidebarSessionLoading}
+        isSessionLoading={sessionIsBusy}
         skills={skills}
         activeSkillIds={activeSkillIds}
         autoReviewEnabled={activeAutoReview}
@@ -2727,7 +2737,7 @@ export default function ChatContainer() {
                 isCompacting={isCompacting}
                 stopGenerating={stopOrCancel}
                 enqueueOrSubmit={submitComposer}
-                researchBusy={isResearchBusyFor(activeSessionId)}
+                researchBusy={activeResearchBusy}
                 researchError={
                   deepResearch.errorSessionId === activeSessionId
                     ? deepResearch.error

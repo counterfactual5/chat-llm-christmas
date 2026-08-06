@@ -1215,7 +1215,9 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
 
         <div className="flex items-center gap-2">
-          {isActiveLoading || researchBusy ? (
+          {/* Visibility uses unified isActiveLoading (chat + scoped research).
+              researchBusy only picks cancel vs stop — do not re-OR busy here. */}
+          {isActiveLoading ? (
             <Button 
               onClick={() => (researchBusy ? cancelResearch() : stopGenerating())}
               size="icon" 

@@ -82,10 +82,16 @@ describe('quote selection roots', () => {
 });
 
 describe('shouldMarkMessagesSelecting', () => {
-  it('is true while pointer is down inside messages or selection is active', () => {
-    expect(shouldMarkMessagesSelecting(true, false)).toBe(true);
-    expect(shouldMarkMessagesSelecting(false, true)).toBe(true);
+  it('is true only while pointer is down AND selection is active', () => {
     expect(shouldMarkMessagesSelecting(true, true)).toBe(true);
+  });
+
+  it('is false on pointer-down alone so link clicks still fire', () => {
+    expect(shouldMarkMessagesSelecting(true, false)).toBe(false);
+  });
+
+  it('is false for idle leftover selection (links stay clickable)', () => {
+    expect(shouldMarkMessagesSelecting(false, true)).toBe(false);
   });
 
   it('is false when idle with no selection', () => {

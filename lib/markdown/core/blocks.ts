@@ -277,7 +277,7 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // Ordered list marker on its own line: `1.\n\n2025年...` should stay part of
   // the list item (otherwise the number becomes a separate paragraph).
   out = out.replace(
-    /(^|\n)(\d{1,2}\.)[\t \u3000]*\n{1,3}([ \t\u3000]*\*{0,2}\s*\d{4}年[^\n]*)/g,
+    /(^|\n)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*\*{0,2}\s*\d{4}年[^\n]*)/g,
     (full, lead: string, marker: string, rest: string) =>
       `${lead}${marker} ${String(rest || '').trimStart()}`,
   );

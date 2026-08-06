@@ -91,7 +91,16 @@ import {
   planOAuthReturnUi,
   type AuthModalMode,
 } from '@/lib/chat/account/oauth-return';
-import { enableGoogleSurfacesOnNewestSession } from '@/lib/chat/integrations/client';
+import {
+  enableGoogleSurfacesOnNewestSession,
+  stripGoogleMcpFromSessions,
+  stripMcpIdFromSessions,
+} from '@/lib/chat/integrations/client';
+import {
+  patchSessionAutoReview,
+  patchSessionMcpIds,
+  patchSessionSkillIds,
+} from '@/lib/chat/session/tool-flags';
 import { bindImeGuards, isEnterSubmitBlockedByIme } from '@/lib/chat/composer/ime';
 import {
   downloadGeneratedFile,
@@ -330,30 +339,33 @@ export default function ChatContainer() {
     }
   }, []);
 
+  /**
+   * Per-chat Tools/MCP flags — always target `activeSessionIdRef` (not a closed-
+   * over id) and sync `sessionsRef` immediately so absolute `setSessions(next)`
+   * paths (updateSession / stream) cannot clobber a just-toggled flag.
+   */
   const setActiveMcpIds = useCallback(
     (updater: string[] | ((prev: string[]) => string[])) => {
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeSessionId) return s;
-          const next = typeof updater === 'function' ? updater(s.mcpIds || []) : updater;
-          return { ...s, mcpIds: next, updatedAt: Date.now() };
-        }),
-      );
+      const sessionId = activeSessionIdRef.current;
+      setSessions((prev) => {
+        const next = patchSessionMcpIds(prev, sessionId, updater);
+        if (next !== prev) sessionsRef.current = next;
+        return next;
+      });
     },
-    [activeSessionId],
+    [],
   );
 
   const setActiveSkillIds = useCallback(
     (updater: string[] | ((prev: string[]) => string[])) => {
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeSessionId) return s;
-          const next = typeof updater === 'function' ? updater(s.skillIds || []) : updater;
-          return { ...s, skillIds: next, updatedAt: Date.now() };
-        }),
-      );
+      const sessionId = activeSessionIdRef.current;
+      setSessions((prev) => {
+        const next = patchSessionSkillIds(prev, sessionId, updater);
+        if (next !== prev) sessionsRef.current = next;
+        return next;
+      });
     },
-    [activeSessionId],
+    [],
   );
 
   /** Pass `authed` from account status — do not rely on React state timing. */
@@ -512,7 +524,7 @@ export default function ChatContainer() {
     disconnectGoogle,
   } = useChatIntegrations({
     setSessions,
-    setActiveMcpIds,
+    sessionsRef,
     isAccountBound,
     showAuthModal,
     authModalMode,
@@ -591,9 +603,12 @@ export default function ChatContainer() {
   const activeMcpIds = activeSession?.mcpIds || [];
   const activeAutoReview = activeSession?.autoReview ?? true;
   const setActiveAutoReview = (v: boolean) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === activeSessionId ? { ...s, autoReview: v } : s)),
-    );
+    const sessionId = activeSessionIdRef.current;
+    setSessions((prev) => {
+      const next = patchSessionAutoReview(prev, sessionId, v);
+      if (next !== prev) sessionsRef.current = next;
+      return next;
+    });
   };
   // Opt-in model tools (default OFF) — slash /papers|/books|/image always work.
   const paperSearchEnabled = activeMcpIds.includes('paper_search');
@@ -704,13 +719,9 @@ export default function ChatContainer() {
     if (notionStatus === null) return; // still loading
     if (notionStatus.connected) return;
     setSessions((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        if (!(s.mcpIds || []).includes('notion')) return s;
-        changed = true;
-        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => id !== 'notion') };
-      });
-      return changed ? next : prev;
+      const next = stripMcpIdFromSessions(prev, 'notion');
+      if (next !== prev) sessionsRef.current = next;
+      return next;
     });
   }, [notionStatus]);
 
@@ -718,13 +729,9 @@ export default function ChatContainer() {
     if (githubStatus === null) return; // still loading
     if (githubStatus.connected) return;
     setSessions((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        if (!(s.mcpIds || []).includes('github')) return s;
-        changed = true;
-        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => id !== 'github') };
-      });
-      return changed ? next : prev;
+      const next = stripMcpIdFromSessions(prev, 'github');
+      if (next !== prev) sessionsRef.current = next;
+      return next;
     });
   }, [githubStatus]);
 
@@ -732,13 +739,9 @@ export default function ChatContainer() {
     if (googleStatus === null) return; // still loading
     if (googleStatus.connected) return;
     setSessions((prev) => {
-      let changed = false;
-      const next = prev.map((s) => {
-        if (!(s.mcpIds || []).some((id) => isGoogleMcpId(id))) return s;
-        changed = true;
-        return { ...s, mcpIds: (s.mcpIds || []).filter((id) => !isGoogleMcpId(id)) };
-      });
-      return changed ? next : prev;
+      const next = stripGoogleMcpFromSessions(prev);
+      if (next !== prev) sessionsRef.current = next;
+      return next;
     });
   }, [googleStatus]);
 

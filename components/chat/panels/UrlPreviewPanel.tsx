@@ -19,8 +19,6 @@ import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { previewPanelWidth } from './panel-widths';
 
-const IFRAME_FALLBACK_MS = 5000;
-
 export type UrlPreviewPanelProps = {
   open: boolean;
   onClose: () => void;
@@ -28,7 +26,7 @@ export type UrlPreviewPanelProps = {
   quoteRootRef?: RefObject<HTMLDivElement | null>;
   url: string;
   title?: string;
-  /** Prefer extract body over iframe (user toggle or auto fallback). */
+  /** Prefer extract body over iframe (caller override / auth degrade). */
   forceExtract?: boolean;
   /** Navigate the preview to another http(s) URL (address-bar submit). */
   onNavigateUrl?: (url: string) => void;
@@ -97,7 +95,6 @@ export function UrlPreviewPanel({
   const [displayTitle, setDisplayTitle] = useState(initialTitle || '');
   const [draftUrl, setDraftUrl] = useState(url);
   const [urlError, setUrlError] = useState('');
-  const iframeLoadedRef = useRef(false);
   const prefetchRef = useRef<ExtractState>({ status: 'idle' });
 
   useEffect(() => {
@@ -106,7 +103,6 @@ export function UrlPreviewPanel({
     setDisplayTitle(initialTitle || '');
     setDraftUrl(url);
     setUrlError('');
-    iframeLoadedRef.current = false;
     prefetchRef.current = { status: 'idle' };
   }, [url, initialTitle, forceExtract]);
 
@@ -124,6 +120,7 @@ export function UrlPreviewPanel({
   };
 
   // Prefetch extract in parallel while iframe tries to load (skip auth-gated hosts).
+  // Used when the user switches to Text — do not auto-switch mode on timer/Quote alone.
   useEffect(() => {
     if (!open || !url || mode !== 'iframe') return;
     const ac = new AbortController();
@@ -146,16 +143,6 @@ export function UrlPreviewPanel({
       });
     return () => ac.abort();
   }, [open, url, mode, t]);
-
-  // Auto-fallback: if iframe never reports load, switch to extract.
-  useEffect(() => {
-    if (!open || !url || mode !== 'iframe') return;
-    const timer = window.setTimeout(() => {
-      if (iframeLoadedRef.current) return;
-      setMode('extract');
-    }, IFRAME_FALLBACK_MS);
-    return () => window.clearTimeout(timer);
-  }, [open, url, mode]);
 
   // Load extract when in extract mode.
   useEffect(() => {
@@ -205,29 +192,43 @@ export function UrlPreviewPanel({
               {headerTitle}
             </span>
             <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-              {mode === 'iframe' ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title={t('urlPreviewShowExtract')}
-                  onClick={() => setMode('extract')}
-                  className="h-8 px-2 text-xs text-stone-500"
+              {mode === 'iframe' || (mode === 'extract' && !authGated) ? (
+                <div
+                  className="mr-0.5 flex items-center rounded-md border border-stone-200 p-0.5 dark:border-stone-700"
+                  role="group"
+                  aria-label={t('urlPreviewPanel')}
                 >
-                  {t('urlPreviewShowExtract')}
-                </Button>
-              ) : mode === 'extract' && !authGated ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  title={t('urlPreviewShowEmbed')}
-                  onClick={() => {
-                    iframeLoadedRef.current = false;
-                    setMode('iframe');
-                  }}
-                  className="h-8 px-2 text-xs text-stone-500"
-                >
-                  {t('urlPreviewShowEmbed')}
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={t('urlPreviewShowEmbed')}
+                    aria-pressed={mode === 'iframe'}
+                    onClick={() => setMode('iframe')}
+                    className={cn(
+                      'h-7 px-2 text-xs',
+                      mode === 'iframe'
+                        ? 'bg-stone-100 font-medium text-stone-800 dark:bg-stone-800 dark:text-stone-100'
+                        : 'text-stone-500',
+                    )}
+                  >
+                    {t('urlPreviewShowEmbed')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={t('urlPreviewShowExtract')}
+                    aria-pressed={mode === 'extract'}
+                    onClick={() => setMode('extract')}
+                    className={cn(
+                      'h-7 px-2 text-xs',
+                      mode === 'extract'
+                        ? 'bg-stone-100 font-medium text-stone-800 dark:bg-stone-800 dark:text-stone-100'
+                        : 'text-stone-500',
+                    )}
+                  >
+                    {t('urlPreviewShowExtract')}
+                  </Button>
+                </div>
               ) : null}
               <Button
                 variant="ghost"
@@ -290,13 +291,10 @@ export function UrlPreviewPanel({
             data-quote-title={
               mode === 'extract' ? displayTitle || undefined : undefined
             }
-            className={cn(
-              'relative min-h-0 min-w-0 flex-1 overscroll-contain',
-              mode === 'iframe' ? 'overflow-hidden' : 'overflow-x-hidden overflow-y-auto',
-            )}
+            className="flex min-h-0 min-w-0 flex-1 flex-col overscroll-contain"
           >
             {mode === 'iframe' ? (
-              <div className="absolute inset-x-0 top-0 z-10 border-b border-amber-200/80 bg-amber-50/95 px-3 py-1.5 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/90 dark:text-amber-100">
+              <div className="shrink-0 border-b border-amber-200/80 bg-amber-50/95 px-3 py-1.5 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/90 dark:text-amber-100">
                 <span>{t('urlPreviewQuoteNeedsExtract')} </span>
                 <button
                   type="button"
@@ -307,68 +305,72 @@ export function UrlPreviewPanel({
                 </button>
               </div>
             ) : null}
-            {mode === 'auth' ? (
-              <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
-                <Globe className="h-8 w-8 text-stone-300 opacity-60 dark:text-stone-600" />
-                <div className="max-w-sm space-y-2">
-                  <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
-                    {t('urlPreviewAuthGatedTitle')}
-                  </p>
-                  <p className="text-xs leading-relaxed text-stone-400 dark:text-stone-500">
-                    {t('urlPreviewAuthGatedBody')}
-                  </p>
+            <div
+              className={cn(
+                'relative min-h-0 min-w-0 flex-1',
+                mode === 'iframe' ? 'overflow-hidden' : 'overflow-x-hidden overflow-y-auto',
+              )}
+            >
+              {mode === 'auth' ? (
+                <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
+                  <Globe className="h-8 w-8 text-stone-300 opacity-60 dark:text-stone-600" />
+                  <div className="max-w-sm space-y-2">
+                    <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
+                      {t('urlPreviewAuthGatedTitle')}
+                    </p>
+                    <p className="text-xs leading-relaxed text-stone-400 dark:text-stone-500">
+                      {t('urlPreviewAuthGatedBody')}
+                    </p>
+                  </div>
+                  <Button type="button" className="rounded-lg" onClick={openExternally}>
+                    <ArrowUpRight className="mr-1.5 h-4 w-4" />
+                    {t('urlPreviewOpenWithLogin')}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('extract')}
+                    className="text-xs text-stone-500 underline-offset-2 hover:underline dark:text-stone-400"
+                  >
+                    {t('urlPreviewTryExtractAnyway')}
+                  </button>
                 </div>
-                <Button type="button" className="rounded-lg" onClick={openExternally}>
-                  <ArrowUpRight className="mr-1.5 h-4 w-4" />
-                  {t('urlPreviewOpenWithLogin')}
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => setMode('extract')}
-                  className="text-xs text-stone-500 underline-offset-2 hover:underline dark:text-stone-400"
-                >
-                  {t('urlPreviewTryExtractAnyway')}
-                </button>
-              </div>
-            ) : mode === 'iframe' ? (
-              <iframe
-                key={url}
-                title={headerTitle}
-                src={url}
-                referrerPolicy="no-referrer"
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                className="absolute inset-x-0 bottom-0 top-9 h-auto w-full border-0 bg-white dark:bg-stone-950"
-                onLoad={() => {
-                  iframeLoadedRef.current = true;
-                }}
-              />
-            ) : extract.status === 'loading' || extract.status === 'idle' ? (
-              <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
-                <Loader2 className="h-8 w-8 animate-spin opacity-60" />
-                <span>{t('urlPreviewExtracting')}</span>
-              </div>
-            ) : extract.status === 'error' ? (
-              <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-400">
-                <Globe className="h-8 w-8 opacity-40" />
-                <span>{extract.message || t('urlPreviewExtractFailed')}</span>
-                <button
-                  type="button"
-                  onClick={openExternally}
-                  className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-                >
-                  {authGated ? t('urlPreviewOpenWithLogin') : t('openInNewTab')}
-                </button>
-              </div>
-            ) : (
-              <div className="px-4 py-4">
-                {extract.title ? (
-                  <h2 className="mb-3 text-base font-semibold text-stone-900 dark:text-stone-100">
-                    {extract.title}
-                  </h2>
-                ) : null}
-                <AnswerMarkdown text={extract.content} streaming={false} />
-              </div>
-            )}
+              ) : mode === 'iframe' ? (
+                <iframe
+                  key={url}
+                  title={headerTitle}
+                  src={url}
+                  referrerPolicy="no-referrer"
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  className="absolute inset-0 h-full w-full border-0 bg-white dark:bg-stone-950"
+                />
+              ) : extract.status === 'loading' || extract.status === 'idle' ? (
+                <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
+                  <Loader2 className="h-8 w-8 animate-spin opacity-60" />
+                  <span>{t('urlPreviewExtracting')}</span>
+                </div>
+              ) : extract.status === 'error' ? (
+                <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-400">
+                  <Globe className="h-8 w-8 opacity-40" />
+                  <span>{extract.message || t('urlPreviewExtractFailed')}</span>
+                  <button
+                    type="button"
+                    onClick={openExternally}
+                    className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                  >
+                    {authGated ? t('urlPreviewOpenWithLogin') : t('openInNewTab')}
+                  </button>
+                </div>
+              ) : (
+                <div className="px-4 py-4">
+                  {extract.title ? (
+                    <h2 className="mb-3 text-base font-semibold text-stone-900 dark:text-stone-100">
+                      {extract.title}
+                    </h2>
+                  ) : null}
+                  <AnswerMarkdown text={extract.content} streaming={false} />
+                </div>
+              )}
+            </div>
           </div>
         </motion.div>
       )}

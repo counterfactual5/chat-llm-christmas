@@ -50,15 +50,18 @@ export function buildStalenessCheck(
 
   if (!timeBoundSentences) return null;
 
+  // Present-tense / “最新” answers need a same-calendar-year source signal.
+  // Include URL path years (e.g. /2025-10/14/) — title/snippet alone often omit the date.
   const sourceYears = collectSources(record).flatMap((s) =>
-    yearsIn([s.title, s.snippet].filter(Boolean).join(' ')),
+    yearsIn([s.title, s.snippet, s.url].filter(Boolean).join(' ')),
   );
   const newest = sourceYears.length ? Math.max(...sourceYears) : null;
-  if (newest !== null && currentYear - newest >= 2) {
+  if (newest !== null && currentYear - newest >= 1) {
+    const gap = currentYear - newest;
     items.push({
-      severity: 'warn',
+      severity: gap >= 2 ? 'error' : 'warn',
       title: `Newest source is from ${newest}`,
-      detail: `Answer speaks about the present but sources stop at ${newest}.`,
+      detail: `Answer speaks about the present but sources stop at ${newest} (need ${currentYear}).`,
       ruleId: 'staleness:newest_source',
     });
   }

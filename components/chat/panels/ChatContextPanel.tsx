@@ -59,6 +59,7 @@ export type ChatContextPanelProps = {
   referenceSourceGroups: ReferenceGroup[];
   webSourcesCount: number;
   onOpenUploadReference: (source: WebSearchSource) => void;
+  onOpenWebSource?: (source: WebSearchSource) => void;
   onRequestClearSources: () => void;
 
   systemPromptExpanded: boolean;
@@ -110,6 +111,7 @@ export function ChatContextPanel({
   referenceSourceGroups,
   webSourcesCount,
   onOpenUploadReference,
+  onOpenWebSource,
   onRequestClearSources,
   systemPromptExpanded,
   onToggleSystemPromptExpanded,
@@ -181,6 +183,7 @@ export function ChatContextPanel({
                 referenceSourceGroups={referenceSourceGroups}
                 webSourcesCount={webSourcesCount}
                 onOpenUploadReference={onOpenUploadReference}
+                onOpenWebSource={onOpenWebSource}
                 onRequestClearSources={onRequestClearSources}
               />
 

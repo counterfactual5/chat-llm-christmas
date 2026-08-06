@@ -102,8 +102,8 @@ describe('session/mutations', () => {
       'Have to analyze. But compare it... Check some more. ',
     );
     expect(m.content).toBe('## 结论\n第一段。 \n第二段。 \n第三段。');
-    // Draft thinking is collected (not scattered between body paragraphs); the
-    // single Thought step is moved after the content it accompanied.
+    // Draft thinking is collected; the single Thought step is moved after the
+    // content it accompanied rather than scattered between body paragraphs.
     expect(m.activity?.map((s) => s.kind)).toEqual([
       'content',
       'content',
@@ -145,7 +145,15 @@ describe('session/mutations', () => {
     sessions = withAppendedAssistantReasoning(sessions, 's1', 'a', 'think2');
 
     const m = sessions[0].messages[0];
+    // Tool sits between two reasoning steps, so the second chunk gets its own
+    // Thought step and the timeline stays chronological (think → tool → think).
     expect(m.activity?.filter((s) => s.kind === 'reasoning')).toHaveLength(2);
+    expect(m.activity?.map((s) => s.kind)).toEqual([
+      'reasoning',
+      'tool',
+      'content',
+      'reasoning',
+    ]);
     expect(m.reasoning).toBe('think1think2');
   });
 

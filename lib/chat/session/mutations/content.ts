@@ -222,19 +222,31 @@ export function withAppendedAssistantReasoning(
           incomplete: true,
         };
       }
-      // Models can interleave CoT with answer text while writing a report.
-      // Only fork a NEW Thought step after a real tool ran; otherwise merge
-      // back into the previous reasoning step so Thought stays one panel and
-      // draft thinking does not get interleaved between body paragraphs.
-      if (last?.kind !== 'tool') {
+      // Models can interleave CoT with answer text while writing a report. Only
+      // merge back into the earlier Thought step when nothing tool-like has run
+      // since that Thought — i.e. the trailing run is pure answer content. A real
+      // tool (or file/view/stage) still forks a new Thought step so the timeline
+      // stays chronological (think → search → think).
+      if (last?.kind === 'content') {
         const idx = activity.findLastIndex((st) => st.kind === 'reasoning');
         if (idx >= 0) {
-          const prev = activity[idx]!;
-          activity.splice(idx, 1);
-          activity.push({
-            ...prev,
-            text: prev.text + chunk,
-          });
+          const interveningTool = activity
+            .slice(idx + 1)
+            .some((st) => st.kind !== 'content');
+          if (!interveningTool) {
+            const prev = activity[idx]!;
+            activity.splice(idx, 1);
+            activity.push({
+              ...prev,
+              text: prev.text + chunk,
+            });
+          } else {
+            activity.push({
+              id: crypto.randomUUID(),
+              kind: 'reasoning',
+              text: chunk,
+            });
+          }
         } else {
           activity.push({
             id: crypto.randomUUID(),

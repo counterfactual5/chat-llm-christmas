@@ -7,6 +7,10 @@ import type {
   WebSearchSource,
 } from '@/lib/chat/types';
 import { useLocale } from '@/lib/i18n';
+import {
+  isPreviewableHttpUrl,
+  shouldOpenLinkExternally,
+} from '@/lib/files/url-preview';
 import { cn } from '@/lib/utils';
 
 type ReferenceGroup = {
@@ -23,6 +27,8 @@ type ReferencePanelProps = {
   referenceSourceGroups: ReferenceGroup[];
   webSourcesCount: number;
   onOpenUploadReference: (source: WebSearchSource) => void;
+  /** Open a web/source URL in the side Preview panel. */
+  onOpenWebSource?: (source: WebSearchSource) => void;
   onRequestClearSources: () => void;
 };
 
@@ -54,6 +60,7 @@ export function ReferencePanel({
   referenceSourceGroups,
   webSourcesCount,
   onOpenUploadReference,
+  onOpenWebSource,
   onRequestClearSources,
 }: ReferencePanelProps) {
   const { t } = useLocale();
@@ -199,6 +206,17 @@ export function ReferencePanel({
                                   rel="noreferrer"
                                   className="block truncate rounded-md px-1.5 py-1 text-xs text-stone-600 hover:bg-stone-100 hover:underline dark:text-stone-300 dark:hover:bg-stone-800/80"
                                   title={src.snippet || src.title}
+                                  onClick={(e) => {
+                                    if (
+                                      !onOpenWebSource ||
+                                      !isPreviewableHttpUrl(src.url)
+                                    ) {
+                                      return;
+                                    }
+                                    if (shouldOpenLinkExternally(e)) return;
+                                    e.preventDefault();
+                                    onOpenWebSource(src);
+                                  }}
                                 >
                                   {src.title || src.url}
                                 </a>

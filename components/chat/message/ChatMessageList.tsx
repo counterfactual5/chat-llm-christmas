@@ -31,6 +31,10 @@ import {
   isImageAttachment,
 } from '@/components/files/AttachmentImageThumb';
 import { canPreviewGeneratedFile, formatPreviewTypeLabel } from '@/lib/files/preview';
+import {
+  isPreviewableHttpUrl,
+  shouldOpenLinkExternally,
+} from '@/lib/files/url-preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { IngestedAttachment } from '@/lib/files/ingest';
@@ -93,6 +97,8 @@ export type ChatMessageListProps = {
   onPreviewImage: (entry: GeneratedImageEntry) => void;
   onPreviewFile: (entry: GeneratedFileEntry) => void;
   onPreviewView: (view: ToolViewPayload, messageId: string) => void;
+  /** Open an http(s) URL in the side Preview panel. */
+  onPreviewUrl?: (url: string, title?: string) => void;
   onGmailApproval?: (
     messageId: string,
     toolRunId: string,
@@ -161,6 +167,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
     onPreviewImage,
     onPreviewFile,
     onPreviewView,
+    onPreviewUrl,
     onGmailApproval,
     gmailApprovalBusyId,
     gmailApprovalError,
@@ -746,6 +753,17 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                       rel="noreferrer"
                                       className="text-stone-600 underline-offset-2 hover:underline dark:text-stone-300"
                                       title={r.snippet || r.title}
+                                      onClick={(e) => {
+                                        if (
+                                          !onPreviewUrl ||
+                                          !isPreviewableHttpUrl(r.url || '')
+                                        ) {
+                                          return;
+                                        }
+                                        if (shouldOpenLinkExternally(e)) return;
+                                        e.preventDefault();
+                                        onPreviewUrl(r.url!, r.title || undefined);
+                                      }}
                                     >
                                       {r.title || r.url}
                                     </a>
@@ -782,6 +800,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     text={text}
                     streaming={streaming}
                     onSendCommand={handleSubmit}
+                    onPreviewLink={onPreviewUrl}
                   />
                 );
 

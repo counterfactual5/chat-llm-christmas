@@ -9,6 +9,10 @@ import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
 import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
 import { looksLikeAsciiArt, reflowCollapsedAsciiArt } from '@/lib/markdown/core/ascii-art';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
+import {
+  isPreviewableHttpUrl,
+  shouldOpenLinkExternally,
+} from '@/lib/files/url-preview';
 import { cn } from '@/lib/utils';
 
 const KATEX_OPTIONS = {
@@ -30,6 +34,7 @@ export function AnswerMarkdown({
   text,
   streaming,
   onSendCommand,
+  onPreviewLink,
   reflowBlocks = true,
   className,
 }: {
@@ -37,6 +42,8 @@ export function AnswerMarkdown({
   streaming: boolean;
   /** Send a slash command as a new user turn (e.g. /books download …). */
   onSendCommand?: (command: string) => void;
+  /** Open an http(s) link in the side Preview panel (Cmd/Ctrl-click still opens a tab). */
+  onPreviewLink?: (url: string) => void;
   /**
    * Restore smashed headings/lists/tables. Thought/CoT keeps this off —
    * English verifier prose is easily shredded by answer-oriented reflow.
@@ -80,7 +87,23 @@ export function AnswerMarkdown({
             return <li className="leading-6">{children}</li>;
           },
           a({ href, children }: any) {
-            return <a href={href} target="_blank" rel="noreferrer" className="text-orange-700 underline decoration-orange-300/80 underline-offset-2 hover:text-orange-800 dark:text-orange-300 dark:decoration-orange-700/80 dark:hover:text-orange-200">{children}</a>;
+            const link = String(href || '').trim();
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-orange-700 underline decoration-orange-300/80 underline-offset-2 hover:text-orange-800 dark:text-orange-300 dark:decoration-orange-700/80 dark:hover:text-orange-200"
+                onClick={(e) => {
+                  if (!onPreviewLink || !isPreviewableHttpUrl(link)) return;
+                  if (shouldOpenLinkExternally(e)) return;
+                  e.preventDefault();
+                  onPreviewLink(link);
+                }}
+              >
+                {children}
+              </a>
+            );
           },
           blockquote({ children }: any) {
             return <blockquote className="my-3 border-l-[3px] border-stone-300 pl-3 text-[13px] leading-5 text-stone-500 not-italic dark:border-stone-600 dark:text-stone-400 [&_p]:mb-0 [&_p]:leading-5 [&_.katex]:text-[0.95em] [&_.katex-display]:my-2 [&_.katex-error]:text-inherit">{children}</blockquote>;

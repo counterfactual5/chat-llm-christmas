@@ -77,6 +77,7 @@ import {
 import { parseReviewCommand } from '@/lib/chat/turn/review-command';
 import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
 import { hasUploadingAttachments } from '@/lib/chat/turn/attachments';
+import { normalizePreviewHttpUrl } from '@/lib/files/url-preview';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
   isSessionBusy,
@@ -113,6 +114,10 @@ import { ChatMessageList } from '@/components/chat/message/ChatMessageList';
 import { ChatContextPanel } from '@/components/chat/panels/ChatContextPanel';
 import { ChatPreviewPanel } from '@/components/chat/panels/ChatPreviewPanel';
 import { ToolViewPanel } from '@/components/chat/panels/ToolViewPanel';
+import {
+  UrlPreviewEmptyPaste,
+  UrlPreviewPanel,
+} from '@/components/chat/panels/UrlPreviewPanel';
 import { ChatModals } from '@/components/chat/overlays/ChatModals';
 import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
@@ -219,6 +224,7 @@ export default function ChatContainer() {
   type PreviewTarget =
     | { kind: 'file'; entry: GeneratedFileEntry }
     | { kind: 'view'; view: ToolViewPayload; messageId?: string }
+    | { kind: 'url'; url: string; title?: string }
     | null;
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget>(null);
   const openFilePreview = (entry: GeneratedFileEntry) => {
@@ -227,6 +233,12 @@ export default function ChatContainer() {
   };
   const openViewPreview = (view: ToolViewPayload, messageId?: string) => {
     setPreviewTarget({ kind: 'view', view, messageId });
+    setIsPreviewPanelOpen(true);
+  };
+  const openUrlPreview = (rawUrl: string, title?: string) => {
+    const url = normalizePreviewHttpUrl(rawUrl);
+    if (!url) return;
+    setPreviewTarget({ kind: 'url', url, title: title?.trim() || undefined });
     setIsPreviewPanelOpen(true);
   };
   const [picturesExpanded, setPicturesExpanded] = useState(false);
@@ -2658,6 +2670,7 @@ export default function ChatContainer() {
                 onPreviewImage={(entry) => setImagePreviewSrc(entry.url)}
                 onPreviewFile={openFilePreview}
                 onPreviewView={openViewPreview}
+                onPreviewUrl={openUrlPreview}
                 onGmailApproval={onGmailApproval}
                 gmailApprovalBusyId={gmailApprovalBusyId}
                 gmailApprovalError={gmailApprovalError}
@@ -2801,24 +2814,38 @@ export default function ChatContainer() {
                 scrollToMessage(previewTarget.messageId);
               }}
             />
-          ) : (
+          ) : previewTarget?.kind === 'url' ? (
+            <UrlPreviewPanel
+              open={isPreviewPanelOpen}
+              onClose={() => setIsPreviewPanelOpen(false)}
+              contextOpen={isContextPanelOpen}
+              quoteRootRef={previewQuoteRootRef}
+              url={previewTarget.url}
+              title={previewTarget.title}
+            />
+          ) : previewTarget?.kind === 'file' ? (
             <ChatPreviewPanel
               open={isPreviewPanelOpen}
               onClose={() => setIsPreviewPanelOpen(false)}
               contextOpen={isContextPanelOpen}
               quoteRootRef={previewQuoteRootRef}
-              file={previewTarget?.kind === 'file' ? previewTarget.entry : null}
+              file={previewTarget.entry}
               onExpandFullscreen={(payload) => {
                 setFilePreview(payload);
               }}
               onJumpToMessage={() => {
-                if (previewTarget?.kind !== 'file') return;
                 scrollToMessage(previewTarget.entry.messageId);
               }}
               onDownload={() => {
-                if (previewTarget?.kind !== 'file') return;
                 void downloadGeneratedFile(previewTarget.entry);
               }}
+            />
+          ) : (
+            <UrlPreviewEmptyPaste
+              open={isPreviewPanelOpen}
+              onClose={() => setIsPreviewPanelOpen(false)}
+              contextOpen={isContextPanelOpen}
+              onOpenUrl={(url) => openUrlPreview(url)}
             />
           )}
           <ChatContextPanel
@@ -2851,6 +2878,7 @@ export default function ChatContainer() {
             referenceSourceGroups={referenceSourceGroups}
             webSourcesCount={webSources.length}
             onOpenUploadReference={openUploadReference}
+            onOpenWebSource={(src) => openUrlPreview(src.url, src.title)}
             onRequestClearSources={() => setConfirmClearSourcesOpen(true)}
             systemPromptExpanded={systemPromptExpanded}
             onToggleSystemPromptExpanded={() => setSystemPromptExpanded((v) => !v)}

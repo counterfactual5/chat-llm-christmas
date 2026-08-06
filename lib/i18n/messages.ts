@@ -204,6 +204,15 @@ export const dict = {
     urlPreviewTryExtractAnyway: 'Try text extract (no login)',
     urlPreviewQuoteNeedsExtract:
       'Quote works in Text mode — embedded pages are cross-origin, so selection stays inside the iframe.',
+    urlPreviewEmbedMaybeBlocked:
+      'This site is loading slowly or blocking the embed…',
+    urlPreviewEmbedBlockedSwitched:
+      'This site blocks embedding — showing extracted text instead.',
+    urlPreviewEmbedBlockedFallbackTitle: 'This page cannot be embedded',
+    urlPreviewEmbedBlockedBody:
+      'The site refuses to load inside other pages. Open it in a new tab, or retry text extraction.',
+    urlPreviewRetryExtract: 'Retry text extract',
+    dismiss: 'Dismiss',
     openInNewTab: 'Open in new tab',
     toolViewPanel: 'View',
     toolViewPanelEmpty: 'Click a specialized view in the chat or Output to open it here',
@@ -625,6 +634,13 @@ export const dict = {
     urlPreviewTryExtractAnyway: '尝试抽取正文（无登录）',
     urlPreviewQuoteNeedsExtract:
       '引用请切到「正文」模式 — 嵌入页跨域，侧栏读不到 iframe 内选区。',
+    urlPreviewEmbedMaybeBlocked: '该站点加载缓慢，或禁止被嵌入…',
+    urlPreviewEmbedBlockedSwitched: '该站点禁止被嵌入，已为你切换到正文模式。',
+    urlPreviewEmbedBlockedFallbackTitle: '此页面无法内嵌显示',
+    urlPreviewEmbedBlockedBody:
+      '该站点拒绝在其他页面内加载。你可以在新标签页打开，或重试正文抽取。',
+    urlPreviewRetryExtract: '重试正文抽取',
+    dismiss: '关闭',
     openInNewTab: '新窗口打开',
     toolViewPanel: '专项视图',
     toolViewPanelEmpty: '在对话或产出框中点击专项视图，即可在此打开',

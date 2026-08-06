@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowUpRight,
@@ -8,6 +8,7 @@ import {
   Globe,
   Loader2,
   PanelRightClose,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
@@ -15,6 +16,12 @@ import {
   isLikelyAuthGatedPreviewUrl,
   normalizePreviewHttpUrl,
 } from '@/lib/files/url-preview';
+import {
+  EMBED_PROBE_TIMING,
+  decideDegradeAction,
+  probeEmbedOutcome,
+} from '@/lib/files/url-preview-embed';
+import { cleanUrlExtractText } from '@/lib/files/url-extract-clean';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { previewPanelWidth } from './panel-widths';
@@ -96,6 +103,17 @@ export function UrlPreviewPanel({
   const [draftUrl, setDraftUrl] = useState(url);
   const [urlError, setUrlError] = useState('');
   const prefetchRef = useRef<ExtractState>({ status: 'idle' });
+  // Blocked-embed degrade state (KTD1/KTD2). prefetchReady mirrors the
+  // prefetchRef status as React state so the degrade effect can react.
+  const [embedLikelyBlocked, setEmbedLikelyBlocked] = useState(false);
+  const [prefetchReady, setPrefetchReady] = useState<ExtractState>({
+    status: 'idle',
+  });
+  const [settleFired, setSettleFired] = useState(false);
+  const [embedNotice, setEmbedNotice] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const degradeHandledRef = useRef(false);
+  const [extractRetryNonce, setExtractRetryNonce] = useState(0);
 
   useEffect(() => {
     setMode(initialPreviewMode(url, forceExtract));
@@ -104,7 +122,30 @@ export function UrlPreviewPanel({
     setDraftUrl(url);
     setUrlError('');
     prefetchRef.current = { status: 'idle' };
+    setEmbedLikelyBlocked(false);
+    setPrefetchReady({ status: 'idle' });
+    setSettleFired(false);
+    setEmbedNotice(false);
+    degradeHandledRef.current = false;
+    setExtractRetryNonce(0);
   }, [url, initialTitle, forceExtract]);
+
+  const switchMode = (next: PreviewMode) => {
+    // Manual mode switch cancels any pending degrade decision (no loops).
+    degradeHandledRef.current = true;
+    setEmbedNotice(false);
+    setMode(next);
+  };
+
+  const retryExtract = () => {
+    degradeHandledRef.current = false;
+    setEmbedLikelyBlocked(false);
+    setSettleFired(false);
+    setPrefetchReady({ status: 'idle' });
+    prefetchRef.current = { status: 'idle' };
+    setExtract({ status: 'idle' });
+    setExtractRetryNonce((n) => n + 1);
+  };
 
   const submitAddress = (e: FormEvent) => {
     e.preventDefault();
@@ -125,6 +166,7 @@ export function UrlPreviewPanel({
     if (!open || !url || mode !== 'iframe') return;
     const ac = new AbortController();
     prefetchRef.current = { status: 'loading' };
+    setPrefetchReady({ status: 'loading' });
     void fetchWebReadExtract(url, ac.signal)
       .then((result) => {
         prefetchRef.current = {
@@ -132,6 +174,11 @@ export function UrlPreviewPanel({
           title: result.title,
           content: result.content,
         };
+        setPrefetchReady({
+          status: 'done',
+          title: result.title,
+          content: result.content,
+        });
         if (result.title) setDisplayTitle((prev) => prev || result.title || '');
       })
       .catch((err) => {
@@ -140,9 +187,10 @@ export function UrlPreviewPanel({
           status: 'error',
           message: err instanceof Error ? err.message : t('requestFailed'),
         };
+        setPrefetchReady(prefetchRef.current);
       });
     return () => ac.abort();
-  }, [open, url, mode, t]);
+  }, [open, url, mode, t, extractRetryNonce]);
 
   // Load extract when in extract mode.
   useEffect(() => {
@@ -172,10 +220,84 @@ export function UrlPreviewPanel({
         });
       });
     return () => ac.abort();
-  }, [open, url, mode, t]);
+  }, [open, url, mode, t, extractRetryNonce]);
+
+  // Blocked-embed degrade (KTD1/KTD2): heuristic probe + settle timer.
+  // Auto-switches to Text only when the prefetched extract is already in
+  // hand; otherwise replaces the dead iframe with an actionable fallback.
+  useEffect(() => {
+    if (!open || mode !== 'iframe' || !embedLikelyBlocked) return;
+    if (degradeHandledRef.current) return;
+    const action = decideDegradeAction({
+      embedLikelyBlocked,
+      prefetch: prefetchReady.status,
+      settleFired,
+    });
+    if (action === 'auto-extract') {
+      degradeHandledRef.current = true;
+      setExtract(prefetchReady);
+      if (prefetchReady.status === 'done' && prefetchReady.title) {
+        setDisplayTitle((prev) => prev || prefetchReady.title || '');
+      }
+      setMode('extract');
+      setEmbedNotice(true);
+      return;
+    }
+    if (action === 'wait') {
+      const timer = setTimeout(
+        () => setSettleFired(true),
+        EMBED_PROBE_TIMING.settleMs,
+      );
+      return () => clearTimeout(timer);
+    }
+  }, [open, mode, embedLikelyBlocked, prefetchReady, settleFired]);
+
+  const degradeAction =
+    mode === 'iframe' && embedLikelyBlocked && !degradeHandledRef.current
+      ? decideDegradeAction({
+          embedLikelyBlocked,
+          prefetch: prefetchReady.status,
+          settleFired,
+        })
+      : 'wait';
+  const showEmbedFallback = degradeAction === 'fallback';
+  const showEmbedPending =
+    degradeAction === 'wait' && mode === 'iframe' && embedLikelyBlocked;
+
+  const handleIframeLoad = () => {
+    if (!iframeRef.current) return;
+    const first = probeEmbedOutcome(iframeRef.current);
+    if (first === 'ready') {
+      // Late-successful load flips a stale blocked flag back off.
+      setEmbedLikelyBlocked(false);
+      return;
+    }
+    if (first === 'unknown') return;
+    setEmbedLikelyBlocked(true);
+    // Error documents settle async — re-probe once shortly after.
+    const timer = setTimeout(() => {
+      if (!iframeRef.current) return;
+      const second = probeEmbedOutcome(iframeRef.current);
+      if (second === 'ready') {
+        setEmbedLikelyBlocked(false);
+      } else if (second === 'likely-blocked') {
+        setEmbedLikelyBlocked(true);
+      }
+    }, EMBED_PROBE_TIMING.reProbeMs);
+    // The one-shot timer needs no cleanup guard beyond iframeRef checks;
+    // clearing on unmount is handled by React removing the node.
+    void timer;
+  };
 
   const headerTitle = displayTitle || t('urlPreviewPanel');
   const openExternally = () => window.open(url, '_blank', 'noopener,noreferrer');
+  const cleanedExtractContent = useMemo(
+    () =>
+      extract.status === 'done'
+        ? cleanUrlExtractText(extract.content, { title: extract.title })
+        : '',
+    [extract],
+  );
 
   return (
     <AnimatePresence>
@@ -203,7 +325,7 @@ export function UrlPreviewPanel({
                     size="sm"
                     title={t('urlPreviewShowEmbed')}
                     aria-pressed={mode === 'iframe'}
-                    onClick={() => setMode('iframe')}
+                    onClick={() => switchMode('iframe')}
                     className={cn(
                       'h-7 px-2 text-xs',
                       mode === 'iframe'
@@ -218,7 +340,7 @@ export function UrlPreviewPanel({
                     size="sm"
                     title={t('urlPreviewShowExtract')}
                     aria-pressed={mode === 'extract'}
-                    onClick={() => setMode('extract')}
+                    onClick={() => switchMode('extract')}
                     className={cn(
                       'h-7 px-2 text-xs',
                       mode === 'extract'
@@ -299,9 +421,24 @@ export function UrlPreviewPanel({
                 <button
                   type="button"
                   className="font-medium underline underline-offset-2"
-                  onClick={() => setMode('extract')}
+                  onClick={() => switchMode('extract')}
                 >
                   {t('urlPreviewShowExtract')}
+                </button>
+              </div>
+            ) : null}
+            {mode === 'extract' && embedNotice ? (
+              <div className="flex shrink-0 items-center gap-2 border-b border-amber-200/80 bg-amber-50/95 px-3 py-1.5 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/90 dark:text-amber-100">
+                <span className="min-w-0 flex-1 truncate">
+                  {t('urlPreviewEmbedBlockedSwitched')}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t('dismiss')}
+                  onClick={() => setEmbedNotice(false)}
+                  className="shrink-0 rounded p-0.5 opacity-70 hover:opacity-100"
+                >
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </div>
             ) : null}
@@ -335,14 +472,57 @@ export function UrlPreviewPanel({
                   </button>
                 </div>
               ) : mode === 'iframe' ? (
-                <iframe
-                  key={url}
-                  title={headerTitle}
-                  src={url}
-                  referrerPolicy="no-referrer"
-                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                  className="absolute inset-0 h-full w-full border-0 bg-white dark:bg-stone-950"
-                />
+                <div className="absolute inset-0">
+                  {showEmbedFallback ? (
+                    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-16 text-center">
+                      <Globe className="h-8 w-8 text-stone-300 opacity-60 dark:text-stone-600" />
+                      <div className="max-w-sm space-y-2">
+                        <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
+                          {t('urlPreviewEmbedBlockedFallbackTitle')}
+                        </p>
+                        <p className="text-xs leading-relaxed text-stone-400 dark:text-stone-500">
+                          {t('urlPreviewEmbedBlockedBody')}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          className="rounded-lg"
+                          onClick={openExternally}
+                        >
+                          <ArrowUpRight className="mr-1.5 h-4 w-4" />
+                          {t('openInNewTab')}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="rounded-lg"
+                          onClick={retryExtract}
+                        >
+                          {t('urlPreviewRetryExtract')}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <iframe
+                        key={url}
+                        ref={iframeRef}
+                        title={headerTitle}
+                        src={url}
+                        referrerPolicy="no-referrer"
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                        onLoad={handleIframeLoad}
+                        className="absolute inset-0 h-full w-full border-0 bg-white dark:bg-stone-950"
+                      />
+                      {showEmbedPending ? (
+                        <div className="pointer-events-none absolute left-1/2 top-2 z-10 max-w-[90%] -translate-x-1/2 truncate rounded-full border border-amber-200/80 bg-amber-50/95 px-3 py-1 text-[11px] text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/90 dark:text-amber-100">
+                          {t('urlPreviewEmbedMaybeBlocked')}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
               ) : extract.status === 'loading' || extract.status === 'idle' ? (
                 <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                   <Loader2 className="h-8 w-8 animate-spin opacity-60" />
@@ -367,7 +547,10 @@ export function UrlPreviewPanel({
                       {extract.title}
                     </h2>
                   ) : null}
-                  <AnswerMarkdown text={extract.content} streaming={false} />
+                  <AnswerMarkdown
+                    text={cleanedExtractContent}
+                    streaming={false}
+                  />
                 </div>
               )}
             </div>

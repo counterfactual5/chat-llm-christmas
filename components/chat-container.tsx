@@ -134,6 +134,11 @@ import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import { FileManagerModal } from '@/components/files/FileManagerModal';
 import { MemoryManagerModal } from '@/components/memories/MemoryManagerModal';
 import { getModelSpec } from '@/lib/models/specs';
+import {
+  clearModelsCache,
+  readModelsCache,
+  writeModelsCache,
+} from '@/lib/models/models-cache';
 import { estimateContextBreakdown } from '@/lib/chat/turn/context-estimate';
 import { estimateBuiltinToolsGuidance } from '@/lib/tools/builtin-guidance';
 import { useLocale } from '@/lib/i18n';
@@ -142,6 +147,21 @@ import {
   normalizeGoogleIntegrations,
 } from '@/lib/integrations/google/services';
 
+function resolveSelectedModelId(
+  models: ModelOption[],
+  previous: string,
+): string {
+  if (!models.length) return '';
+  if (previous && models.some((m) => m.id === previous)) return previous;
+  let saved = '';
+  try {
+    saved = localStorage.getItem('llm_christmas_selected_model') || '';
+  } catch {
+    /* ignore */
+  }
+  if (saved && models.some((m) => m.id === saved)) return saved;
+  return models[0].id;
+}
 
 export default function ChatContainer() {
   const { t, locale, setLocale } = useLocale();
@@ -324,8 +344,17 @@ export default function ChatContainer() {
     [activeSessionId],
   );
 
-  const fetchModels = useCallback(async () => {
-    setModelsLoading(true);
+  /** Pass `authed` from account status — do not rely on React state timing. */
+  const fetchModels = useCallback(async (authed: boolean) => {
+    const cached = readModelsCache({ authed });
+    if (cached?.length) {
+      setAvailableModels(cached);
+      setSelectedModel((prev) => resolveSelectedModelId(cached, prev));
+      setModelsLoading(false);
+    } else {
+      setModelsLoading(true);
+    }
+
     try {
       const res = await fetch('/api/models', {
         cache: 'no-store',
@@ -333,20 +362,11 @@ export default function ChatContainer() {
       });
       const data = await res.json().catch(() => ({}));
       if (data?.success && Array.isArray(data.models)) {
-        setAvailableModels(data.models);
-        if (data.models.length > 0) {
-          setSelectedModel((prev) => {
-            if (prev && data.models.some((m: ModelOption) => m.id === prev)) return prev;
-            let saved = '';
-            try {
-              saved = localStorage.getItem('llm_christmas_selected_model') || '';
-            } catch {}
-            if (saved && data.models.some((m: ModelOption) => m.id === saved)) return saved;
-            return data.models[0].id;
-          });
-        } else {
-          setSelectedModel('');
-        }
+        const models = data.models as ModelOption[];
+        const scopeAuthed = Boolean(data.authed);
+        setAvailableModels(models);
+        setSelectedModel((prev) => resolveSelectedModelId(models, prev));
+        writeModelsCache({ authed: scopeAuthed, models });
       } else {
         console.error('Failed to fetch models', data?.error || res.status);
       }
@@ -497,7 +517,7 @@ export default function ChatContainer() {
         if (bound) await hydrateBoundAccount(username);
         else hydrateGuest();
 
-        const boot: Array<Promise<unknown>> = [fetchModels()];
+        const boot: Array<Promise<unknown>> = [fetchModels(bound)];
         if (bound) boot.push(fetchSkills(), fetchMemories(), fetchIntegrations());
         await Promise.all(boot);
 
@@ -517,7 +537,7 @@ export default function ChatContainer() {
         }
       })
       .catch(() => {
-        void fetchModels();
+        void fetchModels(false);
         hydrateGuest();
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only startup
@@ -1352,7 +1372,8 @@ export default function ChatContainer() {
       await bindWithApiKey(trimmed);
       setTempKeyInput('');
       closeAuthModal();
-      await fetchModels();
+      clearModelsCache();
+      await fetchModels(true);
       await fetchSkills();
       await fetchMemories();
       await fetchIntegrations();
@@ -1376,7 +1397,8 @@ export default function ChatContainer() {
     setMemories([]);
     clearLocalSessions();
     createNewSession();
-    await fetchModels();
+    clearModelsCache();
+    await fetchModels(false);
   };
 
   const selectedSpec = useMemo(() => {

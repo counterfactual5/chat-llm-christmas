@@ -40,6 +40,10 @@ export function useChatSessionPersist(opts: {
     onCrossTabMerge,
   } = opts;
   const [chatsHydrated, setChatsHydrated] = useState(false);
+  /** False until bound-account cloud GET settles — gates PUT so we don't upload pre-merge local. */
+  const [cloudHydrateSettled, setCloudHydrateSettled] = useState(false);
+  /** Bumps after each cloud hydrate settle so remount cleanup can re-run on merged sessions. */
+  const [cloudHydrateEpoch, setCloudHydrateEpoch] = useState(0);
   const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const createNewSessionRef = useRef(createNewSession);
   createNewSessionRef.current = createNewSession;
@@ -55,6 +59,7 @@ export function useChatSessionPersist(opts: {
    * Resolves after cloud GET (callers may run models in parallel with this promise).
    */
   const hydrateBoundAccount = async (username: string | null) => {
+    setCloudHydrateSettled(false);
     enforceChatsOwner(username);
     const local = hydrateSessionsFromLocal();
     if (local.needsDraft || !local.sessions) {
@@ -73,12 +78,17 @@ export function useChatSessionPersist(opts: {
       }
     } catch {
       // Local list already painted; banner path covers later PUTs.
+    } finally {
+      setCloudHydrateSettled(true);
+      setCloudHydrateEpoch((n) => n + 1);
     }
   };
 
   const hydrateGuest = () => {
     createNewSessionRef.current();
     setChatsHydrated(true);
+    setCloudHydrateSettled(true);
+    setCloudHydrateEpoch((n) => n + 1);
   };
 
   // Persist locally once hydrated.
@@ -95,9 +105,9 @@ export function useChatSessionPersist(opts: {
     }
   }, [sessions, isAccountBound, chatsHydrated]);
 
-  // Debounced cloud upload.
+  // Debounced cloud upload — wait until initial cloud GET has settled.
   useEffect(() => {
-    if (!isAccountBound || !chatsHydrated) return;
+    if (!isAccountBound || !chatsHydrated || !cloudHydrateSettled) return;
     if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
     cloudSyncTimerRef.current = setTimeout(() => {
       void putCloudSessions(sessions).catch((err: unknown) => {
@@ -113,7 +123,7 @@ export function useChatSessionPersist(opts: {
     return () => {
       if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
     };
-  }, [sessions, isAccountBound, chatsHydrated]);
+  }, [sessions, isAccountBound, chatsHydrated, cloudHydrateSettled]);
 
   // Other tabs share the same localStorage key — LWW-merge when they write.
   useEffect(() => {
@@ -140,6 +150,7 @@ export function useChatSessionPersist(opts: {
   return {
     chatsHydrated,
     setChatsHydrated,
+    cloudHydrateEpoch,
     hydrateBoundAccount,
     hydrateGuest,
   };

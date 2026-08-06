@@ -500,6 +500,7 @@ export default function ChatContainer() {
 
   const {
     chatsHydrated,
+    cloudHydrateEpoch,
     hydrateBoundAccount,
     hydrateGuest,
   } = useChatSessionPersist({
@@ -2165,7 +2166,7 @@ export default function ChatContainer() {
       });
       return changed ? next : prev;
     });
-  }, [chatsHydrated, loadingBySession, researchBusySessionId]);
+  }, [chatsHydrated, cloudHydrateEpoch, loadingBySession, researchBusySessionId]);
 
   useEffect(() => {
     scrollToBottom();

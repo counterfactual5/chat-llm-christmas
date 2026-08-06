@@ -46,6 +46,19 @@ export function toolArgumentsAreComplete(raw: string): boolean {
   }
 }
 
+/**
+ * Gateways (Minimax / strict OpenAI bridges) reject the whole chat request when
+ * any assistant `tool_calls[].function.arguments` is not valid JSON — including
+ * mid-stream truncation we still stored for the next tool round.
+ * Empty → `{}`; truncated/invalid → `{}` so the request stays well-formed.
+ */
+export function normalizeToolCallArguments(raw: string): string {
+  const text = String(raw ?? '').trim();
+  if (!text) return '{}';
+  if (toolArgumentsAreComplete(text)) return text;
+  return '{}';
+}
+
 /** Matches the structured and provider-specific failures emitted by tools. */
 export function toolResultIndicatesFailure(content: unknown): boolean {
   const payload = String(content || '');

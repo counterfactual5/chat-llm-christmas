@@ -4,6 +4,7 @@
  */
 
 import { stampMessageText, stripMessageStamp } from '@/lib/chat/context/time-context';
+import { normalizeToolCallArguments } from '@/lib/chat/server/tool-execution';
 
 /** Heuristic: user clearly wants a live lookup (used for cursor-* proactive search). */
 export function looksLikeSearchRequest(text: string): boolean {
@@ -120,6 +121,8 @@ export function lastUserMessageHasImageParts(messages: any[]): boolean {
 /**
  * OpenAI-compatible gateways (incl. some GLM routes) reject unknown message
  * fields like `timestamp` / `images`. Keep only chat-completion schema keys.
+ * Also coerce tool-call `arguments` to valid JSON — truncated mid-stream args
+ * otherwise 400 the next upstream round (`invalid tool call arguments`).
  */
 export function sanitizeChatMessages(messages: any[]): any[] {
   return messages.map((m) => {
@@ -127,7 +130,20 @@ export function sanitizeChatMessages(messages: any[]): any[] {
     const out: Record<string, unknown> = { role };
     if (m?.content !== undefined) out.content = m.content;
     if (Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
-      out.tool_calls = m.tool_calls;
+      out.tool_calls = m.tool_calls.map((tc: any) => {
+        const fn = tc?.function || {};
+        const args = normalizeToolCallArguments(
+          String(fn.arguments ?? tc?.arguments ?? ''),
+        );
+        return {
+          id: String(tc?.id || ''),
+          type: 'function',
+          function: {
+            name: String(fn.name || tc?.name || ''),
+            arguments: args,
+          },
+        };
+      });
     }
     if (m?.tool_call_id != null) out.tool_call_id = m.tool_call_id;
     if (typeof m?.name === 'string' && m.name) out.name = m.name;

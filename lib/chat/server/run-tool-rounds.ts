@@ -27,6 +27,7 @@ import {
 } from '@/lib/chat/server/tool-round';
 import {
   buildToolFallbackQuery,
+  normalizeToolCallArguments,
   toolArgumentsAreComplete,
   toolResultIndicatesFailure,
 } from '@/lib/chat/server/tool-execution';
@@ -346,7 +347,10 @@ export async function runToolRounds(
             tool_calls: toolCalls.map((tc: ToolCallAccum) => ({
               id: tc.id,
               type: 'function',
-              function: { name: tc.name, arguments: tc.arguments },
+              function: {
+                name: tc.name,
+                arguments: normalizeToolCallArguments(tc.arguments),
+              },
             })),
           });
           let roundHadToolFailure = false;
@@ -503,7 +507,10 @@ export async function runToolRounds(
       tool_calls: toolCalls.map((tc: ToolCallAccum) => ({
         id: tc.id,
         type: 'function',
-        function: { name: tc.name, arguments: tc.arguments },
+        function: {
+          name: tc.name,
+          arguments: normalizeToolCallArguments(tc.arguments),
+        },
       })),
     });
 
@@ -515,6 +522,9 @@ export async function runToolRounds(
       enabledTools: deps.enabledTools,
       toolCtx: deps.toolCtx,
       executeRegisteredTool: deps.executeRegisteredTool,
+      // Truncated args must not be executed; stored copy is already normalized
+      // to `{}` above so the next upstream round stays schema-valid.
+      skipIncompleteArgs: true,
     });
     if (roundHadToolFailure) deps.state.lastToolRoundHadFailure = true;
   }

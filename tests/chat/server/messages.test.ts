@@ -61,11 +61,59 @@ describe('chat message helpers', () => {
         {
           role: 'assistant',
           content: 'x',
-          tool_calls: [{ id: '1' }],
+          tool_calls: [
+            {
+              id: '1',
+              type: 'function',
+              function: { name: 'web_search', arguments: '{"query":"a"}' },
+            },
+          ],
           images: [{ url: 'data:x' }],
           timestamp: 1,
         },
       ]),
-    ).toEqual([{ role: 'assistant', content: 'x', tool_calls: [{ id: '1' }] }]);
+    ).toEqual([
+      {
+        role: 'assistant',
+        content: 'x',
+        tool_calls: [
+          {
+            id: '1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"query":"a"}' },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('repairs truncated tool-call arguments so upstream will accept them', () => {
+    expect(
+      sanitizeChatMessages([
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'c1',
+              type: 'function',
+              function: { name: 'web_search', arguments: '{"query":"is:unre' },
+            },
+          ],
+        },
+      ]),
+    ).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'c1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{}' },
+          },
+        ],
+      },
+    ]);
   });
 });

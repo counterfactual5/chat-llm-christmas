@@ -3,9 +3,21 @@
 /**
  * Notion / GitHub / Google connection status for the chat shell.
  * Uses `lib/chat/integrations/client` — independent of send/stream.
+ *
+ * OAuth disconnect scrub is global (strip provider from every chat) and must
+ * NOT re-write the active session via setActiveMcpIds — that path can race a
+ * session switch and look like per-chat toggles "overwrote" each other.
+ * Also: status `null` means "unknown / fetch failed", not "disconnected".
  */
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from 'react';
 import type { ChatSession } from '@/lib/chat/types';
 import {
   disconnectIntegration,
@@ -14,19 +26,19 @@ import {
   stripMcpIdFromSessions,
   type IntegrationStatus,
 } from '@/lib/chat/integrations/client';
-import { isGoogleMcpId } from '@/lib/integrations';
 import type { AuthModalMode } from '@/lib/chat/account/oauth-return';
 
 export type { IntegrationStatus };
 
 export function useChatIntegrations(opts: {
   setSessions: Dispatch<SetStateAction<ChatSession[]>>;
-  setActiveMcpIds: (updater: string[] | ((prev: string[]) => string[])) => void;
+  sessionsRef: MutableRefObject<ChatSession[]>;
   isAccountBound: boolean;
   showAuthModal: boolean;
   authModalMode: AuthModalMode;
 }) {
-  const { setSessions, setActiveMcpIds, isAccountBound, showAuthModal, authModalMode } = opts;
+  const { setSessions, sessionsRef, isAccountBound, showAuthModal, authModalMode } =
+    opts;
 
   const [notionStatus, setNotionStatus] = useState<IntegrationStatus | null>(null);
   const [notionBusy, setNotionBusy] = useState(false);
@@ -35,20 +47,28 @@ export function useChatIntegrations(opts: {
   const [googleStatus, setGoogleStatus] = useState<IntegrationStatus | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
 
+  const applySessions = useCallback(
+    (transform: (prev: ChatSession[]) => ChatSession[]) => {
+      setSessions((prev) => {
+        const next = transform(prev);
+        if (next !== prev) sessionsRef.current = next;
+        return next;
+      });
+    },
+    [setSessions, sessionsRef],
+  );
+
   const scrubNotion = useCallback(() => {
-    setSessions((prev) => stripMcpIdFromSessions(prev, 'notion'));
-    setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
-  }, [setSessions, setActiveMcpIds]);
+    applySessions((prev) => stripMcpIdFromSessions(prev, 'notion'));
+  }, [applySessions]);
 
   const scrubGitHub = useCallback(() => {
-    setSessions((prev) => stripMcpIdFromSessions(prev, 'github'));
-    setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
-  }, [setSessions, setActiveMcpIds]);
+    applySessions((prev) => stripMcpIdFromSessions(prev, 'github'));
+  }, [applySessions]);
 
   const scrubGoogle = useCallback(() => {
-    setSessions((prev) => stripGoogleMcpFromSessions(prev));
-    setActiveMcpIds((prev) => prev.filter((id) => !isGoogleMcpId(id)));
-  }, [setSessions, setActiveMcpIds]);
+    applySessions((prev) => stripGoogleMcpFromSessions(prev));
+  }, [applySessions]);
 
   const fetchIntegrations = useCallback(async () => {
     const snap = await fetchIntegrationsSnapshot();
@@ -56,9 +76,11 @@ export function useChatIntegrations(opts: {
     setGitHubStatus(snap.github);
     setGoogleStatus(snap.google);
 
-    if (!snap.notion?.connected) scrubNotion();
-    if (!snap.github?.connected) scrubGitHub();
-    if (!snap.google?.connected) scrubGoogle();
+    // Only scrub when we know the provider is disconnected. `null` = still
+    // loading / fetch failed — wiping mcpIds then looks like toggles won't save.
+    if (snap.notion && !snap.notion.connected) scrubNotion();
+    if (snap.github && !snap.github.connected) scrubGitHub();
+    if (snap.google && !snap.google.connected) scrubGoogle();
   }, [scrubNotion, scrubGitHub, scrubGoogle]);
 
   const disconnectNotion = useCallback(async () => {

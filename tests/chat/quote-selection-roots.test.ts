@@ -1,29 +1,17 @@
 import { describe, expect, it } from 'vitest';
-
-/**
- * Mirrors ChatQuoteToolbar root membership check (kept as a pure helper test
- * so PDF/preview quote wiring does not regress silently).
- */
-function selectionInsideRoot(
-  root: { contains: (node: unknown) => boolean } | null | undefined,
-  anchor: unknown,
-  focus: unknown,
-): boolean {
-  if (!root || !anchor || !focus) return false;
-  return root.contains(anchor) && root.contains(focus);
-}
+import { selectionInsideRoot } from '@/lib/chat/message/quote-roots';
 
 describe('quote selection roots', () => {
   it('accepts selection fully inside a preview root', () => {
-    const node = { id: 'text' };
+    const node = { id: 'text' } as unknown as Node;
     const root = {
-      contains: (n: unknown) => n === node,
+      contains: (n: Node) => n === node,
     };
     expect(selectionInsideRoot(root, node, node)).toBe(true);
   });
 
   it('rejects selection outside any root', () => {
-    const outside = { id: 'outside' };
+    const outside = { id: 'outside' } as unknown as Node;
     const root = {
       contains: () => false,
     };
@@ -36,12 +24,12 @@ describe('quote selection roots', () => {
   });
 
   it('accepts selection when any of multiple roots contains the nodes', () => {
-    const node = { id: 'text' };
+    const node = { id: 'text' } as unknown as Node;
     const previewRoot = { contains: () => false };
-    const overlayRoot = { contains: (n: unknown) => n === node };
+    const overlayRoot = { contains: (n: Node) => n === node };
     const roots = [previewRoot, overlayRoot];
-    expect(
-      roots.some((root) => selectionInsideRoot(root, node, node)),
-    ).toBe(true);
+    expect(roots.some((root) => selectionInsideRoot(root, node, node))).toBe(
+      true,
+    );
   });
 });

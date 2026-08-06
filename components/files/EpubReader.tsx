@@ -77,6 +77,7 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
   const [fontOpen, setFontOpen] = useState(false);
   const [fontSize, setFontSize] = useState(EPUB_DEFAULT_FONT_SIZE);
   const [fontFamily, setFontFamily] = useState(EPUB_DEFAULT_FONT_FAMILY);
+  const [quoteCfi, setQuoteCfi] = useState('');
 
   useEffect(() => {
     const host = hostRef.current;
@@ -218,7 +219,10 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
 
         rendition.on('relocated', (location: { start?: { cfi?: string } }) => {
           const cfi = location?.start?.cfi;
-          if (cfi) persist(cfi);
+          if (cfi) {
+            persist(cfi);
+            setQuoteCfi(cfi);
+          }
         });
 
         await book.ready;
@@ -328,6 +332,10 @@ export function EpubReader({ fileId, url, title, className }: EpubReaderProps) {
   return (
     <div
       ref={rootRef}
+      data-quote-kind="epub"
+      data-quote-file-id={fileId || undefined}
+      data-quote-file-name={title || undefined}
+      data-quote-cfi={quoteCfi || undefined}
       className={cn(
         'flex h-full min-h-[28rem] w-full min-w-0 flex-col overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950',
         className,

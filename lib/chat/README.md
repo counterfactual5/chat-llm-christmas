@@ -28,7 +28,7 @@ Public session-mutation path: `session/mutations/`. Always import from `@/lib/ch
 | `integrations/` | Notion/GitHub/Google client status helpers |
 | `session/` | Normalize/merge, persist; `busy.ts` SSOT for per-session in-progress (chat loading ∪ scoped Deep Research); `tool-flags.ts` SSOT for per-chat mcpIds / skillIds / autoReview patches (no cross-session writes); immutable SSE patches in `session/mutations/` (content, tool-runs, review, settle) |
 | `stream/` | Client SSE consumer; shared `truncation.ts` (client + server); reply heuristics in `reply-truncation.ts` |
-| `message/` | API message shaping, display, quotes, tags, timeline; shared open/close stream tag parser (`stream-xml-tags.ts`) used by `think-tags.ts` and `tool-tags.ts` |
+| `message/` | API message shaping, display, quotes, tags, timeline; shared open/close stream tag parser (`stream-xml-tags.ts`) used by `think-tags.ts` and `tool-tags.ts`; Quote SSOT in `message/quotes.ts` (+ `quote-roots.ts`, same-origin `iframe-selection-bridge.ts`). Surfaces: Chat · side Preview · ToolView · Overlay · URL extract · EPUB blob iframes. URL cross-origin iframe cannot Quote (degrade to extract). |
 | `turn/` | Client turn planning (hooks own React state + streaming): task queue, continue/claim-review, compact, slash *behavior* (`/image`, `/research`, `/papers`, `/books`, `/skill`, `/review` — always available; command *list* UI comes from `composer/slash-commands.ts`; opt-in Tools toggles only gate mid-reply tools), attachments, send estimate, stream errors |
 | `context/` | References, time context, sidebar helpers |
 | `server/` | `/api/chat` pipeline (`chat-request.ts`) + request helpers (server-only) |

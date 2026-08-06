@@ -202,6 +202,8 @@ export const dict = {
       'This site cannot reuse your logged-in session inside the preview panel (browser security). Open it in a new tab to keep cookies and avoid re-login / 2FA.',
     urlPreviewOpenWithLogin: 'Open in browser (with login)',
     urlPreviewTryExtractAnyway: 'Try text extract (no login)',
+    urlPreviewQuoteNeedsExtract:
+      'Quote works in Text mode — embedded pages are cross-origin, so selection stays inside the iframe.',
     openInNewTab: 'Open in new tab',
     toolViewPanel: 'View',
     toolViewPanelEmpty: 'Click a specialized view in the chat or Output to open it here',
@@ -621,6 +623,8 @@ export const dict = {
       '受浏览器安全限制，侧栏预览无法复用你在该网站的登录 Cookie。请在新标签页打开以保留登录态，避免重新登录或触发二次验证。',
     urlPreviewOpenWithLogin: '在浏览器中打开（带登录态）',
     urlPreviewTryExtractAnyway: '尝试抽取正文（无登录）',
+    urlPreviewQuoteNeedsExtract:
+      '引用请切到「正文」模式 — 嵌入页跨域，侧栏读不到 iframe 内选区。',
     openInNewTab: '新窗口打开',
     toolViewPanel: '专项视图',
     toolViewPanelEmpty: '在对话或产出框中点击专项视图，即可在此打开',

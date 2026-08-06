@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, ScrollText } from 'lucide-react';
+import type { RefObject } from 'react';
 import { BrandMark } from '@/components/branding/BrandMark';
 import { NotionLogo } from '@/components/integrations/logos/NotionLogo';
 import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
@@ -78,6 +79,8 @@ export type ChatModalsProps = {
   setImagePreviewSrc: (v: string | null) => void;
   filePreview: FilePreviewPayload | null;
   setFilePreview: (v: FilePreviewPayload | null) => void;
+  /** Quote selection root for fullscreen file preview (ChatQuoteToolbar extraRoots). */
+  filePreviewQuoteRootRef?: RefObject<HTMLDivElement | null>;
   downloadGeneratedFile: (entry: GeneratedFileEntry) => void | Promise<void>;
 };
 
@@ -131,6 +134,7 @@ export function ChatModals(props: ChatModalsProps) {
     setImagePreviewSrc,
     filePreview,
     setFilePreview,
+    filePreviewQuoteRootRef,
     downloadGeneratedFile,
   } = props;
 
@@ -665,6 +669,7 @@ export function ChatModals(props: ChatModalsProps) {
 <FilePreviewOverlay
   file={filePreview}
   onClose={() => setFilePreview(null)}
+  quoteRootRef={filePreviewQuoteRootRef}
   onDownload={(file) =>
     void downloadGeneratedFile({
       messageId: '',

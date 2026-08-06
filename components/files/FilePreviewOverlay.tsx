@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, type RefObject } from 'react';
 import { Download, FileText, X } from 'lucide-react';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import { EpubReader } from '@/components/files/EpubReader';
@@ -57,6 +57,8 @@ type FilePreviewOverlayProps = {
   file: FilePreviewPayload | null;
   onClose: () => void;
   onDownload?: (file: FilePreviewPayload) => void;
+  /** Root for chat Quote selection inside the overlay body. */
+  quoteRootRef?: RefObject<HTMLDivElement | null>;
   labels?: {
     preview?: string;
     download?: string;
@@ -148,6 +150,7 @@ export function FilePreviewOverlay({
   file,
   onClose,
   onDownload,
+  quoteRootRef,
   labels,
 }: FilePreviewOverlayProps) {
   useEffect(() => {
@@ -225,6 +228,7 @@ export function FilePreviewOverlay({
         </div>
 
         <div
+          ref={quoteRootRef}
           className={cn(
             'relative min-h-0 min-w-0 flex-1',
             binaryFill

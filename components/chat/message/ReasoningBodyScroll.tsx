@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { selectionActiveInRoot } from '@/lib/chat/message/quote-roots';
 import { cn } from '@/lib/utils';
 
 const NEAR_BOTTOM_PX = 48;
@@ -16,7 +17,8 @@ type ReasoningBodyScrollProps = {
 
 /**
  * Scrollable thought body with stick-to-bottom while streaming.
- * Mirrors the main chat list: follow new tokens unless the user scrolls up.
+ * Mirrors the main chat list: follow new tokens unless the user scrolls up
+ * or is actively selecting text inside this scroller.
  */
 export function ReasoningBodyScroll({
   body,
@@ -35,6 +37,7 @@ export function ReasoningBodyScroll({
     const el = scrollerRef.current;
     if (!el) return;
     if (!live || !stickToBottomRef.current) return;
+    if (selectionActiveInRoot(el)) return;
     el.scrollTop = el.scrollHeight;
   }, [body, live]);
 

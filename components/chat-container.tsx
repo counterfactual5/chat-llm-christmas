@@ -135,6 +135,7 @@ import {
   parseQuotedUserMessage,
   type QuotedSelection,
 } from '@/lib/chat/message/quotes';
+import { selectionActiveInRoot } from '@/lib/chat/message/quote-roots';
 import {
   messageImagesToIngested,
   sessionHasImages,
@@ -1160,6 +1161,8 @@ export default function ChatContainer() {
     const el = scrollRef.current;
     if (!el) return;
     if (!force && !stickToBottomRef.current) return;
+    // Don't yank content under an in-progress text selection (macOS three-finger).
+    if (!force && selectionActiveInRoot(messagesContentRef.current)) return;
     el.scrollTop = el.scrollHeight;
   };
 

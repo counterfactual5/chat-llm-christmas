@@ -263,6 +263,21 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).not.toMatch(/运\n行/);
   });
 
+  it('joins short hard-wrapped CJK prose below the old 36-char gate', () => {
+    // Review-shaped wraps: each line is well under 36 non-space chars.
+    const smashed = [
+      '该回答的可信度极低，存在严重的“幻觉”问题。回',
+      '答构建了一个虚构的时间线，并捏造了与该时间',
+      '线对应的新闻标题。',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(smashed);
+    expect(out).toBe(
+      '该回答的可信度极低，存在严重的“幻觉”问题。回答构建了一个虚构的时间线，并捏造了与该时间线对应的新闻标题。',
+    );
+    expect(out).not.toMatch(/回\n答/);
+    expect(out).not.toMatch(/时间\n线/);
+  });
+
   it('does not join short poem-like CJK lines', () => {
     const poem = ['床前明月光', '疑是地上霜', '举头望明月'].join('\n');
     expect(reflowCollapsedMarkdownBlocks(poem)).toBe(poem);

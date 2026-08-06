@@ -89,6 +89,7 @@ export function formatPreviewTypeLabel(file: {
     return 'Excel';
   }
   if (name.endsWith('.docx') || mime.includes('wordprocessingml')) return 'Word';
+  if (name.endsWith('.pptx') || mime.includes('presentationml')) return 'PowerPoint';
   if (mime.startsWith('text/')) {
     if (mime.includes('markdown') || name.endsWith('.md')) return 'Markdown';
     if (mime === 'text/csv' || name.endsWith('.csv')) return 'CSV';

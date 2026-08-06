@@ -1,3 +1,6 @@
+export const PPTX_MIME =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
 /** File-type gating for drag/drop + file picker uploads. */
 export function isSupportedDropFile(file: File): boolean {
   const name = file.name.toLowerCase();
@@ -11,6 +14,7 @@ export function isSupportedDropFile(file: File): boolean {
     return true;
   }
   if (name.endsWith('.doc')) return true;
+  if (isPresentationFile(file) || name.endsWith('.ppt')) return true;
   if (
     name.endsWith('.xlsx') ||
     name.endsWith('.xls') ||
@@ -34,5 +38,16 @@ export function isSpreadsheetWorkbookFile(file: { name?: string; type?: string }
     name.endsWith('.xls') ||
     type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
     type === 'application/vnd.ms-excel'
+  );
+}
+
+/** True for .pptx we unzip + pull `<a:t>` text (not legacy .ppt). */
+export function isPresentationFile(file: { name?: string; type?: string }): boolean {
+  const name = String(file.name || '').toLowerCase();
+  const type = String(file.type || '').toLowerCase();
+  return (
+    name.endsWith('.pptx') ||
+    type === PPTX_MIME ||
+    type.includes('presentationml.presentation')
   );
 }

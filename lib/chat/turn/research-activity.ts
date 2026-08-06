@@ -508,11 +508,16 @@ export function applyResearchEvent(
           url?: unknown;
           snippet?: unknown;
           query?: unknown;
+          hasExcerpt?: unknown;
         };
+        const hasExcerpt = Boolean(r.hasExcerpt);
+        const titleBase = String(r.title || r.url || '');
         return {
-          title: String(r.title || r.url || ''),
+          title: hasExcerpt ? titleBase : `${titleBase} · 仅摘要`,
           url: String(r.url || ''),
-          snippet: String(r.snippet || ''),
+          snippet: hasExcerpt
+            ? String(r.snippet || '')
+            : [String(r.snippet || '').trim(), '（未读到正文）'].filter(Boolean).join(' '),
           query: r.query != null ? String(r.query) : undefined,
         };
       })
@@ -741,8 +746,18 @@ export function applyResearchEvent(
   }
 
   if (kind === 'error') {
-    const msg = String(payload.message || 'Research failed');
-    m = settleOpenTools(m, msg);
+    const errors = Array.isArray(payload.errors) ? payload.errors.map(String).filter(Boolean) : [];
+    const msg =
+      String(payload.message || '').trim() ||
+      (errors.length ? errors.join('; ') : 'Research failed');
+    // Prefer the joined gate errors when the SSE stub is just "quality gate failed".
+    const detail =
+      errors.length && /quality gate failed/i.test(msg) && !/Tier|来源|阅读/i.test(msg)
+        ? `质量门禁未通过: ${errors.join('; ')}`
+        : errors.length && msg && !errors.some((e) => msg.includes(e))
+          ? `${msg}: ${errors.join('; ')}`
+          : msg;
+    m = settleOpenTools(m, detail);
     // Failed runs keep drafts under Write tools — clear any partial bubble
     // text so the quality-gate reason is not mixed into a half-finished report.
     const hasResearchFile = (m.files || []).some(
@@ -755,7 +770,7 @@ export function applyResearchEvent(
       ...m,
       content: hasResearchFile ? m.content : '',
       incomplete: true,
-      truncationReason: humanizeResearchError(msg),
+      truncationReason: humanizeResearchError(detail),
       research: m.research ? { ...m.research, status: 'failed' } : m.research,
     };
   }

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   serializeReviewToolRuns,
   settleEmptyBodyAction,
+  withAppendedAssistantContent,
+  withAppendedAssistantReasoning,
   withAppendedAssistantToolView,
   withEmptyReplyFallback,
   withMarkedAssistantIncomplete,
@@ -71,6 +73,80 @@ describe('session/mutations', () => {
     const fallback = withEmptyReplyFallback(sessions, 's1', 'a', '(empty)');
     expect(fallback[0].messages[0].content).toBe('(empty)');
     expect(fallback[0].messages[0].incomplete).toBe(false);
+  });
+
+  it('keeps review-report CoT in one Thought step when no tool runs in between', () => {
+    let sessions = [
+      session([
+        msg({ id: 'a', role: 'assistant', content: '', incomplete: true }),
+      ]),
+    ];
+    const r = (chunk: string) => {
+      sessions = withAppendedAssistantReasoning(sessions, 's1', 'a', chunk);
+    };
+    const c = (chunk: string) => {
+      sessions = withAppendedAssistantContent(sessions, 's1', 'a', chunk);
+    };
+
+    r('Have to analyze. ');
+    c('## 结论\n');
+    c('第一段。 ');
+    r('But compare it... ');
+    c('\n第二段。 ');
+    r('Check some more. ');
+    c('\n第三段。');
+
+    const m = sessions[0].messages[0];
+    expect(m.activity?.filter((s) => s.kind === 'reasoning')).toHaveLength(1);
+    expect(m.reasoning).toBe(
+      'Have to analyze. But compare it... Check some more. ',
+    );
+    expect(m.content).toBe('## 结论\n第一段。 \n第二段。 \n第三段。');
+    // Draft thinking is collected (not scattered between body paragraphs); the
+    // single Thought step is moved after the content it accompanied.
+    expect(m.activity?.map((s) => s.kind)).toEqual([
+      'content',
+      'content',
+      'reasoning',
+      'content',
+    ]);
+  });
+
+  it('still forks a new Thought step after a real tool run', () => {
+    let sessions = [
+      session([
+        msg({ id: 'a', role: 'assistant', content: '', incomplete: true }),
+      ]),
+    ];
+    sessions = withAppendedAssistantReasoning(sessions, 's1', 'a', 'think1');
+    sessions = sessions.map((s) => ({
+      ...s,
+      messages: s.messages.map((m) =>
+        m.id === 'a'
+          ? {
+              ...m,
+              activity: [
+                ...(m.activity || []),
+                { id: 't1', kind: 'tool' as const, toolRunId: 'r1' },
+              ],
+              toolRuns: [
+                {
+                  id: 'r1',
+                  name: 'web_search',
+                  status: 'done' as const,
+                  provider: 'test',
+                },
+              ],
+            }
+          : m,
+      ),
+    }));
+    sessions = withAppendedAssistantContent(sessions, 's1', 'a', 'answer');
+    sessions = withAppendedAssistantReasoning(sessions, 's1', 'a', 'think2');
+
+    const m = sessions[0].messages[0];
+    expect(m.activity?.filter((s) => s.kind === 'reasoning')).toHaveLength(2);
+    expect(m.reasoning).toBe('think1think2');
   });
 
   it('does not promote reasoning that was rewound by orphan </think>', () => {

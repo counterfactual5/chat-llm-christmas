@@ -209,14 +209,39 @@ export function withAppendedAssistantReasoning(
       if (m.id !== assistantId) return m;
       const activity = [...(m.activity || [])];
       const last = activity[activity.length - 1];
-      // Only append to the last step when it is already reasoning.
-      // After a tool runs, start a new reasoning step so the timeline stays
-      // chronological: think → search → think (tool sits in the middle).
+      // Append to the last step when it is already reasoning.
       if (last?.kind === 'reasoning') {
         activity[activity.length - 1] = {
           ...last,
           text: last.text + chunk,
         };
+        return {
+          ...m,
+          reasoning: (m.reasoning || '') + chunk,
+          activity,
+          incomplete: true,
+        };
+      }
+      // Models can interleave CoT with answer text while writing a report.
+      // Only fork a NEW Thought step after a real tool ran; otherwise merge
+      // back into the previous reasoning step so Thought stays one panel and
+      // draft thinking does not get interleaved between body paragraphs.
+      if (last?.kind !== 'tool') {
+        const idx = activity.findLastIndex((st) => st.kind === 'reasoning');
+        if (idx >= 0) {
+          const prev = activity[idx]!;
+          activity.splice(idx, 1);
+          activity.push({
+            ...prev,
+            text: prev.text + chunk,
+          });
+        } else {
+          activity.push({
+            id: crypto.randomUUID(),
+            kind: 'reasoning',
+            text: chunk,
+          });
+        }
       } else {
         activity.push({
           id: crypto.randomUUID(),

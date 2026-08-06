@@ -88,6 +88,83 @@ export async function extractDocxText(file: File): Promise<string> {
   return String(result.value || '').trim();
 }
 
+const MAX_PPTX_SLIDES = 80;
+
+function decodeXmlEntities(raw: string): string {
+  return String(raw || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => {
+      const code = Number(n);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => {
+      const code = Number.parseInt(h, 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    });
+}
+
+/** Pull plain text runs from a PPTX slide/notes XML fragment. */
+function textFromPptxXml(xml: string): string {
+  const parts: string[] = [];
+  const re = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml))) {
+    const t = decodeXmlEntities(m[1]).replace(/\s+/g, ' ').trim();
+    if (t) parts.push(t);
+  }
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Extract .pptx as page-marked text (`--- page N ---` per slide) for ingest /
+ * file_read. Image-only slides become empty page bodies (OCR via file_read later).
+ */
+export async function extractPptxTextFromBytes(data: Uint8Array): Promise<string> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(data);
+  const slideEntries = Object.keys(zip.files)
+    .filter((n) => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
+    .map((path) => {
+      const num = Number(/slide(\d+)\.xml$/i.exec(path)?.[1] || 0);
+      return { path, num };
+    })
+    .filter((e) => e.num > 0)
+    .sort((a, b) => a.num - b.num);
+
+  if (!slideEntries.length) return '';
+
+  const limit = Math.min(slideEntries.length, MAX_PPTX_SLIDES);
+  const parts: string[] = [];
+  for (let i = 0; i < limit; i++) {
+    const { path, num } = slideEntries[i]!;
+    const xml = await zip.files[path]!.async('string');
+    let body = textFromPptxXml(xml);
+    const notesPath = `ppt/notesSlides/notesSlide${num}.xml`;
+    if (zip.files[notesPath]) {
+      const notes = textFromPptxXml(await zip.files[notesPath]!.async('string'));
+      if (notes) body = body ? `${body}\n\n[notes] ${notes}` : `[notes] ${notes}`;
+    }
+    parts.push(`--- page ${num} ---\n${body}`.trimEnd());
+  }
+  if (slideEntries.length > limit) {
+    parts.push(
+      `[…truncated: showing first ${limit} of ${slideEntries.length} slides]`,
+    );
+  }
+  const out = parts.join('\n\n').trim();
+  if (out) return out;
+  return `[PPTX with ${slideEntries.length} slides; no extractable text layer]`;
+}
+
+export async function extractPptxText(file: File): Promise<string> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  return extractPptxTextFromBytes(data);
+}
+
 const MAX_SPREADSHEET_SHEETS = 20;
 const MAX_SPREADSHEET_ROWS_PER_SHEET = 2_000;
 

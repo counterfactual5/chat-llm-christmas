@@ -1,13 +1,23 @@
 /** Client-side file ingestion: read/extract dropped files into attachments. */
 
 import type { IngestedAttachment } from './types';
-import { extractDocxText, extractPdfText, extractSpreadsheetText } from './extractors';
-import { isSpreadsheetWorkbookFile, isSupportedDropFile } from './support';
+import {
+  extractDocxText,
+  extractPdfText,
+  extractPptxText,
+  extractSpreadsheetText,
+} from './extractors';
+import {
+  isPresentationFile,
+  isSpreadsheetWorkbookFile,
+  isSupportedDropFile,
+  PPTX_MIME,
+} from './support';
 import { truncateAttachmentText } from './text-limit';
 import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
 
 export type { IngestedAttachment } from './types';
-export { isSupportedDropFile } from './support';
+export { isSupportedDropFile, isPresentationFile, PPTX_MIME } from './support';
 export { MAX_INGEST_BYTES, MAX_UPLOAD_BYTES } from './compress-image';
 export { MAX_ATTACHMENT_TEXT_CHARS, truncateAttachmentText } from './text-limit';
 
@@ -72,6 +82,20 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
 
   if (name.endsWith('.doc')) {
     throw new Error('Legacy .doc is not supported — please save as .docx and try again');
+  }
+
+  if (name.endsWith('.ppt') && !isPresentationFile(file)) {
+    throw new Error('Legacy .ppt is not supported — please save as .pptx and try again');
+  }
+
+  if (isPresentationFile(file)) {
+    const text = await extractPptxText(file);
+    if (!text) throw new Error(`Could not extract text from ${file.name}`);
+    return {
+      ...base,
+      type: file.type || PPTX_MIME,
+      ...withUploadBlob(file, text),
+    };
   }
 
   if (isSpreadsheetWorkbookFile(file)) {

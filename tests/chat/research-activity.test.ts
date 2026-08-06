@@ -157,6 +157,57 @@ describe('research activity → timeline stages', () => {
     ).toContain('草案');
   });
 
+  it('merges quality gate errors[] into truncationReason', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a4err',
+      jobId: 'rs_4err',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'error',
+      payload: {
+        message: 'quality gate failed',
+        errors: ['Tier 1 来源仅 1 条（standard 期望 ≥2）'],
+      },
+    });
+    expect(m.truncationReason).toContain('Tier 1');
+    expect(m.truncationReason).not.toBe('quality gate failed');
+  });
+
+  it('marks sources without page excerpt as snippet-only', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a4src',
+      jobId: 'rs_4src',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'sources',
+      payload: {
+        count: 2,
+        tier1Count: 0,
+        reads: 1,
+        readAttempts: 2,
+        items: [
+          {
+            title: 'Read ok',
+            url: 'https://a.example/1',
+            snippet: 'full',
+            hasExcerpt: true,
+          },
+          {
+            title: 'Snippet only',
+            url: 'https://b.example/2',
+            snippet: 'blurb',
+            hasExcerpt: false,
+          },
+        ],
+      },
+    });
+    const src = m.toolRuns?.find((r) => r.name === 'research_sources');
+    expect(src?.results?.[0]?.title).toBe('Read ok');
+    expect(src?.results?.[1]?.title).toContain('仅摘要');
+  });
+
   it('records soft-empty search without Failed error', () => {
     let m = createResearchAssistantMessage({
       id: 'a6',

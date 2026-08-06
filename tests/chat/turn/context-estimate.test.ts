@@ -217,4 +217,67 @@ describe('estimateContextBreakdown', () => {
     });
     expect(guided.system).toBeGreaterThan(bare.system);
   });
+
+  it('raises conversation when history has large tool result bodies', () => {
+    const baseArgs = {
+      model: 'gpt-4o',
+      systemPrompt: '',
+      threadId: 't1',
+      searchEnabled: true,
+      authorizedIntegrations: [] as string[],
+      skills: [],
+      webSources: [],
+      attachmentTexts: [],
+      pendingImageCount: 0,
+    };
+    const plainMsg = {
+      id: 'a1',
+      role: 'assistant' as const,
+      content: 'Answer',
+      timestamp: 1,
+    };
+    const toolMsg = {
+      ...plainMsg,
+      toolRuns: [
+        {
+          id: 'tr1',
+          name: 'web_search',
+          status: 'done' as const,
+          query: 'q',
+          results: [
+            {
+              title: 't',
+              url: 'https://example.com',
+              snippet: 's',
+              body: 'w'.repeat(8000),
+            },
+          ],
+        },
+      ],
+    };
+    const plain = estimateContextBreakdown({
+      ...baseArgs,
+      messages: [plainMsg],
+    });
+    const withTools = estimateContextBreakdown({
+      ...baseArgs,
+      messages: [toolMsg],
+    });
+    expect(withTools.conversation).toBeGreaterThan(plain.conversation);
+    expect(withTools.system).toBe(plain.system);
+
+    const projectedPlain = estimateTokensForSend({
+      history: [plainMsg],
+      nextUserText: 'next',
+      pendingImageCount: 0,
+      contextBreakdown: { system: plain.system },
+    });
+    const projectedTools = estimateTokensForSend({
+      history: [toolMsg],
+      nextUserText: 'next',
+      pendingImageCount: 0,
+      contextBreakdown: { system: withTools.system },
+    });
+    expect(projectedTools).toBeGreaterThan(projectedPlain);
+  });
 });

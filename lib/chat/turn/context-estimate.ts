@@ -13,6 +13,7 @@ import {
 } from '@/lib/chat/prompt/system-parts';
 import { wantsProductUsageHelp } from '@/lib/chat/prompt/product-guide';
 import type { Message, WebSearchSource } from '@/lib/chat/types';
+import { estimateHistoryTokens } from '@/lib/chat/turn/history-estimate';
 import { estimateTokensFromText } from '@/lib/models/specs';
 
 export type ContextEstimateBreakdown = {
@@ -140,10 +141,7 @@ export function estimateContextBreakdown(
     0,
   );
   const images = (input.pendingImageCount || 0) * 1000 + historyImages;
-  const conversation = (input.messages || []).reduce(
-    (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
-    0,
-  );
+  const conversation = estimateHistoryTokens(input.messages || []);
 
   // Skills / referenceText are already inside `system` — do not add again.
   const total = system + files + images + conversation;

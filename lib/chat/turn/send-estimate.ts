@@ -7,8 +7,8 @@
  * from that history before calling this.
  */
 
-import { messagePlainText } from '@/lib/chat/message/display';
 import type { Message } from '@/lib/chat/types';
+import { estimateHistoryTokens } from '@/lib/chat/turn/history-estimate';
 import { estimateTokensFromText } from '@/lib/models/specs';
 
 export type SendEstimateInput = {
@@ -24,10 +24,7 @@ export type SendEstimateInput = {
  */
 export function estimateTokensForSend(input: SendEstimateInput): number {
   void input.contextBreakdown.skills;
-  const historyText = input.history.reduce(
-    (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
-    0,
-  );
+  const historyText = estimateHistoryTokens(input.history);
   const historyImages = input.history.reduce(
     (sum, m) => sum + (m.images?.length || 0) * 1000,
     0,

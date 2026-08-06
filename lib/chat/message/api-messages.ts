@@ -1,6 +1,11 @@
 import type { IngestedAttachment } from '@/lib/files/ingest';
 import type { Message } from '@/lib/chat/types';
 import {
+  buildHistoryToolCalls,
+  filterReplayableToolRuns,
+  serializeToolReceipt,
+} from '@/lib/chat/message/tool-receipt';
+import {
   collapseAttachedFileBlocksForHistory,
   formatChatFileHistoryRefs,
   HISTORY_FILE_REF_MARKER,
@@ -118,19 +123,10 @@ export function toApiMessages(
     }
 
     if (m.role === 'assistant') {
-      const runs = (m.toolRuns || []).filter(
-        (r) => r?.name && r.name !== 'claim_reviewer' && r.status === 'done',
-      );
+      const runs = filterReplayableToolRuns(m.toolRuns);
       if (runs.length) {
         const out: Array<Record<string, unknown>> = [];
-        const tool_calls = runs.map((r, idx) => ({
-          id: String(r.id || `hist_${m.id}_${idx}`),
-          type: 'function',
-          function: {
-            name: r.name,
-            arguments: JSON.stringify(r.query ? { query: r.query } : {}),
-          },
-        }));
+        const tool_calls = buildHistoryToolCalls(runs, m.id);
         out.push({
           role: 'assistant',
           content: '',
@@ -138,30 +134,10 @@ export function toApiMessages(
           timestamp: m.timestamp,
         });
         for (let idx = 0; idx < runs.length; idx++) {
-          const r = runs[idx];
-          const payload = r.error
-            ? { ok: false, error: r.error, ...(r.query ? { query: r.query } : {}) }
-            : {
-                ok: true,
-                ...(r.query ? { query: r.query } : {}),
-                ...(r.provider ? { provider: r.provider } : {}),
-                ...(r.results?.length
-                  ? {
-                      results: r.results.slice(0, 8).map((x) => ({
-                        title: x.title,
-                        url: x.url,
-                        snippet: String(x.snippet || '').slice(0, 240),
-                        ...(x.body
-                          ? { content: String(x.body).slice(0, 16_000) }
-                          : {}),
-                      })),
-                    }
-                  : {}),
-              };
           out.push({
             role: 'tool',
             tool_call_id: tool_calls[idx].id,
-            content: JSON.stringify(payload),
+            content: serializeToolReceipt(runs[idx]),
             timestamp: m.timestamp,
           });
         }

@@ -19,7 +19,7 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 | `gateway/` | Server Files API base URL, upload helpers, content parts for tools. |
 | `scrub-deleted-file.ts` | Scrub deleted account file refs from sessions; collect exclusive file ids when deleting a conversation. |
 | `url-preview.ts` | Side-panel online URL helpers (`isPreviewableHttpUrl`, normalize, external-click detection, `isLikelyAuthGatedPreviewUrl` for hosts that need top-level browser login). |
-| `url-preview-embed.ts` | Blocked-embed probe + degrade decisions for URL Preview (XFO/CSP heuristic; auto-switch to Text only when prefetch extract is ready). |
+| `url-preview-embed.ts` | Blocked-embed probe + degrade when user switches to Embed (XFO/CSP heuristic; auto-back to Text when prefetch is ready). URL Preview defaults to Text for Quote. |
 | `url-extract-clean.ts` | Conservative client cleaning for URL extract text (strip provider header blocks, `[Image N]` placeholders; idempotent; server-side mirror lives in chat-api `services/tools/cleanContent.js`). |
 
 Product-level attachment / vision / `file_read` flow: [`docs/images-and-files.md`](../../docs/images-and-files.md).

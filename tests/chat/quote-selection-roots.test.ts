@@ -82,19 +82,10 @@ describe('quote selection roots', () => {
 });
 
 describe('shouldMarkMessagesSelecting', () => {
-  it('is true only while pointer is down AND selection is active', () => {
+  it('documents the old AND gate (unused by UI after pointer-events removal)', () => {
     expect(shouldMarkMessagesSelecting(true, true)).toBe(true);
-  });
-
-  it('is false on pointer-down alone so link clicks still fire', () => {
     expect(shouldMarkMessagesSelecting(true, false)).toBe(false);
-  });
-
-  it('is false for idle leftover selection (links stay clickable)', () => {
     expect(shouldMarkMessagesSelecting(false, true)).toBe(false);
-  });
-
-  it('is false when idle with no selection', () => {
     expect(shouldMarkMessagesSelecting(false, false)).toBe(false);
   });
 });

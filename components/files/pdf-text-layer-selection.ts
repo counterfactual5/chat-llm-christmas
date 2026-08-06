@@ -52,6 +52,14 @@ function enableGlobalSelectionListener() {
     },
     { signal },
   );
+  document.addEventListener(
+    'pointercancel',
+    () => {
+      isPointerDown = false;
+      resetAll();
+    },
+    { signal },
+  );
   window.addEventListener(
     'blur',
     () => {
@@ -167,16 +175,20 @@ export function bindPdfTextLayerSelection(textLayer: HTMLElement): () => void {
   end.className = 'endOfContent';
   textLayer.append(end);
 
-  const onMouseDown = () => {
+  // mousedown covers classic drag; pointerdown covers macOS three-finger
+  // (and other non-mouse pointers) that may not synthesize mousedown first.
+  const markSelecting = () => {
     textLayer.classList.add('selecting');
   };
-  textLayer.addEventListener('mousedown', onMouseDown);
+  textLayer.addEventListener('mousedown', markSelecting);
+  textLayer.addEventListener('pointerdown', markSelecting);
 
   textLayers.set(textLayer, { end });
   enableGlobalSelectionListener();
 
   return () => {
-    textLayer.removeEventListener('mousedown', onMouseDown);
+    textLayer.removeEventListener('mousedown', markSelecting);
+    textLayer.removeEventListener('pointerdown', markSelecting);
     textLayers.delete(textLayer);
     resetLayer(textLayer, end);
     end.remove();

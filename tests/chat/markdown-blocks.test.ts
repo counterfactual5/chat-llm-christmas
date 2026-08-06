@@ -352,6 +352,13 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^1\. \*\*2025年2月26日：\*\*/m);
   });
 
+  it('also joins when the export uses fullwidth spaces (　)', () => {
+    const src =
+      '1.　\n\n2025年9月10日： 取消优惠时段（腾讯云平台）\n- 半价\n';
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^1\. 2025年9月10日：/m);
+  });
+
   it('does not split figure captions inside an ordered item', () => {
     const src = '1. 先做这一步。见图 1. 然后继续。\n2. 第二步';
     expect(reflowCollapsedMarkdownBlocks(src)).toBe(src);

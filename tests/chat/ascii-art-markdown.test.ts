@@ -6,6 +6,7 @@ import {
   promoteInlineAsciiArtToFences,
   reflowCollapsedAsciiArt,
 } from '@/lib/markdown/core/ascii-art';
+import { eastAsianLineColumns } from '@/lib/markdown/core/east-asian-columns';
 import { prepareChatMarkdown } from '@/lib/markdown/math';
 
 describe('ASCII art Markdown recovery', () => {
@@ -135,7 +136,11 @@ describe('ASCII art Markdown recovery', () => {
     const half = '┌────┐\n│ App │ └────┘';
     const out = reflowCollapsedAsciiArt(half);
     expect(out).toContain('\n│ App │\n');
-    expect(out).toContain('└────┘');
+    // Content row is wider (EA cols) than the original 4-dash frame — expand to match.
+    expect(out).toMatch(/^┌─+┐$/m);
+    expect(out).toMatch(/^└─+┘$/m);
+    const widths = out.split('\n').map((l) => eastAsianLineColumns(l));
+    expect(new Set(widths).size).toBe(1);
   });
 
   it('does not shred a nested multi-line CSS box model', () => {
@@ -212,5 +217,28 @@ describe('ASCII art Markdown recovery', () => {
     const md = '```\n┌────┐ │ App │ └────┘\n```';
     const out = normalizeAsciiArtMarkdown(md);
     expect(out).toContain('\n│ App │\n');
+  });
+
+  it('rebalances box rows padded by char count to East-Asian columns', () => {
+    const smashed = [
+      '╔════════════════════════════════╗',
+      '║          欢迎 Christmas Chat            ║',
+      '╠════════════════════════════════╣',
+      '║  🎄 圣诞快乐！节日问候 🎄          ║',
+      '║                                ║',
+      '╚════════════════════════════════╝',
+    ].join('\n');
+    const out = reflowCollapsedAsciiArt(smashed);
+    const widths = out.split('\n').map((l) => eastAsianLineColumns(l));
+    expect(new Set(widths).size).toBe(1);
+    expect(out).toMatch(/^╔═+╗$/m);
+    expect(out).toMatch(/^║.*║$/m);
+    // Side-by-side boxes must not be collapsed into one frame.
+    const dual = [
+      '┌─────────────────┐     ╔════════════╗',
+      '│     Logger      │═════║  Database  ║',
+      '└─────────────────┘     ╚════════════╝',
+    ].join('\n');
+    expect(reflowCollapsedAsciiArt(dual)).toBe(dual);
   });
 });

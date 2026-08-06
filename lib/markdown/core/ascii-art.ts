@@ -7,6 +7,11 @@
  * multi-line trees and nested boxes must pass through unchanged.
  */
 
+import {
+  eastAsianCharColumns,
+  eastAsianLineColumns,
+} from '@/lib/markdown/core/east-asian-columns';
+
 const UNICODE_BRANCH_RE = /(?:^|\s)[├└](?:[─━-]{1,3})/g;
 /**
  * `|---` inside GFM tables (`|------|---|`) is NOT a tree branch. `(?!-)` pins
@@ -277,6 +282,137 @@ function reflowUnicodeBox(text: string): string {
     .trim();
 }
 
+/** Top / bottom / tee separators with no trailing connectors. */
+function isPureBoxFrameLine(line: string): boolean {
+  const t = String(line || '').replace(/\s+$/, '');
+  return (
+    /^[┌╔╭][─━═]+[┐╗╮]$/.test(t) ||
+    /^[└╚╰][─━═]+[┘╝╯]$/.test(t) ||
+    /^[├╠][─━═]+[┤╣]$/.test(t)
+  );
+}
+
+function isPureBoxTopLine(line: string): boolean {
+  return /^[┌╔╭][─━═]+[┐╗╮]$/.test(String(line || '').replace(/\s+$/, ''));
+}
+
+function isPureBoxBottomLine(line: string): boolean {
+  return /^[└╚╰][─━═]+[┘╝╯]$/.test(String(line || '').replace(/\s+$/, ''));
+}
+
+/** Content row `│ … │` / `║ … ║` with no suffix after the closing border. */
+function isPureBoxContentLine(line: string): boolean {
+  return /^[│║┃][^│║┃]*[│║┃]$/.test(String(line || '').replace(/\s+$/, ''));
+}
+
+function boxFrameFillChar(line: string): string {
+  if (/[═]/.test(line)) return '═';
+  if (/[━]/.test(line)) return '━';
+  return '─';
+}
+
+function fitPureBoxFrameLine(line: string, targetCols: number): string {
+  const t = String(line || '').replace(/\s+$/, '');
+  if (eastAsianLineColumns(t) === targetCols) return t;
+  const left = t[0]!;
+  const right = t[t.length - 1]!;
+  const fill = boxFrameFillChar(t);
+  const inner = Math.max(
+    1,
+    targetCols - eastAsianCharColumns(left) - eastAsianCharColumns(right),
+  );
+  return `${left}${fill.repeat(inner)}${right}`;
+}
+
+function fitPureBoxContentLine(line: string, targetCols: number): string {
+  const t = String(line || '').replace(/\s+$/, '');
+  const m = t.match(/^([│║┃])([^│║┃]*)([│║┃])$/);
+  if (!m) return line;
+  const [, left, innerRaw, right] = m as [string, string, string, string];
+  const sideCols =
+    eastAsianCharColumns(left) + eastAsianCharColumns(right);
+  const need = targetCols - sideCols;
+  if (need < 0) return t;
+
+  let inner = innerRaw;
+  let cols = eastAsianLineColumns(inner);
+  if (cols === need) return t;
+
+  if (cols < need) {
+    return `${left}${inner}${' '.repeat(need - cols)}${right}`;
+  }
+
+  // Prefer eating trailing pad spaces the model used for alignment.
+  while (cols > need && inner.endsWith(' ')) {
+    inner = inner.slice(0, -1);
+    cols -= 1;
+  }
+  while (cols > need && inner.startsWith(' ')) {
+    inner = inner.slice(1);
+    cols -= 1;
+  }
+  if (cols === need) return `${left}${inner}${right}`;
+  // Still too wide (CJK/emoji) — leave alone; the frame will expand to fit.
+  return t;
+}
+
+/**
+ * Models often pad box rows by character count, not East-Asian columns, so
+ * `AsciiArtPre`'s 1ch/2ch grid shows the right border drifting. Expand frames
+ * / re-pad pure content rows so each simple box shares one column width.
+ * Skips rows with trailing connectors (`│ Core │──►`).
+ */
+export function rebalanceAsciiArtBoxColumns(text: string): string {
+  const lines = String(text || '').split('\n');
+  if (lines.length < 2) return String(text || '');
+
+  const out = lines.slice();
+  let i = 0;
+  while (i < out.length) {
+    if (!isPureBoxTopLine(out[i]!)) {
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    while (
+      j < out.length &&
+      !isPureBoxBottomLine(out[j]!) &&
+      !isPureBoxTopLine(out[j]!)
+    ) {
+      j += 1;
+    }
+    if (j >= out.length || !isPureBoxBottomLine(out[j]!)) {
+      i += 1;
+      continue;
+    }
+
+    let target = 0;
+    for (let k = i; k <= j; k++) {
+      const line = out[k]!.replace(/\s+$/, '');
+      if (
+        isPureBoxFrameLine(line) ||
+        isPureBoxContentLine(line)
+      ) {
+        target = Math.max(target, eastAsianLineColumns(line));
+      }
+    }
+
+    if (target >= 4) {
+      for (let k = i; k <= j; k++) {
+        const line = out[k]!;
+        if (isPureBoxFrameLine(line)) {
+          out[k] = fitPureBoxFrameLine(line, target);
+        } else if (isPureBoxContentLine(line)) {
+          out[k] = fitPureBoxContentLine(line, target);
+        }
+      }
+    }
+    i = j + 1;
+  }
+
+  return out.join('\n');
+}
+
 /**
  * True when a Unicode box is still smashed (one line / half-glued) and needs
  * row recovery. Nested CSS-style box models already have many lines with
@@ -339,8 +475,10 @@ export function reflowCollapsedAsciiArt(text: string): string {
 
   if (looksLikeUnicodeBox(raw)) {
     const normalized = lightNormalize(raw);
-    if (!needsUnicodeBoxReflow(normalized)) return normalized;
-    return reflowUnicodeBox(normalized).replace(/\n{3,}/g, '\n\n').trim();
+    const laidOut = needsUnicodeBoxReflow(normalized)
+      ? reflowUnicodeBox(normalized).replace(/\n{3,}/g, '\n\n').trim()
+      : normalized;
+    return rebalanceAsciiArtBoxColumns(laidOut);
   }
 
   if (looksLikeAsciiTree(raw)) {

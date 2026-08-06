@@ -790,7 +790,10 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   live: boolean,
                 ) => {
                   const body = step.text.trim();
-                  if (!body && !live) return null;
+                  // Empty CoT must not wear a "Thinking…" badge — that was the
+                  // old fake placeholder. Idle / first-token gaps use the
+                  // Waiting Process row instead.
+                  if (!body) return null;
                   // Open while thinking so it streams in view, then auto-collapse
                   // once the answer starts. Explicit user toggles win.
                   const open = reasoningOpen[step.id] ?? live;
@@ -819,7 +822,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         )}
                         <span>{live ? t('thinking') : t('thought')}</span>
                       </button>
-                      {open && body && (
+                      {open && (
                         <ReasoningBodyScroll body={body} live={live}>
                           <AnswerMarkdown
                             text={body}

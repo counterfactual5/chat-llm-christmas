@@ -336,6 +336,42 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^3\. 放入模型$/m);
   });
 
+  it('keeps splitting ordered items after the first break (no \\s newline stall)', () => {
+    const src =
+      '3. 解压 ZIP 文件 4. 将解压后的文件夹**重命名为** `ComfyUI-Manager` 5. 放入 `D:\\x` 目录';
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^3\. 解压 ZIP 文件$/m);
+    expect(out).toMatch(/^4\. 将解压后的文件夹\*\*重命名为\*\* `ComfyUI-Manager`$/m);
+    expect(out).toMatch(/^5\. 放入 `D:\\x` 目录$/m);
+  });
+
+  it('does not split figure captions inside an ordered item', () => {
+    const src = '1. 先做这一步。见图 1. 然后继续。\n2. 第二步';
+    expect(reflowCollapsedMarkdownBlocks(src)).toBe(src);
+  });
+
+  it('peels smashed heading body openers without breaking 适合你 titles', () => {
+    expect(
+      reflowCollapsedMarkdownBlocks(
+        '## 💡 小提示 如果你下载了 **ComfyUI-Manager** 插件，它可以自动创建文件夹。',
+      ),
+    ).toMatch(/^## 💡 小提示\n\n如果你下载了/);
+    expect(
+      reflowCollapsedMarkdownBlocks(
+        '## 🛠️ 需要手动创建的文件夹 进入 `D:\\models\\`，如果里面是空的。',
+      ),
+    ).toMatch(/^## 🛠️ 需要手动创建的文件夹\n\n进入 `/);
+    expect(
+      reflowCollapsedMarkdownBlocks('## 💡 为什么只有源码？ 因为插件就是脚本。'),
+    ).toMatch(/^## 💡 为什么只有源码？\n\n因为插件就是脚本。/);
+    expect(
+      reflowCollapsedMarkdownBlocks('## 💡 总结 **Manager 的价值不在于下载**'),
+    ).toMatch(/^## 💡 总结\n\n\*\*Manager 的价值不在于下载\*\*/);
+    expect(reflowCollapsedMarkdownBlocks('## 适合你的方案')).toBe(
+      '## 适合你的方案',
+    );
+  });
+
   it('splits backtick bullets after a colon', () => {
     const src =
       '创建以下文件夹： - `checkpoints` - `clip_vision` - `vae`';

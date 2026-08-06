@@ -269,16 +269,33 @@ function reflowHeadingsListsHrs(chunk: string): string {
   // After Latin when the item starts with CJK (`Telegram 2. 加入`)
   out = out.replace(/([A-Za-z0-9])\s+(\d{1,2}\.\s+[\u4e00-\u9fff])/g, '$1\n$2');
   // Heading then first ordered item on the same line: `## 快速操作步骤 1. 打开`
+  // Use [ \t]+ (not \s+) so an already-split `\n1. next` is not re-matched.
   out = out.replace(
-    /(^|\n)(#{1,6}[ \t]+[^\n]*?)\s+(\d{1,2}\.\s+\S)/gm,
+    /(^|\n)(#{1,6}[ \t]+[^\n]*?)[ \t]+(\d{1,2}\.\s+\S)/gm,
     '$1$2\n$3',
   );
+  // Smashed heading + body with no list/`---`: `## 小提示 如果你…` /
+  // `## 为什么只有源码？ 因为…` / `## 总结 **…`. Keep titles that merely
+  // contain `你` (`适合你`) intact — only peel known body openers.
+  out = out.replace(
+    /(^|\n)(#{1,6}[ \t]+[^\n]{1,60}?)[ \t]+((?:如果你|你当前|既然你|双击)\S|(?:因为|进入)[ \t]*\S|\*\*\S)/gm,
+    '$1$2\n\n$3',
+  );
+  out = out.replace(
+    /(^|\n)(#{1,6}[ \t]+[^\n]*?[？?])[ \t]+([\u4e00-\u9fff*])/gm,
+    '$1$2\n\n$3',
+  );
   // Continue splitting `1. foo 2. bar` once an item already starts a line —
-  // does not fire on mid-prose `图 1. …表 2.`.
+  // does not fire on mid-prose `图 1. …表 2.`. [ \t]+ avoids rematching across
+  // the newline we just inserted (which would stall the loop at 3./4. and
+  // never reach 4./5.). Skip figure/table captions inside an item (`见图 1.`).
   for (let i = 0; i < 8; i++) {
     const next = out.replace(
-      /(^|\n)(\d{1,2}\.\s+[^\n]*?)\s+(\d{1,2}\.\s+\S)/g,
-      '$1$2\n$3',
+      /(^|\n)(\d{1,2}\.\s+[^\n]*?)[ \t]+(\d{1,2}\.\s+\S)/g,
+      (full, lead: string, a: string, b: string) => {
+        if (/(?:见|如|参考)?[图表]$/.test(a)) return full;
+        return `${lead}${a}\n${b}`;
+      },
     );
     if (next === out) break;
     out = next;
@@ -309,9 +326,10 @@ function reflowHeadingsListsHrs(chunk: string): string {
   }
   // Continue splitting sibling bullets once a line already starts with `- `,
   // but never catalog lines (`- **/image** - 说明`).
+  // [ \t]+ — same rematch-across-newline stall as ordered lists above.
   for (let i = 0; i < 8; i++) {
     const next = out.replace(
-      /(^|\n)(-\s+(?!\*\*)[^\n]*?)\s+(-\s+(?!\*\*)[`\u4e00-\u9fffA-Za-z*])/g,
+      /(^|\n)(-\s+(?!\*\*)[^\n]*?)[ \t]+(-\s+(?!\*\*)[`\u4e00-\u9fffA-Za-z*])/g,
       '$1$2\n$3',
     );
     if (next === out) break;

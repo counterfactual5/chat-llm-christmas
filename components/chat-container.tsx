@@ -79,9 +79,9 @@ import { parseLiteratureCommand } from '@/lib/chat/turn/literature-command';
 import { hasUploadingAttachments } from '@/lib/chat/turn/attachments';
 import { clearLocalSessions } from '@/lib/chat/session/persist';
 import {
-  isResearchSessionBusy,
   isSessionBusy,
   researchBusySessionIdFrom,
+  shouldCancelResearch,
 } from '@/lib/chat/session/busy';
 import {
   clearOAuthReturnQuery,
@@ -1698,8 +1698,9 @@ export default function ChatContainer() {
   const activeSessionBusy = isSessionBusy(activeSessionId, sessionBusyInput);
   const sessionIsBusy = (sessionId: string) =>
     isSessionBusy(sessionId, sessionBusyInput);
-  const activeResearchBusy = isResearchSessionBusy(
+  const stopCancelsResearch = shouldCancelResearch(
     activeSessionId,
+    deepResearch.busy,
     researchBusySessionId,
   );
 
@@ -1708,10 +1709,10 @@ export default function ChatContainer() {
   const researchReattachRef = useRef(deepResearch.reattach);
   researchReattachRef.current = deepResearch.reattach;
   // After refresh or switching sessions, reconnect SSE for in-flight Deep Research.
-  // Depend on busy/activeSessionId only — not the whole deepResearch object (new each render).
+  // Gate on the same SSOT as orphan cleanup — not a raw busy flag alone.
   useEffect(() => {
     if (!chatsHydrated) return;
-    if (deepResearch.busy) return;
+    if (deepResearch.busy || researchBusySessionId) return;
     const session = sessionsRef.current.find((s) => s.id === activeSessionId);
     if (!session) return;
     const running = session.messages.find((m) => {
@@ -1739,7 +1740,7 @@ export default function ChatContainer() {
     ).finally(() => {
       researchReattachInFlightRef.current.delete(jobId);
     });
-  }, [chatsHydrated, deepResearch.busy, activeSessionId]);
+  }, [chatsHydrated, deepResearch.busy, researchBusySessionId, activeSessionId]);
 
   const startResearchTurn = useCallback(
     async (opts: {
@@ -1849,12 +1850,12 @@ export default function ChatContainer() {
   ]);
 
   const stopOrCancel = useCallback(() => {
-    if (activeResearchBusy) {
+    if (stopCancelsResearch) {
       void deepResearch.cancel();
       return;
     }
     stopGenerating();
-  }, [activeResearchBusy, deepResearch, stopGenerating]);
+  }, [stopCancelsResearch, deepResearch, stopGenerating]);
 
   const resumeIncompleteOrResearch = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -2755,7 +2756,7 @@ export default function ChatContainer() {
                 isCompacting={isCompacting}
                 stopGenerating={stopOrCancel}
                 enqueueOrSubmit={submitComposer}
-                researchBusy={activeResearchBusy}
+                researchBusy={stopCancelsResearch}
                 researchError={
                   deepResearch.errorSessionId === activeSessionId
                     ? deepResearch.error

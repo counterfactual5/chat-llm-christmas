@@ -86,6 +86,8 @@ export function useDeepResearch(opts: {
     message: string;
   } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** Aborts in-flight create/resume HTTP before a jobId exists. */
+  const createAbortRef = useRef<AbortController | null>(null);
   const activeRef = useRef<{
     jobId: string;
     sessionId: string;
@@ -96,6 +98,42 @@ export function useDeepResearch(opts: {
     abortRef.current?.abort();
     abortRef.current = null;
   }, []);
+
+  const abortCreate = useCallback(() => {
+    createAbortRef.current?.abort();
+    createAbortRef.current = null;
+  }, []);
+
+  const beginCreate = useCallback(() => {
+    abortCreate();
+    const ac = new AbortController();
+    createAbortRef.current = ac;
+    return ac;
+  }, [abortCreate]);
+
+  /** Claim the target session in the same turn as setBusy so SSOT Stop/cancel cannot lag. */
+  const claimBusySession = useCallback(
+    (claim: {
+      sessionId: string;
+      query: string;
+      mode: ResearchMode;
+      jobId?: string;
+      model?: string | null;
+      status?: string;
+    }) => {
+      setBusy(true);
+      beginLoading(claim.sessionId);
+      setJob({
+        jobId: claim.jobId || '',
+        sessionId: claim.sessionId,
+        query: claim.query,
+        mode: claim.mode,
+        status: claim.status || 'queued',
+        model: claim.model ?? null,
+      });
+    },
+    [beginLoading],
+  );
 
   const clearError = useCallback(() => setScopedError(null), []);
 
@@ -116,7 +154,11 @@ export function useDeepResearch(opts: {
       throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
     }
     const j = data.data as ResearchJob;
-    setJob(j);
+    // Preserve client session scope when the status payload omits sessionId.
+    setJob((prev) => ({
+      ...j,
+      sessionId: j.sessionId ?? prev?.sessionId ?? null,
+    }));
     return j;
   }, []);
 
@@ -467,15 +509,7 @@ export function useDeepResearch(opts: {
     }) => {
       const { jobId, sessionId, assistantId, query, mode } = opts;
       clearError();
-      setBusy(true);
-      beginLoading(sessionId);
-      setJob({
-        jobId,
-        sessionId,
-        query,
-        mode,
-        status: 'queued',
-      });
+      claimBusySession({ jobId, sessionId, query, mode });
       // Keep the existing Process timeline visible while SSE catch-up rebuilds
       // off-screen; only clear incomplete/error chrome so Continue feels live.
       patchAssistant(setSessions, sessionId, assistantId, (m) => ({
@@ -495,7 +529,7 @@ export function useDeepResearch(opts: {
         seed: { query, mode },
       });
     },
-    [beginLoading, listen, setSessions, clearError],
+    [claimBusySession, listen, setSessions, clearError],
   );
 
   const start = useCallback(
@@ -507,8 +541,13 @@ export function useDeepResearch(opts: {
       }
       const sessionId = startOpts.sessionId;
       clearError();
-      setBusy(true);
-      beginLoading(sessionId);
+      claimBusySession({
+        sessionId,
+        query,
+        mode: startOpts.mode,
+        model: startOpts.model,
+      });
+      const createAc = beginCreate();
 
       try {
         const res = await fetch('/api/research', {
@@ -521,6 +560,7 @@ export function useDeepResearch(opts: {
             sessionId,
             model: startOpts.model,
           }),
+          signal: createAc.signal,
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data?.success === false) {
@@ -567,13 +607,32 @@ export function useDeepResearch(opts: {
         });
         return { ...created, assistantId };
       } catch (err: unknown) {
+        const aborted =
+          (err instanceof DOMException && err.name === 'AbortError') ||
+          (err instanceof Error && err.name === 'AbortError');
         setBusy(false);
         endLoading(sessionId);
-        setErrorForSession(sessionId, err instanceof Error ? err.message : String(err));
+        setJob(null);
+        if (!aborted) {
+          setErrorForSession(
+            sessionId,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
         return null;
+      } finally {
+        if (createAbortRef.current === createAc) createAbortRef.current = null;
       }
     },
-    [beginLoading, endLoading, listen, setSessions, clearError, setErrorForSession],
+    [
+      beginCreate,
+      claimBusySession,
+      endLoading,
+      listen,
+      setSessions,
+      clearError,
+      setErrorForSession,
+    ],
   );
 
   /**
@@ -590,8 +649,8 @@ export function useDeepResearch(opts: {
     }) => {
       const { jobId, sessionId, assistantId, query, mode } = opts;
       clearError();
-      setBusy(true);
-      beginLoading(sessionId);
+      claimBusySession({ jobId, sessionId, query, mode });
+      const createAc = beginCreate();
       try {
         let remote = await refreshJob(jobId).catch(() => null);
         const running = new Set([
@@ -624,6 +683,7 @@ export function useDeepResearch(opts: {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
+          signal: createAc.signal,
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data?.success === false) {
@@ -651,6 +711,15 @@ export function useDeepResearch(opts: {
         await reattach({ jobId, sessionId, assistantId, query, mode });
         return remote;
       } catch (err: unknown) {
+        const aborted =
+          (err instanceof DOMException && err.name === 'AbortError') ||
+          (err instanceof Error && err.name === 'AbortError');
+        if (aborted) {
+          setBusy(false);
+          endLoading(sessionId);
+          setJob(null);
+          return null;
+        }
         const msg = err instanceof Error ? err.message : String(err);
         setErrorForSession(sessionId, msg);
         patchAssistant(setSessions, sessionId, assistantId, (m) => ({
@@ -660,6 +729,7 @@ export function useDeepResearch(opts: {
         }));
         return null;
       } finally {
+        if (createAbortRef.current === createAc) createAbortRef.current = null;
         // reattach/start manage their own busy flag while listening; only clear
         // when we finished synchronously (done report) or errored out.
         if (!activeRef.current) {
@@ -668,18 +738,37 @@ export function useDeepResearch(opts: {
         }
       }
     },
-    [beginLoading, endLoading, reattach, refreshJob, setSessions, start, clearError, setErrorForSession],
+    [
+      beginCreate,
+      claimBusySession,
+      endLoading,
+      reattach,
+      refreshJob,
+      setSessions,
+      start,
+      clearError,
+      setErrorForSession,
+    ],
   );
 
   const cancel = useCallback(async () => {
+    abortCreate();
+    stopStream();
     const active = activeRef.current;
-    const jobId = active?.jobId || job?.jobId;
-    if (!jobId) return;
+    const jobId = (active?.jobId || job?.jobId || '').trim();
+    const sid = active?.sessionId || job?.sessionId || '';
+    // Pending create: no jobId yet — clear busy/loading for the claimed session.
+    if (!jobId) {
+      activeRef.current = null;
+      if (sid) endLoading(sid);
+      setBusy(false);
+      setJob(null);
+      return;
+    }
     try {
       await fetch(`/api/research/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
       });
-      stopStream();
       // Also blocks the delayed SSE reconnect scheduled after a stream drop.
       activeRef.current = null;
       if (active) {
@@ -690,25 +779,36 @@ export function useDeepResearch(opts: {
           }),
         );
         endLoading(active.sessionId);
+      } else if (sid) {
+        endLoading(sid);
       }
       await refreshJob(jobId).catch(() => null);
     } catch (err: unknown) {
-      const sid = active?.sessionId || job?.sessionId || '';
       if (sid) {
         setErrorForSession(sid, err instanceof Error ? err.message : String(err));
       }
     } finally {
       setBusy(false);
     }
-  }, [endLoading, job?.jobId, job?.sessionId, refreshJob, setSessions, setErrorForSession, stopStream]);
+  }, [
+    abortCreate,
+    endLoading,
+    job?.jobId,
+    job?.sessionId,
+    refreshJob,
+    setSessions,
+    setErrorForSession,
+    stopStream,
+  ]);
 
   useEffect(
     () => () => {
+      abortCreate();
       stopStream();
       // Prevent the delayed post-drop reconnect from firing after unmount.
       activeRef.current = null;
     },
-    [stopStream],
+    [abortCreate, stopStream],
   );
 
   return {

@@ -18,6 +18,11 @@ const STAGE_TITLE: Record<string, string> = {
   writing: 'Write',
 };
 
+/** Gather sub-stages opened from tool events (not from phase status alone). */
+const STAGE_SEARCH = 'Search';
+const STAGE_READ = 'Read';
+const STAGE_SOURCES = 'Sources';
+
 function newId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 }
@@ -396,7 +401,13 @@ export function applyResearchEvent(
     const query = String(payload.query || '');
     const status = String(payload.status || '');
     if (status === 'start') {
-      const started = startTool(m, 'web_search', query, String(payload.provider || '') || undefined);
+      m = openStage(m, STAGE_SEARCH);
+      const started = startTool(
+        m,
+        'web_search',
+        query,
+        String(payload.provider || '') || undefined,
+      );
       return started.message;
     }
     if (status === 'ok' || status === 'empty') {
@@ -457,6 +468,7 @@ export function applyResearchEvent(
         ? 'paper_read'
         : 'web_read';
     if (status === 'start') {
+      m = openStage(m, STAGE_READ);
       return startTool(m, toolName, url || title || undefined, sourceProvider || undefined)
         .message;
     }
@@ -507,10 +519,6 @@ export function applyResearchEvent(
     } else if (reads != null) {
       readBits.push(`read ${reads}`);
     }
-    m = appendReasoning(
-      m,
-      `Collected ${count} sources${readBits.length ? ` (${readBits.join(', ')})` : ''}.`,
-    );
     const items = Array.isArray(payload.items) ? payload.items : [];
     const results = items
       .map((row) => {
@@ -533,6 +541,12 @@ export function applyResearchEvent(
         };
       })
       .filter((h) => /^https?:\/\//i.test(h.url));
+    // Open Sources first so the summary Thought + tool land here, not under Read.
+    m = openStage(m, STAGE_SOURCES);
+    m = appendReasoning(
+      m,
+      `Collected ${count} sources${readBits.length ? ` (${readBits.join(', ')})` : ''}.`,
+    );
     if (results.length) {
       const toolRuns = ensureTools(m);
       const existingIdx = toolRuns.findIndex((r) => r.name === 'research_sources');

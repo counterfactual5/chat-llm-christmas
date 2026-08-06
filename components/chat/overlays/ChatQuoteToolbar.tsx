@@ -6,7 +6,8 @@ import {
   firstIframeSelectionUnderRoots,
   tryIframeDocument,
 } from '@/lib/chat/message/iframe-selection-bridge';
-import { selectionInsideRoot } from '@/lib/chat/message/quote-roots';
+import { selectionActiveInRoot, selectionInsideRoot } from '@/lib/chat/message/quote-roots';
+import { shouldMarkMessagesSelecting } from '@/lib/chat/message/selecting-attr';
 import {
   quotedSelectionFromDom,
   type QuotedSelection,
@@ -51,8 +52,24 @@ export function ChatQuoteToolbar({
   useEffect(() => {
     let raf = 0;
     let pointerDown = false;
+    let pointerDownInMessages = false;
     const wrap = () => wrapRef.current;
     const iframeCleanups = new Map<HTMLIFrameElement, () => void>();
+
+    const syncMessagesSelectingAttr = () => {
+      const msg = messagesContentRef.current;
+      if (!msg) return;
+      if (
+        shouldMarkMessagesSelecting(
+          pointerDownInMessages,
+          selectionActiveInRoot(msg),
+        )
+      ) {
+        msg.setAttribute('data-selecting', '');
+      } else {
+        msg.removeAttribute('data-selecting');
+      }
+    };
 
     const hideToolbar = () => {
       const el = wrap();
@@ -195,14 +212,23 @@ export function ChatQuoteToolbar({
       }
     };
 
-    const onPointerDown = () => {
+    const onPointerDown = (e: PointerEvent) => {
       pointerDown = true;
+      const msg = messagesContentRef.current;
+      const target = e.target;
+      pointerDownInMessages = Boolean(
+        msg && target instanceof Node && msg.contains(target),
+      );
+      syncMessagesSelectingAttr();
     };
     const onPointerUp = () => {
       pointerDown = false;
+      pointerDownInMessages = false;
+      syncMessagesSelectingAttr();
       scheduleUpdate('show');
     };
     const onSelectionChange = () => {
+      syncMessagesSelectingAttr();
       scheduleUpdate(pointerDown ? 'stash' : 'show');
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -252,6 +278,7 @@ export function ChatQuoteToolbar({
       window.removeEventListener('resize', onReposition);
       for (const mo of observers) mo.disconnect();
       for (const iframe of Array.from(iframeCleanups.keys())) detachIframe(iframe);
+      messagesContentRef.current?.removeAttribute('data-selecting');
     };
   }, [messagesContentRef, scrollRef, extraRoots]);
 

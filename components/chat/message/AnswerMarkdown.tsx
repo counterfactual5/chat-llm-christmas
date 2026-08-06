@@ -1,10 +1,14 @@
+'use client';
+
 /* eslint-disable @typescript-eslint/no-explicit-any -- react-markdown renderer props are intentionally loose. */
+import { useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { AsciiArtPre } from '@/components/markdown/code/ascii-art-pre';
 import { CodeBlock } from '@/components/markdown/code/code-block';
+import { useSelectionFrozenText } from '@/hooks/chat/use-selection-frozen-text';
 import { expandLiteralBreaks } from '@/lib/markdown/core/breaks';
 import { unwrapMarkdownDocumentFence } from '@/lib/markdown/core/document-fence';
 import { looksLikeAsciiArt, reflowCollapsedAsciiArt } from '@/lib/markdown/core/ascii-art';
@@ -52,8 +56,18 @@ export function AnswerMarkdown({
   /** Extra classes on the outer wrapper (e.g. denser Thought chrome). */
   className?: string;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Live token updates remount remark/rehype (incl. KaTeX) and yank the caret.
+  // Freeze the tree while selecting; still buffer `text` for when selection ends.
+  const renderText = useSelectionFrozenText(text, streaming, rootRef);
+  // Skip KaTeX while streaming — absolute glyph spans remount every token.
+  // Plain $tex$ until the turn settles; freeze above still covers GFM remounts.
+  const remarkPlugins = streaming ? [remarkGfm] : [remarkMath, remarkGfm];
+  const rehypePlugins = streaming ? [] : [[rehypeKatex, KATEX_OPTIONS]];
+
   return (
     <div
+      ref={rootRef}
       className={cn(
         // overflow-wrap:anywhere for prose; tables opt out so wide cells scroll
         // horizontally instead of shredding (see SpreadsheetTable).
@@ -62,8 +76,8 @@ export function AnswerMarkdown({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkGfm]}
-        rehypePlugins={[[rehypeKatex, KATEX_OPTIONS]]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins as any}
         components={{
           p({ children }: any) {
             return <p className="mb-4 whitespace-pre-wrap leading-7 last:mb-0">{children}</p>;
@@ -189,7 +203,7 @@ export function AnswerMarkdown({
           },
         }}
       >
-        {prepareChatMarkdown(unwrapMarkdownDocumentFence(text), {
+        {prepareChatMarkdown(unwrapMarkdownDocumentFence(renderText), {
           streaming,
           reflowBlocks,
         })}

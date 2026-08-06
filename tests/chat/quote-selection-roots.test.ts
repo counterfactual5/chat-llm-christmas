@@ -3,6 +3,7 @@ import {
   selectionActiveInRoot,
   selectionInsideRoot,
 } from '@/lib/chat/message/quote-roots';
+import { shouldMarkMessagesSelecting } from '@/lib/chat/message/selecting-attr';
 
 describe('quote selection roots', () => {
   afterEach(() => {
@@ -77,5 +78,17 @@ describe('quote selection roots', () => {
       }),
     });
     expect(selectionActiveInRoot(root)).toBe(false);
+  });
+});
+
+describe('shouldMarkMessagesSelecting', () => {
+  it('is true while pointer is down inside messages or selection is active', () => {
+    expect(shouldMarkMessagesSelecting(true, false)).toBe(true);
+    expect(shouldMarkMessagesSelecting(false, true)).toBe(true);
+    expect(shouldMarkMessagesSelecting(true, true)).toBe(true);
+  });
+
+  it('is false when idle with no selection', () => {
+    expect(shouldMarkMessagesSelecting(false, false)).toBe(false);
   });
 });

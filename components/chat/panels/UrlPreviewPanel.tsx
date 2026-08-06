@@ -30,6 +30,8 @@ export type UrlPreviewPanelProps = {
   title?: string;
   /** Prefer extract body over iframe (user toggle or auto fallback). */
   forceExtract?: boolean;
+  /** Navigate the preview to another http(s) URL (address-bar submit). */
+  onNavigateUrl?: (url: string) => void;
 };
 
 type ExtractState =
@@ -83,6 +85,7 @@ export function UrlPreviewPanel({
   url,
   title: initialTitle,
   forceExtract = false,
+  onNavigateUrl,
 }: UrlPreviewPanelProps) {
   const { t } = useLocale();
   const width = previewPanelWidth(contextOpen);
@@ -92,6 +95,8 @@ export function UrlPreviewPanel({
   );
   const [extract, setExtract] = useState<ExtractState>({ status: 'idle' });
   const [displayTitle, setDisplayTitle] = useState(initialTitle || '');
+  const [draftUrl, setDraftUrl] = useState(url);
+  const [urlError, setUrlError] = useState('');
   const iframeLoadedRef = useRef(false);
   const prefetchRef = useRef<ExtractState>({ status: 'idle' });
 
@@ -99,9 +104,24 @@ export function UrlPreviewPanel({
     setMode(initialPreviewMode(url, forceExtract));
     setExtract({ status: 'idle' });
     setDisplayTitle(initialTitle || '');
+    setDraftUrl(url);
+    setUrlError('');
     iframeLoadedRef.current = false;
     prefetchRef.current = { status: 'idle' };
   }, [url, initialTitle, forceExtract]);
+
+  const submitAddress = (e: FormEvent) => {
+    e.preventDefault();
+    if (!onNavigateUrl) return;
+    const normalized = normalizePreviewHttpUrl(draftUrl);
+    if (!normalized) {
+      setUrlError(t('urlPreviewInvalidUrl'));
+      return;
+    }
+    setUrlError('');
+    if (normalized === url) return;
+    onNavigateUrl(normalized);
+  };
 
   // Prefetch extract in parallel while iframe tries to load (skip auth-gated hosts).
   useEffect(() => {
@@ -230,9 +250,39 @@ export function UrlPreviewPanel({
             </div>
           </div>
 
-          <p className="shrink-0 truncate border-b border-stone-100 px-4 py-1.5 text-[11px] text-stone-400 dark:border-stone-800 dark:text-stone-500">
-            {url}
-          </p>
+          <form
+            onSubmit={submitAddress}
+            className="shrink-0 border-b border-stone-100 px-3 py-1.5 dark:border-stone-800"
+          >
+            <input
+              type="url"
+              value={draftUrl}
+              readOnly={!onNavigateUrl}
+              onChange={(e) => {
+                setDraftUrl(e.target.value);
+                if (urlError) setUrlError('');
+              }}
+              onBlur={() => {
+                // Keep draft aligned with committed URL when user abandons edits.
+                if (!onNavigateUrl) return;
+                if (normalizePreviewHttpUrl(draftUrl) === url || draftUrl.trim() === url) {
+                  setDraftUrl(url);
+                  setUrlError('');
+                }
+              }}
+              aria-label={t('urlPreviewAddressLabel')}
+              placeholder={t('urlPreviewPastePlaceholder')}
+              className={cn(
+                'w-full rounded-md bg-transparent px-1 py-0.5 text-[11px] text-stone-500 outline-none',
+                'placeholder:text-stone-300 focus:bg-stone-50 focus:text-stone-700 focus:ring-1 focus:ring-stone-200',
+                'dark:text-stone-400 dark:placeholder:text-stone-600 dark:focus:bg-stone-950 dark:focus:text-stone-200 dark:focus:ring-stone-700',
+                onNavigateUrl ? 'cursor-text' : 'cursor-default',
+              )}
+            />
+            {urlError ? (
+              <p className="px-1 pt-1 text-[10px] text-red-500">{urlError}</p>
+            ) : null}
+          </form>
 
           <div
             ref={quoteRootRef}

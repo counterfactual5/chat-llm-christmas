@@ -2825,6 +2825,7 @@ export default function ChatContainer() {
               quoteRootRef={previewQuoteRootRef}
               url={previewTarget.url}
               title={previewTarget.title}
+              onNavigateUrl={(next) => openUrlPreview(next)}
             />
           ) : previewTarget?.kind === 'file' ? (
             <ChatPreviewPanel

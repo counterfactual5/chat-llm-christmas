@@ -292,6 +292,17 @@ function reflowHeadingsListsHrs(chunk: string): string {
     /(^|\n)(#{1,6}[ \t]+[^\n]*?[？?])[ \t]+([\u4e00-\u9fff*])/gm,
     '$1$2\n\n$3',
   );
+  // Empty numbered ATX heading then bold year title on the next paragraph:
+  // `### 1.\n\n**2025年2月26日：…**` → `### 1. **2025年2月26日：…**`.
+  // Models use this for timeline sections; without the join, remark renders a
+  // bare "1." heading. Run AFTER heading-body peels so `**` openers are not
+  // split back off. Only fires when the heading body is exactly `N.` and the
+  // next paragraph starts with `**YYYY年`.
+  out = out.replace(
+    /(^|\n)(#{1,6}[ \t]+)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*\*\*\d{4}年[^\n]*)/g,
+    (_full, lead: string, hashes: string, marker: string, rest: string) =>
+      `${lead}${hashes}${marker} ${String(rest || '').trimStart()}`,
+  );
   // Continue splitting `1. foo 2. bar` once an item already starts a line —
   // does not fire on mid-prose `图 1. …表 2.`. [ \t]+ avoids rematching across
   // the newline we just inserted (which would stall the loop at 3./4. and

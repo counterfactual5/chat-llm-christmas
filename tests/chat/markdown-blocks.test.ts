@@ -352,6 +352,37 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^1\. \*\*2025年2月26日：\*\*/m);
   });
 
+  it('joins empty numbered ATX heading with following bold year title', () => {
+    // Exact shape from the DeepSeek pricing-timeline export.
+    const src = [
+      '## 价格调整时间线',
+      '',
+      '### 1.',
+      '',
+      '**2025年2月26日：正式开始计费**',
+      '- 此前为限时免费阶段',
+      '',
+      '### 2.',
+      '',
+      '**2025年9月10日：取消优惠时段（腾讯云平台）**',
+      '- 之前有优惠时段',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^### 1\. \*\*2025年2月26日：正式开始计费\*\*$/m);
+    expect(out).toMatch(/^### 2\. \*\*2025年9月10日：取消优惠时段（腾讯云平台）\*\*$/m);
+    // Must not leave orphan bare numbered headings.
+    expect(out).not.toMatch(/^### \d+\.\s*$/m);
+  });
+
+  it('does not rewrite normal numbered headings or unrelated peels', () => {
+    expect(reflowCollapsedMarkdownBlocks('### 1. 介绍\n\n正文')).toBe(
+      '### 1. 介绍\n\n正文',
+    );
+    expect(
+      reflowCollapsedMarkdownBlocks('### 总结\n\n**Manager 的价值**'),
+    ).toBe('### 总结\n\n**Manager 的价值**');
+  });
+
   it('does not split figure captions inside an ordered item', () => {
     const src = '1. 先做这一步。见图 1. 然后继续。\n2. 第二步';
     expect(reflowCollapsedMarkdownBlocks(src)).toBe(src);

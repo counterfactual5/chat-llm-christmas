@@ -609,6 +609,10 @@ describe('formatHitsForModel', () => {
     expect(BOOK_SYSTEM).toMatch(/backticks/);
     expect(BOOK_SYSTEM).toMatch(/em-dash/);
     expect(BOOK_SYSTEM).toContain('/books download');
+    expect(BOOK_SYSTEM).toMatch(/blank line between numbered hits/);
+    expect(PAPER_SYSTEM).toMatch(/blank line between numbered hits/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/blank line between numbered hits/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/blank line between numbered hits/);
     expect(PAPER_SYSTEM).toMatch(/answerMarkdown/);
     expect(PAPER_SYSTEM).toMatch(/backticks/);
     expect(PAPER_SYSTEM).toMatch(/em-dash/);

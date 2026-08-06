@@ -34,13 +34,13 @@ export function buildToolFallbackQuery(opts: {
     .join('\n');
 }
 
-/** True when tool-call argument JSON is complete enough to execute. */
+/** True when tool-call argument JSON is a complete JSON **object** (OpenAI shape). */
 export function toolArgumentsAreComplete(raw: string): boolean {
   const text = String(raw ?? '').trim();
   if (!text) return true;
   try {
-    JSON.parse(text);
-    return true;
+    const value = JSON.parse(text);
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
   } catch {
     return false;
   }
@@ -49,14 +49,30 @@ export function toolArgumentsAreComplete(raw: string): boolean {
 /**
  * Gateways (Minimax / strict OpenAI bridges) reject the whole chat request when
  * any assistant `tool_calls[].function.arguments` is not valid JSON — including
- * mid-stream truncation we still stored for the next tool round.
- * Empty → `{}`; truncated/invalid → `{}` so the request stays well-formed.
+ * mid-stream truncation, concatenated full resends (`{...}{...}`), or a JSON
+ * string/array instead of an object.
+ * Empty / invalid → `{}` so the next upstream round stays well-formed.
  */
 export function normalizeToolCallArguments(raw: string): string {
   const text = String(raw ?? '').trim();
   if (!text) return '{}';
   if (toolArgumentsAreComplete(text)) return text;
   return '{}';
+}
+
+/**
+ * Merge streamed argument chunks. Providers usually send deltas; some resend a
+ * full JSON object each time — appending those yields `{...}{...}` and 400s.
+ */
+export function mergeToolCallArgumentChunks(prev: string, chunk: string): string {
+  const next = String(chunk ?? '');
+  if (!next) return String(prev ?? '');
+  const prior = String(prev ?? '');
+  if (!prior) return next;
+  const combined = prior + next;
+  if (toolArgumentsAreComplete(combined)) return combined;
+  if (toolArgumentsAreComplete(next)) return next;
+  return combined;
 }
 
 /** Matches the structured and provider-specific failures emitted by tools. */

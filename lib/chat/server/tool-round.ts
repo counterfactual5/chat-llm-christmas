@@ -16,6 +16,7 @@ import {
   readCompletionUsage,
   type CompletionUsage,
 } from '@/lib/chat/stream/usage';
+import { mergeToolCallArgumentChunks } from '@/lib/chat/server/tool-execution';
 
 export type ToolCallAccum = { id: string; name: string; arguments: string };
 
@@ -33,14 +34,35 @@ export function applyToolCallDelta(
   const idx = tc.index ?? 0;
   const existing = deltas.get(idx) || { id: '', name: '', arguments: '' };
   if (tc.id) existing.id = tc.id;
-  if (tc.function?.name) existing.name += tc.function.name;
-  if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+  if (tc.function?.name) {
+    const piece = String(tc.function.name);
+    // Some gateways resend the full name each chunk; don't duplicate.
+    if (!existing.name) existing.name = piece;
+    else if (!existing.name.endsWith(piece) && !piece.startsWith(existing.name)) {
+      existing.name += piece;
+    } else if (piece.length > existing.name.length) {
+      existing.name = piece;
+    }
+  }
+  if (tc.function?.arguments) {
+    existing.arguments = mergeToolCallArgumentChunks(
+      existing.arguments,
+      String(tc.function.arguments),
+    );
+  }
+  if (!existing.id) existing.id = `call_${idx}`;
   deltas.set(idx, existing);
 }
 
 /** Only accumulated calls that resolved a function name are real tool_calls. */
 export function collectToolCalls(deltas: Map<number, ToolCallAccum>): ToolCallAccum[] {
-  return [...deltas.values()].filter((tc) => tc.name);
+  return [...deltas.entries()]
+    .filter(([, tc]) => tc.name)
+    .map(([idx, tc]) => ({
+      ...tc,
+      id: tc.id || `call_${idx}`,
+      arguments: tc.arguments || '{}',
+    }));
 }
 
 export type ToolRoundResult = {

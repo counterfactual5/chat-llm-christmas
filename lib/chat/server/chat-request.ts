@@ -912,6 +912,30 @@ export async function handleChatRequest(req: NextRequest) {
             authorizedIntegrations.length === 0 &&
             looksLikeSearchRequest(userAsk);
 
+          const guessProactiveSources = (
+            ask: string,
+          ): { sources: 'web' | 'news' | 'wiki'; lang: 'en' | 'zh' } => {
+            const q = String(ask || '').trim();
+            const lang: 'en' | 'zh' = /[\u4e00-\u9fff]/.test(q) ? 'zh' : 'en';
+
+            // Prefer news for recent/breaking/update questions.
+            if (
+              /(最新|最近|今日|今天|今|突发|报道|新闻|快讯|官宣|发布|更新|跟进|发生|事件)/i.test(q) ||
+              /(breaking|latest|news|update|today|official announcement)/i.test(q)
+            ) {
+              return { sources: 'news', lang };
+            }
+
+            // Prefer wiki for definitions / entities.
+            if (
+              /(是什么|是谁|定义|含义|解释|词条|百科|维基|encyclopedia|what is|who is|definition)/i.test(q)
+            ) {
+              return { sources: 'wiki', lang };
+            }
+
+            return { sources: 'web', lang };
+          };
+
           // Normally hand all tools to the model (tool_choice: auto).
           // After Image Understand on this same request: keep web_read/search/etc.
           // so the model can still open links the user pasted. Only drop
@@ -962,9 +986,11 @@ export async function handleChatRequest(req: NextRequest) {
           };
 
           const runProactiveSearch = async (): Promise<boolean> => {
+            const { sources, lang } = guessProactiveSources(userAsk);
             let outcome = await runWebSearch(
               enrichSearchQuery(userAsk.slice(0, 240)),
               toolCtx,
+              sources === 'wiki' ? { sources, lang } : { sources },
             );
             if (!outcome.results.length && /加密|币|项目|融资|最近|最新/.test(userAsk)) {
               outcome = await runWebSearch(
@@ -974,6 +1000,7 @@ export async function handleChatRequest(req: NextRequest) {
                   freshnessForQuery(userAsk) || 'month',
                 ),
                 toolCtx,
+                { sources: 'web' },
               );
             }
             if (!outcome.results.length) {

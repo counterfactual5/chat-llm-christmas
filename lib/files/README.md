@@ -9,11 +9,12 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 | Module | Responsibility |
 |--------|----------------|
 | `text-types.ts` | **SSOT** for text/code extension → MIME + highlight language (`mimeFromFilename`, `languageFromFilename`, `isKnownTextFileExt`). Used by `create_file`, preview routing, and `FilePreviewOverlay`. |
+| `paged-extract.ts` | **SSOT** for catalog/outline + `--- page N ---` extract serialization (`serializePagedExtract`, `buildCatalogPage`). ZIP/PPTX ingest and future formats share this; `file_read` slices via `extract-slice.ts`. |
 | `download.ts` | Browser download triggers (`triggerDownload`, `downloadBlob`, `downloadTextContent`). Chat composer wrappers live in `@/lib/chat/composer/download`. |
 | `preview.ts` | Which files are previewable (text / image / PDF / EPUB / spreadsheet) and chrome labels — reads text extensions from `text-types`. |
 | `direct-content.ts` | `fetchFileContentForPreview` — prefer browser → chat-api content GET; fall back to same-origin `/api/files` proxy. All in-product text/binary preview fetch should go through here. |
 | `direct-upload.ts` | Upload ticket mint for browser → chat-api multipart. |
-| `ingest/` | Client-side extract + prepare before upload (PDF/DOCX/Excel/text/images). |
+| `ingest/` | Client-side extract + prepare before upload (PDF/DOCX/PPTX/ZIP/Excel/text/images). |
 | `gateway/` | Server Files API base URL, upload helpers, content parts for tools. |
 | `scrub-deleted-file.ts` | Scrub deleted account file refs from sessions; collect exclusive file ids when deleting a conversation. |
 

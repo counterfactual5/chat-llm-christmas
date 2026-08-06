@@ -90,6 +90,14 @@ export function formatPreviewTypeLabel(file: {
   }
   if (name.endsWith('.docx') || mime.includes('wordprocessingml')) return 'Word';
   if (name.endsWith('.pptx') || mime.includes('presentationml')) return 'PowerPoint';
+  if (
+    name.endsWith('.zip') ||
+    mime === 'application/zip' ||
+    mime === 'application/x-zip-compressed' ||
+    mime === 'application/x-zip'
+  ) {
+    return 'ZIP';
+  }
   if (mime.startsWith('text/')) {
     if (mime.includes('markdown') || name.endsWith('.md')) return 'Markdown';
     if (mime === 'text/csv' || name.endsWith('.csv')) return 'CSV';

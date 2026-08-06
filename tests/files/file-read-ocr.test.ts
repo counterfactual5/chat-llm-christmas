@@ -108,4 +108,22 @@ describe('pagesNeedingOcrInWindow', () => {
       }),
     ).toEqual([2, 3]);
   });
+
+  it('PPTX image-only hint stubs should not block OCR', () => {
+    const stub = '[image-only slide — use file_read for OCR]';
+    expect(
+      pagesNeedingOcrInWindow({
+        pages: [
+          { page: 1, text: 'Title slide with text '.repeat(5) },
+          { page: 2, text: stub },
+          { page: 3, text: stub },
+        ],
+        startPage: 1,
+        maxPages: 8,
+        pagesNeedingOcr: [2, 3],
+        pdfType: null,
+        docKind: 'pptx',
+      }),
+    ).toEqual([2, 3]);
+  });
 });

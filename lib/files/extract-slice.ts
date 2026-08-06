@@ -178,6 +178,25 @@ export function resolveAutoStartPage(opts: {
     };
   }
 
+  // Paged-extract catalogs for container-like formats (ZIP/PPTX/DOCX/XLSX).
+  // These catalogs are usually page 1 (index/outline) and should be skipped
+  // unless the caller explicitly requests TOC via focus or start_page=1.
+  const firstBody = opts.pages[0]?.text ? String(opts.pages[0]!.text).trim() : '';
+  const looksLikeCatalogPage = /^#\s*(?:ZIP catalog:|PPTX outline:|DOCX outline:|Excel sheets:)/i.test(
+    firstBody,
+  );
+  if (looksLikeCatalogPage) {
+    const maxPage = opts.pages.length ? Math.max(...opts.pages.map((p) => p.page)) : 0;
+    if (maxPage >= 2) {
+      return {
+        startPage: 2,
+        skippedToc: true,
+        bodyStartPage: 2,
+        source: 'heuristic',
+      };
+    }
+  }
+
   const maxAvail = opts.pages.length
     ? Math.max(...opts.pages.map((p) => p.page))
     : 0;

@@ -144,6 +144,30 @@ describe('extract-slice', () => {
     });
   });
 
+  it('skips catalog page 1 for ZIP/PPTX/DOCX/XLSX paged-extracts', () => {
+    const withCatalog = [
+      '--- page 1 ---',
+      '# ZIP catalog: demo.zip',
+      '',
+      '1. notes.md · text · 12B',
+      '',
+      '--- page 2 ---',
+      'Hello ZIP member content',
+    ].join('\n');
+    const pages = parseExtractPages(withCatalog);
+    const auto = resolveAutoStartPage({
+      pages,
+      startPageExplicit: false,
+      startPage: 1,
+    });
+    expect(auto).toMatchObject({
+      startPage: 2,
+      skippedToc: true,
+      bodyStartPage: 2,
+      source: 'heuristic',
+    });
+  });
+
   it('prefers outline body_start when in extracted range', () => {
     const pages = parseExtractPages(withToc);
     const auto = resolveAutoStartPage({

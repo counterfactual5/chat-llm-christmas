@@ -58,7 +58,10 @@ export function pagesNeedingOcrInWindow(opts: {
   for (let p = start; p < start + max; p++) {
     const hasPage = byPage.has(p);
     const body = String(byPage.get(p) || '').trim();
-    if (body.length >= MIN_PAGE_CHARS_FOR_OCR) continue;
+    // “image-only” placeholder stubs can be longer than MIN_PAGE_CHARS_FOR_OCR,
+    // but they are not real extracted text — allow OCR for them.
+    const looksLikeImageOnlyHint = /^\[image-only\b/i.test(body);
+    if (body.length >= MIN_PAGE_CHARS_FOR_OCR && !looksLikeImageOnlyHint) continue;
     if (isZipDoc) {
       // Comic EPUB / image slides: only pages with known media refs.
       if (!listed.has(p)) continue;
@@ -468,11 +471,11 @@ async function fetchGatewayFileText(
 const FILE_READ_SYSTEM_PROMPT = [
   'You also have a file_read tool for documents in this chat (user attachments and book_download / paper_download / create_file outputs).',
   'They appear as 【历史文件引用】 with fileId — call file_read with that file_id (parameter name is file_id, not query).',
-  'Each call returns a SHORT slice (~8 pages by default), not the whole book — this is a context budget, separate from TOC skipping.',
-  'Omitting start_page auto-skips table-of-contents / front matter when possible (PDF outline or text heuristic) and starts near the body; you still only get ~8 pages from that start.',
-  'To read the TOC or cover, pass start_page=1 explicitly, or focus="contents" / "目录".',
+  'Extracts are split into units marked --- page N --- (PDF pages, PPTX slides, ZIP members, etc.). Each call returns a SHORT slice (~8 units by default), not the whole file.',
+  'Omitting start_page auto-skips table-of-contents / catalog / front matter when possible and starts near the body; you still only get ~8 units from that start.',
+  'To read the TOC, ZIP catalog, or cover, pass start_page=1 explicitly, or focus="contents" / "目录". For ZIP, focus may be a member path from the catalog.',
   'Empty or image-only pages in the current window may be OCR’d on demand — never say you cannot read a file when a 【历史文件引用】 marker is present.',
-  'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters.',
+  'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters or ZIP members.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
 ].join(' ');
 
@@ -484,7 +487,7 @@ export function createFileReadTool(): ChatTool {
       function: {
         name: 'file_read',
         description:
-          'Read a slice of a document in this chat (PDF/EPUB/PPTX; default ~8 pages/slides). Pass file_id from 【历史文件引用】. Omitting start_page auto-skips TOC when possible. Use start_page / max_pages / focus to dig deeper — do not expect the whole book in one call.',
+          'Read a slice of a document in this chat (PDF/EPUB/PPTX/ZIP; default ~8 page-units). Pass file_id from 【历史文件引用】. Omitting start_page auto-skips TOC/catalog when possible. Use start_page / max_pages / focus to dig deeper — do not expect the whole archive in one call.',
         parameters: {
           type: 'object',
           properties: {
@@ -496,16 +499,16 @@ export function createFileReadTool(): ChatTool {
             start_page: {
               type: 'number',
               description:
-                '1-based page/slide to start from. Omit for auto body start (skip TOC); pass 1 to include cover/TOC. For PPTX this is the slide number.',
+                '1-based extract unit to start from (PDF page, PPTX slide, or ZIP member page). Omit for auto body start (skip TOC/catalog); pass 1 for cover/TOC/ZIP catalog.',
             },
             max_pages: {
               type: 'number',
-              description: 'Max pages/slides to return this call (default 8, max 40)',
+              description: 'Max units to return this call (default 8, max 40)',
             },
             focus: {
               type: 'string',
               description:
-                'Optional keyword/topic; returns a window around the first match. Use "contents"/"目录" to read the TOC.',
+                'Optional keyword/topic/path; returns a window around the first match. Use "contents"/"目录" for TOC/ZIP catalog; for ZIP, a member path from the catalog also works.',
             },
           },
           required: ['file_id'],

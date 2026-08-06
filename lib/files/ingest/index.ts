@@ -6,18 +6,27 @@ import {
   extractPdfText,
   extractPptxText,
   extractSpreadsheetText,
+  extractZipText,
 } from './extractors';
 import {
   isPresentationFile,
   isSpreadsheetWorkbookFile,
   isSupportedDropFile,
+  isZipArchiveFile,
   PPTX_MIME,
+  ZIP_MIME,
 } from './support';
 import { truncateAttachmentText } from './text-limit';
 import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
 
 export type { IngestedAttachment } from './types';
-export { isSupportedDropFile, isPresentationFile, PPTX_MIME } from './support';
+export {
+  isSupportedDropFile,
+  isPresentationFile,
+  isZipArchiveFile,
+  PPTX_MIME,
+  ZIP_MIME,
+} from './support';
 export { MAX_INGEST_BYTES, MAX_UPLOAD_BYTES } from './compress-image';
 export { MAX_ATTACHMENT_TEXT_CHARS, truncateAttachmentText } from './text-limit';
 
@@ -94,6 +103,16 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
     return {
       ...base,
       type: file.type || PPTX_MIME,
+      ...withUploadBlob(file, text),
+    };
+  }
+
+  if (isZipArchiveFile(file)) {
+    const text = await extractZipText(file);
+    if (!text) throw new Error(`Could not extract text from ${file.name}`);
+    return {
+      ...base,
+      type: file.type || ZIP_MIME,
       ...withUploadBlob(file, text),
     };
   }

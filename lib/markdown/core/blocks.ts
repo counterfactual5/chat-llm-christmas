@@ -385,6 +385,40 @@ function reflowHeadingsListsHrs(chunk: string): string {
   return out;
 }
 
+/**
+ * Insert a blank line before the next `2.` / `3.` / … hit when the previous
+ * hit ended with a literature Download / Actions / Manual download line.
+ * Models often rewrite /books·/papers answerMarkdown without spacing; a blank
+ * line makes each hit its own block. Leaves ordinary short step lists alone.
+ */
+export function ensureBlankLinesBeforeNumberedHits(markdown: string): string {
+  const lines = String(markdown || '').split('\n');
+  const out: string[] = [];
+  let sawLiteratureTail = false;
+  const literatureTail =
+    /^(?:[-*+\s]*)?(?:Download|Manual download|Alt download|Actions|PDF)\b|`(?:\/books|\/papers) download\b/i;
+
+  for (const line of lines) {
+    const m = /^(\d{1,2})\.\s+\S/.exec(line);
+    if (m) {
+      if (
+        Number(m[1]) >= 2 &&
+        sawLiteratureTail &&
+        out.length > 0 &&
+        out[out.length - 1]!.trim() !== ''
+      ) {
+        out.push('');
+      }
+      sawLiteratureTail = false;
+      out.push(line);
+      continue;
+    }
+    if (literatureTail.test(line.trim())) sawLiteratureTail = true;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 /** Full structural repair: unwrap hard-wraps, then tables, then headings/lists/hrs. */
 /**
  * Table-only recovery. Safe for Thought/CoT, where the prose-level reflows are
@@ -414,6 +448,8 @@ export function reflowCollapsedMarkdownBlocks(markdown: string): string {
   // table→prose boundary and would tear the last cell out of its row.
   out = reflowOutsideFences(out, reflowCollapsedMarkdownTables);
   out = reflowOutsideFences(out, reflowHeadingsListsHrs);
+  // After list markers are on their own lines: space packed `N.` hits apart.
+  out = reflowOutsideFences(out, ensureBlankLinesBeforeNumberedHits);
   out = out.replace(/\n{3,}/g, '\n\n');
   return out;
 }

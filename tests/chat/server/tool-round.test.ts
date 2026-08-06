@@ -34,7 +34,23 @@ describe('applyToolCallDelta / collectToolCalls', () => {
 
     expect(collectToolCalls(deltas)).toEqual([
       { id: 'call_1', name: 'web_search', arguments: '{"q":"x"}' },
-      { id: 'call_2', name: 'web_read', arguments: '' },
+      { id: 'call_2', name: 'web_read', arguments: '{}' },
+    ]);
+  });
+
+  it('replaces arguments when a provider resends a full JSON object', () => {
+    const deltas = new Map<number, ToolCallAccum>();
+    applyToolCallDelta(deltas, {
+      index: 0,
+      id: 'call_1',
+      function: { name: 'web_search', arguments: '{"query":"old"}' },
+    });
+    applyToolCallDelta(deltas, {
+      index: 0,
+      function: { arguments: '{"query":"new"}' },
+    });
+    expect(collectToolCalls(deltas)).toEqual([
+      { id: 'call_1', name: 'web_search', arguments: '{"query":"new"}' },
     ]);
   });
 

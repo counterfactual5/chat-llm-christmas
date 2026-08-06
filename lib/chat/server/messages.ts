@@ -130,13 +130,13 @@ export function sanitizeChatMessages(messages: any[]): any[] {
     const out: Record<string, unknown> = { role };
     if (m?.content !== undefined) out.content = m.content;
     if (Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
-      out.tool_calls = m.tool_calls.map((tc: any) => {
+      out.tool_calls = m.tool_calls.map((tc: any, idx: number) => {
         const fn = tc?.function || {};
         const args = normalizeToolCallArguments(
           String(fn.arguments ?? tc?.arguments ?? ''),
         );
         return {
-          id: String(tc?.id || ''),
+          id: String(tc?.id || '').trim() || `call_${idx}`,
           type: 'function',
           function: {
             name: String(fn.name || tc?.name || ''),

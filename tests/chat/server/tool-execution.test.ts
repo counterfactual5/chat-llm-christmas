@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildToolFallbackQuery,
+  mergeToolCallArgumentChunks,
   normalizeToolCallArguments,
   toolArgumentsAreComplete,
   toolResultIndicatesFailure,
@@ -52,5 +53,15 @@ describe('tool execution helpers', () => {
     expect(normalizeToolCallArguments('{"query":"ok"}')).toBe('{"query":"ok"}');
     expect(normalizeToolCallArguments('{"query":"is:unre')).toBe('{}');
     expect(normalizeToolCallArguments('{')).toBe('{}');
+    expect(normalizeToolCallArguments('"just-a-string"')).toBe('{}');
+    expect(normalizeToolCallArguments('[]')).toBe('{}');
+    expect(normalizeToolCallArguments('{"query":"a"}{"query":"b"}')).toBe('{}');
+  });
+
+  it('merges argument deltas and prefers a full-object resend', () => {
+    expect(mergeToolCallArgumentChunks('{"q', '":"x"}')).toBe('{"q":"x"}');
+    expect(mergeToolCallArgumentChunks('{"query":"old"}', '{"query":"new"}')).toBe(
+      '{"query":"new"}',
+    );
   });
 });

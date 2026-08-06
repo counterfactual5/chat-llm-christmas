@@ -5,14 +5,18 @@ export const MAX_QUOTED_SELECTIONS = 8;
 export const PDF_QUOTE_CONTEXT_CHARS = 160;
 
 export type QuotedFileSource = {
-  kind?: 'pdf';
+  kind?: 'pdf' | 'url' | 'epub';
   fileId?: string;
   name?: string;
-  /** 1-based PDF page (or synthetic page for EPUB/PPTX later). */
+  /** Absolute http(s) URL for webpage extract quotes. */
+  url?: string;
+  /** 1-based PDF page (or synthetic page for PPTX later). */
   page?: number;
-  /** Same-page text before the selection (not including the selection). */
+  /** EPUB CFI locator (epubjs). */
+  cfi?: string;
+  /** Same-page/root text before the selection (not including the selection). */
   before?: string;
-  /** Same-page text after the selection. */
+  /** Same-page/root text after the selection. */
   after?: string;
 };
 
@@ -32,7 +36,10 @@ export function normalizeQuotedSelection(
 export function quotedSelectionKey(q: QuotedSelection): string {
   const s = q.source;
   return [
+    s?.kind || '',
     s?.fileId || '',
+    s?.url || '',
+    s?.cfi || '',
     s?.page != null ? String(s.page) : '',
     q.text.trim(),
   ].join('\0');
@@ -73,20 +80,99 @@ export function padAroundSelection(
   };
 }
 
-/** Build a file quote from DOM selection (PDF text layer under [data-page]). */
+/** Build a file/url quote from DOM selection (PDF text layer, URL extract, EPUB). */
 export function quotedSelectionFromDom(
   selectedText: string,
   anchorNode: Node | null,
 ): QuotedSelection {
   const text = String(selectedText || '').trim();
   const base: QuotedSelection = { text };
-  if (!text || !anchorNode || typeof Element === 'undefined') return base;
+  if (!text || !anchorNode) return base;
 
   const el =
-    anchorNode.nodeType === Node.ELEMENT_NODE
+    // ELEMENT_NODE === 1
+    (anchorNode as { nodeType?: number }).nodeType === 1
       ? (anchorNode as Element)
-      : anchorNode.parentElement;
+      : (anchorNode as { parentElement?: Element | null }).parentElement;
   if (!el?.closest) return base;
+
+  // Selection may live inside a same-origin iframe (EPUB); quote attrs sit on the host.
+  const hostCandidates: Element[] = [];
+  const pushHost = (node: Element | null | undefined) => {
+    if (
+      node &&
+      typeof (node as Element).closest === 'function' &&
+      typeof (node as Element).getAttribute === 'function' &&
+      !hostCandidates.includes(node)
+    ) {
+      hostCandidates.push(node);
+    }
+  };
+  pushHost(el);
+  try {
+    const frame = el.ownerDocument?.defaultView?.frameElement as Element | null;
+    if (frame) {
+      pushHost(frame);
+      pushHost(
+        frame.closest(
+          '[data-quote-url], [data-quote-kind], [data-quote-cfi], [data-quote-file-id], [data-page]',
+        ),
+      );
+    }
+  } catch {
+    /* cross-origin frameElement */
+  }
+
+  for (const host of hostCandidates) {
+    const urlRoot = host.closest('[data-quote-url]');
+    if (urlRoot) {
+      const url = String(urlRoot.getAttribute('data-quote-url') || '').trim();
+      const name = String(urlRoot.getAttribute('data-quote-title') || '').trim();
+      const rootText = String(urlRoot.textContent || '');
+      const { before, after } = padAroundSelection(rootText, text);
+      return {
+        text,
+        source: {
+          kind: 'url',
+          url: url || undefined,
+          name: name || undefined,
+          before: before || undefined,
+          after: after || undefined,
+        },
+      };
+    }
+  }
+
+  for (const host of hostCandidates) {
+    const epubRoot = host.closest(
+      '[data-quote-kind="epub"], [data-quote-cfi]',
+    );
+    if (!epubRoot) continue;
+    const fileId = String(
+      epubRoot.getAttribute('data-quote-file-id') || '',
+    ).trim();
+    const name = String(
+      epubRoot.getAttribute('data-quote-file-name') || '',
+    ).trim();
+    const cfi = String(epubRoot.getAttribute('data-quote-cfi') || '').trim();
+    // Prefer chapter text from the iframe document when available.
+    const chapterText = String(el.ownerDocument?.body?.textContent || '');
+    const { before, after } = padAroundSelection(
+      chapterText || String(epubRoot.textContent || ''),
+      text,
+    );
+    return {
+      text,
+      source: {
+        kind: 'epub',
+        fileId: fileId || undefined,
+        name: name || undefined,
+        cfi: cfi || undefined,
+        before: before || undefined,
+        after: after || undefined,
+      },
+    };
+  }
 
   const pageEl = el.closest('[data-page]') as HTMLElement | null;
   if (!pageEl) return base;
@@ -130,7 +216,33 @@ export function encodeQuotedSelectionBody(q: QuotedSelection): string {
   const text = String(q.text || '').trim();
   if (!text) return '';
   const src = q.source;
-  if (!src?.page) return text;
+  if (!src) return text;
+
+  const before = String(src.before || '').trim();
+  const after = String(src.after || '').trim();
+  const body =
+    before || after
+      ? `${before ? `…${before}` : ''}【${text}】${after ? `${after}…` : ''}`
+      : text;
+
+  if (src.kind === 'url' || src.url) {
+    const labelParts = [src.name || '', src.url || ''].filter(Boolean);
+    const label = labelParts.join(' · ');
+    return [label, body].filter(Boolean).join('\n');
+  }
+
+  if (src.kind === 'epub' || src.cfi) {
+    const labelParts = [
+      src.name || 'EPUB',
+      'epub',
+      src.fileId ? `fileId:${src.fileId}` : '',
+    ].filter(Boolean);
+    const label = labelParts.join(' · ');
+    const cfiLine = src.cfi ? `cfi:${src.cfi}` : '';
+    return [label, cfiLine, body].filter(Boolean).join('\n');
+  }
+
+  if (!src.page) return text;
 
   const page = Math.floor(Number(src.page));
   const labelParts = [
@@ -145,12 +257,6 @@ export function encodeQuotedSelectionBody(q: QuotedSelection): string {
       ? `(use quote first; if more context needed: file_read start_page=${page} max_pages≤2)`
       : '';
 
-  const before = String(src.before || '').trim();
-  const after = String(src.after || '').trim();
-  const body =
-    before || after
-      ? `${before ? `…${before}` : ''}【${text}】${after ? `${after}…` : ''}`
-      : text;
   return [label, hint, body].filter(Boolean).join('\n');
 }
 
@@ -239,6 +345,13 @@ export function appendQuotedSelection(
 /** Chip subtitle for file-located quotes. */
 export function quotedSelectionMeta(q: QuotedSelection): string {
   const src = q.source;
-  if (!src?.page) return '';
+  if (!src) return '';
+  if (src.kind === 'url' || src.url) {
+    return [src.name, src.url].filter(Boolean).join(' · ');
+  }
+  if (src.kind === 'epub' || src.cfi) {
+    return [src.name || 'EPUB', src.cfi ? 'epub' : ''].filter(Boolean).join(' · ');
+  }
+  if (!src.page) return '';
   return [src.name, `p.${src.page}`].filter(Boolean).join(' · ');
 }

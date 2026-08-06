@@ -3,6 +3,11 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { Quote } from 'lucide-react';
 import {
+  firstIframeSelectionUnderRoots,
+  tryIframeDocument,
+} from '@/lib/chat/message/iframe-selection-bridge';
+import { selectionInsideRoot } from '@/lib/chat/message/quote-roots';
+import {
   quotedSelectionFromDom,
   type QuotedSelection,
 } from '@/lib/chat/message/quotes';
@@ -17,18 +22,10 @@ export type ChatQuoteToolbarProps = {
   onQuote: (quote: QuotedSelection) => void;
 };
 
-function selectionInsideRoot(
-  root: HTMLElement | null | undefined,
-  anchor: Node | null,
-  focus: Node | null,
-): boolean {
-  if (!root || !anchor || !focus) return false;
-  return root.contains(anchor) && root.contains(focus);
-}
-
 /**
  * Floating "Quote" chip over selected message / preview text.
  * Positioned via DOM (no setState) so React re-renders cannot collapse the selection.
+ * Same-origin iframes under quote roots (e.g. EPUB) are bridged; cross-origin is ignored.
  */
 export function ChatQuoteToolbar({
   messagesContentRef,
@@ -43,6 +40,7 @@ export function ChatQuoteToolbar({
   useEffect(() => {
     let raf = 0;
     const wrap = () => wrapRef.current;
+    const iframeCleanups = new Map<HTMLIFrameElement, () => void>();
 
     const hideToolbar = () => {
       const el = wrap();
@@ -61,38 +59,21 @@ export function ChatQuoteToolbar({
       return roots;
     };
 
-    const updateFromSelection = () => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.rangeCount) {
-        hideToolbar();
-        return;
+    const textFromSel = (sel: Selection) => {
+      try {
+        return markdownFromDomSelection(sel);
+      } catch {
+        return String(sel.toString() || '').trim();
       }
-      const text = markdownFromDomSelection(sel);
-      if (!text) {
-        hideToolbar();
-        return;
-      }
-      const anchor = sel.anchorNode;
-      const focus = sel.focusNode;
-      const roots = allowedRoots();
-      if (
-        !roots.length ||
-        !roots.some((root) => selectionInsideRoot(root, anchor, focus))
-      ) {
-        hideToolbar();
-        return;
-      }
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      if (!rect.width && !rect.height) {
-        hideToolbar();
-        return;
-      }
-      const clipped = text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
+    };
+
+    const showQuote = (
+      clipped: string,
+      anchor: Node | null,
+      x: number,
+      y: number,
+    ) => {
       const quote = quotedSelectionFromDom(clipped, anchor);
-      const x = Math.min(window.innerWidth - 12, Math.max(12, rect.left + rect.width / 2));
-      // Sit just above the selection; wrapper uses translate(-50%, -100%).
-      const y = Math.max(8, rect.top - 10);
       const el = wrap();
       if (el) {
         el.style.display = 'block';
@@ -102,9 +83,94 @@ export function ChatQuoteToolbar({
       quoteRef.current = quote;
     };
 
+    const updateFromSelection = () => {
+      const roots = allowedRoots();
+      if (!roots.length) {
+        hideToolbar();
+        return;
+      }
+
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount) {
+        const text = markdownFromDomSelection(sel);
+        const anchor = sel.anchorNode;
+        const focus = sel.focusNode;
+        if (
+          text &&
+          roots.some((root) => selectionInsideRoot(root, anchor, focus))
+        ) {
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          if (rect.width || rect.height) {
+            const clipped = text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
+            const x = Math.min(
+              window.innerWidth - 12,
+              Math.max(12, rect.left + rect.width / 2),
+            );
+            const y = Math.max(8, rect.top - 10);
+            showQuote(clipped, anchor, x, y);
+            return;
+          }
+        }
+      }
+
+      const iframeSnap = firstIframeSelectionUnderRoots(roots, textFromSel);
+      if (iframeSnap) {
+        const clipped =
+          iframeSnap.text.length > 2000
+            ? `${iframeSnap.text.slice(0, 2000)}…`
+            : iframeSnap.text;
+        const x = Math.min(
+          window.innerWidth - 12,
+          Math.max(12, iframeSnap.left + iframeSnap.width / 2),
+        );
+        const y = Math.max(8, iframeSnap.top - 10);
+        showQuote(clipped, iframeSnap.anchorNode, x, y);
+        return;
+      }
+
+      hideToolbar();
+    };
+
     const scheduleUpdate = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(updateFromSelection);
+    };
+
+    const detachIframe = (iframe: HTMLIFrameElement) => {
+      const cleanup = iframeCleanups.get(iframe);
+      if (cleanup) {
+        cleanup();
+        iframeCleanups.delete(iframe);
+      }
+    };
+
+    const attachIframe = (iframe: HTMLIFrameElement) => {
+      if (iframeCleanups.has(iframe)) return;
+      const doc = tryIframeDocument(iframe);
+      if (!doc) return;
+      const onSel = () => scheduleUpdate();
+      doc.addEventListener('selectionchange', onSel);
+      doc.addEventListener('mouseup', onSel);
+      doc.addEventListener('keyup', onSel);
+      iframeCleanups.set(iframe, () => {
+        doc.removeEventListener('selectionchange', onSel);
+        doc.removeEventListener('mouseup', onSel);
+        doc.removeEventListener('keyup', onSel);
+      });
+    };
+
+    const syncIframeListeners = () => {
+      const live = new Set<HTMLIFrameElement>();
+      for (const root of allowedRoots()) {
+        for (const iframe of Array.from(root.querySelectorAll('iframe'))) {
+          live.add(iframe);
+          attachIframe(iframe);
+        }
+      }
+      for (const iframe of Array.from(iframeCleanups.keys())) {
+        if (!live.has(iframe)) detachIframe(iframe);
+      }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
@@ -115,11 +181,22 @@ export function ChatQuoteToolbar({
     document.addEventListener('selectionchange', scheduleUpdate);
     document.addEventListener('keyup', onKeyUp);
     document.addEventListener('mouseup', scheduleUpdate);
-    // Capture so Preview/PDF panel scrolls also reposition the chip.
     document.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true });
     const scroller = scrollRef.current;
     scroller?.addEventListener('scroll', scheduleUpdate, { passive: true });
     window.addEventListener('resize', scheduleUpdate);
+
+    const observers: MutationObserver[] = [];
+    for (const root of allowedRoots()) {
+      const mo = new MutationObserver(() => {
+        syncIframeListeners();
+        scheduleUpdate();
+      });
+      mo.observe(root, { childList: true, subtree: true });
+      observers.push(mo);
+    }
+    syncIframeListeners();
+
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener('selectionchange', scheduleUpdate);
@@ -130,6 +207,8 @@ export function ChatQuoteToolbar({
       } as EventListenerOptions);
       scroller?.removeEventListener('scroll', scheduleUpdate);
       window.removeEventListener('resize', scheduleUpdate);
+      for (const mo of observers) mo.disconnect();
+      for (const iframe of Array.from(iframeCleanups.keys())) detachIframe(iframe);
     };
   }, [messagesContentRef, scrollRef, extraRoots]);
 

@@ -286,11 +286,27 @@ export function UrlPreviewPanel({
 
           <div
             ref={quoteRootRef}
+            data-quote-url={mode === 'extract' ? url : undefined}
+            data-quote-title={
+              mode === 'extract' ? displayTitle || undefined : undefined
+            }
             className={cn(
               'relative min-h-0 min-w-0 flex-1 overscroll-contain',
               mode === 'iframe' ? 'overflow-hidden' : 'overflow-x-hidden overflow-y-auto',
             )}
           >
+            {mode === 'iframe' ? (
+              <div className="absolute inset-x-0 top-0 z-10 border-b border-amber-200/80 bg-amber-50/95 px-3 py-1.5 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/90 dark:text-amber-100">
+                <span>{t('urlPreviewQuoteNeedsExtract')} </span>
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-2"
+                  onClick={() => setMode('extract')}
+                >
+                  {t('urlPreviewShowExtract')}
+                </button>
+              </div>
+            ) : null}
             {mode === 'auth' ? (
               <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
                 <Globe className="h-8 w-8 text-stone-300 opacity-60 dark:text-stone-600" />
@@ -321,7 +337,7 @@ export function UrlPreviewPanel({
                 src={url}
                 referrerPolicy="no-referrer"
                 sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                className="absolute inset-0 h-full w-full border-0 bg-white dark:bg-stone-950"
+                className="absolute inset-x-0 bottom-0 top-9 h-auto w-full border-0 bg-white dark:bg-stone-950"
                 onLoad={() => {
                   iframeLoadedRef.current = true;
                 }}

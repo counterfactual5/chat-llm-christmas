@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
   try {
     const incoming = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const query = String(incoming?.query || '').trim();
-    const { domainContext, domainPolicy } = researchDomainPayload(query);
+    const mode = String(incoming?.mode || '').trim() || undefined;
+    const { domainContext, domainPolicy } = researchDomainPayload(query, mode);
     const priorContext =
       incoming?.context && typeof incoming.context === 'object' && !Array.isArray(incoming.context)
         ? (incoming.context as Record<string, unknown>)

@@ -92,7 +92,29 @@ export function chatDomainPolicyPrompt(context: DomainContext): string {
 }
 
 /** Research synthesis / report structure for a classified domain. */
-export function researchDomainPolicy(context: DomainContext): ResearchDomainPolicy {
+export function researchDomainPolicy(
+  context: DomainContext,
+  mode?: string,
+): ResearchDomainPolicy {
+  const lengthLine =
+    mode === 'rigorous'
+      ? '目标篇幅约 2800–4500 字（rigorous）；宁可密而完整，禁止为凑字注水，也不要为了“短”丢掉跨源对比与不确定性说明。'
+      : mode === 'quick'
+        ? '目标篇幅约 500–1200 字（quick）；抓住直答与关键依据，不要注水。'
+        : '目标篇幅约 1800–2800 字（standard）；宁可密而完整，禁止为凑字注水，也不要为了“短”丢掉跨源对比与不确定性说明。';
+  const lengthLineFinancial =
+    mode === 'rigorous'
+      ? '目标篇幅约 2800–4500 字（rigorous）；数字必须带时间与来源编号。'
+      : mode === 'quick'
+        ? '目标篇幅约 500–1200 字（quick）；数字必须带时间与来源编号。'
+        : '目标篇幅约 1800–2800 字（standard）；数字必须带时间与来源编号。';
+  const lengthLineGeneral =
+    mode === 'rigorous'
+      ? '目标篇幅约 2800–4500 字（rigorous）；宁可密而完整，禁止为凑字注水，也不要为了“短”丢掉依据。'
+      : mode === 'quick'
+        ? '目标篇幅约 500–1200 字（quick）；抓住关键对比与结论，不要注水。'
+        : '目标篇幅约 1800–2800 字（standard）；宁可密而完整，禁止为凑字注水，也不要为了“短”丢掉依据。';
+
   if (context.domain === 'medical') {
     return {
       synthesisSections: [
@@ -109,7 +131,7 @@ export function researchDomainPolicy(context: DomainContext): ResearchDomainPoli
       reportGuidance: [
         '结构必须包含：用户问题直答 → 常见原因/机制 → 当下怎么处理 → 何时需要就医 → 来源列表。',
         '健康类也要有实质分析深度：把 SYNTHESIS 里的机制、诱因分层、替代解释和证据边界写进对应章节，不要收成三五行的就医手册摘要。',
-        '目标篇幅约 1200–2500 字（standard）；宁可密而完整，也不要为了“短”丢掉跨源对比与不确定性说明。',
+        lengthLine,
         '明确说明无法在线诊断；给出具体但不过度恐吓的红旗症状。',
         context.risk === 'high'
           ? '这是高风险健康意图：开头先给及时就医/急救行动，不要先展开长篇背景。'
@@ -134,7 +156,7 @@ export function researchDomainPolicy(context: DomainContext): ResearchDomainPoli
       reportGuidance: [
         '结构必须包含：用户问题直答 → 关键数据与时间边界 → 驱动因素与反方证据 → 情景与风险 → 来源列表。',
         '把 SYNTHESIS 的跨源对比、反方证据与不确定性写进正文，不要收成几条口号式投资建议。',
-        '目标篇幅约 1200–2500 字（standard）；数字必须带时间与来源编号。',
+        lengthLineFinancial,
         '不得作收益保证或使用“肯定上涨/稳赚”等确定性措辞。',
         '涉及行动决策时说明期限、风险承受能力、仓位和最大可接受亏损等缺失条件。',
         context.risk === 'high'
@@ -155,19 +177,22 @@ export function researchDomainPolicy(context: DomainContext): ResearchDomainPoli
     reportGuidance: [
       '结构必须包含：用户问题直答 → 关键发现与跨源对比 → 因果/机制分析 → 局限与不确定性 → 来源列表。',
       '把 SYNTHESIS 的跨源对比与因果链写进正文，不要收成条目清单。',
-      '目标篇幅约 1200–2500 字（standard）；宁可密而完整，也不要为了“短”丢掉依据。',
+      lengthLineGeneral,
     ],
   };
 }
 
 /** Attach domain classification + research policy snapshot for chat-api workers. */
-export function researchDomainPayload(query: string): {
+export function researchDomainPayload(
+  query: string,
+  mode?: string,
+): {
   domainContext: DomainContext;
   domainPolicy: ResearchDomainPolicy;
 } {
   const domainContext = classifyDomain(query);
   return {
     domainContext,
-    domainPolicy: researchDomainPolicy(domainContext),
+    domainPolicy: researchDomainPolicy(domainContext, mode),
   };
 }

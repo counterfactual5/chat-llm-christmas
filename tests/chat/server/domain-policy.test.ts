@@ -48,6 +48,14 @@ describe('domain policy', () => {
     expect(payload.domainPolicy.synthesisSections).toContain('## 证据边界');
   });
 
+  it('emits mode-aware report length guidance', () => {
+    const std = researchDomainPolicy({ domain: 'general', risk: 'low', intent: 'informational' }, 'standard');
+    const rig = researchDomainPolicy({ domain: 'general', risk: 'low', intent: 'informational' }, 'rigorous');
+    expect(std.reportGuidance.some((l) => /1800–2800/.test(l))).toBe(true);
+    expect(rig.reportGuidance.some((l) => /2800–4500/.test(l))).toBe(true);
+    expect(std.reportGuidance.some((l) => /1200–2500/.test(l))).toBe(false);
+  });
+
   it('does not treat a bare 币 as financial', () => {
     expect(classifyDomain('人民币的币字怎么写').domain).toBe('general');
   });

@@ -226,6 +226,60 @@ describe('research activity → timeline stages', () => {
     expect(read?.query).toBe('https://example.com/a');
   });
 
+  it('keeps parallel reads distinct and surfaces read failures', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a5c',
+      jobId: 'rs_5c',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: { status: 'start', url: 'https://a.example/x', title: 'A' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: { status: 'start', url: 'https://b.example/y', title: 'B' },
+    });
+    expect(m.toolRuns?.filter((r) => r.name === 'web_read' && r.status === 'start')).toHaveLength(
+      2,
+    );
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: {
+        status: 'ok',
+        url: 'https://a.example/x',
+        title: 'A',
+        chars: 100,
+      },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: {
+        status: 'error',
+        url: 'https://b.example/y',
+        title: 'B',
+        error: 'All readers failed | zhipu: timeout',
+      },
+    });
+    const reads = m.toolRuns?.filter((r) => r.name === 'web_read') || [];
+    expect(reads).toHaveLength(2);
+    expect(reads.find((r) => r.query === 'https://a.example/x')?.error).toBeFalsy();
+    expect(reads.find((r) => r.query === 'https://b.example/y')?.error).toContain('无法抓取正文');
+  });
+
+  it('sources summary includes read success rate', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a5d',
+      jobId: 'rs_5d',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'sources',
+      payload: { count: 18, tier1Count: 0, reads: 1, readAttempts: 6, items: [] },
+    });
+    expect(m.reasoning || '').toContain('read 1/6 pages');
+  });
+
   it('labels academic enrichments as paper_read', () => {
     let m = createResearchAssistantMessage({
       id: 'a5b',

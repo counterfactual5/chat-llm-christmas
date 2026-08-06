@@ -54,8 +54,14 @@ function startTool(
   query?: string,
   provider?: string,
 ): { message: Message; toolRunId: string } {
-  // Idempotent: repeated phase events must not spawn duplicate pending runs.
-  const existing = ensureTools(m).find((r) => r.name === name && r.status === 'start');
+  // Idempotent per name+query: parallel web_read/web_search must not collapse
+  // into a single pending run when several URLs/queries are in flight.
+  const existing = ensureTools(m).find(
+    (r) =>
+      r.name === name &&
+      r.status === 'start' &&
+      (query == null || query === '' ? !r.query : r.query === query),
+  );
   if (existing) {
     return { message: m, toolRunId: existing.id };
   }
@@ -431,6 +437,7 @@ export function applyResearchEvent(
     const sourceKind = String(payload.sourceKind || 'web').toLowerCase();
     const sourceProvider = String(payload.sourceProvider || '').trim();
     const title = String(payload.title || '').trim();
+    const status = String(payload.status || 'ok').toLowerCase();
     // Academic enrichments are still HTTP fetches, but the timeline should not
     // look like a generic "Read webpage" when the hit came from OpenAlex/arXiv.
     const toolName =
@@ -438,9 +445,31 @@ export function applyResearchEvent(
       /^(openalex|arxiv|semantic|semantic-scholar|s2)$/i.test(sourceProvider)
         ? 'paper_read'
         : 'web_read';
+    if (status === 'start') {
+      return startTool(m, toolName, url || title || undefined, sourceProvider || undefined)
+        .message;
+    }
+    const errorRaw = String(payload.error || '').trim();
+    if (status === 'error' || status === 'failed') {
+      return finishTool(m, {
+        name: toolName,
+        query: url || undefined,
+        provider: sourceProvider || undefined,
+        error: humanizeReadError(errorRaw),
+        results: /^https?:\/\//i.test(url)
+          ? [
+              {
+                title: title || url,
+                url,
+                snippet: '',
+              },
+            ]
+          : undefined,
+      });
+    }
     return finishTool(m, {
       name: toolName,
-      query: url,
+      query: url || undefined,
       provider: sourceProvider || undefined,
       results: /^https?:\/\//i.test(url)
         ? [
@@ -457,9 +486,19 @@ export function applyResearchEvent(
   if (kind === 'sources') {
     const count = Number(payload.count || 0);
     const tier1 = payload.tier1Count != null ? Number(payload.tier1Count) : null;
+    const reads = payload.reads != null ? Number(payload.reads) : null;
+    const readAttempts =
+      payload.readAttempts != null ? Number(payload.readAttempts) : null;
+    const readBits: string[] = [];
+    if (tier1 != null) readBits.push(`${tier1} Tier 1`);
+    if (reads != null && readAttempts != null && readAttempts > 0) {
+      readBits.push(`read ${reads}/${readAttempts} pages`);
+    } else if (reads != null) {
+      readBits.push(`read ${reads}`);
+    }
     m = appendReasoning(
       m,
-      `Collected ${count} sources${tier1 != null ? ` (${tier1} Tier 1)` : ''}.`,
+      `Collected ${count} sources${readBits.length ? ` (${readBits.join(', ')})` : ''}.`,
     );
     const items = Array.isArray(payload.items) ? payload.items : [];
     const results = items
@@ -742,6 +781,22 @@ export function humanizeResearchError(raw: string): string {
   // Strip HTML dumped after "non-JSON:"
   const cut = msg.split(/non-JSON:/i)[0].trim();
   return (cut || msg).slice(0, 240);
+}
+
+/** Short label for a failed research page enrich (web_read / paper_read). */
+export function humanizeReadError(raw: string): string {
+  const msg = String(raw || '').trim();
+  if (!msg) return '无法读取正文';
+  if (/Invalid, missing, or blocked URL/i.test(msg)) return '链接无效或已屏蔽';
+  if (/All readers failed/i.test(msg)) return '无法抓取正文（阅读器均失败）';
+  if (/timed out|timeout/i.test(msg)) return '读取超时';
+  if (/\b403\b|\b401\b|paywall|login|captcha|forbidden/i.test(msg)) {
+    return '页面需登录或禁止抓取';
+  }
+  if (/empty|no extractable|too short/i.test(msg)) return '页面无可提取正文';
+  // Multi-provider chain: "zhipu: … | tavily: …" → keep the first clause.
+  const first = msg.split(/\s*\|\s*/)[0]?.trim() || msg;
+  return first.slice(0, 160);
 }
 
 /** Seed an empty assistant bubble that will receive research events. */

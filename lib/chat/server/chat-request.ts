@@ -702,7 +702,11 @@ export async function handleChatRequest(req: NextRequest) {
               status: 'start',
               query: reportQuery,
             });
-            let sawText = false;
+            // Report-stage CoT stays off the Thought SSE (verifier owns Thought).
+            // Accumulate it for the review_report card body; only promote into the
+            // answer bubble when the gateway put the whole report on the reasoning
+            // channel and never emitted content.
+            let sawContent = false;
             let reportReasoning = '';
             let lastFinishReason: string | null = null;
             try {
@@ -714,24 +718,30 @@ export async function handleChatRequest(req: NextRequest) {
                 temperature: 0.3,
                 messages: sanitizeChatMessages(reviewMessages),
                 onContent: (text) => {
-                  sawText = true;
+                  sawContent = true;
                   send({ content: text });
                 },
                 onReasoning: (text) => {
-                  sawText = true;
                   reportReasoning += text;
-                  send({ reasoning: text });
                 },
               });
               lastFinishReason = streamed.lastFinishReason;
-              if (!sawText) {
+              if (!sawContent) {
+                const promoted = reportReasoning.trim();
                 send({
-                  content: findings.length
-                    ? 'Review complete — see Findings above. Retract any unsupported claims listed there.'
-                    : 'Review complete — no unsupported tool claims found against the execution record.',
+                  content: promoted
+                    ? promoted
+                    : findings.length
+                      ? 'Review complete — see Findings above. Retract any unsupported claims listed there.'
+                      : 'Review complete — no unsupported tool claims found against the execution record.',
                 });
               }
-              const reportBody = reportReasoning.trim();
+              // Body = draft CoT alongside a real answer stream. Skip when we
+              // just promoted the same text into the bubble (would duplicate).
+              const reportBody =
+                sawContent && reportReasoning.trim()
+                  ? reportReasoning.trim().slice(0, 4000)
+                  : '';
               emitReviewProcessCard(send, {
                 name: 'review_report',
                 status: 'done',
@@ -743,7 +753,7 @@ export async function handleChatRequest(req: NextRequest) {
                     snippet: findings.length
                       ? `${findings.length} tool-claim finding(s), ${reviewIssues.length} other issue(s)`
                       : 'No unsupported claims found',
-                    ...(reportBody ? { body: reportBody.slice(0, 4000) } : {}),
+                    ...(reportBody ? { body: reportBody } : {}),
                   },
                 ],
               });

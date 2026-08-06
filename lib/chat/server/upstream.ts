@@ -3,16 +3,20 @@
  * Streaming SSE + one-shot verifier completions — reusable by other API routes.
  */
 
+import { withIncludeUsage } from '@/lib/chat/stream/usage';
+
 /**
  * Raw SSE chat.completions — preserves gateway-only fields like reasoning_content
  * that the OpenAI SDK types omit (runtime usually keeps them, but this is explicit).
- * If the gateway rejects enable_thinking, retry once without it.
+ * If the gateway rejects enable_thinking or stream_options, retry once without them.
  */
 export async function* streamChatCompletionsRaw(opts: {
   apiKey: string;
   baseURL: string;
   body: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Request usage on the final SSE chunk when the gateway supports it. */
+  includeUsage?: boolean;
 }): AsyncGenerator<any> {
   const post = async (body: Record<string, unknown>) =>
     fetch(`${opts.baseURL.replace(/\/$/, '')}/chat/completions`, {
@@ -26,10 +30,12 @@ export async function* streamChatCompletionsRaw(opts: {
       signal: opts.signal,
     });
 
-  let body: Record<string, unknown> = { ...opts.body };
+  let body: Record<string, unknown> = opts.includeUsage
+    ? withIncludeUsage({ ...opts.body })
+    : { ...opts.body };
   let res = await post(body);
   if (!res.ok) {
-    const errText = await res.text().catch(() => '');
+    let errText = await res.text().catch(() => '');
     const unsupportedThinking =
       Boolean(body.enable_thinking) &&
       res.status === 400 &&
@@ -42,15 +48,25 @@ export async function* streamChatCompletionsRaw(opts: {
         body.model,
       );
       res = await post(body);
+      if (!res.ok) errText = await res.text().catch(() => errText);
+    }
+    const unsupportedStreamOptions =
+      Boolean(body.stream_options) &&
+      res.status === 400 &&
+      /stream_options/i.test(errText);
+    if (!res.ok && unsupportedStreamOptions) {
+      const { stream_options: _drop, ...rest } = body;
+      body = rest;
+      console.warn(
+        'upstream rejected stream_options; retrying without it',
+        body.model,
+      );
+      res = await post(body);
+      if (!res.ok) errText = await res.text().catch(() => errText);
     }
     if (!res.ok) {
-      const retryText = unsupportedThinking
-        ? await res.text().catch(() => errText)
-        : errText;
       throw new Error(
-        `Upstream chat error: ${res.status} ${
-          (retryText || res.statusText).slice(0, 300)
-        }`,
+        `Upstream chat error: ${res.status} ${(errText || res.statusText).slice(0, 300)}`,
       );
     }
   }

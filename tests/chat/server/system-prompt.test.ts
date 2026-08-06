@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatSystemParts, joinChatSystemParts } from '@/lib/chat/server/system-prompt';
+import { buildChatSystemParts, joinChatSystemParts } from '@/lib/chat/prompt/system-parts';
 import { cursorWebChatPrompt } from '@/lib/models/specs';
 
 describe('buildChatSystemParts', () => {

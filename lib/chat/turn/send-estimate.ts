@@ -1,9 +1,12 @@
 /**
  * Pre-send context token estimate for compact / refuse decisions.
+ *
+ * `contextBreakdown.system` is expected to be the isomorphic full system
+ * assembly (skills + reference material already inside). Do not add skills
+ * or webSources again here.
  */
 
 import { messagePlainText } from '@/lib/chat/message/display';
-import { formatWebSourcesForReference } from '@/lib/chat/context/references';
 import type { Message, WebSearchSource } from '@/lib/chat/types';
 import { estimateTokensFromText } from '@/lib/models/specs';
 
@@ -11,8 +14,9 @@ export type SendEstimateInput = {
   history: Message[];
   nextUserText: string;
   pendingImageCount: number;
+  /** Kept for call-site compatibility; reference tokens live in system. */
   webSources: WebSearchSource[];
-  contextBreakdown: { system: number; skills: number };
+  contextBreakdown: { system: number; skills?: number };
 };
 
 /**
@@ -20,9 +24,8 @@ export type SendEstimateInput = {
  * `nextUserText` should already embed attached text files — do not double-count files.
  */
 export function estimateTokensForSend(input: SendEstimateInput): number {
-  const threadReference = estimateTokensFromText(
-    formatWebSourcesForReference(input.webSources || []),
-  );
+  void input.webSources;
+  void input.contextBreakdown.skills;
   const historyText = input.history.reduce(
     (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
     0,
@@ -33,8 +36,6 @@ export function estimateTokensForSend(input: SendEstimateInput): number {
   );
   return (
     input.contextBreakdown.system +
-    input.contextBreakdown.skills +
-    threadReference +
     historyText +
     historyImages +
     input.pendingImageCount * 1000 +

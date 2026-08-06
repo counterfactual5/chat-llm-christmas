@@ -45,7 +45,6 @@ import type {
 import {
   collectUserUploadsFromMessages,
   collectWebSourcesFromMessages,
-  formatWebSourcesForReference,
   referenceSourceKind,
   webSourcesForThread,
 } from '@/lib/chat/context/references';
@@ -56,7 +55,7 @@ import {
   looksAbruptlyCutOff,
   shortenTruncationReason,
 } from '@/lib/chat/stream/reply-truncation';
-import { isAssistantError, messagePlainText } from '@/lib/chat/message/display';
+import { isAssistantError } from '@/lib/chat/message/display';
 import { useChatLogic } from '@/hooks/chat/use-logic';
 import { useDeepResearch } from '@/hooks/chat/use-deep-research';
 import { useChatAccount } from '@/hooks/chat/use-account';
@@ -128,11 +127,8 @@ import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import type { FilePreviewPayload } from '@/components/files/FilePreviewOverlay';
 import { FileManagerModal } from '@/components/files/FileManagerModal';
 import { MemoryManagerModal } from '@/components/memories/MemoryManagerModal';
-import {
-  DEFAULT_SYSTEM_PROMPT,
-  estimateTokensFromText,
-  getModelSpec,
-} from '@/lib/models/specs';
+import { getModelSpec } from '@/lib/models/specs';
+import { estimateContextBreakdown } from '@/lib/chat/turn/context-estimate';
 import { useLocale } from '@/lib/i18n';
 import {
   isGoogleMcpId,
@@ -214,6 +210,12 @@ export default function ChatContainer() {
   const [outputGroupsOpen, setOutputGroupsOpen] = useState<Record<string, boolean>>({});
   const [systemPromptExpanded, setSystemPromptExpanded] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
+  /** Gateway usage from the latest finished completion (ephemeral). */
+  const [lastTurnUsage, setLastTurnUsage] = useState<{
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  } | null>(null);
   /** When the user explicitly clears web sources, suppress auto-restore from history. */
   const [webSourcesCleared, setWebSourcesCleared] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -1246,6 +1248,9 @@ export default function ChatContainer() {
         onMalformedSse: (message) => {
           setAttachError(message);
         },
+        onCompletionUsage: (usage) => {
+          setLastTurnUsage(usage);
+        },
       },
       sessionId,
       apiMessages,
@@ -1473,39 +1478,80 @@ export default function ChatContainer() {
     );
   }, [isAccountBound, selectedSpec.vision, hasImages, zhipuVisionOn]);
 
-  // Token estimate aligned with what the server actually sends.
+  // Isomorphic estimate: same buildChatSystemParts assembly the server uses
+  // (best-effort client opts — toolsGuidance / account catalog may drift).
   const contextBreakdown = useMemo(() => {
-    const systemText = (systemPrompt.trim() || DEFAULT_SYSTEM_PROMPT);
-    const system = estimateTokensFromText(systemText);
-    const skillTokens = activeSkills.reduce(
-      (sum, s) => sum + estimateTokensFromText(`${s.title}\n${s.content}`) + 8,
-      0,
-    );
-    const reference = estimateTokensFromText(formatWebSourcesForReference(webSources));
-    const files = estimateTokensFromText(
-      attachments
+    const authorizedIntegrations = [
+      ...(notionMcpOn ? ['notion'] : []),
+      ...(githubMcpOn ? ['github'] : []),
+      ...(gmailMcpOn ? ['gmail'] : []),
+      ...(calendarMcpOn ? ['calendar'] : []),
+      ...(driveMcpOn ? ['drive'] : []),
+      ...(paperSearchEnabled ? ['paper_search'] : []),
+      ...(bookSearchEnabled ? ['book_search'] : []),
+      ...(generateImageEnabled ? ['generate_image'] : []),
+      ...(zhipuVisionOn ? ['zhipu-vision'] : []),
+    ];
+    return estimateContextBreakdown({
+      model: selectedModel,
+      systemPrompt,
+      threadId: activeSessionId,
+      searchEnabled: true,
+      authorizedIntegrations,
+      googleRequestedButUnauthorized:
+        Boolean(activeMcpIds.includes('gmail') ||
+          activeMcpIds.includes('calendar') ||
+          activeMcpIds.includes('drive')) && !googleMcpConnected,
+      notionRequestedButUnauthorized:
+        activeMcpIds.includes('notion') && !Boolean(notionStatus?.connected),
+      githubRequestedButUnauthorized:
+        activeMcpIds.includes('github') && !Boolean(githubStatus?.connected),
+      skills: activeSkills.map((s) => ({
+        title: s.title,
+        content: s.content,
+      })),
+      memories: memoriesEnabled() ? memoriesPayload() : [],
+      memoriesEnabled: memoriesEnabled(),
+      autoReview: activeAutoReview,
+      webSources,
+      attachmentTexts: attachments
         .filter((a) => a.text)
-        .map((a) => `${a.name}\n${a.text}`)
-        .join('\n\n'),
-    );
-    // Images are roughly ~1k tokens each for budgeting (provider-dependent).
-    const imageTokens =
-      attachments.filter((a) => a.dataUrl).length * 1000 +
-      messages.reduce((sum, m) => sum + (m.images?.length || 0) * 1000, 0);
-    const conversation = messages.reduce(
-      (sum, m) => sum + estimateTokensFromText(messagePlainText(m)) + 4,
-      0,
-    );
-    return {
-      system,
-      skills: skillTokens,
-      reference,
-      files,
-      images: imageTokens,
-      conversation,
-      total: system + skillTokens + reference + files + imageTokens + conversation,
-    };
-  }, [messages, systemPrompt, webSources, attachments, activeSkills]);
+        .map((a) => ({ name: a.name, text: String(a.text || '') })),
+      messages,
+      pendingImageCount: attachments.filter((a) => a.dataUrl).length,
+      hasGeneratedImages: generatedImageHistory.length > 0,
+      hasGeneratedFiles: generatedFileHistory.length > 0,
+      skillCreatorOn: activeSkillIds.includes(SKILL_CREATOR_ID),
+    });
+  }, [
+    messages,
+    systemPrompt,
+    webSources,
+    attachments,
+    activeSkills,
+    selectedModel,
+    activeSessionId,
+    notionMcpOn,
+    githubMcpOn,
+    gmailMcpOn,
+    calendarMcpOn,
+    driveMcpOn,
+    paperSearchEnabled,
+    bookSearchEnabled,
+    generateImageEnabled,
+    zhipuVisionOn,
+    activeMcpIds,
+    googleMcpConnected,
+    notionStatus?.connected,
+    githubStatus?.connected,
+    memoriesEnabled,
+    memoriesPayload,
+    memories,
+    activeAutoReview,
+    generatedImageHistory.length,
+    generatedFileHistory.length,
+    activeSkillIds,
+  ]);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -2137,13 +2183,13 @@ export default function ChatContainer() {
   const usageRatio =
     usableLimit != null ? Math.min(estimatedTokens / usableLimit, 1.5) : null;
 
+  // Skills + web reference live inside System (server assembly). Show them as
+  // detail only when non-zero, without implying they add on top of System.
   const contextSources = useMemo(
     () =>
       (
         [
           ['System', contextBreakdown.system],
-          ['Skills', contextBreakdown.skills],
-          ['Reference', contextBreakdown.reference],
           ['Files', contextBreakdown.files],
           ['Images', contextBreakdown.images],
           ['Conversation', contextBreakdown.conversation],
@@ -2723,6 +2769,7 @@ export default function ChatContainer() {
             usageRatio={usageRatio}
             estimatedTokens={estimatedTokens}
             contextSources={contextSources}
+            lastTurnUsage={lastTurnUsage}
             isCompacting={isCompacting}
             canCompact={messages.length >= 4}
             onCompact={async () => {

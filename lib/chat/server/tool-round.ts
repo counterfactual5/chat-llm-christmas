@@ -12,6 +12,10 @@ import {
   splitCompletionDelta,
   streamChatCompletionsRaw,
 } from '@/lib/chat/server/upstream';
+import {
+  readCompletionUsage,
+  type CompletionUsage,
+} from '@/lib/chat/stream/usage';
 
 export type ToolCallAccum = { id: string; name: string; arguments: string };
 
@@ -50,6 +54,7 @@ export type ToolRoundResult = {
   toolCalls: ToolCallAccum[];
   roundFinishReason: string | null;
   hasToolCallDeltas: boolean;
+  usage?: CompletionUsage | null;
 };
 
 /**
@@ -81,6 +86,7 @@ export async function runToolCallStreamRound(opts: {
       apiKey: opts.apiKey,
       baseURL: opts.baseURL,
       signal: opts.signal,
+      includeUsage: true,
       body: {
         model: opts.model,
         temperature: opts.temperature,
@@ -113,10 +119,14 @@ export async function runToolCallStreamRound(opts: {
   const toolCallDeltas = new Map<number, ToolCallAccum>();
   let roundFinishReason: string | null = null;
   let hasToolCallDeltas = false;
+  let usage: CompletionUsage | null = null;
   const roundStampStripper = createStampLeakStripper();
 
   try {
     for await (const chunk of bounded) {
+      const nextUsage = readCompletionUsage(chunk);
+      if (nextUsage) usage = nextUsage;
+
       const choice = chunk?.choices?.[0];
       const delta = choice?.delta || {};
       const finishReason = choice?.finish_reason || null;
@@ -167,6 +177,7 @@ export async function runToolCallStreamRound(opts: {
         toolCalls: collectToolCalls(toolCallDeltas),
         roundFinishReason: roundFinishReason || 'length',
         hasToolCallDeltas,
+        usage,
       };
     }
     return {
@@ -176,6 +187,7 @@ export async function runToolCallStreamRound(opts: {
       toolCalls: collectToolCalls(toolCallDeltas),
       roundFinishReason,
       hasToolCallDeltas,
+      usage,
     };
   }
   {
@@ -193,5 +205,6 @@ export async function runToolCallStreamRound(opts: {
     toolCalls: collectToolCalls(toolCallDeltas),
     roundFinishReason,
     hasToolCallDeltas,
+    usage,
   };
 }

@@ -5,7 +5,7 @@ import {
   productUsageGuideDetailPrompt,
   productUsageGuidePrompt,
   wantsProductUsageHelp,
-} from '@/lib/chat/server/product-guide';
+} from '@/lib/chat/prompt/product-guide';
 
 describe('productUsageGuidePrompt', () => {
   it('covers built-in commands in a compact always-on map', () => {

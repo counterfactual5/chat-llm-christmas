@@ -1209,7 +1209,11 @@ export async function handleChatRequest(req: NextRequest) {
               ...streamCompletionPayload('error', { code: 'upstream_error' }),
             });
           } else {
-            send(streamCompletionPayload(finalResult.lastFinishReason || 'stop'));
+            send(
+              streamCompletionPayload(finalResult.lastFinishReason || 'stop', {
+                usage: finalResult.usage,
+              }),
+            );
           }
 
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));

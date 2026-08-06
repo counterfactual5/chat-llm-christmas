@@ -83,6 +83,8 @@ docs/                  产品与跨仓流程说明（非代码地图时用）
 ### 4.2 文件与预览
 
 - 扩展名 / MIME / 高亮语言 → 只改 `text-types.ts`。
+- 分页 extract 序列化（catalog + `--- page N ---`）→ `paged-extract.ts`；格式抽取 → `ingest/extractors/*`。
+- `file_read` 切片 / 跳过目录 → `extract-slice.ts`（工具目录只做胶水）。
 - 预览拉字节 → `fetchFileContentForPreview`。
 - 下载 → `lib/files/download.ts`（chat 包装可留在 `lib/chat/composer/download.ts`）。
 

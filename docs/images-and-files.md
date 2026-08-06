@@ -30,8 +30,11 @@ sequenceDiagram
 - **直传**：浏览器 → `api.chat.llm.christmas/v1/files`，不经过 Vercel body（约 4.5MB 限制）。
 - **回退**：ticket 失败时仍走同源 `/api/files`（小文件 / 旧部署）。
 - **图片**：原图直传（不压缩）；会话里主要存 `fileId`，预览走 `/api/files/<id>`。
-- **PDF/DOCX/Excel/文本**：客户端抽取正文（Excel → 分 sheet 的 TSV）；上传原文件时附带 `extract` 字段；chat-api 写 `{path}.extract.txt` sidecar（DOCX/XLSX 同样用 `--- page N ---` 分页以便 `file_read` 切片）。
-- **PPTX / ZIP**：客户端写成统一的 `--- page N ---` 分页 extract（ZIP：page 1 = 完整目录，后续页 = 白名单成员正文）；`file_read` 按单元切片。
+- **文档抽取**：客户端抽取文本后，上传原文件时附带 `extract` 字段；chat-api 写 `{path}.extract.txt` sidecar。
+  - **分页格式（DOCX / XLSX / PPTX / ZIP）**：统一 `--- page N ---` 单元。page 1 = catalog/outline；后续页 = 章节 / sheet / 幻灯片 / ZIP 白名单成员。共享序列化在 `lib/files/paged-extract.ts`；格式实现在 `lib/files/ingest/extractors/*`。
+  - **PDF / 纯文本 / 代码**：仍抽成正文（PDF 约前 40 页）；sidecar 可带 page 标记或整段文本，供 `file_read` 切片。
+  - **拒收**：legacy `.doc` / `.ppt`（OLE，无轻量浏览器抽取）在上传白名单直接拒绝。
+  - **ZIP**：整包 ≤20MB；成员 `uncompressedSize` 缺失或累计将超限则 **fail-closed**（不解压该成员）；嵌套 zip 只列目录、不展开；Office 成员正文会折叠内层 `--- page N ---`，避免污染外层切片。
 - 硬限制：chat-api `FILE_UPLOAD_MAX_BYTES`（默认 20MB）；客户端 `MAX_INGEST_BYTES` 同为 20MB；nginx 更大。
 
 `UPLOAD_TOKEN_SECRET` 在 **chat-api** `.env`，不是前端密钥。前端只拿短时 ticket。
@@ -71,6 +74,7 @@ flowchart TD
 - **纯文本模型**：最新轮服务端自动转写（避免「首轮空转只调工具」）；更早未转写的图变成 `【历史图片引用（未转写）】` + 路径，模型可调 `image_understand`。
 - **纯文本 → 视觉**：可从 archive / fileId **重新展开像素**（不是只能看描述）。
 - `image_understand` **懒注入**：登录用户 + 会话有图 + 非视觉模型时才进工具列表（前端 `zhipu-vision` 集成开关会随有图自动打开）。
+- **文档内嵌图（PPTX/DOCX 等）**：ingest **不做** vision；目录页标注 `has image` / `image-only`。纯图单元正文可为空或短 stub；`file_read` 窗口内对空页 / `[image-only…]` stub 可按需 OCR（PPTX 等依赖 gateway 列出的 image 页）。
 
 ---
 
@@ -78,7 +82,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[用户附带 PDF/DOCX/Excel/文本] --> E[浏览器抽取文本]
+  A[用户附带 PDF/DOCX/PPTX/XLSX/ZIP/文本] --> E[浏览器抽取文本]
   E --> Up[直传原文件 + extract sidecar]
   E --> Msg[用户消息写入全文 Attached File 块]
   Msg --> Turn1[本轮：模型直接看到全文]
@@ -98,7 +102,10 @@ flowchart TD
 - **会话也折叠**：下一轮发送时，旧用户消息里的全文（有 fileId）被压成引用；云同步 / 本地恢复同样处理。最新用户轮保留全文，方便 Retry。
 - **气泡不泄全文**：UI 展示用 `attachedFilesForUserBubbleDisplay`，即使本轮会话里还存着全文也不刷屏。
 - **`file_read` 懒注入**：本线程有附件文档，或助手交付的文件（`book_download` / `create_file` → `【历史文件引用】`）时才进工具列表。
-- **按需切片（非整书）**：`file_read` 默认返回约 8 页；可用 `start_page` / `max_pages` / `focus` 继续读。首轮省略 `start_page` 时，优先用 PDF outline 的 `body_start_page`，否则用文本启发式跳过目录，从正文附近起读；显式 `start_page=1` 或 `focus=目录/contents` 可读目录。chat-api sidecar 用 `--- page N ---` 分页，meta 可含 `outline` / `body_start_page` / `pdf_type` / `needs_ocr` / `pages_needing_ocr`（pdf-inspector 分类；扫描件空文本返回 `NEEDS_OCR`，OCR 尚未启用）；同步先写 partial，后台续抽。
+- **按需切片（非整书）**：`file_read` 默认返回约 8 个 page 单元；可用 `start_page` / `max_pages` / `focus` 继续读。「page」= 抽取单元（PDF 页；或 PPT 幻灯 / DOCX 节 / Excel sheet / ZIP 成员）。
+  - 省略 `start_page` 时：优先 PDF outline 的 `body_start_page`；否则启发式跳过 PDF 目录；对 `# ZIP catalog:` / `# PPTX outline:` / `# DOCX outline:` / `# Excel sheets:` 的 page 1 直接从 page 2 起读。
+  - 显式 `start_page=1` 或 `focus=目录/contents` 可读 catalog；ZIP 的 `focus` 也可是成员路径。
+  - chat-api sidecar 用 `--- page N ---` 分页，meta 可含 `outline` / `body_start_page` / `pdf_type` / `needs_ocr` / `pages_needing_ocr`（pdf-inspector；扫描件空文本可 `NEEDS_OCR`）；同步先写 partial，后台续抽。
 - **重读靠 sidecar**：不每轮把全文塞进 `/api/chat` body；`GET /v1/files/:id/extract` 返回文本 + `partial` / `total_pages`。
 - **与图片引用同构**：书籍下载只留 fileId 引用；需要内容时再 `file_read`，类似 `【历史图片引用】` → 按需看图。
 - **删除同步**：Files 管理器删除账户文件时，会清掉会话正文里的 `【历史文件引用】` / `[Attached File]`（避免再调 `file_read`），并标记 Output 卡片为「已从 Files 删除」但仍保留为产出记录；在 Output 里手动删除才会拿掉该记录。打开 Files 时也会对账已缺失的 id。**删除对话**时，会一并删除仅被该对话引用的账户附件（上传 / 生图 / 生成文件 / 书籍论文下载等）；仍被其他对话引用的文件保留。
@@ -115,7 +122,7 @@ flowchart TD
 
 ## 6. 与主流产品的对应关系（简记）
 
-ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上下文用引用 + 按模型能力注入；长文档不会每轮全文重放。本项目的混合策略同一思路：**最新轮完整，历史引用，按需工具重读**；视觉模型额外保留像素路径。
+ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上下文用引用 + 按模型能力注入；长文档不会每轮全文重放。本项目的混合策略同一思路：**最新轮完整，历史引用，按需工具重读**；视觉模型额外保留像素路径。Office/ZIP 等几乎都是产品侧先抽成文本（+ 偶尔 OCR/看图），而不是模型原生打开任意二进制格式。
 
 ---
 
@@ -124,7 +131,8 @@ ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上
 | 主题 | 路径 |
 |------|------|
 | 直传 | `lib/files/direct-upload.ts`，chat-api `routes/files.js` + `uploadToken.js` |
-| 抽取 / 直传准备 | `lib/files/ingest/*` |
+| 抽取 / 直传准备 | `lib/files/ingest/*`（格式：`ingest/extractors/{pdf,epub,docx,pptx,spreadsheet,zip}.ts`） |
+| 分页 extract SSOT | `lib/files/paged-extract.ts` |
 | 文本扩展名 / MIME / 高亮 | `lib/files/text-types.ts`（`create_file`、预览路由、FilePreviewOverlay 共用） |
 | 预览字节拉取 | `lib/files/direct-content.ts` → `fetchFileContentForPreview` |
 | 浏览器下载 | `lib/files/download.ts`（composer 包装：`lib/chat/composer/download.ts`） |

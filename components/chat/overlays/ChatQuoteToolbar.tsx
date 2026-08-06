@@ -22,10 +22,21 @@ export type ChatQuoteToolbarProps = {
   onQuote: (quote: QuotedSelection) => void;
 };
 
+type PendingQuote = {
+  quote: QuotedSelection;
+  x: number;
+  y: number;
+};
+
+type UpdateMode = 'stash' | 'show' | 'reposition';
+
 /**
  * Floating "Quote" chip over selected message / preview text.
  * Positioned via DOM (no setState) so React re-renders cannot collapse the selection.
  * Same-origin iframes under quote roots (e.g. EPUB) are bridged; cross-origin is ignored.
+ *
+ * The chip stays hidden while a pointer gesture is active so it cannot sit under
+ * macOS three-finger drag (`pointer-events-auto`) and steal the selection.
  */
 export function ChatQuoteToolbar({
   messagesContentRef,
@@ -39,6 +50,7 @@ export function ChatQuoteToolbar({
 
   useEffect(() => {
     let raf = 0;
+    let pointerDown = false;
     const wrap = () => wrapRef.current;
     const iframeCleanups = new Map<HTMLIFrameElement, () => void>();
 
@@ -46,6 +58,16 @@ export function ChatQuoteToolbar({
       const el = wrap();
       if (el) el.style.display = 'none';
       quoteRef.current = null;
+    };
+
+    const paintToolbar = (next: PendingQuote) => {
+      const el = wrap();
+      if (el) {
+        el.style.display = 'block';
+        el.style.left = `${next.x}px`;
+        el.style.top = `${next.y}px`;
+      }
+      quoteRef.current = next.quote;
     };
 
     const allowedRoots = (): HTMLElement[] => {
@@ -67,28 +89,9 @@ export function ChatQuoteToolbar({
       }
     };
 
-    const showQuote = (
-      clipped: string,
-      anchor: Node | null,
-      x: number,
-      y: number,
-    ) => {
-      const quote = quotedSelectionFromDom(clipped, anchor);
-      const el = wrap();
-      if (el) {
-        el.style.display = 'block';
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
-      }
-      quoteRef.current = quote;
-    };
-
-    const updateFromSelection = () => {
+    const computePending = (): PendingQuote | null => {
       const roots = allowedRoots();
-      if (!roots.length) {
-        hideToolbar();
-        return;
-      }
+      if (!roots.length) return null;
 
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && sel.rangeCount) {
@@ -103,38 +106,56 @@ export function ChatQuoteToolbar({
           const rect = range.getBoundingClientRect();
           if (rect.width || rect.height) {
             const clipped = text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
-            const x = Math.min(
-              window.innerWidth - 12,
-              Math.max(12, rect.left + rect.width / 2),
-            );
-            const y = Math.max(8, rect.top - 10);
-            showQuote(clipped, anchor, x, y);
-            return;
+            return {
+              quote: quotedSelectionFromDom(clipped, anchor),
+              x: Math.min(
+                window.innerWidth - 12,
+                Math.max(12, rect.left + rect.width / 2),
+              ),
+              y: Math.max(8, rect.top - 10),
+            };
           }
         }
       }
 
       const iframeSnap = firstIframeSelectionUnderRoots(roots, textFromSel);
-      if (iframeSnap) {
-        const clipped =
-          iframeSnap.text.length > 2000
-            ? `${iframeSnap.text.slice(0, 2000)}…`
-            : iframeSnap.text;
-        const x = Math.min(
+      if (!iframeSnap) return null;
+      const clipped =
+        iframeSnap.text.length > 2000
+          ? `${iframeSnap.text.slice(0, 2000)}…`
+          : iframeSnap.text;
+      return {
+        quote: quotedSelectionFromDom(clipped, iframeSnap.anchorNode),
+        x: Math.min(
           window.innerWidth - 12,
           Math.max(12, iframeSnap.left + iframeSnap.width / 2),
-        );
-        const y = Math.max(8, iframeSnap.top - 10);
-        showQuote(clipped, iframeSnap.anchorNode, x, y);
-        return;
-      }
-
-      hideToolbar();
+        ),
+        y: Math.max(8, iframeSnap.top - 10),
+      };
     };
 
-    const scheduleUpdate = () => {
+    const updateFromSelection = (mode: UpdateMode) => {
+      const next = computePending();
+      if (!next) {
+        hideToolbar();
+        return;
+      }
+      quoteRef.current = next.quote;
+      const el = wrap();
+      const visible = el?.style.display === 'block';
+
+      if (mode === 'stash') {
+        if (el) el.style.display = 'none';
+        return;
+      }
+      if (mode === 'show' || (mode === 'reposition' && visible)) {
+        paintToolbar(next);
+      }
+    };
+
+    const scheduleUpdate = (mode: UpdateMode) => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(updateFromSelection);
+      raf = requestAnimationFrame(() => updateFromSelection(mode));
     };
 
     const detachIframe = (iframe: HTMLIFrameElement) => {
@@ -149,14 +170,15 @@ export function ChatQuoteToolbar({
       if (iframeCleanups.has(iframe)) return;
       const doc = tryIframeDocument(iframe);
       if (!doc) return;
-      const onSel = () => scheduleUpdate();
-      doc.addEventListener('selectionchange', onSel);
-      doc.addEventListener('mouseup', onSel);
-      doc.addEventListener('keyup', onSel);
+      const onSelChange = () => scheduleUpdate(pointerDown ? 'stash' : 'show');
+      const onSelCommit = () => scheduleUpdate('show');
+      doc.addEventListener('selectionchange', onSelChange);
+      doc.addEventListener('mouseup', onSelCommit);
+      doc.addEventListener('keyup', onSelCommit);
       iframeCleanups.set(iframe, () => {
-        doc.removeEventListener('selectionchange', onSel);
-        doc.removeEventListener('mouseup', onSel);
-        doc.removeEventListener('keyup', onSel);
+        doc.removeEventListener('selectionchange', onSelChange);
+        doc.removeEventListener('mouseup', onSelCommit);
+        doc.removeEventListener('keyup', onSelCommit);
       });
     };
 
@@ -173,24 +195,42 @@ export function ChatQuoteToolbar({
       }
     };
 
+    const onPointerDown = () => {
+      pointerDown = true;
+    };
+    const onPointerUp = () => {
+      pointerDown = false;
+      scheduleUpdate('show');
+    };
+    const onSelectionChange = () => {
+      scheduleUpdate(pointerDown ? 'stash' : 'show');
+    };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Escape') hideToolbar();
-      else if (e.shiftKey || e.key.startsWith('Arrow')) scheduleUpdate();
+      else if (e.shiftKey || e.key.startsWith('Arrow')) scheduleUpdate('show');
     };
+    const onMouseUp = () => scheduleUpdate('show');
+    const onReposition = () => scheduleUpdate('reposition');
 
-    document.addEventListener('selectionchange', scheduleUpdate);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('pointerup', onPointerUp, true);
+    document.addEventListener('pointercancel', onPointerUp, true);
+    document.addEventListener('selectionchange', onSelectionChange);
     document.addEventListener('keyup', onKeyUp);
-    document.addEventListener('mouseup', scheduleUpdate);
-    document.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true });
+    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('scroll', onReposition, {
+      capture: true,
+      passive: true,
+    });
     const scroller = scrollRef.current;
-    scroller?.addEventListener('scroll', scheduleUpdate, { passive: true });
-    window.addEventListener('resize', scheduleUpdate);
+    scroller?.addEventListener('scroll', onReposition, { passive: true });
+    window.addEventListener('resize', onReposition);
 
     const observers: MutationObserver[] = [];
     for (const root of allowedRoots()) {
       const mo = new MutationObserver(() => {
         syncIframeListeners();
-        scheduleUpdate();
+        scheduleUpdate('reposition');
       });
       mo.observe(root, { childList: true, subtree: true });
       observers.push(mo);
@@ -199,14 +239,17 @@ export function ChatQuoteToolbar({
 
     return () => {
       cancelAnimationFrame(raf);
-      document.removeEventListener('selectionchange', scheduleUpdate);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('pointerup', onPointerUp, true);
+      document.removeEventListener('pointercancel', onPointerUp, true);
+      document.removeEventListener('selectionchange', onSelectionChange);
       document.removeEventListener('keyup', onKeyUp);
-      document.removeEventListener('mouseup', scheduleUpdate);
-      document.removeEventListener('scroll', scheduleUpdate, {
+      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('scroll', onReposition, {
         capture: true,
       } as EventListenerOptions);
-      scroller?.removeEventListener('scroll', scheduleUpdate);
-      window.removeEventListener('resize', scheduleUpdate);
+      scroller?.removeEventListener('scroll', onReposition);
+      window.removeEventListener('resize', onReposition);
       for (const mo of observers) mo.disconnect();
       for (const iframe of Array.from(iframeCleanups.keys())) detachIframe(iframe);
     };

@@ -2103,14 +2103,15 @@ export default function ChatContainer() {
     });
     // Mid-answer token gaps are often 1–2s; only treat longer stalls as a "wait"
     // (e.g. tool round). First-token wait uses awaitingFirstContent and does not
-    // depend on this timer.
-    const hasVisibleOutput =
-      Boolean(String(msg.content || '').trim()) ||
+    // depend on this timer. After Thought finishes but before the first answer
+    // token, flip to Waiting quickly — leaving "Thinking…" spinning with a
+    // frozen CoT body is the fake-thinking placeholder we retired.
+    const hasAnswer = Boolean(String(msg.content || '').trim());
+    const hasThought =
       (msg.activity || []).some(
         (s) => s.kind === 'reasoning' && String(s.text || '').trim(),
-      ) ||
-      Boolean(String(msg.reasoning || '').trim());
-    const idleMs = hasVisibleOutput ? 2800 : 500;
+      ) || Boolean(String(msg.reasoning || '').trim());
+    const idleMs = hasAnswer ? 2800 : hasThought ? 700 : 500;
     const timer = window.setTimeout(() => {
       setReplyWaitByMessage((prev) =>
         prev[msg.id] ? prev : { ...prev, [msg.id]: true },

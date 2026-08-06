@@ -48,9 +48,9 @@ type ExtractState =
 type PreviewMode = 'iframe' | 'extract' | 'auth';
 
 function initialPreviewMode(url: string, forceExtract: boolean): PreviewMode {
-  if (forceExtract) return 'extract';
-  if (isLikelyAuthGatedPreviewUrl(url)) return 'auth';
-  return 'iframe';
+  if (isLikelyAuthGatedPreviewUrl(url) && !forceExtract) return 'auth';
+  // Default Text: extract works for Quote and bypasses XFO/CSP frame blocks.
+  return 'extract';
 }
 
 async function fetchWebReadExtract(
@@ -315,42 +315,23 @@ export function UrlPreviewPanel({
             </span>
             <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
               {mode === 'iframe' || (mode === 'extract' && !authGated) ? (
-                <div
-                  className="mr-0.5 flex items-center rounded-md border border-stone-200 p-0.5 dark:border-stone-700"
-                  role="group"
-                  aria-label={t('urlPreviewPanel')}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={
+                    mode === 'iframe'
+                      ? t('urlPreviewShowExtract')
+                      : t('urlPreviewShowEmbed')
+                  }
+                  onClick={() =>
+                    switchMode(mode === 'iframe' ? 'extract' : 'iframe')
+                  }
+                  className="mr-0.5 h-7 px-2 text-xs text-stone-500"
                 >
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    title={t('urlPreviewShowEmbed')}
-                    aria-pressed={mode === 'iframe'}
-                    onClick={() => switchMode('iframe')}
-                    className={cn(
-                      'h-7 px-2 text-xs',
-                      mode === 'iframe'
-                        ? 'bg-stone-100 font-medium text-stone-800 dark:bg-stone-800 dark:text-stone-100'
-                        : 'text-stone-500',
-                    )}
-                  >
-                    {t('urlPreviewShowEmbed')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    title={t('urlPreviewShowExtract')}
-                    aria-pressed={mode === 'extract'}
-                    onClick={() => switchMode('extract')}
-                    className={cn(
-                      'h-7 px-2 text-xs',
-                      mode === 'extract'
-                        ? 'bg-stone-100 font-medium text-stone-800 dark:bg-stone-800 dark:text-stone-100'
-                        : 'text-stone-500',
-                    )}
-                  >
-                    {t('urlPreviewShowExtract')}
-                  </Button>
-                </div>
+                  {mode === 'iframe'
+                    ? t('urlPreviewShowExtract')
+                    : t('urlPreviewShowEmbed')}
+                </Button>
               ) : null}
               <Button
                 variant="ghost"

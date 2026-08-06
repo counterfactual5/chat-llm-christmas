@@ -19,7 +19,12 @@ import {
 } from '@/lib/chat/turn/literature-search';
 import { buildBookDownloadThread } from '@/lib/chat/turn/book-download-turn';
 import { buildPaperDownloadThread } from '@/lib/chat/turn/paper-download-turn';
-import { formatHitsForModel } from '@/lib/tools/literature/tool';
+import {
+  BOOK_SYSTEM,
+  formatHitsForModel,
+  LITERATURE_TOOL_ANSWER_HINT,
+  PAPER_SYSTEM,
+} from '@/lib/tools/literature/tool';
 
 describe('parseLiteratureCommand', () => {
   it('parses /papers and aliases', () => {
@@ -541,6 +546,10 @@ describe('formatHitsForModel', () => {
     expect(books.results[0].downloadCommand).toBe('/books download calculus');
     expect(books.results[1].downloadCommand).toBeUndefined();
     expect(books.results[1].url).toContain('openlibrary.org');
+    expect(books.answerMarkdown).toContain('Download: `/books download calculus`');
+    expect(books.hint).toBe(LITERATURE_TOOL_ANSWER_HINT.books);
+    expect(books.hint).toMatch(/backticks/i);
+    expect(books.hint).toMatch(/em-dash/);
 
     const withAlt = JSON.parse(
       formatHitsForModel('books', '区块链', 'libgen', [
@@ -589,6 +598,21 @@ describe('formatHitsForModel', () => {
       '/papers download ARXIV:1706.03762',
     );
     expect(papers.results[0].pdfUrl).toBeUndefined();
+    expect(papers.answerMarkdown).toContain(
+      'Download: `/papers download ARXIV:1706.03762`',
+    );
+    expect(papers.hint).toBe(LITERATURE_TOOL_ANSWER_HINT.papers);
+  });
+
+  it('locks tool system prompts to slash-shaped answers with backtick commands', () => {
+    expect(BOOK_SYSTEM).toMatch(/answerMarkdown/);
+    expect(BOOK_SYSTEM).toMatch(/backticks/);
+    expect(BOOK_SYSTEM).toMatch(/em-dash/);
+    expect(BOOK_SYSTEM).toContain('/books download');
+    expect(PAPER_SYSTEM).toMatch(/answerMarkdown/);
+    expect(PAPER_SYSTEM).toMatch(/backticks/);
+    expect(PAPER_SYSTEM).toMatch(/em-dash/);
+    expect(PAPER_SYSTEM).toContain('downloadCommand');
   });
 });
 

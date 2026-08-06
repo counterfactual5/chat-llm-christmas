@@ -80,7 +80,11 @@ export function useDeepResearch(opts: {
   const [mode, setMode] = useState<ResearchMode>('standard');
   const [job, setJob] = useState<ResearchJob | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** Scoped to the session that produced it — must not bleed across chats. */
+  const [scopedError, setScopedError] = useState<{
+    sessionId: string;
+    message: string;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const activeRef = useRef<{
     jobId: string;
@@ -91,6 +95,16 @@ export function useDeepResearch(opts: {
   const stopStream = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+  }, []);
+
+  const clearError = useCallback(() => setScopedError(null), []);
+
+  const setErrorForSession = useCallback((sessionId: string, message: string | null) => {
+    if (!message) {
+      setScopedError(null);
+      return;
+    }
+    setScopedError({ sessionId, message });
   }, []);
 
   const refreshJob = useCallback(async (jobId: string) => {
@@ -191,9 +205,9 @@ export function useDeepResearch(opts: {
           st === 'writing' ||
           st === 'done'
         ) {
-          setError(null);
+          clearError();
         } else if (st === 'failed' || st === 'cancelled') {
-          setError(rebuilt.truncationReason || 'Research failed');
+          setErrorForSession(sessionId, rebuilt.truncationReason || 'Research failed');
         }
       };
 
@@ -276,13 +290,15 @@ export function useDeepResearch(opts: {
               status === 'writing' ||
               status === 'done'
             ) {
-              setError(null);
+              clearError();
             }
           }
           if (kind === 'error' && payload.message) {
             // During catch-up, ignore stale errors — the latest phase wins above.
             // Only surface errors that arrive while the UI is live.
-            if (uiLive) setError(humanizeResearchError(String(payload.message)));
+            if (uiLive) {
+              setErrorForSession(sessionId, humanizeResearchError(String(payload.message)));
+            }
           }
         };
 
@@ -314,7 +330,7 @@ export function useDeepResearch(opts: {
           );
         } else if (finalJob?.status === 'failed') {
           const msg = humanizeResearchError(finalJob.error || 'Research failed');
-          setError(msg);
+          setErrorForSession(sessionId, msg);
           patchAssistant(setSessions, sessionId, assistantId, (m) =>
             applyResearchEvent(m, {
               kind: 'error',
@@ -330,7 +346,7 @@ export function useDeepResearch(opts: {
           // Proxies often close long SSE without throwing on the client. The job
           // is still running (e.g. Verify done → Write) — reattach instead of
           // stamping a fake "Reply was interrupted".
-          setError(null);
+          clearError();
           patchAssistant(setSessions, sessionId, assistantId, (m) => ({
             ...m,
             incomplete: false,
@@ -366,7 +382,7 @@ export function useDeepResearch(opts: {
           'writing',
         ]);
         if (remote && running.has(String(remote.status))) {
-          setError(null);
+          clearError();
           patchAssistant(setSessions, sessionId, assistantId, (m) => ({
             ...m,
             incomplete: false,
@@ -386,7 +402,7 @@ export function useDeepResearch(opts: {
         }
         if (remote?.status === 'failed') {
           const msg = humanizeResearchError(remote.error || 'Research failed');
-          setError(msg);
+          setErrorForSession(sessionId, msg);
           patchAssistant(setSessions, sessionId, assistantId, (m) =>
             applyResearchEvent(m, {
               kind: 'error',
@@ -396,7 +412,7 @@ export function useDeepResearch(opts: {
           return;
         }
         const msg = err instanceof Error ? err.message : String(err);
-        setError(humanizeResearchError(msg));
+        setErrorForSession(sessionId, humanizeResearchError(msg));
         patchAssistant(setSessions, sessionId, assistantId, (m) => ({
           ...m,
           incomplete: true,
@@ -406,7 +422,7 @@ export function useDeepResearch(opts: {
         if (catchUpTimer) clearTimeout(catchUpTimer);
         if (reattachAfterDrop) {
           if (reattachAttempt >= MAX_REATTACH) {
-            setError('Research is still running, but the live stream kept dropping. Tap Continue to reconnect.');
+            setErrorForSession(sessionId, 'Research is still running, but the live stream kept dropping. Tap Continue to reconnect.');
             patchAssistant(setSessions, sessionId, assistantId, (m) => ({
               ...m,
               incomplete: true,
@@ -437,7 +453,7 @@ export function useDeepResearch(opts: {
         if (activeRef.current?.jobId === jobId) activeRef.current = null;
       }
     },
-    [endLoading, refreshJob, setSessions, stopStream],
+    [endLoading, refreshJob, refreshJobWithRetry, setSessions, stopStream, clearError, setErrorForSession],
   );
 
   /** Reconnect to an existing job and rebuild the bubble from SSE replay. */
@@ -450,7 +466,7 @@ export function useDeepResearch(opts: {
       mode: ResearchMode;
     }) => {
       const { jobId, sessionId, assistantId, query, mode } = opts;
-      setError(null);
+      clearError();
       setBusy(true);
       beginLoading(sessionId);
       setJob({
@@ -479,18 +495,18 @@ export function useDeepResearch(opts: {
         seed: { query, mode },
       });
     },
-    [beginLoading, listen, setSessions],
+    [beginLoading, listen, setSessions, clearError],
   );
 
   const start = useCallback(
     async (startOpts: StartOpts) => {
       const query = String(startOpts.query || '').trim();
       if (!query) {
-        setError('请输入研究问题');
+        setErrorForSession(startOpts.sessionId, '请输入研究问题');
         return null;
       }
       const sessionId = startOpts.sessionId;
-      setError(null);
+      clearError();
       setBusy(true);
       beginLoading(sessionId);
 
@@ -553,11 +569,11 @@ export function useDeepResearch(opts: {
       } catch (err: unknown) {
         setBusy(false);
         endLoading(sessionId);
-        setError(err instanceof Error ? err.message : String(err));
+        setErrorForSession(sessionId, err instanceof Error ? err.message : String(err));
         return null;
       }
     },
-    [beginLoading, endLoading, listen, setSessions],
+    [beginLoading, endLoading, listen, setSessions, clearError, setErrorForSession],
   );
 
   /**
@@ -573,7 +589,7 @@ export function useDeepResearch(opts: {
       mode: ResearchMode;
     }) => {
       const { jobId, sessionId, assistantId, query, mode } = opts;
-      setError(null);
+      clearError();
       setBusy(true);
       beginLoading(sessionId);
       try {
@@ -636,7 +652,7 @@ export function useDeepResearch(opts: {
         return remote;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
+        setErrorForSession(sessionId, msg);
         patchAssistant(setSessions, sessionId, assistantId, (m) => ({
           ...m,
           incomplete: true,
@@ -652,7 +668,7 @@ export function useDeepResearch(opts: {
         }
       }
     },
-    [beginLoading, endLoading, reattach, refreshJob, setSessions, start],
+    [beginLoading, endLoading, reattach, refreshJob, setSessions, start, clearError, setErrorForSession],
   );
 
   const cancel = useCallback(async () => {
@@ -677,11 +693,14 @@ export function useDeepResearch(opts: {
       }
       await refreshJob(jobId).catch(() => null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      const sid = active?.sessionId || job?.sessionId || '';
+      if (sid) {
+        setErrorForSession(sid, err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setBusy(false);
     }
-  }, [endLoading, job?.jobId, refreshJob, setSessions, stopStream]);
+  }, [endLoading, job?.jobId, job?.sessionId, refreshJob, setSessions, setErrorForSession, stopStream]);
 
   useEffect(
     () => () => {
@@ -697,7 +716,9 @@ export function useDeepResearch(opts: {
     setMode,
     job,
     busy,
-    error,
+    error: scopedError?.message ?? null,
+    errorSessionId: scopedError?.sessionId ?? null,
+    clearError,
     start,
     cancel,
     resume,

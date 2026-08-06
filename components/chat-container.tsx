@@ -1836,24 +1836,16 @@ export default function ChatContainer() {
           messages;
         const index = sessionMsgs.findIndex((m) => m.id === messageId);
         if (index < 0) return;
-        // Truncate to before this message so review targets the prior assistant.
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === activeSessionId
-              ? {
-                  ...s,
-                  updatedAt: Date.now(),
-                  messages: sessionMsgs.slice(0, index),
-                }
-              : s,
-          ),
-        );
+        // Truncate via baseMessages (like /research|/papers) — do NOT rely on
+        // setSessions alone; requestClaimReview reads sessionsRef same-tick.
+        const priorMessages = sessionMsgs.slice(0, index);
         setEditingMessageId(null);
         setEditingMessageContent('');
         setEditingMessageAttachments([]);
         await requestClaimReview({
           focus: reviewCmd.focus,
           userContent: content,
+          baseMessages: priorMessages,
         });
         return;
       }
@@ -1929,7 +1921,6 @@ export default function ChatContainer() {
       runLiteratureSearch,
       runBookDownload,
       runPaperDownload,
-      setSessions,
       setEditingMessageId,
       setEditingMessageContent,
       setEditingMessageAttachments,
@@ -2023,7 +2014,13 @@ export default function ChatContainer() {
     if (lastPreviewSessionIdRef.current === activeSessionId) return;
     lastPreviewSessionIdRef.current = activeSessionId;
     setPreviewTarget(null);
-  }, [activeSessionId]);
+    // Composer banners that belong to the previous chat (upload/vision/wait)
+    // must not follow the user into another session. Cloud-sync notices stay —
+    // they describe account-wide state, not one conversation.
+    setAttachError((prev) =>
+      /Cloud sync failed|updated from another tab/i.test(prev) ? prev : '',
+    );
+  }, [activeSessionId, setAttachError]);
 
   // Keep / drop the side-panel preview against the live Output file list:
   // deleted → clear; same id with updated content/name/size → refresh snapshot.
@@ -2641,7 +2638,11 @@ export default function ChatContainer() {
                 stopGenerating={stopOrCancel}
                 enqueueOrSubmit={submitComposer}
                 researchBusy={deepResearch.busy}
-                researchError={deepResearch.error}
+                researchError={
+                  deepResearch.errorSessionId === activeSessionId
+                    ? deepResearch.error
+                    : null
+                }
                 cancelResearch={() => void deepResearch.cancel()}
               />
             </div>

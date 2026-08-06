@@ -1,4 +1,9 @@
-/** Explicit claim-review command: `/review` or `/审查`, optional focus text. */
+/** Explicit claim-review command: `/review` or `/审查`, optional focus text.
+ *
+ * Edit/resend of a `/review` bubble must pass `baseMessages` (thread before that
+ * turn) into `requestClaimReview` — same as `/research` / `/papers`. Truncating
+ * only via `setSessions` leaves `sessionsRef` stale for the same-tick append.
+ */
 const REVIEW_CMD_RE = /^(?:\/review|\/审查)(?:\s+([\s\S]*))?$/i;
 
 export type ReviewCommand = {

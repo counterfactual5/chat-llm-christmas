@@ -92,11 +92,69 @@ describe('research activity → timeline stages', () => {
     expect(m.toolRuns?.some((r) => r.name === 'research_synthesize')).toBe(true);
     m = applyResearchEvent(m, {
       kind: 'synthesis',
-      payload: { chars: 1200, preview: '跨源对比…' },
+      payload: { chars: 1200, preview: '跨源对比：来源对病因口径不一…\n\n## 数据缺口\n待核实…' },
     });
     const syn = m.toolRuns?.find((r) => r.name === 'research_synthesize');
     expect(syn?.status).toBe('done');
     expect(syn?.results?.[0]?.snippet).toContain('1200');
+    expect(syn?.results?.[0]?.body).toContain('跨源对比');
+  });
+
+  it('stores Verify preview and gate summary on the tool', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a4v',
+      jobId: 'rs_4v',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'verifying', detail: 'fact-checking synthesis' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'verified_quality',
+      payload: { attempt: 1, ok: false, errors: ['缺 contradictions 节'] },
+    });
+    expect(m.reasoning || '').toContain('Verify gate');
+    m = applyResearchEvent(m, {
+      kind: 'verified',
+      payload: {
+        chars: 400,
+        preview: '## 已核实\n- 点 A\n',
+        ok: true,
+        errors: [],
+      },
+    });
+    const ver = m.toolRuns?.find((r) => r.name === 'research_verify');
+    expect(ver?.status).toBe('done');
+    expect(ver?.results?.[0]?.snippet).toContain('passed');
+    expect(ver?.results?.[0]?.body).toContain('已核实');
+  });
+
+  it('research error clears partial bubble content', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a4e',
+      jobId: 'rs_4e',
+      query: 'topic',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'drafting report' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report_delta',
+      payload: { text: '草案不应进正文' },
+    });
+    // Simulate legacy / stray content in the bubble.
+    m = { ...m, content: '草案不应进正文' };
+    m = applyResearchEvent(m, {
+      kind: 'error',
+      payload: { message: '质量门禁未通过: Tier 1 来源仅 1 条（standard 期望 ≥2）' },
+    });
+    expect(m.content).toBe('');
+    expect(m.truncationReason).toContain('Tier 1');
+    expect(
+      m.toolRuns?.find((r) => r.name === 'research_write')?.results?.[0]?.body,
+    ).toContain('草案');
   });
 
   it('records soft-empty search without Failed error', () => {
@@ -209,10 +267,67 @@ describe('research activity → timeline stages', () => {
     expect(m.research?.status).toBe('failed');
   });
 
-  it('report event does not re-flip incomplete after content is set', () => {
+  it('report_delta streams into Write draft, not the answer bubble', () => {
     let m = createResearchAssistantMessage({
       id: 'a8',
       jobId: 'rs_8',
+      query: 'x',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'drafting report' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report_delta',
+      payload: { text: '## 用户问题直答\n草案' },
+    });
+    expect(m.content || '').toBe('');
+    const write = m.toolRuns?.find((r) => r.name === 'research_write');
+    expect(write?.status).toBe('start');
+    expect(write?.results?.[0]?.body).toContain('草案');
+
+    m = applyResearchEvent(m, {
+      kind: 'report_reset',
+      payload: {},
+    });
+    expect(m.content || '').toBe('');
+    expect(
+      m.toolRuns?.find((r) => r.name === 'research_write' && r.status === 'start')
+        ?.results?.[0]?.body || '',
+    ).toBe('');
+  });
+
+  it('quality-gate rewrite keeps prior draft on settled Write step', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a8b',
+      jobId: 'rs_8b',
+      query: 'x',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'drafting report' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report_delta',
+      payload: { replace: '## 用户问题直答\n第一版草案' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'rewriting after quality gate (attempt 2)' },
+    });
+    const writes = m.toolRuns?.filter((r) => r.name === 'research_write') || [];
+    expect(writes).toHaveLength(2);
+    expect(writes[0]?.status).toBe('done');
+    expect(writes[0]?.results?.[0]?.body).toContain('第一版草案');
+    expect(writes[1]?.status).toBe('start');
+    expect(writes[1]?.query).toContain('rewriting');
+    expect(m.content || '').toBe('');
+  });
+
+  it('report event promotes draft to content when Output file is missing', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a8c',
+      jobId: 'rs_8c',
       query: 'x',
     });
     m = applyResearchEvent(m, {
@@ -229,6 +344,36 @@ describe('research activity → timeline stages', () => {
     });
     expect(m.incomplete).toBe(false);
     expect(m.content).toContain('完整报告');
+  });
+
+  it('file event promotes final report into the answer bubble', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a8d',
+      jobId: 'rs_8d',
+      query: 'x',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'writing', detail: 'drafting report' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'report_delta',
+      payload: { text: '草案中' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'file',
+      payload: {
+        id: 'f-final',
+        name: 'research_report.md',
+        mimeType: 'text/markdown',
+        size: 12,
+        url: 'local://f-final',
+        content: '## 用户问题直答\n定稿',
+      },
+    });
+    expect(m.content).toContain('定稿');
+    expect(m.incomplete).toBe(false);
+    expect(m.content).not.toContain('草案中');
   });
 
   it('skips Verify stage chrome for resuming saved verification', () => {
@@ -264,6 +409,10 @@ describe('research activity → timeline stages', () => {
       kind: 'report_delta',
       payload: { text: '## 用户问题直答\n答案' },
     });
+    expect(m.content || '').toBe('');
+    expect(
+      m.toolRuns?.find((r) => r.name === 'research_write')?.results?.[0]?.body,
+    ).toContain('答案');
     m = withResearchReport(m, '## 用户问题直答\n完整报告', {
       id: 'f1',
       name: 'research_report.md',

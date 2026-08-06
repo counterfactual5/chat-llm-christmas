@@ -1166,13 +1166,21 @@ export function useChatLogic(props: UseChatLogicProps) {
     focus?: string;
     /** Visible user bubble text (defaults to `/review` + focus). */
     userContent?: string;
+    /**
+     * Edit/resend: truncated thread *before* the edited `/review` turn.
+     * Must be passed explicitly — a prior `setSessions` alone is too late for
+     * same-tick `sessionsRef` readers (same pitfall as ordinary Save & resend).
+     */
+    baseMessages?: Message[];
   }) => {
     const sessionId = activeSessionIdRef.current;
     if (!isAccountBound) {
       openLoginModal();
       return;
     }
-    const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
+    const sessionMessages =
+      opts?.baseMessages ??
+      (sessionsRef.current.find((s) => s.id === sessionId)?.messages || []);
     const lastAssistant = [...sessionMessages].reverse().find((m) => m.role === 'assistant');
     if (!lastAssistant || isSessionLoading(sessionId)) return;
 
@@ -1198,6 +1206,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       timestamp: Date.now(),
       incomplete: true,
     };
+    // updateSession syncs sessionsRef — replaces any tail after baseMessages.
     updateSession(sessionId, [...sessionMessages, userMessage, assistantMessage]);
     if (sessionId === activeSessionId) {
       setInput('');

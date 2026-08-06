@@ -701,7 +701,27 @@ export function ChatMessageList(props: ChatMessageListProps) {
                               {run.error}
                             </div>
                           )}
-                          {run.status === 'done' && resultCount > 0 && (
+                          {/* Research Write drafts + Synthesize/Verify previews
+                              stream/land here (collapsible), not the answer bubble. */}
+                          {(isResearchWrite ||
+                            isResearchSynthesize ||
+                            isResearchVerify) &&
+                            String(run.results?.[0]?.body || '').trim() && (
+                              <AnswerMarkdown
+                                text={String(run.results?.[0]?.body || '')}
+                                streaming={searching && isResearchWrite}
+                                reflowBlocks={false}
+                                className="max-h-64 overflow-y-auto space-y-1 text-[12px] leading-5 text-stone-500 dark:text-stone-400 [&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-[12px] [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-[12px] [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-[12px] [&_p]:mb-0 [&_p]:leading-5 [&_ul]:my-1 [&_ol]:my-1"
+                              />
+                            )}
+                          {run.status === 'done' &&
+                            resultCount > 0 &&
+                            !(
+                              (isResearchWrite ||
+                                isResearchSynthesize ||
+                                isResearchVerify) &&
+                              String(run.results?.[0]?.body || '').trim()
+                            ) && (
                             <ul className={cn('space-y-2', !isImageUnderstand && 'space-y-0.5')}>
                               {(run.results || []).slice(0, 8).map((r) => (
                                 <li

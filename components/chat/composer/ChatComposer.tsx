@@ -136,6 +136,7 @@ export type ChatComposerProps = {
   requestClaimReview: (opts?: {
     focus?: string;
     userContent?: string;
+    baseMessages?: Message[];
   }) => void | Promise<void>;
   lastMessage: Message | undefined;
   isAssistantError: (m?: Message) => boolean;

@@ -172,6 +172,47 @@ function settleOpenTools(m: Message, error?: string): Message {
   return { ...m, toolRuns };
 }
 
+/** Stream writer drafts into the pending research_write tool — never the answer bubble. */
+function ensurePendingWrite(m: Message, query?: string): Message {
+  if (hasPendingTool(m, 'research_write')) return m;
+  return startTool(m, 'research_write', query || 'drafting report').message;
+}
+
+function patchWriteDraft(
+  m: Message,
+  next: { mode: 'clear' | 'append' | 'replace'; text?: string },
+): Message {
+  let out = ensurePendingWrite(m);
+  const toolRuns = ensureTools(out);
+  const idx = toolRuns.findIndex((r) => r.name === 'research_write' && r.status === 'start');
+  if (idx < 0) return out;
+  const run = toolRuns[idx];
+  const prev = run.results?.[0];
+  let body = String(prev?.body || '');
+  if (next.mode === 'clear') body = '';
+  else if (next.mode === 'replace') body = String(next.text || '');
+  else body = `${body}${next.text || ''}`;
+  toolRuns[idx] = {
+    ...run,
+    results: [
+      {
+        title: prev?.title || 'Draft',
+        url: '',
+        snippet: prev?.snippet || '',
+        body,
+      },
+    ],
+  };
+  return { ...out, toolRuns, incomplete: true };
+}
+
+function pendingWriteDraftBody(m: Message): string {
+  const pending = ensureTools(m).find(
+    (r) => r.name === 'research_write' && r.status === 'start',
+  );
+  return String(pending?.results?.[0]?.body || '').trim();
+}
+
 function appendReasoning(m: Message, text: string): Message {
   const t = String(text || '').trim();
   if (!t) return m;
@@ -464,10 +505,26 @@ export function applyResearchEvent(
     return m;
   }
 
+  if (kind === 'synthesis_quality') {
+    const ok = Boolean(payload.ok);
+    const attempt = Number(payload.attempt || 0) || 0;
+    const errors = Array.isArray(payload.errors) ? payload.errors.map(String) : [];
+    if (!ok && errors.length) {
+      const label =
+        attempt > 1
+          ? `Synthesis gate (attempt ${attempt})`
+          : 'Synthesis gate';
+      return appendReasoning(m, `${label}: ${errors.join('; ')}`);
+    }
+    return m;
+  }
+
   if (kind === 'synthesis') {
     const chars = Number(payload.chars || 0);
     const preview =
       typeof payload.preview === 'string' ? String(payload.preview).trim() : '';
+    // Prefer a readable body preview in Process; keep snippet short for the row.
+    const body = preview.slice(0, 800);
     return finishTool(m, {
       name: 'research_synthesize',
       provider: 'research',
@@ -475,15 +532,39 @@ export function applyResearchEvent(
         {
           title: 'Synthesis',
           url: '',
-          snippet: preview
-            ? `${chars} chars · ${preview.slice(0, 160)}`
-            : `${chars} chars`,
+          snippet: chars ? `${chars} chars` : 'ready',
+          ...(body ? { body } : {}),
         },
       ],
     });
   }
 
+  if (kind === 'verified_quality') {
+    const ok = Boolean(payload.ok);
+    const attempt = Number(payload.attempt || 0) || 0;
+    const errors = Array.isArray(payload.errors) ? payload.errors.map(String) : [];
+    if (!ok && errors.length) {
+      const label =
+        attempt > 1
+          ? `Verify gate (attempt ${attempt})`
+          : 'Verify gate';
+      return appendReasoning(m, `${label}: ${errors.join('; ')}`);
+    }
+    return m;
+  }
+
   if (kind === 'verified') {
+    const chars = Number(payload.chars || 0);
+    const preview =
+      typeof payload.preview === 'string' ? String(payload.preview).trim() : '';
+    const body = preview.slice(0, 800);
+    const ok = payload.ok == null ? true : Boolean(payload.ok);
+    const errors = Array.isArray(payload.errors) ? payload.errors.map(String) : [];
+    const gate = ok
+      ? 'passed'
+      : errors.length
+        ? errors.slice(0, 2).join('; ')
+        : 'issues';
     return finishTool(m, {
       name: 'research_verify',
       provider: 'research',
@@ -491,33 +572,28 @@ export function applyResearchEvent(
         {
           title: 'Verified facts',
           url: '',
-          snippet: `${Number(payload.chars || 0)} chars`,
+          snippet: chars ? `${chars} chars · ${gate}` : gate,
+          ...(body ? { body } : {}),
         },
       ],
     });
   }
 
   if (kind === 'report_reset') {
-    return {
-      ...m,
-      content: '',
-      incomplete: true,
-    };
+    // Clear the in-progress Write draft only — do not yank text from the
+    // answer bubble (drafts never lived there; retries must not flash-clear).
+    return patchWriteDraft(m, { mode: 'clear' });
   }
 
   if (kind === 'report_delta') {
     const replace =
       typeof payload.replace === 'string' ? String(payload.replace) : null;
     if (replace != null) {
-      return { ...m, content: replace, incomplete: true };
+      return patchWriteDraft(m, { mode: 'replace', text: replace });
     }
     const text = String(payload.text || '');
     if (!text) return m;
-    return {
-      ...m,
-      content: `${m.content || ''}${text}`,
-      incomplete: true,
-    };
+    return patchWriteDraft(m, { mode: 'append', text });
   }
 
   if (kind === 'file') {
@@ -539,9 +615,26 @@ export function applyResearchEvent(
     if (!activity.some((s) => s.kind === 'file' && s.fileId === id)) {
       activity.push({ id: newId('file'), kind: 'file', fileId: id });
     }
-    const researchDone = m.research?.status === 'done';
+    // Final report lands with the Output file — promote into the answer bubble
+    // now. Intermediate writer attempts stay in Write tool drafts only.
+    const reportBody = String(file.content || '').trim() || pendingWriteDraftBody(m);
+    const researchDone = m.research?.status === 'done' || Boolean(reportBody);
     return finishTool(
-      { ...m, files, activity },
+      {
+        ...m,
+        files,
+        activity,
+        ...(reportBody
+          ? {
+              content: reportBody,
+              incomplete: false,
+              truncationReason: undefined,
+              research: m.research
+                ? { ...m.research, status: 'done' as const }
+                : m.research,
+            }
+          : {}),
+      },
       {
         name: 'research_write',
         provider: 'research',
@@ -569,21 +662,41 @@ export function applyResearchEvent(
   if (kind === 'report') {
     // Final report settle — do not flip incomplete back to true (Continue
     // would reappear after a finished research run).
-    const researchDone = m.research?.status === 'done' || Boolean(String(m.content || '').trim());
-    m = finishTool(m, {
-      name: 'research_write',
-      provider: 'research',
-      keepComplete: researchDone,
-      results: [
-        {
-          title: 'Report',
-          url: '',
-          snippet: `${Number(payload.chars || 0)} chars`,
-        },
-      ],
-    });
+    const draft = pendingWriteDraftBody(m);
+    const content = String(m.content || '').trim() || draft;
+    const researchDone =
+      m.research?.status === 'done' || Boolean(content);
+    m = finishTool(
+      content && !String(m.content || '').trim()
+        ? {
+            ...m,
+            content,
+            research: m.research
+              ? { ...m.research, status: 'done' }
+              : m.research,
+          }
+        : m,
+      {
+        name: 'research_write',
+        provider: 'research',
+        keepComplete: researchDone,
+        results: [
+          {
+            title: 'Report',
+            url: '',
+            snippet: `${Number(payload.chars || 0)} chars`,
+          },
+        ],
+      },
+    );
     if (researchDone) {
-      return { ...m, incomplete: false };
+      return {
+        ...m,
+        content: String(m.content || '').trim() || content,
+        incomplete: false,
+        truncationReason: undefined,
+        research: m.research ? { ...m.research, status: 'done' } : m.research,
+      };
     }
     return m;
   }
@@ -591,8 +704,17 @@ export function applyResearchEvent(
   if (kind === 'error') {
     const msg = String(payload.message || 'Research failed');
     m = settleOpenTools(m, msg);
+    // Failed runs keep drafts under Write tools — clear any partial bubble
+    // text so the quality-gate reason is not mixed into a half-finished report.
+    const hasResearchFile = (m.files || []).some(
+      (f) =>
+        String(f.name || '').startsWith('research_') ||
+        String(f.url || '').startsWith('local://local_research_') ||
+        String(f.url || '').startsWith('local://research'),
+    );
     return {
       ...m,
+      content: hasResearchFile ? m.content : '',
       incomplete: true,
       truncationReason: humanizeResearchError(msg),
       research: m.research ? { ...m.research, status: 'failed' } : m.research,
@@ -675,10 +797,10 @@ export function withResearchReport(
       : message.research,
   };
 
-  // Do not append a duplicate `content` activity step at the end — streamed
-  // report body already lives on message.content, and buildTimelineSegments
-  // places it after Process panels. Pushing content here put the answer in the
-  // middle of the timeline and let an orphan Write tool land below it.
+  // Do not append a duplicate `content` activity step at the end — the final
+  // report lives on message.content (promoted from file/report), while writer
+  // drafts stayed on research_write tool results. buildTimelineSegments places
+  // the answer after Process panels.
 
   if (reportFile?.id) {
     m = applyResearchEvent(m, { kind: 'file', payload: reportFile as Record<string, unknown> });

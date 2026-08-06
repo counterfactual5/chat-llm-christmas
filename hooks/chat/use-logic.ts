@@ -137,6 +137,8 @@ export type UseChatLogicProps = {
   zhipuVisionOn: boolean;
   usableLimit: number | null;
   contextBreakdown: { system: number; skills: number };
+  /** Rebuild isomorphic system tokens for the text about to send. */
+  estimateSystemForSend?: (nextUserText: string, history: Message[]) => number;
   
   setPicturesExpanded: React.Dispatch<React.SetStateAction<boolean>>;
   setOutputGroupsOpen: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
@@ -160,6 +162,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     input, setInput, quotedSelections, setQuotedSelections, attachments, setAttachments, setAttachError,
     isAccountBound, openLoginModal, stickToBottomRef, scrollToBottom, setIsSkillPickerOpen,
     selectedSpec, selectedModel, zhipuVisionOn, usableLimit, contextBreakdown,
+    estimateSystemForSend,
     setPicturesExpanded, setOutputGroupsOpen, setIsContextPanelOpen,
     editingMessageContent, setEditingMessageContent, editingMessageAttachments, setEditingMessageAttachments, setEditingMessageId,
     messages, messageImagesToIngested
@@ -994,6 +997,8 @@ export function useChatLogic(props: UseChatLogicProps) {
 
     const projectTokens = (history: Message[]) => {
       const session = sessionsRef.current.find((s) => s.id === sessionId);
+      const system =
+        estimateSystemForSend?.(fullContent, history) ?? contextBreakdown.system;
       return estimateTokensForSend({
         history,
         nextUserText: fullContent,
@@ -1001,7 +1006,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         // Match the sources we will actually send (thread-derived), not a stale
         // session.webSources left over from turns truncated by edit/resend.
         webSources: webSourcesForThread([...history, userMessage], session),
-        contextBreakdown,
+        contextBreakdown: { system, skills: contextBreakdown.skills },
       });
     };
 

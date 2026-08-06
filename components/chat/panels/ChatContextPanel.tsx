@@ -309,13 +309,16 @@ export function ChatContextPanel({
                 </p>
                 {lastTurnUsage &&
                   (lastTurnUsage.prompt_tokens != null ||
-                    lastTurnUsage.completion_tokens != null) && (
+                    lastTurnUsage.completion_tokens != null ||
+                    lastTurnUsage.total_tokens != null) && (
                     <div className="flex justify-between text-[11px]">
                       <span className="text-stone-400">Measured last turn</span>
                       <span className="font-mono text-stone-500 text-right">
                         {lastTurnUsage.prompt_tokens != null
                           ? `${lastTurnUsage.prompt_tokens.toLocaleString()} prompt`
-                          : '—'}
+                          : lastTurnUsage.total_tokens != null
+                            ? `${lastTurnUsage.total_tokens.toLocaleString()} total`
+                            : '—'}
                         {lastTurnUsage.completion_tokens != null
                           ? ` · ${lastTurnUsage.completion_tokens.toLocaleString()} out`
                           : ''}

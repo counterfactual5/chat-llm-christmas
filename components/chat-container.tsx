@@ -1249,6 +1249,7 @@ export default function ChatContainer() {
           setAttachError(message);
         },
         onCompletionUsage: (usage) => {
+          if (sessionId !== activeSessionIdRef.current) return;
           setLastTurnUsage(usage);
         },
       },
@@ -1480,78 +1481,109 @@ export default function ChatContainer() {
 
   // Isomorphic estimate: same buildChatSystemParts assembly the server uses
   // (best-effort client opts — toolsGuidance / account catalog may drift).
-  const contextBreakdown = useMemo(() => {
-    const authorizedIntegrations = [
-      ...(notionMcpOn ? ['notion'] : []),
-      ...(githubMcpOn ? ['github'] : []),
-      ...(gmailMcpOn ? ['gmail'] : []),
-      ...(calendarMcpOn ? ['calendar'] : []),
-      ...(driveMcpOn ? ['drive'] : []),
-      ...(paperSearchEnabled ? ['paper_search'] : []),
-      ...(bookSearchEnabled ? ['book_search'] : []),
-      ...(generateImageEnabled ? ['generate_image'] : []),
-      ...(zhipuVisionOn ? ['zhipu-vision'] : []),
-    ];
-    return estimateContextBreakdown({
-      model: selectedModel,
-      systemPrompt,
-      threadId: activeSessionId,
-      searchEnabled: true,
-      authorizedIntegrations,
-      googleRequestedButUnauthorized:
-        Boolean(activeMcpIds.includes('gmail') ||
-          activeMcpIds.includes('calendar') ||
-          activeMcpIds.includes('drive')) && !googleMcpConnected,
-      notionRequestedButUnauthorized:
-        activeMcpIds.includes('notion') && !Boolean(notionStatus?.connected),
-      githubRequestedButUnauthorized:
-        activeMcpIds.includes('github') && !Boolean(githubStatus?.connected),
-      skills: activeSkills.map((s) => ({
-        title: s.title,
-        content: s.content,
-      })),
-      memories: memoriesEnabled() ? memoriesPayload() : [],
-      memoriesEnabled: memoriesEnabled(),
-      autoReview: activeAutoReview,
-      webSources,
-      attachmentTexts: attachments
-        .filter((a) => a.text)
-        .map((a) => ({ name: a.name, text: String(a.text || '') })),
+  const buildContextEstimateInput = useCallback(
+    (opts?: { userAsk?: string; messages?: Message[] }) => {
+      const authorizedIntegrations = [
+        ...(notionMcpOn ? ['notion'] : []),
+        ...(githubMcpOn ? ['github'] : []),
+        ...(gmailMcpOn ? ['gmail'] : []),
+        ...(calendarMcpOn ? ['calendar'] : []),
+        ...(driveMcpOn ? ['drive'] : []),
+        ...(paperSearchEnabled ? ['paper_search'] : []),
+        ...(bookSearchEnabled ? ['book_search'] : []),
+        ...(generateImageEnabled ? ['generate_image'] : []),
+        ...(zhipuVisionOn ? ['zhipu-vision'] : []),
+      ];
+      return {
+        model: selectedModel,
+        systemPrompt,
+        threadId: activeSessionId,
+        searchEnabled: true,
+        authorizedIntegrations,
+        googleRequestedButUnauthorized:
+          Boolean(
+            activeMcpIds.includes('gmail') ||
+              activeMcpIds.includes('calendar') ||
+              activeMcpIds.includes('drive'),
+          ) && !googleMcpConnected,
+        notionRequestedButUnauthorized:
+          activeMcpIds.includes('notion') && !Boolean(notionStatus?.connected),
+        githubRequestedButUnauthorized:
+          activeMcpIds.includes('github') && !Boolean(githubStatus?.connected),
+        skills: activeSkills.map((s) => ({
+          title: s.title,
+          content: s.content,
+        })),
+        memories: memoriesEnabled() ? memoriesPayload() : [],
+        memoriesEnabled: memoriesEnabled(),
+        autoReview: activeAutoReview,
+        webSources,
+        attachmentTexts: attachments
+          .filter((a) => a.text)
+          .map((a) => ({ name: a.name, text: String(a.text || '') })),
+        messages: opts?.messages ?? messages,
+        pendingImageCount: attachments.filter((a) => a.dataUrl).length,
+        hasGeneratedImages: generatedImageHistory.length > 0,
+        hasGeneratedFiles: generatedFileHistory.length > 0,
+        skillCreatorOn: activeSkillIds.includes(SKILL_CREATOR_ID),
+        userAsk: opts?.userAsk,
+      };
+    },
+    [
       messages,
-      pendingImageCount: attachments.filter((a) => a.dataUrl).length,
-      hasGeneratedImages: generatedImageHistory.length > 0,
-      hasGeneratedFiles: generatedFileHistory.length > 0,
-      skillCreatorOn: activeSkillIds.includes(SKILL_CREATOR_ID),
-    });
-  }, [
-    messages,
-    systemPrompt,
-    webSources,
-    attachments,
-    activeSkills,
-    selectedModel,
-    activeSessionId,
-    notionMcpOn,
-    githubMcpOn,
-    gmailMcpOn,
-    calendarMcpOn,
-    driveMcpOn,
-    paperSearchEnabled,
-    bookSearchEnabled,
-    generateImageEnabled,
-    zhipuVisionOn,
-    activeMcpIds,
-    googleMcpConnected,
-    notionStatus?.connected,
-    githubStatus?.connected,
-    memoriesEnabled,
-    memoriesPayload,
-    memories,
-    activeAutoReview,
-    generatedImageHistory.length,
-    generatedFileHistory.length,
-    activeSkillIds,
-  ]);
+      systemPrompt,
+      webSources,
+      attachments,
+      activeSkills,
+      selectedModel,
+      activeSessionId,
+      notionMcpOn,
+      githubMcpOn,
+      gmailMcpOn,
+      calendarMcpOn,
+      driveMcpOn,
+      paperSearchEnabled,
+      bookSearchEnabled,
+      generateImageEnabled,
+      zhipuVisionOn,
+      activeMcpIds,
+      googleMcpConnected,
+      notionStatus?.connected,
+      githubStatus?.connected,
+      memoriesEnabled,
+      memoriesPayload,
+      memories,
+      activeAutoReview,
+      generatedImageHistory.length,
+      generatedFileHistory.length,
+      activeSkillIds,
+    ],
+  );
+
+  const contextBreakdown = useMemo(
+    () =>
+      estimateContextBreakdown(
+        buildContextEstimateInput({
+          userAsk: input.trim() || undefined,
+        }),
+      ),
+    [buildContextEstimateInput, input],
+  );
+
+  const estimateSystemForSend = useCallback(
+    (nextUserText: string, history: Message[]) =>
+      estimateContextBreakdown(
+        buildContextEstimateInput({
+          userAsk: nextUserText,
+          messages: history,
+        }),
+      ).system,
+    [buildContextEstimateInput],
+  );
+
+  useEffect(() => {
+    setLastTurnUsage(null);
+  }, [activeSessionId]);
 
   const estimatedTokens = contextBreakdown.total;
   const contextLimit = selectedSpec.context;
@@ -1612,6 +1644,7 @@ export default function ChatContainer() {
     zhipuVisionOn,
     usableLimit,
     contextBreakdown,
+    estimateSystemForSend,
     setPicturesExpanded,
     setOutputGroupsOpen,
     setIsContextPanelOpen,
@@ -1629,6 +1662,17 @@ export default function ChatContainer() {
     beginLoading,
     endLoading,
   });
+
+  // Deep Research busy must stay scoped to its session. Treating it as a
+  // global "chat loading" flag makes other sessions' orphan tool runs look
+  // live (Reading webpage…) while the sidebar spinner sits on a different row.
+  const researchSessionId = deepResearch.job?.sessionId || null;
+  const isResearchBusyFor = (sessionId: string | null | undefined) =>
+    Boolean(deepResearch.busy && sessionId && researchSessionId === sessionId);
+  const activeSessionBusy =
+    isActiveLoading || isResearchBusyFor(activeSessionId);
+  const sidebarSessionLoading = (sessionId: string) =>
+    isSessionLoading(sessionId) || isResearchBusyFor(sessionId);
 
   const researchReattachAttemptsRef = useRef(new Map<string, number>());
   const researchReattachInFlightRef = useRef(new Set<string>());
@@ -1850,7 +1894,7 @@ export default function ChatContainer() {
       const content = editingMessageContent.trim();
       const researchCmd = parseResearchCommand(content);
       if (researchCmd) {
-        if (isActiveLoading || deepResearch.busy) {
+        if (activeSessionBusy) {
           stopOrCancel();
         }
         const sessionMsgs =
@@ -1874,7 +1918,7 @@ export default function ChatContainer() {
       }
       const reviewCmd = parseReviewCommand(content);
       if (reviewCmd) {
-        if (isActiveLoading || deepResearch.busy) {
+        if (activeSessionBusy) {
           stopOrCancel();
         }
         const sessionMsgs =
@@ -1899,7 +1943,7 @@ export default function ChatContainer() {
       // Same as composer: edit/resend of /papers|/books must not fall through to chat.
       const literatureCmd = parseLiteratureCommand(content);
       if (literatureCmd) {
-        if (isActiveLoading || deepResearch.busy) {
+        if (activeSessionBusy) {
           stopOrCancel();
         }
         const sessionMsgs =
@@ -1956,8 +2000,7 @@ export default function ChatContainer() {
     },
     [
       editingMessageContent,
-      isActiveLoading,
-      deepResearch.busy,
+      activeSessionBusy,
       stopOrCancel,
       activeSessionId,
       messages,
@@ -1993,21 +2036,21 @@ export default function ChatContainer() {
   // Only offer Continue when we have a clear interruption signal — not for every
   // finished assistant turn. Deep Research failures also set incomplete + truncationReason.
   const canResumeIncomplete =
-    !isActiveLoading && !deepResearch.busy && truncationInfo.truncated;
+    !activeSessionBusy && truncationInfo.truncated;
   // Timeout / upstream failures leave an Error: bubble — offer Retry for that turn.
   const canRetryFailed =
-    !isActiveLoading && !deepResearch.busy && isAssistantError(lastMessage);
+    !activeSessionBusy && isAssistantError(lastMessage);
 
   // After refresh / remount / lost tool-done events, orphan tool runs can stay at
   // status:"start" and spin forever. Close them whenever the session is idle.
-  // Skip while Deep Research is in flight — its tools stay "start" across long LLM calls.
+  // Keep Deep Research tools open only on the research session itself.
   useEffect(() => {
     if (!chatsHydrated) return;
-    if (deepResearch.busy) return;
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {
         if (loadingBySession[s.id]) return s;
+        if (isResearchBusyFor(s.id)) return s;
         let sessionChanged = false;
         const messages = s.messages.map((m) => {
           if (m.role !== 'assistant') return m;
@@ -2043,7 +2086,7 @@ export default function ChatContainer() {
       });
       return changed ? next : prev;
     });
-  }, [chatsHydrated, loadingBySession, deepResearch.busy]);
+  }, [chatsHydrated, loadingBySession, deepResearch.busy, researchSessionId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -2420,7 +2463,7 @@ export default function ChatContainer() {
         open={isSidebarOpen}
         sessions={sessions}
         activeSessionId={activeSessionId}
-        isSessionLoading={isSessionLoading}
+        isSessionLoading={sidebarSessionLoading}
         skills={skills}
         activeSkillIds={activeSkillIds}
         autoReviewEnabled={activeAutoReview}
@@ -2542,7 +2585,7 @@ export default function ChatContainer() {
               <ChatMessageList
                 messages={messages}
                 selectedModel={selectedModel}
-                isActiveLoading={isActiveLoading || deepResearch.busy}
+                isActiveLoading={activeSessionBusy}
                 lastMessage={lastMessage}
                 replyWaitByMessage={replyWaitByMessage}
                 scrollRef={scrollRef}
@@ -2680,11 +2723,11 @@ export default function ChatContainer() {
                 zhipuVisionOn={zhipuVisionOn}
                 setActiveMcpIds={setActiveMcpIds}
                 setSelectedModel={setSelectedModel}
-                isActiveLoading={isActiveLoading || deepResearch.busy}
+                isActiveLoading={activeSessionBusy}
                 isCompacting={isCompacting}
                 stopGenerating={stopOrCancel}
                 enqueueOrSubmit={submitComposer}
-                researchBusy={deepResearch.busy}
+                researchBusy={isResearchBusyFor(activeSessionId)}
                 researchError={
                   deepResearch.errorSessionId === activeSessionId
                     ? deepResearch.error

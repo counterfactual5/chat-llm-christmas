@@ -274,11 +274,12 @@ function reflowHeadingsListsHrs(chunk: string): string {
     /(^|\n)(#{1,6}[ \t]+[^\n]*?)[ \t]+(\d{1,2}\.\s+\S)/gm,
     '$1$2\n$3',
   );
-  // Ordered list marker on its own line: `1.\n\n2025年...` should stay part of
-  // the list item (otherwise the number becomes a separate paragraph).
+  // Ordered list marker on its own line: `1.\n\n2025年...` / `2.\n\n**跨会话持久化**`
+  // should stay part of the list item (otherwise the number becomes a bare
+  // paragraph). Skip when the next line is another list/heading/quote/fence/HR.
   out = out.replace(
-    /(^|\n)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*\*{0,2}\s*\d{4}年[^\n]*)/g,
-    (full, lead: string, marker: string, rest: string) =>
+    /(^|\n)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*(?!(?:\d{1,2}\.|#{1,6}|[-*+])(?:[ \t]|$)|(?:>|```)|(?:-{3,}[ \t]*$))(\*\*[^\n]+|[^\s#>][^\n]*))/gm,
+    (_full, lead: string, marker: string, rest: string) =>
       `${lead}${marker} ${String(rest || '').trimStart()}`,
   );
   // Smashed heading + body with no list/`---`: `## 小提示 如果你…` /
@@ -292,14 +293,13 @@ function reflowHeadingsListsHrs(chunk: string): string {
     /(^|\n)(#{1,6}[ \t]+[^\n]*?[？?])[ \t]+([\u4e00-\u9fff*])/gm,
     '$1$2\n\n$3',
   );
-  // Empty numbered ATX heading then bold year title on the next paragraph:
-  // `### 1.\n\n**2025年2月26日：…**` → `### 1. **2025年2月26日：…**`.
-  // Models use this for timeline sections; without the join, remark renders a
-  // bare "1." heading. Run AFTER heading-body peels so `**` openers are not
-  // split back off. Only fires when the heading body is exactly `N.` and the
-  // next paragraph starts with `**YYYY年`.
+  // Empty numbered ATX heading then a title paragraph:
+  // `### 1.\n\n**2025年2月26日：…**` / `### 2.\n\n**跨会话持久化**`
+  // → `### 1. **…**`. Models use this for timeline / feature sections;
+  // without the join, remark renders a bare "1." heading. Run AFTER
+  // heading-body peels so `**` openers are not split back off.
   out = out.replace(
-    /(^|\n)(#{1,6}[ \t]+)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*\*\*\d{4}年[^\n]*)/g,
+    /(^|\n)(#{1,6}[ \t]+)(\d{1,2}\.)[ \t]*\n{1,2}([ \t]*(?!(?:\d{1,2}\.|#{1,6}|[-*+])(?:[ \t]|$)|(?:>|```)|(?:-{3,}[ \t]*$))(\*\*[^\n]+|[^\s#>][^\n]*))/gm,
     (_full, lead: string, hashes: string, marker: string, rest: string) =>
       `${lead}${hashes}${marker} ${String(rest || '').trimStart()}`,
   );

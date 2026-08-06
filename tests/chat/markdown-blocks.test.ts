@@ -352,6 +352,46 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^1\. \*\*2025年2月26日：\*\*/m);
   });
 
+  it('joins bare ordered markers with following bold / plain titles', () => {
+    // Exact shape from the ds4 feature list export: number alone, then title.
+    const src = [
+      '1.',
+      '',
+      '**极速增量推理**',
+      '',
+      '> 传统方式：每次都要处理整个 prompt',
+      '',
+      '2.',
+      '',
+      '**跨会话持久化**',
+      '',
+      '> 昨天的工作：分析代码库 A',
+      '',
+      '3.',
+      '',
+      '零 API 成本',
+      '',
+      '> 本地运行 = 无 API 调用费用',
+    ].join('\n');
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^1\. \*\*极速增量推理\*\*$/m);
+    expect(out).toMatch(/^2\. \*\*跨会话持久化\*\*$/m);
+    expect(out).toMatch(/^3\. 零 API 成本$/m);
+    expect(out).not.toMatch(/^\d+\.\s*$/m);
+    // Blockquotes stay after the title.
+    expect(out).toContain('> 传统方式：每次都要处理整个 prompt');
+  });
+
+  it('does not join a bare ordered marker onto the next list or heading', () => {
+    // Blank line between bare `1.` and `2. …` may collapse; must not become `1. 2. …`.
+    const nextItem = reflowCollapsedMarkdownBlocks('1.\n\n2. 第二项');
+    expect(nextItem).toMatch(/^1\.\s*$/m);
+    expect(nextItem).toMatch(/^2\. 第二项$/m);
+    expect(nextItem).not.toMatch(/^1\. 2\./m);
+    expect(reflowCollapsedMarkdownBlocks('1.\n\n## 标题')).toBe('1.\n\n## 标题');
+    expect(reflowCollapsedMarkdownBlocks('1.\n\n> 只是引用')).toBe('1.\n\n> 只是引用');
+  });
+
   it('joins empty numbered ATX heading with following bold year title', () => {
     // Exact shape from the DeepSeek pricing-timeline export.
     const src = [
@@ -372,6 +412,12 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^### 2\. \*\*2025年9月10日：取消优惠时段（腾讯云平台）\*\*$/m);
     // Must not leave orphan bare numbered headings.
     expect(out).not.toMatch(/^### \d+\.\s*$/m);
+  });
+
+  it('joins empty numbered ATX heading with following non-year bold title', () => {
+    const src = '### 2.\n\n**跨会话持久化**\n\n> 昨天的工作';
+    const out = reflowCollapsedMarkdownBlocks(src);
+    expect(out).toMatch(/^### 2\. \*\*跨会话持久化\*\*$/m);
   });
 
   it('does not rewrite normal numbered headings or unrelated peels', () => {

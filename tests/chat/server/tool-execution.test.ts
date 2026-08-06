@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildToolFallbackQuery,
+  normalizeToolCallArguments,
   toolArgumentsAreComplete,
   toolResultIndicatesFailure,
 } from '@/lib/chat/server/tool-execution';
@@ -44,5 +45,12 @@ describe('tool execution helpers', () => {
     expect(toolArgumentsAreComplete('')).toBe(true);
     expect(toolArgumentsAreComplete('{"query":"is:unread"}')).toBe(true);
     expect(toolArgumentsAreComplete('{"query":"is:unre')).toBe(false);
+  });
+
+  it('normalizes truncated tool arguments to empty object JSON', () => {
+    expect(normalizeToolCallArguments('')).toBe('{}');
+    expect(normalizeToolCallArguments('{"query":"ok"}')).toBe('{"query":"ok"}');
+    expect(normalizeToolCallArguments('{"query":"is:unre')).toBe('{}');
+    expect(normalizeToolCallArguments('{')).toBe('{}');
   });
 });

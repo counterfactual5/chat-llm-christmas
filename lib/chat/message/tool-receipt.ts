@@ -69,7 +69,27 @@ export function buildHistoryToolCalls(
     type: 'function' as const,
     function: {
       name: r.name,
-      arguments: JSON.stringify(r.query ? { query: r.query } : {}),
+      arguments: JSON.stringify(historyToolCallArgs(r)),
     },
   }));
+}
+
+/** Replay args shaped for each tool’s schema (not a one-size `{query}`). */
+function historyToolCallArgs(run: MessageToolRun): Record<string, unknown> {
+  const q = String(run.query || '').trim();
+  if (/^web[_-]?read$/i.test(run.name)) {
+    if (/^https?:\/\//i.test(q)) return { url: q };
+    return q ? { url: q } : {};
+  }
+  if (/^(web_search|news_search|wiki_search|proactive_search)$/i.test(run.name)) {
+    return q ? { query: q } : {};
+  }
+  if (/^image_generate$/i.test(run.name)) {
+    return q ? { prompt: q } : {};
+  }
+  if (/^image_understand$/i.test(run.name)) {
+    return q ? { image_url: q } : {};
+  }
+  // Generic fallback: keep prior behavior for search-like tools / unknown.
+  return q ? { query: q } : {};
 }

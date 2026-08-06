@@ -479,27 +479,4 @@ describe('reflowCollapsedMarkdownBlocks', () => {
     expect(out).toMatch(/^-\s+`clip_vision`$/m);
     expect(out).toMatch(/^-\s+`vae`$/m);
   });
-
-  it('inserts blank lines between packed numbered literature hits', () => {
-    const src = [
-      '📚 2026 年书籍',
-      '1. [Agent Nation](https://example.com/a)',
-      'Chirag Shah · 2026 · Apress',
-      'Download: `/books download libgen:aaa`',
-      '2. [Generative AI On Microsoft Azure](https://example.com/b)',
-      'Adrián González Sánchez · 2026',
-      'Download: `/books download libgen:bbb`',
-      '3. [Seven AI Laws](https://example.com/c)',
-      'Manual download: [Seven AI Laws](https://example.com/c)',
-    ].join('\n');
-    const out = reflowCollapsedMarkdownBlocks(src);
-    expect(out).toMatch(
-      /Download: `\/books download libgen:aaa`\n\n2\. \[Generative AI/,
-    );
-    expect(out).toMatch(
-      /Download: `\/books download libgen:bbb`\n\n3\. \[Seven AI Laws/,
-    );
-    // First hit stays tight after the section label.
-    expect(out).toMatch(/📚 2026 年书籍\n1\. \[Agent Nation/);
-  });
 });

@@ -654,11 +654,9 @@ export async function handleChatRequest(req: NextRequest) {
         };
 
         if (requestReview) {
-          // Stream the verifier into Thought, then stream the written summary as content.
-          send({
-            reasoning:
-              'Claim review — streaming independent verifier against tool receipts…\n',
-          });
+          // Verifier tokens stream into Thought; the written summary streams as
+          // content. Process cards (claim_audit / claim_verifier / review_report)
+          // already surface stage progress — no canned "starting…" Thought line.
           const auditOpts = {
             searchEnabled,
             integrations: authorizedIntegrations,

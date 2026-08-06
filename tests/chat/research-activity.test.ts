@@ -75,6 +75,87 @@ describe('research activity → timeline stages', () => {
     ]);
   });
 
+  it('splits gather into Search → Read → Sources panels', () => {
+    let m = createResearchAssistantMessage({
+      id: 'a1b',
+      jobId: 'rs_1b',
+      query: 'leg cramps',
+      mode: 'standard',
+    });
+    m = applyResearchEvent(m, {
+      kind: 'phase',
+      payload: { status: 'searching', detail: 'searching' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'search',
+      payload: { query: 'night cramps', status: 'start', provider: 'tavily' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'search',
+      payload: {
+        query: 'night cramps',
+        status: 'ok',
+        provider: 'tavily',
+        count: 1,
+        hits: [{ title: 'A', url: 'https://example.com/a', snippet: 'x' }],
+      },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: { url: 'https://example.com/a', status: 'start' },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'read',
+      payload: {
+        url: 'https://example.com/a',
+        status: 'ok',
+        chars: 1200,
+        title: 'A',
+      },
+    });
+    m = applyResearchEvent(m, {
+      kind: 'sources',
+      payload: {
+        count: 1,
+        reads: 1,
+        items: [
+          {
+            title: 'A',
+            url: 'https://example.com/a',
+            snippet: 'x',
+            hasExcerpt: true,
+          },
+        ],
+      },
+    });
+
+    const toolById = new Map((m.toolRuns || []).map((r) => [r.id, r]));
+    const segs = buildTimelineSegments({
+      messageId: m.id,
+      activitySteps: m.activity || [],
+      toolById,
+      visibleContent: '',
+      messageIsStreaming: true,
+      awaitingFirstContent: true,
+      replyWait: false,
+    });
+    const processSegs = segs.filter((s) => s.type === 'process');
+    expect(processSegs.map((s) => (s.type === 'process' ? s.title : ''))).toEqual([
+      'Search',
+      'Read',
+      'Sources',
+    ]);
+    const toolNames = (seg: (typeof processSegs)[number]) =>
+      seg.type === 'process'
+        ? seg.steps
+            .filter((s): s is Extract<(typeof seg.steps)[number], { kind: 'tool' }> => s.kind === 'tool')
+            .map((s) => toolById.get(s.toolRunId)?.name)
+        : [];
+    expect(toolNames(processSegs[0]!)).toEqual(['web_search']);
+    expect(toolNames(processSegs[1]!)).toEqual(['web_read']);
+    expect(toolNames(processSegs[2]!)).toEqual(['research_sources']);
+  });
+
   it('attaches report content and clears incomplete', () => {
     let m = createResearchAssistantMessage({
       id: 'a2',

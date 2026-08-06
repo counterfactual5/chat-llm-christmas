@@ -51,8 +51,8 @@ export function useChatSessionPersist(opts: {
   const writingLocalRef = useRef(false);
 
   /**
-   * Restore local chats (and merge cloud) for a bound account.
-   * Caller owns account refresh + post-hydrate fetches.
+   * Restore local chats for a bound account, mark hydrated, then merge cloud.
+   * Resolves after cloud GET (callers may run models in parallel with this promise).
    */
   const hydrateBoundAccount = async (username: string | null) => {
     enforceChatsOwner(username);
@@ -63,12 +63,17 @@ export function useChatSessionPersist(opts: {
       setSessions(local.sessions);
       if (local.activeSessionId) setActiveSessionId(local.activeSessionId);
     }
-
-    const cloud = await fetchCloudSessions();
-    if (cloud.length > 0) {
-      setSessions((prev) => mergeLocalWithCloud(prev, cloud));
-    }
+    // Local-first: do not block UI / sibling boot fetches on cloud sync.
     setChatsHydrated(true);
+
+    try {
+      const cloud = await fetchCloudSessions();
+      if (cloud.length > 0) {
+        setSessions((prev) => mergeLocalWithCloud(prev, cloud));
+      }
+    } catch {
+      // Local list already painted; banner path covers later PUTs.
+    }
   };
 
   const hydrateGuest = () => {

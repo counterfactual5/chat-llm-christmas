@@ -18,7 +18,7 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 | `ingest/` | Client-side extract + prepare before upload (PDF/DOCX/PPTX/ZIP/Excel/text/images). Format extractors: `ingest/extractors/{pdf,epub,docx,pptx,spreadsheet,zip}.ts` + barrel `ingest/extractors/index.ts`. Drop whitelist / ZIP member kinds: `ingest/support.ts`. |
 | `gateway/` | Server Files API base URL, upload helpers, content parts for tools. |
 | `scrub-deleted-file.ts` | Scrub deleted account file refs from sessions; collect exclusive file ids when deleting a conversation. |
-| `url-preview.ts` | Side-panel online URL helpers (`isPreviewableHttpUrl`, normalize, external-click detection, `isLikelyAuthGatedPreviewUrl` for hosts that need top-level browser login). |
+| `url-preview.ts` | Side-panel online URL helpers (`isPreviewableHttpUrl`, normalize, `resolvePreviewHttpUrl` for extract/markdown hrefs + base, same-document nav equality, external-click detection, `isLikelyAuthGatedPreviewUrl` for hosts that need top-level browser login). Extract Text links navigate in-panel via `onPreviewLink`; cross-origin iframe clicks stay uninterceptable. |
 | `url-preview-embed.ts` | Blocked-embed probe + degrade when user switches to Embed (XFO/CSP heuristic; auto-back to Text when prefetch is ready). URL Preview defaults to Text for Quote. |
 | `url-extract-clean.ts` | Conservative client cleaning for URL extract text (strip provider header blocks, `[Image N]` placeholders; idempotent; server-side mirror lives in chat-api `services/tools/cleanContent.js`). |
 

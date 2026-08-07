@@ -131,6 +131,9 @@ export function estimateContextBreakdown(
   }, 0);
 
   const reference = estimateTokensFromText(referenceText);
+  // Includes both inline-extract attachments (full body) and fileId-only docs
+  // (pointer body) — `text` is empty for the latter post-U4a, so only their
+  // `name` contributes, which matches how the assembled user ask reads.
   const files = estimateTokensFromText(
     (input.attachmentTexts || [])
       .map((a) => `${a.name}\n${a.text}`)

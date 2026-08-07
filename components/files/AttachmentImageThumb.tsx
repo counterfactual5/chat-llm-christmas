@@ -68,7 +68,9 @@ export function AttachmentImageThumb({
         title={
           uploadFailed
             ? 'Upload to server failed — remove and try again, or paste again'
-            : a.name
+            : a.attachmentRequiresLogin
+              ? 'Sign in to send this image'
+              : a.name
         }
         className={cn(
           'relative block overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400/60',
@@ -106,6 +108,16 @@ export function AttachmentImageThumb({
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-red-500/30 ring-2 ring-red-500/80">
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white shadow-md">
               <X className="h-5 w-5" strokeWidth={2.5} aria-hidden />
+            </span>
+          </div>
+        )}
+        {!uploadFailed && !uploading && a.attachmentRequiresLogin && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-amber-500/20 ring-2 ring-amber-500/70">
+            <span
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-white"
+              title="Sign in to send this image"
+            >
+              <span className="text-[10px] font-bold leading-none">!</span>
             </span>
           </div>
         )}

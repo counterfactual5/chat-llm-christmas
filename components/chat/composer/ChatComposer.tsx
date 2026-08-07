@@ -365,9 +365,17 @@ export function ChatComposer(props: ChatComposerProps) {
                   'group flex max-w-full items-center gap-2 rounded-xl border bg-white px-2 py-1.5 text-xs shadow-sm dark:bg-stone-900',
                   a.uploading
                     ? 'border-stone-300 opacity-80 dark:border-stone-600'
-                    : 'border-stone-200 dark:border-stone-700',
+                    : a.attachmentRequiresLogin
+                      ? 'border-amber-300 dark:border-amber-600'
+                      : 'border-stone-200 dark:border-stone-700',
                 )}
-                title={a.uploading ? 'Uploading…' : a.name}
+                title={
+                  a.uploading
+                    ? 'Uploading…'
+                    : a.attachmentRequiresLogin
+                      ? t('loginForAttachments')
+                      : a.name
+                }
               >
                 {a.uploading ? (
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-stone-400" />
@@ -375,7 +383,13 @@ export function ChatComposer(props: ChatComposerProps) {
                   <FileText className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                 )}
                 <span className="truncate text-stone-600 dark:text-stone-300">{a.name}</span>
-                {a.fileId && !a.uploading && (
+                {a.attachmentRequiresLogin && !a.uploading && (
+                  <span
+                    className="shrink-0 h-1.5 w-1.5 rounded-full bg-amber-500"
+                    aria-hidden
+                  />
+                )}
+                {a.fileId && !a.uploading && !a.attachmentRequiresLogin && (
                   <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400">✓</span>
                 )}
                 <button

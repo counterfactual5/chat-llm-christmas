@@ -6,6 +6,7 @@ import {
   collectFileExtractsFromMessages,
   formatChatFileHistoryRefs,
   HISTORY_FILE_REF_MARKER,
+  isDirectiveBody,
   messagesHaveAttachedFiles,
   parseAttachedFileBlocks,
 } from '@/lib/files/attached-file-blocks';
@@ -145,6 +146,31 @@ describe('attached-file-blocks', () => {
     expect(shown).not.toContain('x'.repeat(450));
   });
 
+  it('collapses a fileId-only pointer body to a history ref (post-U4a doc attach)', () => {
+    // After U4a a docx/pdf attachment emits a file_read pointer instead of an
+    // inline extract. The collapse / re-read path must treat it identically to
+    // a full-extract block: header + fileId is all the history ref needs.
+    const content =
+      '[Attached File: report.docx] (stored fileId: file-doc-1)\n' +
+      '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-doc-1)\n\n---\n\n' +
+      'summarize this report';
+    const collapsed = collapseAttachedFileBlocksForHistory(content, {
+      onlyWithFileId: true,
+    });
+    expect(collapsed).toContain(HISTORY_FILE_REF_MARKER);
+    expect(collapsed).toContain('report.docx (fileId: file-doc-1)');
+    expect(collapsed).toContain('file_read');
+    expect(collapsed).toContain('summarize this report');
+    // The pointer body (~110 chars) fits within the 400-char preview window, so
+    // it survives collapse as the line preview. That's acceptable: it is a
+    // file_read directive, and the ref itself still says 如需全文请调用 file_read.
+    // The key contract is that header + fileId collapse identically.
+
+    // Enables the file_read tool gate on the server (`messagesHaveAttachedFiles`).
+    expect(messagesHaveAttachedFiles([{ role: 'user', content }])).toBe(true);
+    expect(messagesHaveAttachedFiles([{ role: 'user', content: collapsed }])).toBe(true);
+  });
+
   it('collects extracts keyed by fileId', () => {
     const extracts = collectFileExtractsFromMessages([
       {
@@ -161,6 +187,28 @@ describe('attached-file-blocks', () => {
     ]);
     expect(extracts['fid/1']?.text).toBe('body one longer extract');
     expect(extracts['fid/1']?.name).toBe('a.txt');
+  });
+
+  it('skips directive-shaped pointer bodies (not real extracts)', () => {
+    const directive =
+      '[Attached File: a.pdf] (stored fileId: file-x)\n' +
+      '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-x)\n' +
+      '\n\n---\n\nplease summarize';
+    const extracts = collectFileExtractsFromMessages([
+      { role: 'user', content: directive },
+    ]);
+    expect(extracts['file-x']).toBeUndefined();
+  });
+
+  it('still collects genuine markdown-like bodies', () => {
+    const content =
+      '[Attached File: a.pdf] (stored fileId: file-y)\n' +
+      '# Chapter One\n\n| Col | Row |\n| --- | --- |\n| a | b |\n' +
+      '\n\n---\n\nplease summarize';
+    const extracts = collectFileExtractsFromMessages([
+      { role: 'user', content },
+    ]);
+    expect(extracts['file-y']?.text).toContain('# Chapter One');
   });
 });
 
@@ -207,5 +255,67 @@ describe('file_read arg parsing', () => {
       maxPages: 8,
       startPageExplicit: false,
     });
+  });
+});
+
+describe('isDirectiveBody', () => {
+  it('matches canonical single-line pointer bodies', () => {
+    expect(
+      isDirectiveBody(
+        '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=abc123)',
+      ),
+    ).toBe(true);
+    expect(
+      isDirectiveBody('(to read the body, call file_read with file_id=xyz)'),
+    ).toBe(true);
+    // Whitespace outside the parens is fine.
+    expect(
+      isDirectiveBody(
+        '  (call file_read with file_id=a)  ',
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores markdown content (pipe / hash / star / backtick inside)', () => {
+    expect(
+      isDirectiveBody('(call file_read with `file_id`)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read # section)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read | table)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read * doc)'),
+    ).toBe(false);
+  });
+
+  it('ignores multi-line bodies', () => {
+    expect(
+      isDirectiveBody('(call file_read\nwith file_id=x)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read\tfile_id=x)'),
+    ).toBe(false);
+  });
+
+  it('ignores bodies that are not wrapped in parentheses', () => {
+    expect(isDirectiveBody('call file_read with file_id=x')).toBe(false);
+    expect(isDirectiveBody('open (call file_read with file_id=x)')).toBe(false);
+    expect(isDirectiveBody('(call file_read with file_id=x')).toBe(false);
+  });
+
+  it('ignores over-200-char bodies even when wrapped', () => {
+    const filler = 'x'.repeat(250);
+    const body = `(to inspect, call file_read with file_id=abc; ${filler})`;
+    expect(body.length).toBeGreaterThanOrEqual(200);
+    expect(isDirectiveBody(body)).toBe(false);
+  });
+
+  it('ignores genuine user prose mentioning file_read', () => {
+    expect(
+      isDirectiveBody('when you want to read a file you can call file_read'),
+    ).toBe(false);
   });
 });

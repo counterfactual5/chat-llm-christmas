@@ -7,6 +7,7 @@
 import { useCallback, useState } from 'react';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import { uploadAttachmentDirect } from '@/lib/files/direct-upload';
+import { isImageType, uploadFailurePatch } from '@/lib/chat/turn/upload-patch';
 
 export function useChatAttachments(opts: { isAccountBound: boolean }) {
   const { isAccountBound } = opts;
@@ -29,6 +30,11 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
       const placeholders: IngestedAttachment[] = next.map((a) => ({
         ...a,
         uploading: Boolean((a.uploadBlob || a.dataUrl) && isAccountBound),
+        // Logged out + no inline text (docs and images): the model would
+        // silently drop these at send time. Mark them so the UI can warn and
+        // the send gate can block with `needs_login` instead of sending.
+        attachmentRequiresLogin:
+          !isAccountBound && !(typeof a.text === 'string' && a.text.trim().length > 0),
       }));
 
       if (placeholders.length > 0) {
@@ -42,15 +48,15 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
         try {
           // Prefer browser → chat-api direct upload (upload ticket); falls back
           // to same-origin /api/files if the ticket endpoint is not yet live.
+          // Server is the extract authority — no multipart `extract` field.
           const uploaded = await uploadAttachmentDirect({
             blob: a.uploadBlob || null,
             dataUrl: a.dataUrl,
             filename: a.name,
             mime: a.type,
-            extractText: a.text || null,
           });
           const fileId = String(uploaded.id);
-          const isImage = a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
+          const isImage = isImageType(a);
           patch(a.id, (x) => ({
             ...x,
             uploading: false,
@@ -68,20 +74,19 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             /too large|FUNCTION_PAYLOAD_TOO_LARGE|payload too large|FILE_TOO_LARGE|413/i.test(
               msg,
             );
-          const isImage =
-            a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
+          const isImage = isImageType(a);
           uploadErrors.push(
             `${a.name}: ${
               payloadTooLarge ? 'File too large for upload (max 20MB)' : msg
             }`,
           );
           // Images: hard fail (can't chat vision without bytes).
-          // Docs/PDFs: soft warn — extracted text still usable for chat.
-          patch(a.id, (x) =>
-            isImage
-              ? { ...x, uploading: false, uploadError: true }
-              : { ...x, uploading: false, uploadError: false, uploadBlob: undefined },
-          );
+          // Non-image with embedded text: soft fail — extracted text still usable.
+          // Text-less non-image (e.g. unreadable binary): hard fail — nothing to send.
+          patch(a.id, (x) => ({
+            ...x,
+            ...uploadFailurePatch({ isImage, text: a.text, msg }),
+          }));
         }
       }
       const allErrors = [...errors, ...uploadErrors];

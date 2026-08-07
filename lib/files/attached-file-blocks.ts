@@ -28,6 +28,26 @@ export type FileExtractEntry = {
 
 const DEFAULT_PREVIEW_CHARS = 400;
 
+/**
+ * Directive bodies are single-line `(stored server-side … call file_read …)`
+ * hints, not real file text. They must not be cached as extracts — otherwise
+ * file_read treats the pointer as the document when the sidecar is missing.
+ *
+ * Narrow on purpose (KTD3): only deterministic shape — single line, short,
+ * bracket-wrapped, contains the exact phrase `call file_read`, no markdown
+ * structure chars. Real user content (markdown excerpts, conversation about
+ * file_read usage) fails at least one gate.
+ */
+export function isDirectiveBody(body: string): boolean {
+  const t = String(body || '').trim();
+  if (!t.startsWith('(') || !t.endsWith(')')) return false;
+  if (t.length >= 200) return false;
+  if (!/call file_read/.test(t)) return false;
+  if (/[\n\t]/.test(t)) return false;
+  if (/[|#*`]/.test(t)) return false;
+  return true;
+}
+
 /** Split user content into attached-file blocks (order preserved). */
 export function parseAttachedFileBlocks(content: string): AttachedFileBlock[] {
   const raw = String(content || '');
@@ -239,6 +259,9 @@ export function collectFileExtractsFromMessages(
           : '';
     for (const block of parseAttachedFileBlocks(text)) {
       if (!block.fileId || !block.body) continue;
+      // A directive-shaped pointer body ("call file_read with file_id=…") is not
+      // the document itself — skip so file_read doesn't treat it as the extract.
+      if (isDirectiveBody(block.body)) continue;
       // Prefer the longest extract if the same file appears twice.
       const prev = out[block.fileId];
       if (prev && prev.text.length >= block.body.length) continue;

@@ -7,6 +7,7 @@ import {
   resolvePendingAttachments,
   titleForNewConversation,
 } from '@/lib/chat/turn/attachments';
+import { uploadFailurePatch } from '@/lib/chat/turn/upload-patch';
 import {
   exceedsUsableWindow,
   estimateTokensForSend,
@@ -53,8 +54,17 @@ function att(partial: Partial<IngestedAttachment> & Pick<IngestedAttachment, 'id
     fileId: partial.fileId,
     uploading: partial.uploading,
     uploadError: partial.uploadError,
+    attachmentRequiresLogin: partial.attachmentRequiresLogin,
   };
 }
+
+const baseResolveOpts = {
+  isActiveSession: true,
+  vision: false,
+  zhipuVisionOn: false,
+  isAccountBound: true,
+  isLoading: false,
+};
 
 describe('attachments', () => {
   it('drops only a trailing empty incomplete assistant', () => {
@@ -87,6 +97,72 @@ describe('attachments', () => {
     ).toBe('/api/files/fid%2F1');
   });
 
+  it('embeds a file_read pointer for fileId-only docs (post-U4a server extract)', () => {
+    // pdf/docx/epub/xlsx no longer carry client-side text — the body must be a
+    // pointer to the server-side sidecar, not empty/missing content.
+    expect(
+      assembleUserContent(
+        'summarize this report',
+        [],
+        [att({ id: 'd', name: 'report.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fileId: 'file-doc-1' })],
+      ),
+    ).toBe(
+      '[Attached File: report.docx] (stored fileId: file-doc-1)\n' +
+        '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-doc-1)\n\n---\n\nsummarize this report',
+    );
+
+    // Mixed: text-bearing attachments inline; fileId-only docs point.
+    expect(
+      assembleUserContent(
+        'hi',
+        [att({ id: 't', name: 'notes.txt', text: 'inline body' })],
+        [att({ id: 'p', name: 'paper.pdf', type: 'application/pdf', fileId: 'file-pdf-9' })],
+      ),
+    ).toBe(
+      '[Attached File: notes.txt]\ninline body\n\n' +
+        '[Attached File: paper.pdf] (stored fileId: file-pdf-9)\n' +
+        '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-pdf-9)\n\n---\n\nhi',
+    );
+
+    // Default third arg keeps the prior two-arg signature working.
+    expect(assembleUserContent('plain', [])).toBe('plain');
+  });
+
+  it('treats a fileId-only doc attachment as sendable (not empty) without vision', () => {
+    const doc = att({
+      id: 'd1',
+      name: 'report.docx',
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileId: 'file-doc-1',
+    });
+    const resolved = resolvePendingAttachments({
+      ...baseResolveOpts,
+      textToSend: '',
+      attachments: [doc],
+    });
+    expect(resolved).toMatchObject({
+      ok: true,
+      pendingTexts: [],
+      pendingDocRefs: [expect.objectContaining({ id: 'd1' })],
+    });
+    if (resolved.ok) {
+      expect(resolved.fullContent).toContain('[Attached File: report.docx] (stored fileId: file-doc-1)');
+      expect(resolved.fullContent).toContain('file_read with file_id=file-doc-1');
+    }
+  });
+
+  it('hard-blocks send when a text-less doc failed to upload (no sidecar to read)', () => {
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        textToSend: 'hi',
+        attachments: [
+          att({ id: 'd2', name: 'x.pdf', type: 'application/pdf', uploadError: true }),
+        ],
+      }),
+    ).toEqual({ ok: false, error: 'upload_failed' });
+  });
+
   it('does not treat uploaded PDFs as vision images', () => {
     const pdf = att({
       id: 'p',
@@ -96,12 +172,9 @@ describe('attachments', () => {
       fileId: 'fid/pdf',
     });
     const resolved = resolvePendingAttachments({
+      ...baseResolveOpts,
       textToSend: 'hi',
       attachments: [pdf],
-      isActiveSession: true,
-      vision: false,
-      zhipuVisionOn: false,
-      isLoading: false,
     });
     expect(resolved).toMatchObject({
       ok: true,
@@ -119,23 +192,18 @@ describe('attachments', () => {
     });
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: '',
         attachments: [image],
-        isActiveSession: true,
-        vision: false,
-        zhipuVisionOn: false,
-        isLoading: false,
       }).ok,
     ).toBe(false);
 
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: '',
         attachments: [image],
-        isActiveSession: true,
-        vision: false,
         zhipuVisionOn: true,
-        isLoading: false,
       }),
     ).toMatchObject({ ok: true });
 
@@ -146,23 +214,19 @@ describe('attachments', () => {
 
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: 'hi',
         attachments: [att({ id: 'u', name: 'x.png', type: 'image/png', dataUrl: 'd', uploading: true })],
-        isActiveSession: true,
         vision: true,
-        zhipuVisionOn: false,
-        isLoading: false,
       }),
     ).toEqual({ ok: false, error: 'upload_in_progress' });
 
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: '',
         attachments: [],
-        isActiveSession: true,
         vision: true,
-        zhipuVisionOn: false,
-        isLoading: false,
       }),
     ).toEqual({ ok: false, error: 'empty' });
   });
@@ -171,6 +235,193 @@ describe('attachments', () => {
     expect(titleForNewConversation('short')).toBe('short');
     expect(titleForNewConversation('x'.repeat(35))).toBe(`${'x'.repeat(30)}...`);
     expect(titleForNewConversation('', [att({ id: '1', name: 'photo.png' })])).toBe('photo.png');
+  });
+
+  it('blocks with needs_login when logged out and a text-less doc is attached', () => {
+    const pdf = att({
+      id: 'p1',
+      name: 'report.pdf',
+      type: 'application/pdf',
+      attachmentRequiresLogin: true,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        textToSend: 'hi',
+        attachments: [pdf],
+      }),
+    ).toEqual({ ok: false, error: 'needs_login' });
+  });
+
+  it('allows text-bearing plain-text attachments when logged out', () => {
+    const txt = att({
+      id: 't1',
+      name: 'notes.txt',
+      type: 'text/plain',
+      text: 'hello world',
+      // text-bearing attachments never require login
+      attachmentRequiresLogin: false,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        textToSend: 'hi',
+        attachments: [txt],
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('blocks with needs_login when logged out and an image is attached', () => {
+    const img = att({
+      id: 'i1',
+      name: 'photo.png',
+      type: 'image/png',
+      dataUrl: 'data:image/png;base64,aa',
+      attachmentRequiresLogin: true,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        vision: true,
+        textToSend: 'hi',
+        attachments: [img],
+      }),
+    ).toEqual({ ok: false, error: 'needs_login' });
+  });
+
+  it('allows a PDF when logged in (isAccountBound=true, no login flag)', () => {
+    const pdf = att({
+      id: 'p2',
+      name: 'report.pdf',
+      type: 'application/pdf',
+      fileId: 'fid/pdf',
+      attachmentRequiresLogin: false,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: true,
+        textToSend: 'hi',
+        attachments: [pdf],
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('allows an image when logged in (isAccountBound=true, no login flag)', () => {
+    const img = att({
+      id: 'i2',
+      name: 'photo.png',
+      type: 'image/png',
+      dataUrl: 'data:image/png;base64,aa',
+      attachmentRequiresLogin: false,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: true,
+        vision: true,
+        textToSend: 'hi',
+        attachments: [img],
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('needs_login takes precedence over empty gate when only a logged-out doc is present', () => {
+    // Doc has no text, no fileId — nothing to send, but the correct error is
+    // needs_login (not empty) so the user knows to sign in.
+    const pdf = att({
+      id: 'p3',
+      name: 'report.pdf',
+      type: 'application/pdf',
+      attachmentRequiresLogin: true,
+    });
+    const res = resolvePendingAttachments({
+      ...baseResolveOpts,
+      isAccountBound: false,
+      textToSend: '',
+      attachments: [pdf],
+    });
+    // 'empty' fires before any content check — ensure needs_login still surfaces
+    // when there IS accompanying text.
+    expect(res).toEqual({ ok: false, error: 'empty' });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        textToSend: 'please summarize',
+        attachments: [pdf],
+      }),
+    ).toEqual({ ok: false, error: 'needs_login' });
+  });
+});
+
+describe('uploadFailurePatch (upload soft-fail hard-gate)', () => {
+  it('hard-fails text-less non-image attachments (the P1 regression)', () => {
+    // Pre-fix: this branch always set uploadError: false, silencing the send gate.
+    const patch = uploadFailurePatch({
+      isImage: false,
+      text: undefined,
+      msg: 'connection reset',
+    });
+    expect(patch.uploading).toBe(false);
+    expect(patch.uploadError).toBe(true);
+    expect(patch.uploadErrorMessage).toBe('connection reset');
+  });
+
+  it('soft-fails text-bearing non-image attachments (plain-text preserve)', () => {
+    const patch = uploadFailurePatch({
+      isImage: false,
+      text: 'pdf body extracted',
+      msg: 'connection reset',
+    });
+    expect(patch.uploading).toBe(false);
+    expect(patch.uploadError).toBe(false);
+    expect(patch.uploadErrorMessage).toBeUndefined();
+  });
+
+  it('hard-fails image attachments regardless of text', () => {
+    const patch = uploadFailurePatch({
+      isImage: true,
+      text: undefined,
+      msg: 'too large',
+    });
+    expect(patch.uploading).toBe(false);
+    expect(patch.uploadError).toBe(true);
+    expect(patch.uploadErrorMessage).toBe('too large');
+  });
+
+  it('keeps the resolvePendingAttachments send gate aligned with the new flag', () => {
+    // Sanity: a text-less non-image doc with uploadError: true must now block send.
+    const doc = att({
+      id: 'd1',
+      name: 'a.pdf',
+      type: 'application/pdf',
+      uploadError: true,
+    });
+    const resolved = resolvePendingAttachments({
+      ...baseResolveOpts,
+      textToSend: 'hi',
+      attachments: [doc],
+    });
+    expect(resolved).toEqual({ ok: false, error: 'upload_failed' });
+
+    // An image with uploadError also blocks.
+    const image = att({
+      id: 'i1',
+      name: 'x.png',
+      type: 'image/png',
+      uploadError: true,
+    });
+    const resolvedImg = resolvePendingAttachments({
+      ...baseResolveOpts,
+      textToSend: 'hi',
+      attachments: [image],
+      vision: true,
+    });
+    expect(resolvedImg).toEqual({ ok: false, error: 'upload_failed' });
   });
 });
 

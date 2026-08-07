@@ -78,6 +78,7 @@ describe('file_read EXTRACT_PENDING + directive cache', () => {
   });
 
   it('returns EXTRACT_PENDING when extract is partial with empty body and not OCR-ready', async () => {
+    vi.useFakeTimers();
     stubGateway({
       extract: () =>
         jsonResponse({
@@ -88,11 +89,50 @@ describe('file_read EXTRACT_PENDING + directive cache', () => {
         }),
     });
 
-    const out = await runFileRead('file-pending-1', makeCtx());
+    const pending = runFileRead('file-pending-1', makeCtx());
+    await vi.advanceTimersByTimeAsync(6_000);
+    const out = await pending;
+    vi.useRealTimers();
     expect(out.ok).toBe(false);
     expect(out.code).toBe('EXTRACT_PENDING');
     expect(String(out.error || '')).toMatch(/still being built|call file_read again/i);
-    expect(String(out.tip || '')).toMatch(/call file_read again/i);
+    expect(String(out.tip || '')).toMatch(/still building|call file_read again/i);
+  });
+
+  it('succeeds when extract becomes ready within the short pending wait', async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    stubGateway({
+      extract: () => {
+        n += 1;
+        if (n === 1) {
+          return jsonResponse({
+            text: '',
+            chars: 0,
+            partial: true,
+            filename: 'report.docx',
+          });
+        }
+        const body = [
+          '--- page 1 ---',
+          '',
+          'Ready after short wait.',
+        ].join('\n');
+        return jsonResponse({
+          text: body,
+          chars: body.length,
+          partial: false,
+          filename: 'report.docx',
+        });
+      },
+    });
+
+    const pending = runFileRead('file-pending-ready', makeCtx());
+    await vi.advanceTimersByTimeAsync(1_000);
+    const out = await pending;
+    vi.useRealTimers();
+    expect(out.ok).toBe(true);
+    expect(String(out.text || '')).toContain('Ready after short wait');
   });
 
   it('still succeeds when partial extract has sliceable text', async () => {
@@ -192,5 +232,35 @@ describe('file_read EXTRACT_PENDING + directive cache', () => {
     expect(out.ok).toBe(false);
     expect(out.code).not.toBeUndefined();
     expect(String(out.text || '')).toBe('');
+  });
+
+  it('surfaces EXTRACT_PENDING even when a non-directive cache text exists', async () => {
+    vi.useFakeTimers();
+    stubGateway({
+      extract: () =>
+        jsonResponse({
+          text: '',
+          chars: 0,
+          partial: true,
+          filename: 'report.docx',
+        }),
+    });
+
+    const pending = runFileRead(
+      'file-stale-cache',
+      makeCtx({
+        fileExtracts: {
+          'file-stale-cache': {
+            name: 'report.docx',
+            text: '--- page 1 ---\n\nStale partial slice from an earlier poll.',
+          },
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(6_000);
+    const out = await pending;
+    vi.useRealTimers();
+    expect(out.ok).toBe(false);
+    expect(out.code).toBe('EXTRACT_PENDING');
   });
 });

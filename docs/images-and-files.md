@@ -35,7 +35,7 @@ sequenceDiagram
   - **PDF / 纯文本 / 代码**：服务端产出正文（PDF 由 chat-api 走 anydoc/unpdf 路径）；sidecar 可带 page 标记或整段文本，供 `file_read` 切片。
   - **拒收**：legacy `.doc` / `.ppt`（OLE）在上传白名单直接拒绝。
   - **ZIP**：整包 ≤20MB；成员尺寸 / 解压上限守卫逻辑实现在 chat-api 端（fail-closed）；嵌套 zip 只列目录、不展开；Office 成员正文会折叠内层 `--- page N ---`，避免污染外层切片。成员 extract 有界并发（`ZIP_EXTRACT_CONCURRENCY = 4`）。
-  - **预览轮询**：非纯文本附件上传后可标 `pendingExtract`；预览打开时 `waitForFileExtractSidecar` 对 `GET /v1/files/:id/extract` 短轮询（约 1–2s 间隔，默认可约 60s），直到 `partial === false` 或超时；UI 显示「解析中…」。
+  - **预览轮询**：非纯文本附件上传后可标 `pendingExtract`；预览与 attach 预热通过 `waitForSharedFileExtractSidecar` 合并同一 `fileId` 的轮询。`waitForFileExtractSidecar` 用 deadline `AbortSignal` 约束 ticket+GET（约 1–2s 间隔，默认约 60s），直到就绪或超时；UI 显示「解析中…」。
 - 硬限制：chat-api `FILE_UPLOAD_MAX_BYTES`（默认 20MB）；客户端 `MAX_INGEST_BYTES` 同为 20MB；nginx 更大。
 
 `UPLOAD_TOKEN_SECRET` 在 **chat-api** `.env`，不是前端密钥。前端只拿短时 ticket。
@@ -107,7 +107,7 @@ flowchart TD
   - 省略 `start_page` 时：优先 PDF outline 的 `body_start_page`；否则启发式跳过 PDF 目录；对 `# ZIP catalog:` / `# PPTX outline:` / `# DOCX outline:` / `# Excel sheets:` 的 page 1 直接从 page 2 起读。
   - 显式 `start_page=1` 或 `focus=目录/contents` 可读 catalog；ZIP 的 `focus` 也可是成员路径。
   - chat-api sidecar 用 `--- page N ---` 分页，meta 可含 `outline` / `body_start_page` / `pdf_type` / `needs_ocr` / `pages_needing_ocr`（pdf-inspector；扫描件空文本可 `NEEDS_OCR`）；同步先写 partial，后台续抽。
-  - **`EXTRACT_PENDING`**：`file_read` 在 sidecar `partial === true` 且无可用正文、且非 OCR-ready（无 `needs_ocr` / image 页列表）时返回可重试失败，而不是空成功或把 directive pointer 当缓存正文（`isDirectiveBody` 过滤）。
+  - **`EXTRACT_PENDING`**：`file_read` 在 sidecar `partial === true` 且无可用正文、且非 OCR-ready（无 `needs_ocr` / image 页列表）时，先短等再 GET（约数秒），仍未就绪则返回可重试失败；不把 directive pointer 或非 directive 旧缓存当成功。发送瞬间若 `pendingExtract`，user content 会附带 pending 提示。
 - **重读靠 sidecar**：不每轮把全文塞进 `/api/chat` body；`GET /v1/files/:id/extract` 返回文本 + `partial` / `total_pages`。
 - **与图片引用同构**：书籍下载只留 fileId 引用；需要内容时再 `file_read`，类似 `【历史图片引用】` → 按需看图。
 - **删除同步**：Files 管理器删除账户文件时，会清掉会话正文里的 `【历史文件引用】` / `[Attached File]`（避免再调 `file_read`），并标记 Output 卡片为「已从 Files 删除」但仍保留为产出记录；在 Output 里手动删除才会拿掉该记录。打开 Files 时也会对账已缺失的 id。**删除对话**时，会一并删除仅被该对话引用的账户附件（上传 / 生图 / 生成文件 / 书籍论文下载等）；仍被其他对话引用的文件保留。
@@ -140,7 +140,7 @@ ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上
 | 预览字节拉取 | `lib/files/direct-content.ts` → `fetchFileContentForPreview` |
 | 浏览器下载 | `lib/files/download.ts`（composer 包装：`lib/chat/composer/download.ts`） |
 | 历史折叠 | `lib/files/attached-file-blocks.ts` |
-| 预览 extract 轮询 | `lib/files/ensure-file-extract.ts`（`waitForFileExtractSidecar`） |
+| 预览 extract 轮询 | `lib/files/ensure-file-extract.ts`（`waitForFileExtractSidecar` / `waitForSharedFileExtractSidecar`）；映射 `lib/files/extract-sidecar-preview.ts` |
 | 按需切片 | `lib/files/extract-slice.ts`，`lib/tools/file-read/tool.ts` |
 | 生图 + 入库 | `lib/images/generate-and-store.ts`（`/api/images` 与 `generate_image` 工具共用） |
 | 视觉组装 / 转写 | `lib/chat/server/chat-request.ts`，`lib/tools/image-understand/*` |

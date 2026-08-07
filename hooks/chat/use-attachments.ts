@@ -7,7 +7,7 @@
 import { useCallback, useState } from 'react';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import { uploadAttachmentDirect } from '@/lib/files/direct-upload';
-import { waitForFileExtractSidecar } from '@/lib/files/ensure-file-extract';
+import { waitForSharedFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { isImageType, uploadFailurePatch } from '@/lib/chat/turn/upload-patch';
 
 export function useChatAttachments(opts: { isAccountBound: boolean }) {
@@ -76,8 +76,9 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
           }));
           if (pendingExtract) {
             // Fire-and-forget prewarm — do not block the attach UI.
-            void waitForFileExtractSidecar({ fileId }).then((result) => {
-              if (!result.ok) return;
+            // Clear pending on every terminal outcome (ok, TIMEOUT, empty, …).
+            // Shares the poller with preview via waitForSharedFileExtractSidecar.
+            void waitForSharedFileExtractSidecar({ fileId }).then(() => {
               patch(a.id, (x) =>
                 x.fileId === fileId ? { ...x, pendingExtract: false } : x,
               );

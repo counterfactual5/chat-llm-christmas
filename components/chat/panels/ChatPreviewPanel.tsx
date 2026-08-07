@@ -25,7 +25,7 @@ import {
   needsExtractSidecarPreview,
 } from '@/lib/files/preview';
 import { fetchFileContentForPreview } from '@/lib/files/direct-content';
-import { waitForFileExtractSidecar } from '@/lib/files/ensure-file-extract';
+import { loadExtractSidecarPreviewContent } from '@/lib/files/extract-sidecar-preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GeneratedFileEntry } from './OutputPanel';
@@ -107,21 +107,18 @@ export function ChatPreviewPanel({
       try {
         if (needsExtractWait) {
           const fileId = String(file.id || '').trim();
-          const result = await waitForFileExtractSidecar({
+          const state = await loadExtractSidecarPreviewContent({
             fileId,
             signal: ac.signal,
+            failedMessage: t('extractPreviewFailed'),
           });
-          if (cancelled) return;
-          if (!result.ok) {
-            setFetchError(
-              result.code === 'ABORTED'
-                ? ''
-                : result.error || t('extractPreviewFailed'),
-            );
+          if (cancelled || state.status === 'aborted') return;
+          if (state.status === 'failed') {
+            setFetchError(state.error);
             setExtracting(false);
             return;
           }
-          setFetchedContent(String(result.text || ''));
+          setFetchedContent(state.content);
           setExtracting(false);
           return;
         }

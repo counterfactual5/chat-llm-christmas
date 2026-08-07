@@ -265,6 +265,14 @@ type FetchErr = {
   pagesNeedingOcr?: number[];
 };
 
+/** Short wall-clock budget before declaring EXTRACT_PENDING (plan 011 / KTD5). */
+const EXTRACT_PENDING_WAIT_MS = 5_000;
+const EXTRACT_PENDING_INTERVAL_MS = 750;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchGatewayFileText(
   fileId: string,
   apiKey: string | undefined,
@@ -295,83 +303,102 @@ async function fetchGatewayFileText(
     }
   }
 
-  const extractRes = await fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
+  const parseExtractOkBody = (data: {
+    text?: string;
+    filename?: string;
+    mime?: string;
+    partial?: boolean;
+    total_pages?: number | null;
+    extracted_pages?: number | null;
+    body_start_page?: number | null;
+    outline?: Array<{ title?: string; page?: number | null }>;
+    pdf_type?: string | null;
+    pdf_confidence?: number | null;
+    pages_needing_ocr?: number[];
+    needs_ocr?: boolean;
+    doc_kind?: string | null;
+    epub_image_pages?: number[];
+    pptx_image_slides?: number[];
+  }): FetchOk | FetchErr | 'continue' => {
+    const text = String(data.text || '');
+    const needsOcrFlag = Boolean(data.needs_ocr);
+    const docKind = data.doc_kind
+      ? String(data.doc_kind)
+      : /\.epub$/i.test(filename) || mime === 'application/epub+zip'
+        ? 'epub'
+        : /\.pptx$/i.test(filename) || mime.includes('presentationml')
+          ? 'pptx'
+          : null;
+    const listedNeed = Array.isArray(data.pages_needing_ocr)
+      ? data.pages_needing_ocr
+      : Array.isArray(data.epub_image_pages)
+        ? data.epub_image_pages
+        : Array.isArray(data.pptx_image_slides)
+          ? data.pptx_image_slides
+          : [];
+    const ocrReady = needsOcrFlag || listedNeed.length > 0;
+    if (text.trim() || ocrReady) {
+      return {
+        ok: true,
+        name: data.filename ? String(data.filename) : filename,
+        text,
+        mime: data.mime ? String(data.mime) : mime,
+        partial: Boolean(data.partial),
+        totalPages: data.total_pages ?? null,
+        extractedPages: data.extracted_pages ?? null,
+        bodyStartPage:
+          Number(data.body_start_page) > 0 ? Number(data.body_start_page) : null,
+        outline: Array.isArray(data.outline) ? data.outline : [],
+        pdfType: data.pdf_type ?? null,
+        pdfConfidence:
+          Number(data.pdf_confidence) > 0 ? Number(data.pdf_confidence) : null,
+        pagesNeedingOcr: listedNeed,
+        needsOcr: ocrReady,
+        docKind,
+      };
+    }
+    if (Boolean(data.partial)) {
+      return {
+        ok: false,
+        error: [
+          `Text extract for ${filename} is still being built.`,
+          'Wait a moment, then call file_read again.',
+        ].join(' '),
+        code: 'EXTRACT_PENDING',
+      };
+    }
+    return 'continue';
+  };
+
+  const deadline = Date.now() + EXTRACT_PENDING_WAIT_MS;
+  let extractRes = await fetch(`${base}/files/${encodeURIComponent(fileId)}/extract`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  if (extractRes.ok) {
+  while (extractRes.ok) {
     try {
-      const data = (await extractRes.json()) as {
-        text?: string;
-        filename?: string;
-        mime?: string;
-        partial?: boolean;
-        total_pages?: number | null;
-        extracted_pages?: number | null;
-        body_start_page?: number | null;
-        outline?: Array<{ title?: string; page?: number | null }>;
-        pdf_type?: string | null;
-        pdf_confidence?: number | null;
-        pages_needing_ocr?: number[];
-        needs_ocr?: boolean;
-        doc_kind?: string | null;
-        epub_image_pages?: number[];
-        pptx_image_slides?: number[];
-      };
-      const text = String(data.text || '');
-      const needsOcrFlag = Boolean(data.needs_ocr);
-      const docKind = data.doc_kind
-        ? String(data.doc_kind)
-        : /\.epub$/i.test(filename) || mime === 'application/epub+zip'
-          ? 'epub'
-          : /\.pptx$/i.test(filename) ||
-              mime.includes('presentationml')
-            ? 'pptx'
-            : null;
-      const listedNeed = Array.isArray(data.pages_needing_ocr)
-        ? data.pages_needing_ocr
-        : Array.isArray(data.epub_image_pages)
-          ? data.epub_image_pages
-          : Array.isArray(data.pptx_image_slides)
-            ? data.pptx_image_slides
-            : [];
-      const ocrReady = needsOcrFlag || listedNeed.length > 0;
-      // Empty placeholder extract is OK when OCR is available on demand.
-      if (text.trim() || ocrReady) {
-        return {
-          ok: true,
-          name: data.filename ? String(data.filename) : filename,
-          text,
-          mime: data.mime ? String(data.mime) : mime,
-          partial: Boolean(data.partial),
-          totalPages: data.total_pages ?? null,
-          extractedPages: data.extracted_pages ?? null,
-          bodyStartPage:
-            Number(data.body_start_page) > 0 ? Number(data.body_start_page) : null,
-          outline: Array.isArray(data.outline) ? data.outline : [],
-          pdfType: data.pdf_type ?? null,
-          pdfConfidence:
-            Number(data.pdf_confidence) > 0 ? Number(data.pdf_confidence) : null,
-          pagesNeedingOcr: listedNeed,
-          needsOcr: ocrReady,
-          docKind,
-        };
+      const data = (await extractRes.json()) as Parameters<typeof parseExtractOkBody>[0];
+      const parsed = parseExtractOkBody(data);
+      if (parsed !== 'continue') {
+        if (
+          !parsed.ok &&
+          parsed.code === 'EXTRACT_PENDING' &&
+          Date.now() + EXTRACT_PENDING_INTERVAL_MS < deadline
+        ) {
+          await sleepMs(EXTRACT_PENDING_INTERVAL_MS);
+          extractRes = await fetch(
+            `${base}/files/${encodeURIComponent(fileId)}/extract`,
+            { headers: { Authorization: `Bearer ${apiKey}` } },
+          );
+          continue;
+        }
+        return parsed;
       }
-      // Sidecar still building: no usable body and not OCR-ready → retry later
-      // (KTD4). Do not fall through to /content and invent a success.
-      if (Boolean(data.partial)) {
-        return {
-          ok: false,
-          error: [
-            `Text extract for ${filename} is still being built.`,
-            'Wait a moment, then call file_read again.',
-          ].join(' '),
-          code: 'EXTRACT_PENDING',
-        };
-      }
+      break;
     } catch {
-      /* fall through */
+      break;
     }
-  } else if (extractRes.status === 404) {
+  }
+  if (!extractRes.ok && extractRes.status === 404) {
     let code = 'EXTRACT_NOT_FOUND';
     let detail = '';
     try {
@@ -489,6 +516,7 @@ const FILE_READ_SYSTEM_PROMPT = [
   'Omitting start_page auto-skips table-of-contents / catalog / front matter when possible and starts near the body; you still only get ~8 units from that start.',
   'To read the TOC, ZIP catalog, or cover, pass start_page=1 explicitly, or focus="contents" / "目录". For ZIP, focus may be a member path from the catalog.',
   'Empty or image-only pages in the current window may be OCR’d on demand — never say you cannot read a file when a 【历史文件引用】 marker is present.',
+  'If file_read returns code EXTRACT_PENDING, the server extract is still building — do not invent body text and do not claim the file is unreadable; wait for a later turn and call file_read again.',
   'Workflow: first call with only file_id for a body overview; then call again with start_page or focus to drill into chapters or ZIP members.',
   'When has_more is true, continue with a higher start_page. Never invent file contents.',
 ].join(' ');
@@ -602,7 +630,11 @@ export function createFileReadTool(): ChatTool {
           ctx.credentials?.skillsApiKey || ctx.gateway?.apiKey,
         );
         if (!fetched.ok) {
-          if (!text) {
+          // Never let stale/partial cache hide an in-progress extract — the
+          // model must see EXTRACT_PENDING and retry after the sidecar settles.
+          const surfaceError =
+            !text || fetched.code === 'EXTRACT_PENDING';
+          if (surfaceError) {
             ctx.send({
               tool: {
                 status: 'done',
@@ -625,7 +657,7 @@ export function createFileReadTool(): ChatTool {
                   fetched.needsOcr || fetched.code === 'NEEDS_OCR'
                     ? 'This document looks image-based. Call file_read again after OCR is available, or ensure the gateway OCR endpoint is configured.'
                     : fetched.code === 'EXTRACT_PENDING'
-                      ? 'Extract sidecar is still building; wait briefly, then call file_read again.'
+                      ? 'Extract sidecar is still building. Do not invent file contents; wait for the next user turn or a later tool round after extract finishes, then call file_read again.'
                       : undefined,
               }),
             };

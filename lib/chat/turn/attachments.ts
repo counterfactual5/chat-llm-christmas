@@ -160,11 +160,21 @@ export function resolvePendingAttachments(
 /**
  * Body emitted for a fileId-only attachment: no inline extract (the browser
  * does not have it), so point the model at the server-side sidecar instead.
+ * When pendingExtract is true at send time, note that extract may still be
+ * building (send-time snapshot — history is not rewritten later).
  */
-function docRefBody(fileId: string): string {
-  return (
+function docRefBody(
+  fileId: string,
+  opts?: { pendingExtract?: boolean },
+): string {
+  const base =
     `(content is stored server-side in the extract sidecar; ` +
-    `to inspect it, call file_read with file_id=${fileId})`
+    `to inspect it, call file_read with file_id=${fileId})`;
+  if (!opts?.pendingExtract) return base;
+  return (
+    `${base} ` +
+    `(server extract may still be building; file_read may return EXTRACT_PENDING ` +
+    `until ready — do not invent file contents)`
   );
 }
 
@@ -189,7 +199,10 @@ export function assembleUserContent(
       }),
       ...pendingDocRefs.map((a) => {
         const fileId = a.fileId!;
-        return `[Attached File: ${a.name}] (stored fileId: ${fileId})\n${docRefBody(fileId)}`;
+        return (
+          `[Attached File: ${a.name}] (stored fileId: ${fileId})\n` +
+          docRefBody(fileId, { pendingExtract: Boolean(a.pendingExtract) })
+        );
       }),
     ];
     fullContent =

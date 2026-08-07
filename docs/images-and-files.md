@@ -131,7 +131,8 @@ ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上
 | 主题 | 路径 |
 |------|------|
 | 直传 | `lib/files/direct-upload.ts`，chat-api `routes/files.js` + `uploadToken.js` |
-| 抽取 / 直传准备 | `lib/files/ingest/*`（格式：`ingest/extractors/{pdf,epub,docx,pptx,spreadsheet,zip}.ts`） |
+| 上传 metadata / 图片压缩 | `lib/files/ingest/*`（仅做 validate + image compress，不再做正文抽取） |
+| 权威 extract 路径（anydoc / JS / image-augment） | chat-api `src/services/fileExtract.js`（`extractPlainTextFromBytes`） |
 | 分页 extract SSOT | `lib/files/paged-extract.ts` |
 | 文本扩展名 / MIME / 高亮 | `lib/files/text-types.ts`（`create_file`、预览路由、FilePreviewOverlay 共用） |
 | 预览字节拉取 | `lib/files/direct-content.ts` → `fetchFileContentForPreview` |

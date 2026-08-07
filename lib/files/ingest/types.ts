@@ -24,4 +24,11 @@ export type IngestedAttachment = {
   uploadError?: boolean;
   /** Last upload failure message (shown in tooltip / debugging). */
   uploadErrorMessage?: string;
+  /**
+   * Set by the hook when the user is logged out and this attachment has no
+   * inline text (docs + images): it will not be uploaded, so the model would
+   * silently drop it at send time. UI should warn; the send gate blocks with
+   * `needs_login` unless the user signs in.
+   */
+  attachmentRequiresLogin?: boolean;
 };

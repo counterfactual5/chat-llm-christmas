@@ -30,6 +30,11 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
       const placeholders: IngestedAttachment[] = next.map((a) => ({
         ...a,
         uploading: Boolean((a.uploadBlob || a.dataUrl) && isAccountBound),
+        // Logged out + no inline text (docs and images): the model would
+        // silently drop these at send time. Mark them so the UI can warn and
+        // the send gate can block with `needs_login` instead of sending.
+        attachmentRequiresLogin:
+          !isAccountBound && !(typeof a.text === 'string' && a.text.trim().length > 0),
       }));
 
       if (placeholders.length > 0) {

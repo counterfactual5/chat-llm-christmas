@@ -944,6 +944,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       isActiveSession: sessionId === activeSessionId,
       vision: selectedSpec.vision,
       zhipuVisionOn,
+      isAccountBound,
       isLoading: isSessionLoading(sessionId),
       force,
       alreadyLoading: opts?.alreadyLoading,
@@ -955,6 +956,9 @@ export function useChatLogic(props: UseChatLogicProps) {
         setAttachError(t('waitForUpload'));
       } else if (resolved.error === 'upload_failed') {
         setAttachError(t('uploadFailedRetry'));
+      } else if (resolved.error === 'needs_login') {
+        setAttachError(t('loginForAttachments'));
+        openLoginModal();
       }
       return false;
     }
@@ -1388,8 +1392,12 @@ export function useChatLogic(props: UseChatLogicProps) {
     );
     // Count content-bearing doc attachments too: post-U4a a doc may carry only a
     // fileId (extract lives server-side) and is still resendable via file_read.
+    // When logged out, attachments flagged as requiring login have no text
+    // and no fileId — they must not satisfy this gate on their own.
     const hasTextFiles = editingMessageAttachments.some(
-      (a) => a.text || (Boolean(a.fileId) && !isImageAttachment(a)),
+      (a) =>
+        !a.attachmentRequiresLogin &&
+        (a.text || (Boolean(a.fileId) && !isImageAttachment(a))),
     );
     // Do not bail on isActiveLoading — stop the in-flight turn then resubmit with force.
     if (!content && resendImages.length === 0 && !hasTextFiles) return;

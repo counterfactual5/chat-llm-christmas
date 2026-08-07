@@ -22,6 +22,7 @@ export type AttachmentGateError =
   | 'images_need_vision'
   | 'upload_in_progress'
   | 'upload_failed'
+  | 'needs_login'
   | 'empty';
 
 export type ResolvePendingAttachmentsOpts = {
@@ -33,6 +34,7 @@ export type ResolvePendingAttachmentsOpts = {
   isActiveSession: boolean;
   vision: boolean;
   zhipuVisionOn: boolean;
+  isAccountBound: boolean;
   isLoading: boolean;
   force?: boolean;
   alreadyLoading?: boolean;
@@ -71,6 +73,7 @@ export function resolvePendingAttachments(
     isActiveSession,
     vision,
     zhipuVisionOn,
+    isAccountBound,
     isLoading,
     force,
     alreadyLoading,
@@ -134,6 +137,14 @@ export function resolvePendingAttachments(
     )
   ) {
     return { ok: false, error: 'upload_failed' };
+  }
+  // Logged out: attachments that could not be uploaded (docs + images with no
+  // inline text) would be silently dropped at send time. Block with
+  // `needs_login` so the caller can open the login modal before resubmitting.
+  if (!isAccountBound) {
+    if (uploadChecks.some((a) => a.attachmentRequiresLogin)) {
+      return { ok: false, error: 'needs_login' };
+    }
   }
 
   return {

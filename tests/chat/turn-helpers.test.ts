@@ -54,8 +54,17 @@ function att(partial: Partial<IngestedAttachment> & Pick<IngestedAttachment, 'id
     fileId: partial.fileId,
     uploading: partial.uploading,
     uploadError: partial.uploadError,
+    attachmentRequiresLogin: partial.attachmentRequiresLogin,
   };
 }
+
+const baseResolveOpts = {
+  isActiveSession: true,
+  vision: false,
+  zhipuVisionOn: false,
+  isAccountBound: true,
+  isLoading: false,
+};
 
 describe('attachments', () => {
   it('drops only a trailing empty incomplete assistant', () => {
@@ -127,12 +136,9 @@ describe('attachments', () => {
       fileId: 'file-doc-1',
     });
     const resolved = resolvePendingAttachments({
+      ...baseResolveOpts,
       textToSend: '',
       attachments: [doc],
-      isActiveSession: true,
-      vision: false,
-      zhipuVisionOn: false,
-      isLoading: false,
     });
     expect(resolved).toMatchObject({
       ok: true,
@@ -148,14 +154,11 @@ describe('attachments', () => {
   it('hard-blocks send when a text-less doc failed to upload (no sidecar to read)', () => {
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: 'hi',
         attachments: [
           att({ id: 'd2', name: 'x.pdf', type: 'application/pdf', uploadError: true }),
         ],
-        isActiveSession: true,
-        vision: false,
-        zhipuVisionOn: false,
-        isLoading: false,
       }),
     ).toEqual({ ok: false, error: 'upload_failed' });
   });
@@ -169,12 +172,9 @@ describe('attachments', () => {
       fileId: 'fid/pdf',
     });
     const resolved = resolvePendingAttachments({
+      ...baseResolveOpts,
       textToSend: 'hi',
       attachments: [pdf],
-      isActiveSession: true,
-      vision: false,
-      zhipuVisionOn: false,
-      isLoading: false,
     });
     expect(resolved).toMatchObject({
       ok: true,
@@ -192,23 +192,18 @@ describe('attachments', () => {
     });
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: '',
         attachments: [image],
-        isActiveSession: true,
-        vision: false,
-        zhipuVisionOn: false,
-        isLoading: false,
       }).ok,
     ).toBe(false);
 
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: '',
         attachments: [image],
-        isActiveSession: true,
-        vision: false,
         zhipuVisionOn: true,
-        isLoading: false,
       }),
     ).toMatchObject({ ok: true });
 
@@ -219,23 +214,19 @@ describe('attachments', () => {
 
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: 'hi',
         attachments: [att({ id: 'u', name: 'x.png', type: 'image/png', dataUrl: 'd', uploading: true })],
-        isActiveSession: true,
         vision: true,
-        zhipuVisionOn: false,
-        isLoading: false,
       }),
     ).toEqual({ ok: false, error: 'upload_in_progress' });
 
     expect(
       resolvePendingAttachments({
+        ...baseResolveOpts,
         textToSend: '',
         attachments: [],
-        isActiveSession: true,
         vision: true,
-        zhipuVisionOn: false,
-        isLoading: false,
       }),
     ).toEqual({ ok: false, error: 'empty' });
   });
@@ -244,6 +235,126 @@ describe('attachments', () => {
     expect(titleForNewConversation('short')).toBe('short');
     expect(titleForNewConversation('x'.repeat(35))).toBe(`${'x'.repeat(30)}...`);
     expect(titleForNewConversation('', [att({ id: '1', name: 'photo.png' })])).toBe('photo.png');
+  });
+
+  it('blocks with needs_login when logged out and a text-less doc is attached', () => {
+    const pdf = att({
+      id: 'p1',
+      name: 'report.pdf',
+      type: 'application/pdf',
+      attachmentRequiresLogin: true,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        textToSend: 'hi',
+        attachments: [pdf],
+      }),
+    ).toEqual({ ok: false, error: 'needs_login' });
+  });
+
+  it('allows text-bearing plain-text attachments when logged out', () => {
+    const txt = att({
+      id: 't1',
+      name: 'notes.txt',
+      type: 'text/plain',
+      text: 'hello world',
+      // text-bearing attachments never require login
+      attachmentRequiresLogin: false,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        textToSend: 'hi',
+        attachments: [txt],
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('blocks with needs_login when logged out and an image is attached', () => {
+    const img = att({
+      id: 'i1',
+      name: 'photo.png',
+      type: 'image/png',
+      dataUrl: 'data:image/png;base64,aa',
+      attachmentRequiresLogin: true,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        vision: true,
+        textToSend: 'hi',
+        attachments: [img],
+      }),
+    ).toEqual({ ok: false, error: 'needs_login' });
+  });
+
+  it('allows a PDF when logged in (isAccountBound=true, no login flag)', () => {
+    const pdf = att({
+      id: 'p2',
+      name: 'report.pdf',
+      type: 'application/pdf',
+      fileId: 'fid/pdf',
+      attachmentRequiresLogin: false,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: true,
+        textToSend: 'hi',
+        attachments: [pdf],
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('allows an image when logged in (isAccountBound=true, no login flag)', () => {
+    const img = att({
+      id: 'i2',
+      name: 'photo.png',
+      type: 'image/png',
+      dataUrl: 'data:image/png;base64,aa',
+      attachmentRequiresLogin: false,
+    });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: true,
+        vision: true,
+        textToSend: 'hi',
+        attachments: [img],
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it('needs_login takes precedence over empty gate when only a logged-out doc is present', () => {
+    // Doc has no text, no fileId — nothing to send, but the correct error is
+    // needs_login (not empty) so the user knows to sign in.
+    const pdf = att({
+      id: 'p3',
+      name: 'report.pdf',
+      type: 'application/pdf',
+      attachmentRequiresLogin: true,
+    });
+    const res = resolvePendingAttachments({
+      ...baseResolveOpts,
+      isAccountBound: false,
+      textToSend: '',
+      attachments: [pdf],
+    });
+    // 'empty' fires before any content check — ensure needs_login still surfaces
+    // when there IS accompanying text.
+    expect(res).toEqual({ ok: false, error: 'empty' });
+    expect(
+      resolvePendingAttachments({
+        ...baseResolveOpts,
+        isAccountBound: false,
+        textToSend: 'please summarize',
+        attachments: [pdf],
+      }),
+    ).toEqual({ ok: false, error: 'needs_login' });
   });
 });
 
@@ -291,12 +402,9 @@ describe('uploadFailurePatch (upload soft-fail hard-gate)', () => {
       uploadError: true,
     });
     const resolved = resolvePendingAttachments({
+      ...baseResolveOpts,
       textToSend: 'hi',
       attachments: [doc],
-      isActiveSession: true,
-      vision: false,
-      zhipuVisionOn: false,
-      isLoading: false,
     });
     expect(resolved).toEqual({ ok: false, error: 'upload_failed' });
 
@@ -308,12 +416,10 @@ describe('uploadFailurePatch (upload soft-fail hard-gate)', () => {
       uploadError: true,
     });
     const resolvedImg = resolvePendingAttachments({
+      ...baseResolveOpts,
       textToSend: 'hi',
       attachments: [image],
-      isActiveSession: true,
       vision: true,
-      zhipuVisionOn: false,
-      isLoading: false,
     });
     expect(resolvedImg).toEqual({ ok: false, error: 'upload_failed' });
   });

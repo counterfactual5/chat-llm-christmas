@@ -122,6 +122,49 @@ function sectionsFromMammothHtml(
     let s = String(fragment || '');
     s = s.replace(/<br\s*\/?>/gi, '\n');
     s = s.replace(/<\/p>/gi, '\n\n');
+    s = s.replace(
+      /<table[^>]*>([\s\S]*?)<\/table>/gi,
+      (_, inner: string) => {
+        const rows: string[][] = [];
+        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        let rowMatch: RegExpExecArray | null;
+        while ((rowMatch = rowRegex.exec(inner))) {
+          const cells: string[] = [];
+          const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+          let cellMatch: RegExpExecArray | null;
+          while ((cellMatch = cellRegex.exec(rowMatch[1]!))) {
+            const cell = cellMatch[1]!
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/&nbsp;/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/\s+/g, ' ')
+              .trim();
+            cells.push(cell);
+          }
+          if (cells.length) rows.push(cells);
+        }
+        if (rows.length >= 2) {
+          const width = Math.max(...rows.map((r) => r.length));
+          const esc = (c: string) => c.replace(/\|/g, '\\|');
+          const line = (r: string[]) =>
+            `| ${Array.from({ length: width }, (_, i) => esc(String(r[i] ?? ''))).join(' | ')} |`;
+          const sep = `| ${Array.from({ length: width }, () => '---').join(' | ')} |`;
+          return `\n${line(rows[0]!)}\n${sep}\n${rows.slice(1).map(line).join('\n')}\n\n`;
+        }
+        // Fallback: inline as space-separated cells.
+        const flat = inner
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim();
+        return ` ${flat} `;
+      },
+    );
     s = s.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, inner) => `- ${stripTags(inner)}\n`);
     s = s.replace(/<[^>]+>/g, ' ');
     s = s

@@ -13,21 +13,52 @@ export function readAsDataUrl(file: File): Promise<string> {
  * Server-safe PDF text extract (file_read / ensure sidecar).
  * Do not use pdfjs-dist here — it expects DOM/canvas and throws
  * `Cannot read properties of undefined (reading 'prototype')` on Vercel Node.
+ *
+ * Output is aligned with the browser path: page 1 = outline, page 2.. = one
+ * `--- page N ---` per PDF page when a reliable per-page split is available.
  */
 export async function extractPdfTextFromBytes(data: Uint8Array): Promise<string> {
   const { extractText, getDocumentProxy } = await import('unpdf');
+  const { buildCatalogPage, serializePagedExtract } = await import(
+    '@/lib/files/paged-extract'
+  );
   const pdf = await getDocumentProxy(data);
   const pageCount = Number(pdf.numPages) || 0;
-  const { text, totalPages } = await extractText(pdf, { mergePages: true });
-  let body = String(text || '').trim();
+  const { text, totalPages } = await extractText(pdf, { mergePages: false });
+  const pagesText = Array.isArray(text) ? text.map((t) => String(t || '').trim()) : [];
+  const merged = pagesText.filter(Boolean).join('\n\n').trim();
+  const body = merged || String(text || '').trim();
   if (!body) return '';
-  // Soft page hint when the library reported more pages than we typically show
-  // in the browser ingest path (full text still returned; file_read truncates).
   const pages = totalPages || pageCount;
-  if (pages > PDF_PAGE_LIMIT) {
-    body += `\n\n[…document has ${pages} pages; extract may be long]`;
+  // Single-page document: keep a simple one-page extract (also matches client).
+  if (pages <= 1) {
+    return body;
   }
-  return body;
+  // Multi-page: keep everything in one page 2 body so `file_read` slicing stays
+  // simple; only add an outline catalog so the model remembers pagination.
+  const limit = Math.min(pages || PDF_PAGE_LIMIT, PDF_PAGE_LIMIT);
+  const catalogEntries: Array<{ label: string; kind: string; note: string }> = [
+    {
+      label: '(document body)',
+      kind: 'pages',
+      note:
+        pages > limit
+          ? `extracted first ${limit} of ${pages} pages`
+          : `${limit} pages extracted`,
+    },
+  ];
+  return serializePagedExtract([
+    {
+      page: 1,
+      body: buildCatalogPage({
+        title: 'PDF extract: page outline',
+        entries: catalogEntries,
+      }),
+    },
+    // Per-page slicing is currently left to the client / file_read layer; here
+    // we store one body page so server-side read returns a stable chunk.
+    { page: 2, title: 'Document', body },
+  ]);
 }
 
 export async function extractPdfText(file: File): Promise<string> {
@@ -47,6 +78,32 @@ export async function extractPdfText(file: File): Promise<string> {
   if (doc.numPages > limit) {
     pages.push(`\n[…truncated: showing first ${limit} of ${doc.numPages} pages]`);
   }
-  return pages.join('\n\n').trim();
+  const body = pages.join('\n\n').trim();
+  if (!body) return '';
+  if (doc.numPages <= 1) {
+    return body;
+  }
+  const { buildCatalogPage, serializePagedExtract } = await import(
+    '@/lib/files/paged-extract'
+  );
+  return serializePagedExtract([
+    {
+      page: 1,
+      body: buildCatalogPage({
+        title: `PDF extract: ${file.name || 'document.pdf'}`,
+        entries: [
+          {
+            label: '(document body)',
+            kind: 'pages',
+            note:
+              doc.numPages > limit
+                ? `extracted first ${limit} of ${doc.numPages} pages`
+                : `${limit} pages extracted`,
+          },
+        ],
+      }),
+    },
+    { page: 2, title: 'Document', body },
+  ]);
 }
 

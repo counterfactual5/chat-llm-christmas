@@ -3,12 +3,100 @@ export const PPTX_MIME =
 
 export const ZIP_MIME = 'application/zip';
 
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46]; // %PDF
+const ZIP_LOCAL = [0x50, 0x4b, 0x03, 0x04]; // PK..
+/** OLE (legacy .doc/.ppt/.xls) starts with D0 CF 11 E0 A1 B1 1A E1. */
+const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+function startsWith(bytes: Uint8Array, magic: number[], offset = 0): boolean {
+  if (bytes.length < offset + magic.length) return false;
+  return magic.every((b, i) => bytes[offset + i] === b);
+}
+
+export function isPdfMagicBytes(bytes: Uint8Array): boolean {
+  const first = bytes.subarray(0, Math.min(bytes.length, 1024));
+  for (let i = 0; i <= first.length - PDF_MAGIC.length; i++) {
+    if (startsWith(first, PDF_MAGIC, i)) return true;
+  }
+  return false;
+}
+
+export function isZipMagicBytes(bytes: Uint8Array): boolean {
+  return startsWith(bytes, ZIP_LOCAL);
+}
+
+/** EPUB is a ZIP whose first entry is the uncompressed "mimetype" file. */
+export function isEpubMagicBytes(bytes: Uint8Array): boolean {
+  if (!isZipMagicBytes(bytes)) return false;
+  const head = new TextDecoder('latin1').decode(
+    bytes.slice(0, Math.min(bytes.length, 128)),
+  );
+  return /mimetype/i.test(head) && /epub/i.test(head);
+}
+
+export function isOleMagicBytes(bytes: Uint8Array): boolean {
+  return startsWith(bytes, OLE_MAGIC);
+}
+
+export type IngestSniffKind =
+  | 'pdf'
+  | 'zip_container'
+  | 'docx'
+  | 'pptx'
+  | 'xlsx'
+  | 'epub'
+  | 'ole_legacy'
+  | 'unknown';
+
+function hasOoxmlContentTypes(bytes: Uint8Array): boolean {
+  if (!isZipMagicBytes(bytes)) return false;
+  const head = new TextDecoder('latin1').decode(
+    bytes.slice(0, Math.min(bytes.length, 2048)),
+  );
+  return /\[content_types\]\.xml/i.test(head);
+}
+
+/**
+ * Content sniff only; extension checks in `isSupportedDropFile` still decide
+ * whether we accept the file for browser ingest.
+ */
+export function sniffIngestKind(bytes: Uint8Array): IngestSniffKind {
+  if (!bytes?.length) return 'unknown';
+  if (isPdfMagicBytes(bytes)) return 'pdf';
+  if (isOleMagicBytes(bytes)) return 'ole_legacy';
+  if (isEpubMagicBytes(bytes)) return 'epub';
+  if (isZipMagicBytes(bytes)) {
+    if (!hasOoxmlContentTypes(bytes)) return 'zip_container';
+    const head = new TextDecoder('latin1').decode(
+      bytes.slice(0, Math.min(bytes.length, 4096)),
+    );
+    if (/word\//i.test(head) || /wordprocessingml/i.test(head)) return 'docx';
+    if (/ppt\//i.test(head) || /presentationml/i.test(head)) return 'pptx';
+    if (/xl\//i.test(head) || /spreadsheetml/i.test(head)) return 'xlsx';
+    return 'zip_container';
+  }
+  return 'unknown';
+}
+
+/** Legacy OLE formats we deliberately do not parse in the browser. */
+export function isLegacyOleOfficeFile(file: { name?: string; type?: string }): boolean {
+  const lower = String(file?.name || '').toLowerCase();
+  const type = String(file?.type || '').toLowerCase();
+  return (
+    lower.endsWith('.doc') ||
+    lower.endsWith('.ppt') ||
+    type === 'application/msword' ||
+    type === 'application/vnd.ms-powerpoint'
+  );
+}
+
 /** File-type gating for drag/drop + file picker uploads. */
 export function isSupportedDropFile(file: File): boolean {
   const name = file.name.toLowerCase();
   if (file.type.startsWith('image/')) return true;
   if (file.type.startsWith('text/') || file.type === 'application/json') return true;
   if (file.type === 'application/pdf' || name.endsWith('.pdf')) return true;
+  if (name.endsWith('.epub') || file.type === 'application/epub+zip') return true;
   if (
     name.endsWith('.docx') ||
     file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -76,7 +164,7 @@ export function isZipArchiveFile(file: { name?: string; type?: string }): boolea
  */
 export function zipMemberExtractKind(
   path: string,
-): 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'xls' | 'image' | 'text' | 'nested_zip' | 'skip' {
+): 'pdf' | 'epub' | 'docx' | 'pptx' | 'xlsx' | 'xls' | 'image' | 'text' | 'nested_zip' | 'skip' {
   const base = String(path || '')
     .replace(/\\/g, '/')
     .split('/')
@@ -86,6 +174,7 @@ export function zipMemberExtractKind(
   if (!lower || lower.startsWith('._')) return 'skip';
   if (lower.endsWith('.zip')) return 'nested_zip';
   if (lower.endsWith('.pdf')) return 'pdf';
+  if (lower.endsWith('.epub')) return 'epub';
   if (lower.endsWith('.docx')) return 'docx';
   if (lower.endsWith('.pptx')) return 'pptx';
   if (lower.endsWith('.xlsx')) return 'xlsx';

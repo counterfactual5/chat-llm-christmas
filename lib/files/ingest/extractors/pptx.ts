@@ -25,12 +25,66 @@ function decodeXmlEntities(raw: string): string {
     });
 }
 
-/** Pull plain text runs from a PPTX slide/notes XML fragment. */
-function textFromPptxXml(xml: string): string {
+/** Extract one PPTX table (`a:tbl`) into a simple markdown table string. */
+function markdownTableFromPptxXml(tbl: string): string {
+  const rows: string[][] = [];
+  const trRe = /<a:tr\b[^>]*>([\s\S]*?)<\/a:tr>/gi;
+  let trm: RegExpExecArray | null;
+  while ((trm = trRe.exec(tbl))) {
+    const rowXml = trm[1]!;
+    const cells: string[] = [];
+    const tcRe = /<a:tc\b[^>]*>([\s\S]*?)<\/a:tc>/gi;
+    let tcm: RegExpExecArray | null;
+    while ((tcm = tcRe.exec(rowXml))) {
+      const cellText = textFromPptxXml(tcm[1]!);
+      cells.push(cellText);
+    }
+    if (cells.length) rows.push(cells);
+  }
+  if (rows.length < 2) {
+    return '';
+  }
+  const width = Math.max(...rows.map((r) => r.length));
+  const esc = (c: string) => String(c ?? '').replace(/\|/g, '\\|');
+  const line = (r: string[]) =>
+    `| ${Array.from({ length: width }, (_, i) => esc(r[i])).join(' | ')} |`;
+  const sep = `| ${Array.from({ length: width }, () => '---').join(' | ')} |`;
+  return `${line(rows[0]!)}\n${sep}\n${rows.slice(1).map(line).join('\n')}`;
+}
+
+/** Pull table fragments (in source order) from a PPTX slide. */
+export function tablesFromPptxXml(xml: string): string[] {
+  const out: string[] = [];
+  const tblRe = /<a:tbl\b[^>]*>([\s\S]*?)<\/a:tbl>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = tblRe.exec(xml))) {
+    const md = markdownTableFromPptxXml(m[0]!);
+    if (md) out.push(md);
+  }
+  return out;
+}
+
+/**
+ * Pull plain text runs from a PPTX slide/notes XML fragment, optionally
+ * skipping table fragments so table bodies can be rendered separately.
+ */
+function textFromPptxXml(xml: string, opts?: { skipTables?: boolean }): string {
   const parts: string[] = [];
+  if (!opts?.skipTables) {
+    const re = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml))) {
+      const t = decodeXmlEntities(m[1]).replace(/\s+/g, ' ').trim();
+      if (t) parts.push(t);
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+  // Remove table/subtree chunks before extracting runs so we don't re-dump
+  // table cells inline; caller renders them as markdown tables instead.
+  const withoutTables = String(xml || '').replace(/<a:tbl\b[\s\S]*?<\/a:tbl>/gi, '');
   const re = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(xml))) {
+  while ((m = re.exec(withoutTables))) {
     const t = decodeXmlEntities(m[1]).replace(/\s+/g, ' ').trim();
     if (t) parts.push(t);
   }
@@ -87,12 +141,18 @@ export async function extractPptxTextFromBytes(
     const { path, num } = slideEntries[i]!;
     const xml = await zip.files[path]!.async('string');
     const hasImage = pptxSlideHasImage(xml);
-    let body = textFromPptxXml(xml);
+    let body = textFromPptxXml(xml, { skipTables: true });
+    const tables = tablesFromPptxXml(xml);
     const notesPath = `ppt/notesSlides/notesSlide${num}.xml`;
+    let notes = '';
     if (zip.files[notesPath]) {
-      const notes = textFromPptxXml(await zip.files[notesPath]!.async('string'));
-      if (notes) body = body ? `${body}\n\n[notes] ${notes}` : `[notes] ${notes}`;
+      notes = textFromPptxXml(await zip.files[notesPath]!.async('string'));
     }
+    const chunks: string[] = [];
+    if (body) chunks.push(body);
+    chunks.push(...tables);
+    if (notes) chunks.push(`[notes] ${notes}`);
+    body = chunks.join('\n\n');
     const textBody = body.trim();
     slides.push({
       num,

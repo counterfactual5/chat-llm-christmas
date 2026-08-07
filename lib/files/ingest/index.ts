@@ -2,13 +2,12 @@
 
 import type { IngestedAttachment } from './types';
 import {
-  extractDocxText,
-  extractPdfText,
-  extractPptxText,
-  extractSpreadsheetText,
+  extractEpubTextFromBytes,
   extractZipText,
 } from './extractors';
+import { extractWithAnydocFallback } from './anydoc';
 import {
+  isLegacyOleOfficeFile,
   isPresentationFile,
   isSpreadsheetWorkbookFile,
   isSupportedDropFile,
@@ -65,7 +64,7 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
   }
 
   if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
-    const text = await extractPdfText(file);
+    const text = await extractWithAnydocFallback(file);
     if (!text) throw new Error(`Could not extract text from ${file.name}`);
     return {
       ...base,
@@ -78,7 +77,7 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
     name.endsWith('.docx') ||
     file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   ) {
-    const text = await extractDocxText(file);
+    const text = await extractWithAnydocFallback(file);
     if (!text) throw new Error(`Could not extract text from ${file.name}`);
     return {
       ...base,
@@ -89,16 +88,26 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
     };
   }
 
-  if (name.endsWith('.doc')) {
+  if (isLegacyOleOfficeFile(file)) {
+    if (name.endsWith('.ppt')) {
+      throw new Error('Legacy .ppt is not supported — please save as .pptx and try again');
+    }
     throw new Error('Legacy .doc is not supported — please save as .docx and try again');
   }
 
-  if (name.endsWith('.ppt') && !isPresentationFile(file)) {
-    throw new Error('Legacy .ppt is not supported — please save as .pptx and try again');
+  if (name.endsWith('.epub') || file.type === 'application/epub+zip') {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const text = await extractEpubTextFromBytes(data);
+    if (!text) throw new Error(`Could not extract text from ${file.name}`);
+    return {
+      ...base,
+      type: file.type || 'application/epub+zip',
+      ...withUploadBlob(file, text),
+    };
   }
 
   if (isPresentationFile(file)) {
-    const text = await extractPptxText(file);
+    const text = await extractWithAnydocFallback(file);
     if (!text) throw new Error(`Could not extract text from ${file.name}`);
     return {
       ...base,
@@ -118,6 +127,9 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
   }
 
   if (isSpreadsheetWorkbookFile(file)) {
+    // Don't route spreadsheets through anydoc: SheetJS keeps sheet/catalog
+    // structure that anydoc's CSV-style markdown loses.
+    const { extractSpreadsheetText } = await import('./extractors');
     const text = await extractSpreadsheetText(file);
     if (!text) throw new Error(`Could not extract cells from ${file.name}`);
     return {

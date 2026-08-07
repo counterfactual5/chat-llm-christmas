@@ -16,6 +16,7 @@ import {
 
 import { extractPdfText } from './pdf';
 import { extractDocxText } from './docx';
+import { extractEpubTextFromBytes } from './epub';
 import { extractPptxTextFromBytes } from './pptx';
 import { extractSpreadsheetText } from './spreadsheet';
 
@@ -57,6 +58,8 @@ async function extractZipMemberText(
   switch (kind) {
     case 'pdf':
       return extractPdfText(fileFromBytes(base, bytes, 'application/pdf'));
+    case 'epub':
+      return extractEpubTextFromBytes(bytes);
     case 'docx':
       return extractDocxText(
         fileFromBytes(
@@ -125,6 +128,7 @@ export async function extractZipTextFromBytes(
 
     const path = rawPath.replace(/\\/g, '/');
     const kind = zipMemberExtractKind(path);
+    const lower = path.toLowerCase();
 
     let size = 0;
     // JSZip 的 _data.uncompressedSize 在部分情况下可能缺失/不可信。
@@ -156,11 +160,14 @@ export async function extractZipTextFromBytes(
       continue;
     }
     if (kind === 'skip') {
+      const isLegacyOle = /\.(doc|ppt)$/i.test(lower);
       catalogEntries.push({
         label: path,
-        kind: 'other',
+        kind: isLegacyOle ? 'ole' : 'other',
         sizeLabel: size ? formatByteSize(size) : undefined,
-        skipped: 'unsupported',
+        skipped: isLegacyOle
+          ? 'legacy OLE — save as .docx / .pptx to extract'
+          : 'unsupported',
       });
       continue;
     }
@@ -220,7 +227,12 @@ export async function extractZipTextFromBytes(
       // If the member is an embedded Office-like paged-extract, collapse
       // its nested `--- page N ---` markers so the outer slice parser
       // won't treat them as real pages.
-      if (kind === 'docx' || kind === 'pptx' || kind === 'xlsx' || kind === 'xls') {
+      if (
+        kind === 'docx' ||
+        kind === 'pptx' ||
+        kind === 'xlsx' ||
+        kind === 'xls'
+      ) {
         body = collapseNestedPagedExtractMarkers(body);
       }
     } catch (err) {

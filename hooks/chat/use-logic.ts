@@ -143,7 +143,13 @@ export type UseChatLogicProps = {
     history: Message[],
     threadWebSources?: import('@/lib/chat/types').WebSearchSource[],
   ) => number;
-  /** Fired when submit truncates history (edit/resend). */
+  /** Gateway usage from the last finished completion — floors compact/refuse. */
+  measuredLastTurn?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  } | null;
+  /** Fired when submit truncates history (edit/resend) or compact rewrites it. */
   onHistoryTruncated?: () => void;
   
   setPicturesExpanded: React.Dispatch<React.SetStateAction<boolean>>;
@@ -169,6 +175,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     isAccountBound, openLoginModal, stickToBottomRef, scrollToBottom, setIsSkillPickerOpen,
     selectedSpec, selectedModel, zhipuVisionOn, usableLimit, contextBreakdown,
     estimateSystemForSend,
+    measuredLastTurn,
     onHistoryTruncated,
     setPicturesExpanded, setOutputGroupsOpen, setIsContextPanelOpen,
     editingMessageContent, setEditingMessageContent, editingMessageAttachments, setEditingMessageAttachments, setEditingMessageId,
@@ -1006,7 +1013,10 @@ export function useChatLogic(props: UseChatLogicProps) {
       onHistoryTruncated?.();
     }
 
-    const projectTokens = (history: Message[]) => {
+    const projectTokens = (
+      history: Message[],
+      measured: typeof measuredLastTurn = measuredLastTurn,
+    ) => {
       const session = sessionsRef.current.find((s) => s.id === sessionId);
       const threadSources = webSourcesForThread(
         [...history, userMessage],
@@ -1020,6 +1030,7 @@ export function useChatLogic(props: UseChatLogicProps) {
         nextUserText: fullContent,
         pendingImageCount: pendingImages.length,
         contextBreakdown: { system, skills: contextBreakdown.skills },
+        measuredLastTurn: measured,
       });
     };
 
@@ -1041,7 +1052,9 @@ export function useChatLogic(props: UseChatLogicProps) {
         baseMessages = compacted;
         newMessages = [...baseMessages, userMessage];
         updateSession(sessionId, newMessages, newTitle);
-        projected = projectTokens(baseMessages);
+        // Measured usage is stale after rewrite — floor without it.
+        onHistoryTruncated?.();
+        projected = projectTokens(baseMessages, null);
         if (exceedsUsableWindow(projected, usableLimit)) {
           restoreHistoryIfNeeded();
           setAttachError(
@@ -1050,6 +1063,13 @@ export function useChatLogic(props: UseChatLogicProps) {
           if (!opts?.alreadyLoading) endLoading(sessionId);
           return false;
         }
+      } else if (exceedsUsableWindow(projected, usableLimit)) {
+        restoreHistoryIfNeeded();
+        setAttachError(
+          `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
+        );
+        if (!opts?.alreadyLoading) endLoading(sessionId);
+        return false;
       }
     }
 

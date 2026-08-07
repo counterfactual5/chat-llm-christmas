@@ -1593,8 +1593,12 @@ export default function ChatContainer() {
         memoriesEnabled: memoriesEnabled(),
         autoReview: activeAutoReview,
         webSources: threadSources,
+        // Inline-extract attachments contribute their body; fileId-only docs
+        // contribute name only (text '') — correct for the estimate, and the
+        // chat route streams attachmentTexts verbatim into upstream request
+        // fileExtracts, where '' is right (server sidecar is authoritative).
         attachmentTexts: attachments
-          .filter((a) => a.text)
+          .filter((a) => a.text || (Boolean(a.fileId) && !isImageAttachment(a)))
           .map((a) => ({ name: a.name, text: String(a.text || '') })),
         messages: threadMessages,
         pendingImageCount: attachments.filter((a) => a.dataUrl).length,

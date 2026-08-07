@@ -1386,7 +1386,11 @@ export function useChatLogic(props: UseChatLogicProps) {
     const resendImages = ingestedToMessageImages(
       editingMessageAttachments.filter((a) => isImageAttachment(a)),
     );
-    const hasTextFiles = editingMessageAttachments.some((a) => a.text);
+    // Count content-bearing doc attachments too: post-U4a a doc may carry only a
+    // fileId (extract lives server-side) and is still resendable via file_read.
+    const hasTextFiles = editingMessageAttachments.some(
+      (a) => a.text || (Boolean(a.fileId) && !isImageAttachment(a)),
+    );
     // Do not bail on isActiveLoading — stop the in-flight turn then resubmit with force.
     if (!content && resendImages.length === 0 && !hasTextFiles) return;
     if (hasUploadingAttachments(editingMessageAttachments)) {

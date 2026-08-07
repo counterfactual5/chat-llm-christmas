@@ -87,6 +87,78 @@ describe('attachments', () => {
     ).toBe('/api/files/fid%2F1');
   });
 
+  it('embeds a file_read pointer for fileId-only docs (post-U4a server extract)', () => {
+    // pdf/docx/epub/xlsx no longer carry client-side text — the body must be a
+    // pointer to the server-side sidecar, not empty/missing content.
+    expect(
+      assembleUserContent(
+        'summarize this report',
+        [],
+        [att({ id: 'd', name: 'report.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fileId: 'file-doc-1' })],
+      ),
+    ).toBe(
+      '[Attached File: report.docx] (stored fileId: file-doc-1)\n' +
+        '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-doc-1)\n\n---\n\nsummarize this report',
+    );
+
+    // Mixed: text-bearing attachments inline; fileId-only docs point.
+    expect(
+      assembleUserContent(
+        'hi',
+        [att({ id: 't', name: 'notes.txt', text: 'inline body' })],
+        [att({ id: 'p', name: 'paper.pdf', type: 'application/pdf', fileId: 'file-pdf-9' })],
+      ),
+    ).toBe(
+      '[Attached File: notes.txt]\ninline body\n\n' +
+        '[Attached File: paper.pdf] (stored fileId: file-pdf-9)\n' +
+        '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-pdf-9)\n\n---\n\nhi',
+    );
+
+    // Default third arg keeps the prior two-arg signature working.
+    expect(assembleUserContent('plain', [])).toBe('plain');
+  });
+
+  it('treats a fileId-only doc attachment as sendable (not empty) without vision', () => {
+    const doc = att({
+      id: 'd1',
+      name: 'report.docx',
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      fileId: 'file-doc-1',
+    });
+    const resolved = resolvePendingAttachments({
+      textToSend: '',
+      attachments: [doc],
+      isActiveSession: true,
+      vision: false,
+      zhipuVisionOn: false,
+      isLoading: false,
+    });
+    expect(resolved).toMatchObject({
+      ok: true,
+      pendingTexts: [],
+      pendingDocRefs: [expect.objectContaining({ id: 'd1' })],
+    });
+    if (resolved.ok) {
+      expect(resolved.fullContent).toContain('[Attached File: report.docx] (stored fileId: file-doc-1)');
+      expect(resolved.fullContent).toContain('file_read with file_id=file-doc-1');
+    }
+  });
+
+  it('hard-blocks send when a text-less doc failed to upload (no sidecar to read)', () => {
+    expect(
+      resolvePendingAttachments({
+        textToSend: 'hi',
+        attachments: [
+          att({ id: 'd2', name: 'x.pdf', type: 'application/pdf', uploadError: true }),
+        ],
+        isActiveSession: true,
+        vision: false,
+        zhipuVisionOn: false,
+        isLoading: false,
+      }),
+    ).toEqual({ ok: false, error: 'upload_failed' });
+  });
+
   it('does not treat uploaded PDFs as vision images', () => {
     const pdf = att({
       id: 'p',

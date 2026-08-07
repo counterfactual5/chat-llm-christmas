@@ -347,6 +347,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                             !editingMessageAttachments.some(
                               (a) =>
                                 a.text ||
+                                // fileId-only docs are still resendable post-U4a
+                                (Boolean(a.fileId) && !isImageAttachment(a)) ||
                                 (isImageAttachment(a) && (a.dataUrl || a.fileId)),
                             ))
                         }

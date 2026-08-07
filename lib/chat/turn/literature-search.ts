@@ -401,17 +401,18 @@ export function formatLiteratureMarkdown(
     const lines = [`### Authors`, '', `Query: **${query}**`, ''];
     extras.authors.forEach((a, i) => {
       const aff = a.affiliations?.slice(0, 2).join(', ');
-      const stats = [
+      const detail = [
         a.paperCount != null ? `${a.paperCount} papers` : '',
         a.citationCount != null ? `${a.citationCount} citations` : '',
         a.hIndex != null ? `h-index ${a.hIndex}` : '',
+        a.authorId ? `ID: \`${a.authorId}\`` : '',
       ]
         .filter(Boolean)
         .join(' · ');
       const name = a.url ? `[${a.name}](${a.url})` : a.name;
       lines.push(`${i + 1}. ${name}${aff ? ` (${aff})` : ''}`);
-      if (stats) lines.push(`   - ${stats}`);
-      if (a.authorId) lines.push(`   - ID: \`${a.authorId}\``);
+      lines.push('');
+      if (detail) lines.push(detail);
       lines.push('');
     });
     return lines.join('\n').trim();
@@ -438,60 +439,66 @@ export function formatLiteratureMarkdown(
     '',
   ];
   results.forEach((hit, i) => {
-    const meta = [
+    // Shape: `N. [title](url)` + blank + one detail line (no intra-hit newlines).
+    lines.push(`${i + 1}. [${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`);
+    lines.push('');
+
+    const parts: string[] = [
       hit.authors,
       hit.year,
       hit.venue,
       hit.citationCount != null ? `${hit.citationCount} citations` : '',
       hit.sourceProvider,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    lines.push(`${i + 1}. [${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`);
-    if (meta) lines.push(`   - ${meta}`);
-    if (hit.tldr) lines.push(`   - TLDR: ${hit.tldr.replace(/\s+/g, ' ').slice(0, 320)}`);
-    else if (hit.snippet) lines.push(`   - ${hit.snippet.replace(/\s+/g, ' ').slice(0, 280)}`);
-    if (hit.paperId) {
-      lines.push(`   - ID: \`${hit.paperId}\``);
-      if (kind === 'papers') {
+      hit.format,
+      hit.size,
+      hit.doi ? `DOI: \`${hit.doi}\`` : '',
+    ].filter(Boolean) as string[];
+
+    if (kind === 'papers') {
+      const blurb = (hit.tldr || hit.snippet || '').replace(/\s+/g, ' ').trim();
+      if (blurb && blurb.length <= 160) {
+        parts.push(hit.tldr ? `TLDR: ${blurb}` : blurb);
+      }
+      if (hit.paperId) {
         const id = hit.paperId;
-        lines.push(
-          `   - Actions: \`${formatPaperActionCommand('details', id)}\` · \`${formatPaperActionCommand('citations', id)}\` · \`${formatPaperActionCommand('references', id)}\``,
+        parts.push(`ID: \`${id}\``);
+        parts.push(
+          `Actions: \`${formatPaperActionCommand('details', id)}\` · \`${formatPaperActionCommand('citations', id)}\` · \`${formatPaperActionCommand('references', id)}\``,
         );
       }
-    }
-    if (kind === 'papers') {
       const dlId = resolvePaperDownloadIdentifier(hit);
       if (dlId && isValidPaperDownloadIdentifier(dlId)) {
-        // In-app Files download — do not also emit an Open PDF link here or the
-        // model/UI will treat the external URL as the primary “下载” CTA.
-        lines.push(`   - Download: \`${formatPaperDownloadCommand(dlId)}\``);
+        // In-app Files download — do not also emit Open PDF here.
+        parts.push(`Download: \`${formatPaperDownloadCommand(dlId)}\``);
       } else if (hit.pdfUrl) {
-        lines.push(`   - PDF: [Open PDF](${hit.pdfUrl})`);
+        parts.push(`PDF: [Open PDF](${hit.pdfUrl})`);
       }
     }
+
     if (kind === 'books') {
       const dlId = hit.downloadable ? resolveBookDownloadIdentifier(hit) : '';
       if (dlId && isValidBookDownloadIdentifier(dlId)) {
-        lines.push(
-          `   - ${bookDownloadCommandLabel(dlId)}: \`${formatBookDownloadCommand(dlId)}\``,
+        parts.push(
+          `${bookDownloadCommandLabel(dlId)}: \`${formatBookDownloadCommand(dlId)}\``,
         );
       } else if (hit.url && /^https?:\/\//i.test(hit.url)) {
         const label = markdownLinkLabel(hit.title || '', 'Page');
-        lines.push(`   - Manual download: [${label}](${hit.url})`);
+        parts.push(`Manual download: [${label}](${hit.url})`);
       }
-      if (hit.size) lines.push(`   - Size: ${hit.size}`);
-      for (const alt of hit.alternates || []) {
-        const altId = resolveBookDownloadIdentifier(alt);
-        if (!altId || !isValidBookDownloadIdentifier(altId)) continue;
+      const alt = (hit.alternates || []).find((a) => {
+        const altId = resolveBookDownloadIdentifier(a);
+        return Boolean(altId && isValidBookDownloadIdentifier(altId));
+      });
+      if (alt) {
+        const altId = resolveBookDownloadIdentifier(alt)!;
         const bits = [alt.format, alt.size].filter(Boolean).join(' · ');
-        lines.push(
-          `   - Alt download${bits ? ` (${bits})` : ''}: \`${formatBookDownloadCommand(altId)}\``,
+        parts.push(
+          `Alt download${bits ? ` (${bits})` : ''}: \`${formatBookDownloadCommand(altId)}\``,
         );
       }
     }
-    if (kind !== 'books' && hit.size) lines.push(`   - Size: ${hit.size}`);
-    if (hit.doi) lines.push(`   - DOI: \`${hit.doi}\``);
+
+    if (parts.length) lines.push(parts.join(' · '));
     lines.push('');
   });
   return lines.join('\n').trim();

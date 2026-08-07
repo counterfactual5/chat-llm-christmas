@@ -113,10 +113,23 @@ export function UrlPreviewPanel({
   const [settleFired, setSettleFired] = useState(false);
   const [embedNotice, setEmbedNotice] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const reProbeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const urlRef = useRef(url);
+  urlRef.current = url;
   const degradeHandledRef = useRef(false);
   const [extractRetryNonce, setExtractRetryNonce] = useState(0);
 
+  const clearReProbeTimer = () => {
+    if (reProbeTimerRef.current != null) {
+      clearTimeout(reProbeTimerRef.current);
+      reProbeTimerRef.current = null;
+    }
+  };
+
+  // Hard-reset extract/embed state only when the page target changes — not
+  // when `initialTitle` alone churns (that remounts Text and flashes images).
   useEffect(() => {
+    clearReProbeTimer();
     setMode(initialPreviewMode(url, forceExtract));
     setExtract({ status: 'idle' });
     setDisplayTitle(initialTitle || '');
@@ -129,7 +142,12 @@ export function UrlPreviewPanel({
     setEmbedNotice(false);
     degradeHandledRef.current = false;
     setExtractRetryNonce(0);
-  }, [url, initialTitle, forceExtract]);
+    return () => clearReProbeTimer();
+  }, [url, forceExtract]);
+
+  useEffect(() => {
+    if (initialTitle) setDisplayTitle(initialTitle);
+  }, [initialTitle]);
 
   const switchMode = (next: PreviewMode) => {
     // Manual mode switch cancels any pending degrade decision (no loops).
@@ -196,6 +214,17 @@ export function UrlPreviewPanel({
   // Load extract when in extract mode.
   useEffect(() => {
     if (!open || !url || mode !== 'extract') return;
+    const applyDone = (result: { title?: string; content: string }) => {
+      const next: ExtractState = {
+        status: 'done',
+        title: result.title,
+        content: result.content,
+      };
+      prefetchRef.current = next;
+      setPrefetchReady(next);
+      setExtract(next);
+      if (result.title) setDisplayTitle((prev) => prev || result.title || '');
+    };
     const cached = prefetchRef.current;
     if (cached.status === 'done') {
       setExtract(cached);
@@ -206,19 +235,18 @@ export function UrlPreviewPanel({
     setExtract({ status: 'loading' });
     void fetchWebReadExtract(url, ac.signal)
       .then((result) => {
-        setExtract({
-          status: 'done',
-          title: result.title,
-          content: result.content,
-        });
-        if (result.title) setDisplayTitle((prev) => prev || result.title || '');
+        if (ac.signal.aborted) return;
+        applyDone(result);
       })
       .catch((err) => {
         if (ac.signal.aborted) return;
-        setExtract({
+        const next: ExtractState = {
           status: 'error',
           message: err instanceof Error ? err.message : t('requestFailed'),
-        });
+        };
+        prefetchRef.current = next;
+        setPrefetchReady(next);
+        setExtract(next);
       });
     return () => ac.abort();
   }, [open, url, mode, t, extractRetryNonce]);
@@ -276,7 +304,11 @@ export function UrlPreviewPanel({
     if (first === 'unknown') return;
     setEmbedLikelyBlocked(true);
     // Error documents settle async — re-probe once shortly after.
-    const timer = setTimeout(() => {
+    clearReProbeTimer();
+    const generationUrl = url;
+    reProbeTimerRef.current = setTimeout(() => {
+      reProbeTimerRef.current = null;
+      if (generationUrl !== urlRef.current) return;
       if (!iframeRef.current) return;
       const second = probeEmbedOutcome(iframeRef.current);
       if (second === 'ready') {
@@ -285,9 +317,6 @@ export function UrlPreviewPanel({
         setEmbedLikelyBlocked(true);
       }
     }, EMBED_PROBE_TIMING.reProbeMs);
-    // The one-shot timer needs no cleanup guard beyond iframeRef checks;
-    // clearing on unmount is handled by React removing the node.
-    void timer;
   };
 
   const headerTitle = displayTitle || t('urlPreviewPanel');

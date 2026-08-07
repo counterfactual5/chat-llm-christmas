@@ -36,20 +36,61 @@ function stripProviderHeaderBlock(lines: string[], title?: string): string[] {
 const IMAGE_PLACEHOLDER_LINE =
   /^\s*(?:\[?Image\s*\d+\]?|!\[\s*(?:Image\s*\d*)?\s*\]\([^)]*\))\s*$/i;
 
+/** Unwrap `[![alt](src)](href)` → `![alt](src)`. */
+function unwrapLinkedImage(line: string): string {
+  const m = /^\[(!\[[^\]]*\]\([^)]*\))\]\([^)]*\)$/.exec(line.trim());
+  return m ? m[1] : line.trim();
+}
+
+/**
+ * Parse a CommonMark image destination, including optional title:
+ * `![alt](url)`, `![alt](<url>)`, `![alt](url "title")`.
+ */
+function parseMarkdownImage(
+  line: string,
+): { alt: string; src: string } | null {
+  const trimmed = unwrapLinkedImage(line);
+  const m =
+    /^!\[([^\]]*)\]\(\s*<?([^>\s)]+)>?(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)$/.exec(
+      trimmed,
+    );
+  if (!m) return null;
+  return { alt: m[1], src: m[2].trim() };
+}
+
+const BADGE_ALT_RE =
+  /creative\s*commons|\bcc\s*license\b|\bcc0\b|\bcc[- ]?by\b|^zero$/i;
+
+const BADGE_HOST_RE =
+  /(^|\.)(licensebuttons\.net|i\.creativecommons\.org|mirrors\.creativecommons\.org)$/i;
+
+function isChromeBadgeImage(alt: string, src: string): boolean {
+  if (BADGE_ALT_RE.test(alt.trim())) return true;
+  try {
+    const host = new URL(src).hostname;
+    if (BADGE_HOST_RE.test(host)) return true;
+  } catch {
+    // relative / invalid — not a known badge CDN
+  }
+  return false;
+}
+
 function isBadImageLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed) return false;
   if (IMAGE_PLACEHOLDER_LINE.test(trimmed)) return true;
-  // Markdown image whose src is empty/#/javascript: — src must not contain
-  // whitespace or unescaped parens, so `)(#` inside is already garbage.
-  const m = /^!\[[^\]]*\]\(([^()\s]*)\)$/.exec(trimmed);
-  if (m) {
-    const src = m[1].trim().toLowerCase();
+
+  const parsed = parseMarkdownImage(trimmed);
+  if (parsed) {
+    const src = parsed.src.toLowerCase();
     if (!src || src === '#' || src.startsWith('javascript:')) return true;
-  } else if (/^!\[[^\]]*\]/.test(trimmed)) {
-    // `![` present but the tail is not a sane `(src)` — placeholder noise.
-    return true;
+    if (isChromeBadgeImage(parsed.alt, parsed.src)) return true;
+    return false;
   }
+
+  // `![…]` present but not a parseable destination (title-bearing forms
+  // parse above) — placeholder noise.
+  if (/^!\[[^\]]*\]/.test(unwrapLinkedImage(trimmed))) return true;
   return false;
 }
 

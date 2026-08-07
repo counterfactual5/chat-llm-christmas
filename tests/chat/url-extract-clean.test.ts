@@ -31,6 +31,29 @@ describe('cleanUrlExtractText', () => {
     expect(cleanUrlExtractText(raw)).toBe(raw);
   });
 
+  it('keeps title-bearing markdown images', () => {
+    const raw = 'Text.\n\n![chip](https://img.test/a19.png "A19 die shot")\n\nMore.';
+    expect(cleanUrlExtractText(raw)).toBe(raw);
+  });
+
+  it('drops Creative Commons / zero badge images and linked badges', () => {
+    const raw = [
+      'Body.',
+      '',
+      '![Creative Commons License](https://licensebuttons.net/l/by/4.0/88x31.png)',
+      '',
+      '![zero](https://i.creativecommons.org/l/zero/1.0/80x15.png)',
+      '',
+      '[![Creative Commons License](https://licensebuttons.net/l/by/4.0/88x31.png)](https://creativecommons.org/licenses/by/4.0/)',
+      '',
+      '![article figure](https://cdn.test/photo.jpg)',
+      '',
+      'End.',
+    ].join('\n');
+    const cleaned = cleanUrlExtractText(raw);
+    expect(cleaned).toBe('Body.\n\n![article figure](https://cdn.test/photo.jpg)\n\nEnd.');
+  });
+
   it('drops images with empty, #, or javascript: srcs', () => {
     const raw = 'A\n![]()\n![]())(#)\n![x](javascript:alert(1))\nB';
     const cleaned = cleanUrlExtractText(raw);

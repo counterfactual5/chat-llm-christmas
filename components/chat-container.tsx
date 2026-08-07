@@ -1405,7 +1405,9 @@ export default function ChatContainer() {
     setAccountError('');
     setAccountSaving(true);
     try {
-      await bindWithApiKey(trimmed);
+      const status = await bindWithApiKey(trimmed);
+      // Swap to account local+cloud; guest drafts stay in the guest key.
+      await hydrateBoundAccount(status.username);
       setTempKeyInput('');
       closeAuthModal();
       clearModelsCache();
@@ -1428,11 +1430,11 @@ export default function ChatContainer() {
     setNotionStatus(null);
     setGitHubStatus(null);
     setGoogleStatus(null);
-    setSessions([]);
     setSkills([]);
     setMemories([]);
     clearLocalSessions();
-    createNewSession();
+    // Restore device-local guest drafts (separate key from account cache).
+    hydrateGuest();
     clearModelsCache();
     await fetchModels(false);
   };

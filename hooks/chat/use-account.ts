@@ -27,7 +27,7 @@ export function useChatAccount() {
     async (apiKey: string) => {
       const data = await bindAccountApiKey(apiKey);
       if (data?.username) setAccountUsername(String(data.username));
-      await refreshAccountStatus();
+      return refreshAccountStatus();
     },
     [refreshAccountStatus],
   );

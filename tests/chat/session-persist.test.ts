@@ -1,9 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  LOCAL_CHATS_KEY,
+  LOCAL_GUEST_CHATS_KEY,
+  clearLocalSessions,
+  hydrateSessionsFromLocal,
   putCloudSessions,
   mergeLocalWithCloud,
+  readGuestLocalSessions,
+  readLocalSessions,
   sameSessionRevision,
+  writeGuestLocalSessions,
+  writeLocalSessions,
 } from '@/lib/chat/session/persist';
+import { CHATS_OWNER_KEY } from '@/lib/chat/session/store';
 import type { ChatSession } from '@/lib/chat/types';
 
 function session(id: string, updatedAt: number): ChatSession {
@@ -16,6 +25,29 @@ function session(id: string, updatedAt: number): ChatSession {
 }
 
 describe('session persist helpers', () => {
+  const store = new Map<string, string>();
+
+  beforeEach(() => {
+    store.clear();
+    const localStorageMock = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+      clear: () => {
+        store.clear();
+      },
+    };
+    vi.stubGlobal('localStorage', localStorageMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('sameSessionRevision uses referential equality (catches updatedAt ties)', () => {
     const shared = session('a', 1);
     const a = [shared, session('b', 2)];
@@ -48,5 +80,34 @@ describe('session persist helpers', () => {
     const fetchImpl = vi.fn();
     await putCloudSessions([], fetchImpl);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('keeps guest drafts in a separate key from bound-account chats', () => {
+    writeLocalSessions([session('account', 1)]);
+    writeGuestLocalSessions([session('guest', 2)]);
+    expect(readLocalSessions().map((s) => s.id)).toEqual(['account']);
+    expect(readGuestLocalSessions().map((s) => s.id)).toEqual(['guest']);
+    expect(localStorage.getItem(LOCAL_CHATS_KEY)).toBeTruthy();
+    expect(localStorage.getItem(LOCAL_GUEST_CHATS_KEY)).toBeTruthy();
+  });
+
+  it('clearLocalSessions leaves guest drafts intact', () => {
+    writeLocalSessions([session('account', 1)]);
+    writeGuestLocalSessions([session('guest', 2)]);
+    localStorage.setItem(CHATS_OWNER_KEY, 'alice');
+    clearLocalSessions();
+    expect(readLocalSessions()).toEqual([]);
+    expect(localStorage.getItem(CHATS_OWNER_KEY)).toBeNull();
+    expect(readGuestLocalSessions().map((s) => s.id)).toEqual(['guest']);
+  });
+
+  it('hydrateSessionsFromLocal restores guest drafts with a blank draft prepended', () => {
+    writeGuestLocalSessions([session('guest', 2)]);
+    const result = hydrateSessionsFromLocal(LOCAL_GUEST_CHATS_KEY);
+    expect(result.needsDraft).toBe(false);
+    expect(result.sessions).toHaveLength(2);
+    expect(result.sessions?.[0]?.messages).toEqual([]);
+    expect(result.sessions?.[1]?.id).toBe('guest');
+    expect(result.activeSessionId).toBe(result.sessions?.[0]?.id);
   });
 });

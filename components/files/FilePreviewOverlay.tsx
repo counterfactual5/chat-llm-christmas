@@ -9,6 +9,7 @@ import { SpreadsheetTable } from '@/components/files/SpreadsheetTable';
 import { CodeBlock } from '@/components/markdown/code/code-block';
 import {
   isEpubFile,
+  isExtractSidecarPreviewFile,
   isPdfFile,
   isPreviewableImageFile,
   isSpreadsheetPreviewFile,
@@ -45,6 +46,10 @@ export function prefersAnswerMarkdownPreview(
   file: Pick<FilePreviewPayload, 'name' | 'mimeType'>,
 ): boolean {
   if (isMarkdownPreview(file)) return true;
+  // Server extract for office/zip is markdown (catalog + pages); not code fences.
+  if (isExtractSidecarPreviewFile(file) && !isSpreadsheetPreviewFile(file)) {
+    return true;
+  }
   const mime = String(file.mimeType || '').toLowerCase();
   if (mime === 'text/plain' || mime.startsWith('text/plain;')) return true;
   const ext = fileExt(file.name);

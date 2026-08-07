@@ -23,4 +23,14 @@ describe('file preview routing', () => {
       prefersAnswerMarkdownPreview({ name: 'app.ts', mimeType: 'text/typescript' }),
     ).toBe(false);
   });
+
+  it('routes office extract previews through AnswerMarkdown', () => {
+    expect(
+      prefersAnswerMarkdownPreview({
+        name: 'notes.docx',
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
+    ).toBe(true);
+  });
 });

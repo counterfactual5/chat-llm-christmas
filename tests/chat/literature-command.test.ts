@@ -267,6 +267,11 @@ describe('formatLiteratureMarkdown', () => {
     );
     expect(md).not.toContain('[Open PDF]');
     expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);
+    // Title, blank, one detail line — no nested `- ` bullets inside the hit.
+    expect(md).toMatch(
+      /1\. \[Attention Is All You Need\]\([^\n]+\)\n\nVaswani et al\. · 2017/,
+    );
+    expect(md).not.toMatch(/^\s+-\s/m);
   });
 
   it('uses Open PDF only when in-app download is unavailable', () => {
@@ -376,9 +381,13 @@ describe('formatLiteratureMarkdown', () => {
       },
     ]);
     expect(md).toContain('/books download libgen:70a383c096ff335b1ec51de27571d04c');
-    expect(md).toContain('Size: 6 MB');
+    expect(md).toContain('6 MB');
     expect(md).toContain('Alt download (mobi · 7 MB)');
     expect(md).toContain('/books download libgen:313848e5d3427b4983b8f90162f59cea');
+    expect(md).toMatch(
+      /1\. \[区块链\]\([^\n]+\)\n\n[^\n]*6 MB[^\n]*Download:/,
+    );
+    expect(md).not.toMatch(/^\s+-\s/m);
   });
 
   it('uses gutenberg: id and Manual download when not API-downloadable', () => {
@@ -609,10 +618,12 @@ describe('formatHitsForModel', () => {
     expect(BOOK_SYSTEM).toMatch(/backticks/);
     expect(BOOK_SYSTEM).toMatch(/em-dash/);
     expect(BOOK_SYSTEM).toContain('/books download');
-    expect(BOOK_SYSTEM).toMatch(/blank line between numbered hits/);
-    expect(PAPER_SYSTEM).toMatch(/blank line between numbered hits/);
-    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/blank line between numbered hits/);
-    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/blank line between numbered hits/);
+    expect(BOOK_SYSTEM).toMatch(/ONE detail line/);
+    expect(BOOK_SYSTEM).toMatch(/Blank line before the next numbered hit/);
+    expect(PAPER_SYSTEM).toMatch(/ONE detail line/);
+    expect(PAPER_SYSTEM).toMatch(/Blank line before the next numbered hit/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/ONE detail line/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/ONE detail line/);
     expect(PAPER_SYSTEM).toMatch(/answerMarkdown/);
     expect(PAPER_SYSTEM).toMatch(/backticks/);
     expect(PAPER_SYSTEM).toMatch(/em-dash/);

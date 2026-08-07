@@ -9,7 +9,7 @@ export type IngestedAttachment = {
    * True while the browser is waiting for chat-api to finish the authoritative
    * extract; preview panels should render a "解析中…" affordance for the slot.
    * Set on upload success for text-less non-image attachments; cleared when
-   * waitForFileExtractSidecar resolves.
+   * waitForFileExtractSidecar settles (ok or any terminal failure).
    */
   pendingExtract?: boolean;
   /** data: URL for images (legacy / offline fallback) */

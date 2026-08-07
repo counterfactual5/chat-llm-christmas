@@ -52,6 +52,7 @@ function att(partial: Partial<IngestedAttachment> & Pick<IngestedAttachment, 'id
     text: partial.text,
     dataUrl: partial.dataUrl,
     fileId: partial.fileId,
+    pendingExtract: partial.pendingExtract,
     uploading: partial.uploading,
     uploadError: partial.uploadError,
     attachmentRequiresLogin: partial.attachmentRequiresLogin,
@@ -126,6 +127,39 @@ describe('attachments', () => {
 
     // Default third arg keeps the prior two-arg signature working.
     expect(assembleUserContent('plain', [])).toBe('plain');
+  });
+
+  it('notes pendingExtract on fileId-only docs at send time', () => {
+    expect(
+      assembleUserContent(
+        'summarize',
+        [],
+        [
+          att({
+            id: 'd',
+            name: 'report.docx',
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            fileId: 'file-doc-1',
+            pendingExtract: true,
+          }),
+        ],
+      ),
+    ).toContain('EXTRACT_PENDING');
+    expect(
+      assembleUserContent(
+        'summarize',
+        [],
+        [
+          att({
+            id: 'd',
+            name: 'report.docx',
+            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            fileId: 'file-doc-1',
+            pendingExtract: true,
+          }),
+        ],
+      ),
+    ).toContain('may still be building');
   });
 
   it('treats a fileId-only doc attachment as sendable (not empty) without vision', () => {

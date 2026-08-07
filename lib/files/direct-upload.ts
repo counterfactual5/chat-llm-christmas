@@ -14,8 +14,13 @@ export type DirectUploadTicket = {
   expiresAt: number;
 };
 
-export async function fetchUploadTicket(): Promise<DirectUploadTicket> {
-  const res = await fetch('/api/files/upload-token', { method: 'POST' });
+export async function fetchUploadTicket(
+  signal?: AbortSignal,
+): Promise<DirectUploadTicket> {
+  const res = await fetch('/api/files/upload-token', {
+    method: 'POST',
+    signal,
+  });
   const data = (await res.json().catch(() => ({}))) as {
     error?: string;
     uploadToken?: string;

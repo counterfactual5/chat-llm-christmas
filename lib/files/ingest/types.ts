@@ -8,7 +8,8 @@ export type IngestedAttachment = {
   /**
    * True while the browser is waiting for chat-api to finish the authoritative
    * extract; preview panels should render a "解析中…" affordance for the slot.
-   * Reserved for Phase 5 — not currently set by ingest.
+   * Set on upload success for text-less non-image attachments; cleared when
+   * waitForFileExtractSidecar resolves.
    */
   pendingExtract?: boolean;
   /** data: URL for images (legacy / offline fallback) */

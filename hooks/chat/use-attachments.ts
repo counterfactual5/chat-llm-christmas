@@ -7,6 +7,7 @@
 import { useCallback, useState } from 'react';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import { uploadAttachmentDirect } from '@/lib/files/direct-upload';
+import { waitForFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { isImageType, uploadFailurePatch } from '@/lib/chat/turn/upload-patch';
 
 export function useChatAttachments(opts: { isAccountBound: boolean }) {
@@ -57,17 +58,31 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
           });
           const fileId = String(uploaded.id);
           const isImage = isImageType(a);
+          const hasInlineText =
+            typeof a.text === 'string' && a.text.trim().length > 0;
+          // Docs (pdf/docx/…) upload as opaque bytes; mark pending until sidecar ready.
+          const pendingExtract = !isImage && !hasInlineText;
           patch(a.id, (x) => ({
             ...x,
             uploading: false,
             uploadError: false,
             fileId,
+            pendingExtract: pendingExtract || undefined,
             // Image thumbs may use /api/files/<id>; docs keep extracted text only.
             previewUrl: isImage
               ? `/api/files/${encodeURIComponent(fileId)}`
               : x.previewUrl,
             uploadBlob: undefined,
           }));
+          if (pendingExtract) {
+            // Fire-and-forget prewarm — do not block the attach UI.
+            void waitForFileExtractSidecar({ fileId }).then((result) => {
+              if (!result.ok) return;
+              patch(a.id, (x) =>
+                x.fileId === fileId ? { ...x, pendingExtract: false } : x,
+              );
+            });
+          }
         } catch (err: any) {
           const msg = String(err?.message || 'upload failed');
           const payloadTooLarge =

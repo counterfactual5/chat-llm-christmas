@@ -22,8 +22,10 @@ import {
   isPreviewableImageFile,
   isPreviewableTextFile,
   isSpreadsheetPreviewFile,
+  needsExtractSidecarPreview,
 } from '@/lib/files/preview';
 import { fetchFileContentForPreview } from '@/lib/files/direct-content';
+import { waitForFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GeneratedFileEntry } from './OutputPanel';
@@ -69,47 +71,78 @@ export function ChatPreviewPanel({
   const { t } = useLocale();
   const [fetchedContent, setFetchedContent] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState('');
+  const [extracting, setExtracting] = useState(false);
   const width = previewPanelWidth(contextOpen);
 
   const previewable = Boolean(file && canPreviewGeneratedFile(file));
   const sourceUrl = file ? fileSourceUrl(file) : '';
   const hasInlineContent = typeof file?.content === 'string';
+  const needsExtractWait = Boolean(file && needsExtractSidecarPreview(file));
   const needsTextFetch =
     Boolean(file) &&
     !hasInlineContent &&
+    !needsExtractWait &&
     Boolean(sourceUrl) &&
     isPreviewableTextFile(file!) &&
     !isPdfFile(file!) &&
     !isEpubFile(file!) &&
     !isPreviewableImageFile(file!);
+  const needsAsyncLoad = needsExtractWait || needsTextFetch;
 
   useEffect(() => {
-    if (!open || !file || !needsTextFetch) {
+    if (!open || !file || !needsAsyncLoad) {
       setFetchedContent(null);
       setFetchError('');
+      setExtracting(false);
       return;
     }
 
     let cancelled = false;
+    const ac = new AbortController();
     setFetchedContent(null);
     setFetchError('');
+    setExtracting(needsExtractWait);
 
     void (async () => {
       try {
-        const { buf } = await fetchFileContentForPreview(sourceUrl);
+        if (needsExtractWait) {
+          const fileId = String(file.id || '').trim();
+          const result = await waitForFileExtractSidecar({
+            fileId,
+            signal: ac.signal,
+          });
+          if (cancelled) return;
+          if (!result.ok) {
+            setFetchError(
+              result.code === 'ABORTED'
+                ? ''
+                : result.error || t('extractPreviewFailed'),
+            );
+            setExtracting(false);
+            return;
+          }
+          setFetchedContent(String(result.text || ''));
+          setExtracting(false);
+          return;
+        }
+
+        const { buf } = await fetchFileContentForPreview(sourceUrl, {
+          signal: ac.signal,
+        });
         const text = new TextDecoder('utf-8').decode(buf);
         if (!cancelled) setFetchedContent(text);
       } catch (cause) {
-        if (!cancelled) {
-          setFetchError(cause instanceof Error ? cause.message : t('requestFailed'));
-        }
+        if (cancelled || ac.signal.aborted) return;
+        setFetchError(cause instanceof Error ? cause.message : t('requestFailed'));
+        setExtracting(false);
       }
     })();
 
     return () => {
       cancelled = true;
+      ac.abort();
     };
-  }, [open, file?.id, file?.url, needsTextFetch, sourceUrl, t]);
+  }, [open, file?.id, file?.url, needsAsyncLoad, needsExtractWait, sourceUrl, t]);
 
   const resolved: FilePreviewPayload | null = (() => {
     if (!file || !previewable) return null;
@@ -132,7 +165,7 @@ export function ChatPreviewPanel({
         size: file.size,
       };
     }
-    if (needsTextFetch && typeof fetchedContent === 'string') {
+    if (needsAsyncLoad && typeof fetchedContent === 'string') {
       return {
         id: file.id,
         name: file.name,
@@ -239,10 +272,10 @@ export function ChatPreviewPanel({
               >
                 <FilePreviewContent file={resolved} />
               </div>
-            ) : needsTextFetch && !fetchError ? (
+            ) : needsAsyncLoad && !fetchError ? (
               <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                 <Loader2 className="h-8 w-8 animate-spin opacity-60" />
-                <span>{t('loading')}</span>
+                <span>{extracting ? t('extractingPreview') : t('loading')}</span>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-400">

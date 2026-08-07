@@ -1,5 +1,10 @@
 /** Which generated/account files can be previewed in-product (not only downloaded). */
 
+import {
+  isPresentationFile,
+  isSpreadsheetWorkbookFile,
+  isZipArchiveFile,
+} from '@/lib/files/ingest/support';
 import { fileExt, isKnownTextFileExt } from '@/lib/files/text-types';
 
 export function isPdfFile(file: { name?: string; mimeType?: string; mime?: string }): boolean {
@@ -112,8 +117,53 @@ export function formatPreviewTypeLabel(file: {
 }
 
 /**
- * Inline `content`, or a fetchable `url` for PDF / EPUB / image / text
- * (text is lazy-fetched by the preview panel — not embedded in session JSON).
+ * Office / zip archives whose in-product preview is the chat-api markdown
+ * extract sidecar (not raw bytes). PDF / EPUB keep binary viewers; plain text
+ * still uses content GET.
+ */
+export function isExtractSidecarPreviewFile(file: {
+  name?: string;
+  mimeType?: string;
+  mime?: string;
+  filename?: string;
+}): boolean {
+  if (isPdfFile(file) || isEpubFile(file) || isPreviewableImageFile(file)) {
+    return false;
+  }
+  const name = String(file.name || file.filename || '').toLowerCase();
+  const mime = String(file.mimeType || file.mime || '').toLowerCase();
+  const as = { name, type: mime };
+  if (
+    name.endsWith('.docx') ||
+    mime.includes('wordprocessingml.document')
+  ) {
+    return true;
+  }
+  if (isPresentationFile(as)) return true;
+  if (isSpreadsheetWorkbookFile(as)) return true;
+  if (isZipArchiveFile(as)) return true;
+  return false;
+}
+
+/** Preview should poll extract sidecar (has file id, no inline content). */
+export function needsExtractSidecarPreview(file: {
+  content?: string;
+  id?: string;
+  name?: string;
+  mimeType?: string;
+  mime?: string;
+  filename?: string;
+}): boolean {
+  if (typeof file.content === 'string') return false;
+  const id = String(file.id || '').trim();
+  if (!id || id.startsWith('local:')) return false;
+  return isExtractSidecarPreviewFile(file);
+}
+
+/**
+ * Inline `content`, or a fetchable `url` for PDF / EPUB / image / text /
+ * extract-sidecar office docs (text / extract is lazy-fetched by the preview
+ * panel — not embedded in session JSON).
  */
 export function canPreviewGeneratedFile(file: {
   content?: string;
@@ -130,6 +180,7 @@ export function canPreviewGeneratedFile(file: {
     isPdfFile(file) ||
     isEpubFile(file) ||
     isPreviewableImageFile(file) ||
-    isPreviewableTextFile(file)
+    isPreviewableTextFile(file) ||
+    isExtractSidecarPreviewFile(file)
   );
 }

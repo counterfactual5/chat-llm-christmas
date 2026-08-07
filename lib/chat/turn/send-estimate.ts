@@ -10,17 +10,24 @@
 import type { Message } from '@/lib/chat/types';
 import { estimateHistoryTokens } from '@/lib/chat/turn/history-estimate';
 import { estimateTokensFromText } from '@/lib/models/specs';
+import {
+  sendProjectionFromEstimateAndMeasured,
+  type MeasuredTurnUsage,
+} from '@/lib/chat/turn/context-occupancy';
 
 export type SendEstimateInput = {
   history: Message[];
   nextUserText: string;
   pendingImageCount: number;
   contextBreakdown: { system: number; skills?: number };
+  /** Gateway usage from the last finished completion — floors the projection. */
+  measuredLastTurn?: MeasuredTurnUsage | null;
 };
 
 /**
  * Project tokens for the next send.
  * `nextUserText` should already embed attached text files — do not double-count files.
+ * When measured usage is present, never project below last prompt+completion+this user.
  */
 export function estimateTokensForSend(input: SendEstimateInput): number {
   void input.contextBreakdown.skills;
@@ -29,12 +36,17 @@ export function estimateTokensForSend(input: SendEstimateInput): number {
     (sum, m) => sum + (m.images?.length || 0) * 1000,
     0,
   );
-  return (
+  const nextUser =
+    estimateTokensFromText(input.nextUserText) + input.pendingImageCount * 1000;
+  const raw =
     input.contextBreakdown.system +
     historyText +
     historyImages +
-    input.pendingImageCount * 1000 +
-    estimateTokensFromText(input.nextUserText)
+    nextUser;
+  return sendProjectionFromEstimateAndMeasured(
+    raw,
+    input.measuredLastTurn,
+    nextUser,
   );
 }
 

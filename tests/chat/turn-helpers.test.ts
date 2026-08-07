@@ -189,6 +189,17 @@ describe('send-estimate', () => {
     expect(shouldCompactBeforeSend(90, 100)).toBe(false);
     expect(exceedsUsableWindow(101, 100)).toBe(true);
   });
+
+  it('floors send projection with measured last-turn usage', () => {
+    const projected = estimateTokensForSend({
+      history: [msg({ role: 'user', content: 'hello world' })],
+      nextUserText: 'next',
+      pendingImageCount: 0,
+      contextBreakdown: { system: 10, skills: 5 },
+      measuredLastTurn: { prompt_tokens: 50_000, completion_tokens: 1_000 },
+    });
+    expect(projected).toBeGreaterThanOrEqual(51_000);
+  });
 });
 
 describe('stream-error', () => {

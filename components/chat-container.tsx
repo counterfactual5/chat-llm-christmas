@@ -155,6 +155,7 @@ import {
   writeModelsCache,
 } from '@/lib/models/models-cache';
 import { estimateContextBreakdown } from '@/lib/chat/turn/context-estimate';
+import { occupancyFromEstimateAndMeasured } from '@/lib/chat/turn/context-occupancy';
 import { estimateBuiltinToolsGuidance } from '@/lib/tools/builtin-guidance';
 import { useLocale } from '@/lib/i18n';
 import {
@@ -1662,7 +1663,10 @@ export default function ChatContainer() {
     setLastTurnUsage(null);
   }, []);
 
-  const estimatedTokens = contextBreakdown.total;
+  const estimatedTokens = occupancyFromEstimateAndMeasured(
+    contextBreakdown.total,
+    lastTurnUsage,
+  );
   const contextLimit = selectedSpec.context;
   const outputReserve = Math.min(selectedSpec.maxOutput || 8192, 8192);
   const usableLimit =
@@ -1720,6 +1724,7 @@ export default function ChatContainer() {
     usableLimit,
     contextBreakdown,
     estimateSystemForSend,
+    measuredLastTurn: lastTurnUsage,
     onHistoryTruncated: clearMeasuredUsage,
     setPicturesExpanded,
     setOutputGroupsOpen,
@@ -2918,7 +2923,10 @@ export default function ChatContainer() {
             canCompact={messages.length >= 4}
             onCompact={async () => {
               const next = await runCompact(messages);
-              if (next) updateActiveSession(next);
+              if (next) {
+                clearMeasuredUsage();
+                updateActiveSession(next);
+              }
             }}
           />
         </div>

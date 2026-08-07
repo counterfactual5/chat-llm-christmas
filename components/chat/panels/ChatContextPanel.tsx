@@ -308,7 +308,9 @@ export function ChatContextPanel({
                   </span>
                 </div>
                 <p className="text-[10px] leading-snug text-stone-400">
-                  Estimate for window / compact (system assembled like the server).
+                  Window occupancy for compact / send gates. When the last turn
+                  reported usage, that measurement floors this number so the bar
+                  cannot look emptier than the real prompt.
                 </p>
                 {lastTurnUsage &&
                   (lastTurnUsage.prompt_tokens != null ||

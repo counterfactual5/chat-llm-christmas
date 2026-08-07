@@ -1,6 +1,10 @@
 /**
  * Local + cloud chat session persistence.
  * Pure async/sync helpers — hooks only own React state timing.
+ *
+ * Bound accounts use `LOCAL_CHATS_KEY` (+ owner anti-bleed). Guests use a
+ * separate `LOCAL_GUEST_CHATS_KEY` so drafts survive refresh and stay isolated
+ * from account histories (no cloud sync for guests).
  */
 
 import type { ChatSession } from '@/lib/chat/types';
@@ -13,10 +17,12 @@ import {
 } from '@/lib/chat/session/store';
 
 export const LOCAL_CHATS_KEY = 'llm_christmas_chats';
+/** Device-local guest drafts — never shared with bound-account storage. */
+export const LOCAL_GUEST_CHATS_KEY = 'llm_christmas_chats_guest';
 
-export function readLocalSessions(): ChatSession[] {
+function readLocalSessionsFrom(key: string): ChatSession[] {
   try {
-    const raw = localStorage.getItem(LOCAL_CHATS_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as ChatSession[];
     return parsed
@@ -32,15 +38,32 @@ export function readLocalSessions(): ChatSession[] {
   }
 }
 
-export function writeLocalSessions(sessions: ChatSession[]): void {
+function writeLocalSessionsTo(key: string, sessions: ChatSession[]): void {
   const persisted = sessionsWorthPersisting(sessions);
   if (persisted.length > 0) {
-    localStorage.setItem(LOCAL_CHATS_KEY, JSON.stringify(persisted));
+    localStorage.setItem(key, JSON.stringify(persisted));
   } else {
-    localStorage.removeItem(LOCAL_CHATS_KEY);
+    localStorage.removeItem(key);
   }
 }
 
+export function readLocalSessions(): ChatSession[] {
+  return readLocalSessionsFrom(LOCAL_CHATS_KEY);
+}
+
+export function writeLocalSessions(sessions: ChatSession[]): void {
+  writeLocalSessionsTo(LOCAL_CHATS_KEY, sessions);
+}
+
+export function readGuestLocalSessions(): ChatSession[] {
+  return readLocalSessionsFrom(LOCAL_GUEST_CHATS_KEY);
+}
+
+export function writeGuestLocalSessions(sessions: ChatSession[]): void {
+  writeLocalSessionsTo(LOCAL_GUEST_CHATS_KEY, sessions);
+}
+
+/** Clears bound-account local cache only — guest drafts are left intact. */
 export function clearLocalSessions(): void {
   try {
     localStorage.removeItem(LOCAL_CHATS_KEY);
@@ -108,11 +131,14 @@ export type HydrateSessionsResult = {
 };
 
 /**
- * Build the initial session list for a bound account from localStorage.
- * Cloud merge is applied separately via `mergeSyncedSessions`.
+ * Build the initial session list from a localStorage key.
+ * Bound accounts use `LOCAL_CHATS_KEY`; guests use `LOCAL_GUEST_CHATS_KEY`.
+ * Cloud merge (bound only) is applied separately via `mergeSyncedSessions`.
  */
-export function hydrateSessionsFromLocal(): HydrateSessionsResult {
-  const nonEmpty = readLocalSessions();
+export function hydrateSessionsFromLocal(
+  key: string = LOCAL_CHATS_KEY,
+): HydrateSessionsResult {
+  const nonEmpty = readLocalSessionsFrom(key);
   if (nonEmpty.length === 0) {
     return { sessions: null, activeSessionId: null, needsDraft: true };
   }

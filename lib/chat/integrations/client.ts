@@ -12,6 +12,8 @@ export type IntegrationStatus = {
   connected: boolean;
   available: boolean;
   label?: string;
+  /** Vault still has tokens, but live Google APIs rejected them. */
+  needsReconnect?: boolean;
 };
 
 export type IntegrationsSnapshot = {
@@ -19,6 +21,12 @@ export type IntegrationsSnapshot = {
   github: IntegrationStatus | null;
   google: IntegrationStatus | null;
 };
+
+/** Outcome of probing Google REST APIs against stored OAuth tokens. */
+export type GoogleLiveProbeResult =
+  | { kind: 'ok' }
+  | { kind: 'needs_reconnect' }
+  | { kind: 'inconclusive' };
 
 type ApiRow = {
   provider?: string;
@@ -54,6 +62,52 @@ export async function fetchIntegrationsSnapshot(
   } catch {
     return { notion: null, github: null, google: null };
   }
+}
+
+/**
+ * Live check via `/api/integrations/google/probe`.
+ * - 401 / usable:false → needs reconnect
+ * - network / 5xx → inconclusive (do not flip vault-connected UI)
+ */
+export async function probeGoogleLiveStatus(
+  fetchImpl: typeof fetch = fetch,
+): Promise<GoogleLiveProbeResult> {
+  try {
+    const response = await fetchImpl('/api/integrations/google/probe', {
+      cache: 'no-store',
+    });
+    if (response.status === 401) {
+      return { kind: 'needs_reconnect' };
+    }
+    if (!response.ok) {
+      return { kind: 'inconclusive' };
+    }
+    const data = (await response.json()) as { usable?: boolean };
+    if (data.usable === false) {
+      return { kind: 'needs_reconnect' };
+    }
+    return { kind: 'ok' };
+  } catch {
+    return { kind: 'inconclusive' };
+  }
+}
+
+/** Merge vault snapshot with a live probe without clearing tokens. */
+export function applyGoogleLiveProbe(
+  status: IntegrationStatus,
+  probe: GoogleLiveProbeResult,
+): IntegrationStatus {
+  if (!status.connected) {
+    return { ...status, needsReconnect: false };
+  }
+  if (probe.kind === 'needs_reconnect') {
+    return { ...status, needsReconnect: true };
+  }
+  if (probe.kind === 'ok') {
+    return { ...status, needsReconnect: false };
+  }
+  // inconclusive: keep prior flag if any, otherwise leave unset
+  return status;
 }
 
 export async function disconnectIntegration(

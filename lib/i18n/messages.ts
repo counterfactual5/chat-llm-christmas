@@ -55,7 +55,11 @@ export const dict = {
     searchedGitHub: 'GitHub tool finished',
     connectGoogle: 'Connect Google',
     disconnectGoogle: 'Disconnect Google',
+    reconnectGoogle: 'Reconnect Google',
     googleConnected: 'Google connected',
+    googleNeedsReconnect: 'Google connection expired — reconnect to continue',
+    googleAuthRequired:
+      'Google tools failed authorization — reconnect Google in Settings, then try again.',
     googleNotConfigured: 'Google OAuth is unavailable on this server',
     googleConnectCardTitle: 'Google',
     googleConnectCardBody:
@@ -488,7 +492,10 @@ export const dict = {
     searchedGitHub: 'GitHub 调用完成',
     connectGoogle: '连接 Google',
     disconnectGoogle: '断开 Google',
+    reconnectGoogle: '重新连接 Google',
     googleConnected: 'Google 已连接',
+    googleNeedsReconnect: 'Google 连接已失效 — 请重新连接后继续',
+    googleAuthRequired: 'Google 工具鉴权失败 — 请在设置中重新连接 Google 后再试。',
     googleNotConfigured: '服务器 Google OAuth 暂不可用',
     googleConnectCardTitle: 'Google',
     googleConnectCardBody:

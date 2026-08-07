@@ -20,8 +20,10 @@ import {
 } from 'react';
 import type { ChatSession } from '@/lib/chat/types';
 import {
+  applyGoogleLiveProbe,
   disconnectIntegration,
   fetchIntegrationsSnapshot,
+  probeGoogleLiveStatus,
   stripGoogleMcpFromSessions,
   stripMcpIdFromSessions,
   type IntegrationStatus,
@@ -74,14 +76,30 @@ export function useChatIntegrations(opts: {
     const snap = await fetchIntegrationsSnapshot();
     setNotionStatus(snap.notion);
     setGitHubStatus(snap.github);
-    setGoogleStatus(snap.google);
+
+    let google = snap.google;
+    if (google?.connected) {
+      const probe = await probeGoogleLiveStatus();
+      google = applyGoogleLiveProbe(google, probe);
+    }
+    setGoogleStatus(google);
 
     // Only scrub when we know the provider is disconnected. `null` = still
     // loading / fetch failed — wiping mcpIds then looks like toggles won't save.
+    // Do NOT scrub on needsReconnect — keep mcpIds so reconnect restores toggles.
     if (snap.notion && !snap.notion.connected) scrubNotion();
     if (snap.github && !snap.github.connected) scrubGitHub();
     if (snap.google && !snap.google.connected) scrubGoogle();
   }, [scrubNotion, scrubGitHub, scrubGoogle]);
+
+  /** Stream/auth failure: flip UI without wiping vault tokens. */
+  const markGoogleNeedsReconnect = useCallback(() => {
+    setGoogleStatus((prev) => {
+      if (!prev?.connected) return prev;
+      if (prev.needsReconnect) return prev;
+      return { ...prev, needsReconnect: true };
+    });
+  }, []);
 
   const disconnectNotion = useCallback(async () => {
     setNotionBusy(true);
@@ -133,6 +151,7 @@ export function useChatIntegrations(opts: {
     setGoogleStatus,
     googleBusy,
     fetchIntegrations,
+    markGoogleNeedsReconnect,
     disconnectNotion,
     disconnectGitHub,
     disconnectGoogle,

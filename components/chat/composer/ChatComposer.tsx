@@ -68,6 +68,7 @@ export type ComposerIntegrationStatus = {
   connected: boolean;
   available?: boolean;
   label?: string;
+  needsReconnect?: boolean;
 } | null;
 
 type PlusFlyout = 'commands' | 'skills' | 'tools' | 'mcp' | null;
@@ -1084,7 +1085,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           )}
                         </div>
                         <div>
-                          {googleStatus?.connected ? (
+                          {googleStatus?.connected && !googleStatus.needsReconnect ? (
                             <button
                               type="button"
                               onClick={() => setGoogleMcpMenuOpen((open) => !open)}
@@ -1118,8 +1119,10 @@ export function ChatComposer(props: ChatComposerProps) {
                                 <div className="text-sm text-stone-800 dark:text-stone-100">
                                   Google
                                 </div>
-                                <div className="truncate text-[10px] text-stone-400">
-                                  {t('googleMcpNeedsConnect')}
+                                <div className="truncate text-[10px] text-amber-600 dark:text-amber-400">
+                                  {googleStatus?.connected && googleStatus.needsReconnect
+                                    ? t('googleNeedsReconnect')
+                                    : t('googleMcpNeedsConnect')}
                                 </div>
                               </div>
                               <button
@@ -1131,12 +1134,16 @@ export function ChatComposer(props: ChatComposerProps) {
                                 }}
                                 className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                               >
-                                {t('connectGoogle')}
+                                {googleStatus?.connected && googleStatus.needsReconnect
+                                  ? t('reconnectGoogle')
+                                  : t('connectGoogle')}
                               </button>
                             </div>
                           )}
                           <AnimatePresence initial={false}>
-                            {googleStatus?.connected && googleMcpMenuOpen && (
+                            {googleStatus?.connected &&
+                              !googleStatus.needsReconnect &&
+                              googleMcpMenuOpen && (
                               <motion.div
                                 key="google-mcp-inline"
                                 initial={{ height: 0, opacity: 0 }}

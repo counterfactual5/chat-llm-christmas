@@ -24,6 +24,7 @@ export type IntegrationStatus = {
   connected: boolean;
   available?: boolean;
   label?: string;
+  needsReconnect?: boolean;
 } | null;
 
 export type ChatModalsProps = {
@@ -555,7 +556,12 @@ export function ChatModals(props: ChatModalsProps) {
             <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
               {t('googleConnectCardTitle')}
             </h2>
-            {googleStatus?.connected ? (
+            {googleStatus?.connected && googleStatus.needsReconnect ? (
+              <p className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-400">
+                {t('googleNeedsReconnect')}
+                {googleStatus.label ? ` · ${googleStatus.label}` : ''}
+              </p>
+            ) : googleStatus?.connected ? (
               <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
                 {t('googleConnected')}
                 {googleStatus.label ? ` · ${googleStatus.label}` : ''}
@@ -570,8 +576,25 @@ export function ChatModals(props: ChatModalsProps) {
               </p>
             )}
 
-            <div className="mt-6 w-full max-w-sm">
-              {googleStatus?.connected ? (
+            <div className="mt-6 w-full max-w-sm space-y-2">
+              {googleStatus?.connected && googleStatus.needsReconnect ? (
+                <>
+                  <a
+                    href="/api/integrations/google/start"
+                    className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-stone-900 text-sm font-semibold text-white transition-colors hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                  >
+                    {t('reconnectGoogle')}
+                  </a>
+                  <Button
+                    type="button"
+                    disabled={googleBusy}
+                    onClick={() => void disconnectGoogle()}
+                    className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
+                  >
+                    {t('disconnectGoogle')}
+                  </Button>
+                </>
+              ) : googleStatus?.connected ? (
                 <Button
                   type="button"
                   disabled={googleBusy}

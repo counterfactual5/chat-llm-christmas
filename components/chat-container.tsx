@@ -526,6 +526,7 @@ export default function ChatContainer() {
     setGoogleStatus,
     googleBusy,
     fetchIntegrations,
+    markGoogleNeedsReconnect,
     disconnectNotion,
     disconnectGitHub,
     disconnectGoogle,
@@ -1050,7 +1051,7 @@ export default function ChatContainer() {
       setActiveMcpIds((prev) => prev.filter((id) => id !== service && id !== 'google'));
       return;
     }
-    if (!isAccountBound || !googleStatus?.connected) {
+    if (!isAccountBound || !googleStatus?.connected || googleStatus.needsReconnect) {
       openGoogleModal();
       return;
     }
@@ -1263,7 +1264,10 @@ export default function ChatContainer() {
         memoriesEnabled,
         getNotionConnected: () => Boolean(notionStatusRef.current?.connected),
         getGitHubConnected: () => Boolean(githubStatusRef.current?.connected),
-        getGoogleConnected: () => Boolean(googleStatusRef.current?.connected),
+        getGoogleConnected: () => {
+          const g = googleStatusRef.current;
+          return Boolean(g?.connected && !g.needsReconnect);
+        },
         getActiveSessionId: () => activeSessionIdRef.current,
         scrollToBottom,
         fetchSkills,
@@ -1291,9 +1295,8 @@ export default function ChatContainer() {
         },
         onReplySettled: onMemoryReplySettled,
         onGoogleAuthRequired: () => {
-          setAttachError(
-            'Google tools are enabled but not authorized — reconnect Google in Settings, then try again.',
-          );
+          markGoogleNeedsReconnect();
+          setAttachError(t('googleAuthRequired'));
         },
         onNotionAuthRequired: () => {
           setAttachError(

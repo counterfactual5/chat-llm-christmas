@@ -126,8 +126,13 @@ export function resolvePendingAttachments(
   // Hard-block on upload failure when the attachment has no inline fallback:
   // images (vision needs the stored file) and text-less docs (post-U4a the
   // extract lives server-side; with no fileId there's nothing to file_read).
+  // Empty-string text is treated the same as missing (post-trim).
   // Only text-bearing plain-text files may still send when their upload fails.
-  if (uploadChecks.some((a) => a.uploadError && (isImageAttachment(a) || !a.text))) {
+  if (
+    uploadChecks.some(
+      (a) => a.uploadError && (isImageAttachment(a) || !String(a.text || '').trim()),
+    )
+  ) {
     return { ok: false, error: 'upload_failed' };
   }
 

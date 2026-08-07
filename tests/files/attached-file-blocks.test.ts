@@ -6,6 +6,7 @@ import {
   collectFileExtractsFromMessages,
   formatChatFileHistoryRefs,
   HISTORY_FILE_REF_MARKER,
+  isDirectiveBody,
   messagesHaveAttachedFiles,
   parseAttachedFileBlocks,
 } from '@/lib/files/attached-file-blocks';
@@ -187,6 +188,28 @@ describe('attached-file-blocks', () => {
     expect(extracts['fid/1']?.text).toBe('body one longer extract');
     expect(extracts['fid/1']?.name).toBe('a.txt');
   });
+
+  it('skips directive-shaped pointer bodies (not real extracts)', () => {
+    const directive =
+      '[Attached File: a.pdf] (stored fileId: file-x)\n' +
+      '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=file-x)\n' +
+      '\n\n---\n\nplease summarize';
+    const extracts = collectFileExtractsFromMessages([
+      { role: 'user', content: directive },
+    ]);
+    expect(extracts['file-x']).toBeUndefined();
+  });
+
+  it('still collects genuine markdown-like bodies', () => {
+    const content =
+      '[Attached File: a.pdf] (stored fileId: file-y)\n' +
+      '# Chapter One\n\n| Col | Row |\n| --- | --- |\n| a | b |\n' +
+      '\n\n---\n\nplease summarize';
+    const extracts = collectFileExtractsFromMessages([
+      { role: 'user', content },
+    ]);
+    expect(extracts['file-y']?.text).toContain('# Chapter One');
+  });
 });
 
 describe('file_read arg parsing', () => {
@@ -232,5 +255,67 @@ describe('file_read arg parsing', () => {
       maxPages: 8,
       startPageExplicit: false,
     });
+  });
+});
+
+describe('isDirectiveBody', () => {
+  it('matches canonical single-line pointer bodies', () => {
+    expect(
+      isDirectiveBody(
+        '(content is stored server-side in the extract sidecar; to inspect it, call file_read with file_id=abc123)',
+      ),
+    ).toBe(true);
+    expect(
+      isDirectiveBody('(to read the body, call file_read with file_id=xyz)'),
+    ).toBe(true);
+    // Whitespace outside the parens is fine.
+    expect(
+      isDirectiveBody(
+        '  (call file_read with file_id=a)  ',
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores markdown content (pipe / hash / star / backtick inside)', () => {
+    expect(
+      isDirectiveBody('(call file_read with `file_id`)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read # section)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read | table)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read * doc)'),
+    ).toBe(false);
+  });
+
+  it('ignores multi-line bodies', () => {
+    expect(
+      isDirectiveBody('(call file_read\nwith file_id=x)'),
+    ).toBe(false);
+    expect(
+      isDirectiveBody('(call file_read\tfile_id=x)'),
+    ).toBe(false);
+  });
+
+  it('ignores bodies that are not wrapped in parentheses', () => {
+    expect(isDirectiveBody('call file_read with file_id=x')).toBe(false);
+    expect(isDirectiveBody('open (call file_read with file_id=x)')).toBe(false);
+    expect(isDirectiveBody('(call file_read with file_id=x')).toBe(false);
+  });
+
+  it('ignores over-200-char bodies even when wrapped', () => {
+    const filler = 'x'.repeat(250);
+    const body = `(to inspect, call file_read with file_id=abc; ${filler})`;
+    expect(body.length).toBeGreaterThanOrEqual(200);
+    expect(isDirectiveBody(body)).toBe(false);
+  });
+
+  it('ignores genuine user prose mentioning file_read', () => {
+    expect(
+      isDirectiveBody('when you want to read a file you can call file_read'),
+    ).toBe(false);
   });
 });

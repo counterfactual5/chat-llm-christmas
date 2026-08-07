@@ -22,4 +22,6 @@ export type IngestedAttachment = {
   uploading?: boolean;
   /** Gateway upload failed (network / server); local preview may still exist. */
   uploadError?: boolean;
+  /** Last upload failure message (shown in tooltip / debugging). */
+  uploadErrorMessage?: string;
 };

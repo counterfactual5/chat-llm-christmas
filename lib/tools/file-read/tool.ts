@@ -11,6 +11,7 @@ import {
   resolveAutoStartPage,
   sliceExtractForRead,
 } from '@/lib/files/extract-slice';
+import { isDirectiveBody } from '@/lib/files/attached-file-blocks';
 import type { ChatTool, ToolRuntimeContext } from '@/lib/tools/registry';
 
 /** Per-call return cap — overview / chapter, not whole book. */
@@ -568,7 +569,10 @@ export function createFileReadTool(): ChatTool {
       try {
         const cached = ctx.fileExtracts?.[fileId];
         let name = cached?.name || fileId;
-        let text = cached?.text || '';
+        // A directive-shaped pointer body ("call file_read with file_id=…") is
+        // not the real extract — treat as cache miss so gateway errors surface.
+        let text =
+          cached?.text && !isDirectiveBody(cached.text) ? cached.text : '';
         let partialExtract = false;
         let extractTotal: number | null | undefined;
         let extractPages: number | null | undefined;

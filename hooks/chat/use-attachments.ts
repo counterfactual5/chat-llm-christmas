@@ -7,6 +7,7 @@
 import { useCallback, useState } from 'react';
 import { ingestFiles, type IngestedAttachment } from '@/lib/files/ingest';
 import { uploadAttachmentDirect } from '@/lib/files/direct-upload';
+import { isImageType, uploadFailurePatch } from '@/lib/chat/turn/upload-patch';
 
 export function useChatAttachments(opts: { isAccountBound: boolean }) {
   const { isAccountBound } = opts;
@@ -50,7 +51,7 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             mime: a.type,
           });
           const fileId = String(uploaded.id);
-          const isImage = a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
+          const isImage = isImageType(a);
           patch(a.id, (x) => ({
             ...x,
             uploading: false,
@@ -68,20 +69,19 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
             /too large|FUNCTION_PAYLOAD_TOO_LARGE|payload too large|FILE_TOO_LARGE|413/i.test(
               msg,
             );
-          const isImage =
-            a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));
+          const isImage = isImageType(a);
           uploadErrors.push(
             `${a.name}: ${
               payloadTooLarge ? 'File too large for upload (max 20MB)' : msg
             }`,
           );
           // Images: hard fail (can't chat vision without bytes).
-          // Docs/PDFs: soft warn — extracted text still usable for chat.
-          patch(a.id, (x) =>
-            isImage
-              ? { ...x, uploading: false, uploadError: true }
-              : { ...x, uploading: false, uploadError: false, uploadBlob: undefined },
-          );
+          // Non-image with embedded text: soft fail — extracted text still usable.
+          // Text-less non-image (e.g. unreadable binary): hard fail — nothing to send.
+          patch(a.id, (x) => ({
+            ...x,
+            ...uploadFailurePatch({ isImage, text: a.text, msg }),
+          }));
         }
       }
       const allErrors = [...errors, ...uploadErrors];

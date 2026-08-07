@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ingestFile } from '@/lib/files/ingest';
+import { MAX_ATTACHMENT_TEXT_CHARS } from '@/lib/files/ingest/text-limit';
 
 function file(name: string, type: string, contents: BlobPart = 'x'): File {
   return new File([contents], name, { type });
@@ -87,5 +88,24 @@ describe('ingestFile — thin client (server-authority parsing)', () => {
   it('legacy .ppt throws (never supported)', async () => {
     const f = file('legacy.ppt', 'application/vnd.ms-powerpoint', 'OLE-fake');
     await expect(ingestFile(f)).rejects.toThrow(/Legacy \.ppt is not supported/i);
+  });
+
+  it('truncates .txt files over MAX_ATTACHMENT_TEXT_CHARS', async () => {
+    const big = 'x'.repeat(MAX_ATTACHMENT_TEXT_CHARS + 1234);
+    const f = file('big.txt', 'text/plain', big);
+    const out = await ingestFile(f);
+    expect(out.name).toBe('big.txt');
+    const text = String(out.text || '');
+    expect(text.startsWith('x'.repeat(MAX_ATTACHMENT_TEXT_CHARS))).toBe(true);
+    expect(text).toContain('truncated');
+    expect(text).toContain('big.txt');
+    expect(text.length).toBeGreaterThan(MAX_ATTACHMENT_TEXT_CHARS);
+  });
+
+  it('leaves small .txt files untruncated', async () => {
+    const f = file('small.txt', 'text/plain', 'tiny body');
+    const out = await ingestFile(f);
+    expect(out.text).toBe('tiny body');
+    expect(out.text).not.toContain('truncated');
   });
 });

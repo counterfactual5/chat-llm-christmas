@@ -7,6 +7,7 @@ import {
   resolvePendingAttachments,
   titleForNewConversation,
 } from '@/lib/chat/turn/attachments';
+import { uploadFailurePatch } from '@/lib/chat/turn/upload-patch';
 import {
   exceedsUsableWindow,
   estimateTokensForSend,
@@ -243,6 +244,78 @@ describe('attachments', () => {
     expect(titleForNewConversation('short')).toBe('short');
     expect(titleForNewConversation('x'.repeat(35))).toBe(`${'x'.repeat(30)}...`);
     expect(titleForNewConversation('', [att({ id: '1', name: 'photo.png' })])).toBe('photo.png');
+  });
+});
+
+describe('uploadFailurePatch (upload soft-fail hard-gate)', () => {
+  it('hard-fails text-less non-image attachments (the P1 regression)', () => {
+    // Pre-fix: this branch always set uploadError: false, silencing the send gate.
+    const patch = uploadFailurePatch({
+      isImage: false,
+      text: undefined,
+      msg: 'connection reset',
+    });
+    expect(patch.uploading).toBe(false);
+    expect(patch.uploadError).toBe(true);
+    expect(patch.uploadErrorMessage).toBe('connection reset');
+  });
+
+  it('soft-fails text-bearing non-image attachments (plain-text preserve)', () => {
+    const patch = uploadFailurePatch({
+      isImage: false,
+      text: 'pdf body extracted',
+      msg: 'connection reset',
+    });
+    expect(patch.uploading).toBe(false);
+    expect(patch.uploadError).toBe(false);
+    expect(patch.uploadErrorMessage).toBeUndefined();
+  });
+
+  it('hard-fails image attachments regardless of text', () => {
+    const patch = uploadFailurePatch({
+      isImage: true,
+      text: undefined,
+      msg: 'too large',
+    });
+    expect(patch.uploading).toBe(false);
+    expect(patch.uploadError).toBe(true);
+    expect(patch.uploadErrorMessage).toBe('too large');
+  });
+
+  it('keeps the resolvePendingAttachments send gate aligned with the new flag', () => {
+    // Sanity: a text-less non-image doc with uploadError: true must now block send.
+    const doc = att({
+      id: 'd1',
+      name: 'a.pdf',
+      type: 'application/pdf',
+      uploadError: true,
+    });
+    const resolved = resolvePendingAttachments({
+      textToSend: 'hi',
+      attachments: [doc],
+      isActiveSession: true,
+      vision: false,
+      zhipuVisionOn: false,
+      isLoading: false,
+    });
+    expect(resolved).toEqual({ ok: false, error: 'upload_failed' });
+
+    // An image with uploadError also blocks.
+    const image = att({
+      id: 'i1',
+      name: 'x.png',
+      type: 'image/png',
+      uploadError: true,
+    });
+    const resolvedImg = resolvePendingAttachments({
+      textToSend: 'hi',
+      attachments: [image],
+      isActiveSession: true,
+      vision: true,
+      zhipuVisionOn: false,
+      isLoading: false,
+    });
+    expect(resolvedImg).toEqual({ ok: false, error: 'upload_failed' });
   });
 });
 

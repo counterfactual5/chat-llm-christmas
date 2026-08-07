@@ -15,6 +15,7 @@ import {
   ZIP_MIME,
 } from './support';
 import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
+import { truncateAttachmentText } from './text-limit';
 
 export type { IngestedAttachment } from './types';
 export {
@@ -105,7 +106,7 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
   }
 
   // Plain text: chat composer wants the body inline.
-  const text = await file.text();
+  const text = truncateAttachmentText(await file.text(), file.name).text;
   return {
     ...base,
     type: file.type || 'text/plain',

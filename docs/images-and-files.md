@@ -23,18 +23,18 @@ sequenceDiagram
   V->>A: mint X-Upload-Token (HMAC, ~300s)
   A-->>V: uploadToken + uploadUrl
   V-->>B: ticket
-  B->>A: POST /v1/files (multipart + X-Upload-Token)<br/>optional form field: extract
+  B->>A: POST /v1/files (multipart + X-Upload-Token)<br/>no extract field — server runs the parser
   A-->>B: { id: file-… }
 ```
 
 - **直传**：浏览器 → `api.chat.llm.christmas/v1/files`，不经过 Vercel body（约 4.5MB 限制）。
 - **回退**：ticket 失败时仍走同源 `/api/files`（小文件 / 旧部署）。
 - **图片**：原图直传（不压缩）；会话里主要存 `fileId`，预览走 `/api/files/<id>`。
-- **文档抽取**：客户端抽取文本后，上传原文件时附带 `extract` 字段；chat-api 写 `{path}.extract.txt` sidecar。
-  - **分页格式（DOCX / XLSX / PPTX / ZIP）**：统一 `--- page N ---` 单元。page 1 = catalog/outline；后续页 = 章节 / sheet / 幻灯片 / ZIP 白名单成员。共享序列化在 `lib/files/paged-extract.ts`；格式实现在 `lib/files/ingest/extractors/*`。
-  - **PDF / 纯文本 / 代码**：仍抽成正文（PDF 约前 40 页）；sidecar 可带 page 标记或整段文本，供 `file_read` 切片。
-  - **拒收**：legacy `.doc` / `.ppt`（OLE，无轻量浏览器抽取）在上传白名单直接拒绝。
-  - **ZIP**：整包 ≤20MB；成员 `uncompressedSize` 缺失或累计将超限则 **fail-closed**（不解压该成员）；嵌套 zip 只列目录、不展开；Office 成员正文会折叠内层 `--- page N ---`，避免污染外层切片。
+- **文档抽取**：客户端**不再**做文档正文抽取；上传仅携带原 bytes。chat-api 在服务端运行权威解析（含 `anydoc-wasm` / SheetJS）；写 `{path}.extract.txt` sidecar。
+  - **分页格式（DOCX / XLSX / PPTX / ZIP / EPUB）**：统一 `--- page N ---` 单元。page 1 = catalog/outline；后续页 = 章节 / sheet / 幻灯片 / ZIP 白名单成员。共享序列化契约在 `lib/files/paged-extract.ts`（与 chat-api `services/pagedSerialize.js` 对齐）；格式解析已由 chat-api 接管。
+  - **PDF / 纯文本 / 代码**：服务端产出正文（PDF 由 chat-api 走 anydoc/unpdf 路径）；sidecar 可带 page 标记或整段文本，供 `file_read` 切片。
+  - **拒收**：legacy `.doc` / `.ppt`（OLE）在上传白名单直接拒绝。
+  - **ZIP**：整包 ≤20MB；成员尺寸 / 解压上限守卫逻辑实现在 chat-api 端（fail-closed）；嵌套 zip 只列目录、不展开；Office 成员正文会折叠内层 `--- page N ---`，避免污染外层切片。
 - 硬限制：chat-api `FILE_UPLOAD_MAX_BYTES`（默认 20MB）；客户端 `MAX_INGEST_BYTES` 同为 20MB；nginx 更大。
 
 `UPLOAD_TOKEN_SECRET` 在 **chat-api** `.env`，不是前端密钥。前端只拿短时 ticket。

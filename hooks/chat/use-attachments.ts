@@ -42,12 +42,12 @@ export function useChatAttachments(opts: { isAccountBound: boolean }) {
         try {
           // Prefer browser → chat-api direct upload (upload ticket); falls back
           // to same-origin /api/files if the ticket endpoint is not yet live.
+          // Server is the extract authority — no multipart `extract` field.
           const uploaded = await uploadAttachmentDirect({
             blob: a.uploadBlob || null,
             dataUrl: a.dataUrl,
             filename: a.name,
             mime: a.type,
-            extractText: a.text || null,
           });
           const fileId = String(uploaded.id);
           const isImage = a.type.startsWith('image/') || Boolean(a.dataUrl?.startsWith('data:image'));

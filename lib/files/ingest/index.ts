@@ -1,10 +1,10 @@
-/** Client-side file ingestion: read/extract dropped files into attachments. */
+/**
+ * Client-side file ingestion (thin). Browser validates + compresses images +
+ * reads small plain-text files; bytes for docs (pdf/docx/epub/pptx/xlsx/zip)
+ * upload as opaque blobs. Authoritative extract lives on chat-api.
+ */
 
 import type { IngestedAttachment } from './types';
-import {
-  extractZipText,
-} from './extractors';
-import { extractWithAnydocFallback } from './anydoc';
 import {
   isLegacyOleOfficeFile,
   isPresentationFile,
@@ -14,7 +14,6 @@ import {
   PPTX_MIME,
   ZIP_MIME,
 } from './support';
-import { truncateAttachmentText } from './text-limit';
 import { MAX_INGEST_BYTES, prepareImageForUpload } from './compress-image';
 
 export type { IngestedAttachment } from './types';
@@ -22,20 +21,13 @@ export {
   isSupportedDropFile,
   isPresentationFile,
   isZipArchiveFile,
+  isSpreadsheetWorkbookFile,
+  isLegacyOleOfficeFile,
   PPTX_MIME,
   ZIP_MIME,
 } from './support';
 export { MAX_INGEST_BYTES, MAX_UPLOAD_BYTES } from './compress-image';
 export { MAX_ATTACHMENT_TEXT_CHARS, truncateAttachmentText } from './text-limit';
-
-function withUploadBlob(file: File, text: string): Pick<IngestedAttachment, 'text' | 'uploadBlob'> {
-  const clipped = truncateAttachmentText(text, file.name || 'file');
-  return {
-    text: clipped.text,
-    /** Keep original bytes for browser → chat-api direct upload. */
-    uploadBlob: file,
-  };
-}
 
 export async function ingestFile(file: File): Promise<IngestedAttachment> {
   const base: IngestedAttachment = {
@@ -62,31 +54,6 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
     };
   }
 
-  if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
-    const text = await extractWithAnydocFallback(file);
-    if (!text) throw new Error(`Could not extract text from ${file.name}`);
-    return {
-      ...base,
-      type: file.type || 'application/pdf',
-      ...withUploadBlob(file, text),
-    };
-  }
-
-  if (
-    name.endsWith('.docx') ||
-    file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  ) {
-    const text = await extractWithAnydocFallback(file);
-    if (!text) throw new Error(`Could not extract text from ${file.name}`);
-    return {
-      ...base,
-      type:
-        file.type ||
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      ...withUploadBlob(file, text),
-    };
-  }
-
   if (isLegacyOleOfficeFile(file)) {
     if (name.endsWith('.ppt')) {
       throw new Error('Legacy .ppt is not supported — please save as .pptx and try again');
@@ -94,42 +61,38 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
     throw new Error('Legacy .doc is not supported — please save as .docx and try again');
   }
 
-  if (name.endsWith('.epub') || file.type === 'application/epub+zip') {
-    const text = await extractWithAnydocFallback(file);
-    if (!text) throw new Error(`Could not extract text from ${file.name}`);
+  // Docs / archives: bytes only. chat-api runs the parser and serves extract
+  // via GET /files/:id/extract once sidecar is ready.
+  if (file.type === 'application/pdf' || name.endsWith('.pdf')) {
+    return { ...base, type: file.type || 'application/pdf', uploadBlob: file };
+  }
+
+  if (
+    name.endsWith('.docx') ||
+    file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ) {
     return {
       ...base,
-      type: file.type || 'application/epub+zip',
-      ...withUploadBlob(file, text),
+      type:
+        file.type ||
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      uploadBlob: file,
     };
+  }
+
+  if (name.endsWith('.epub') || file.type === 'application/epub+zip') {
+    return { ...base, type: file.type || 'application/epub+zip', uploadBlob: file };
   }
 
   if (isPresentationFile(file)) {
-    const text = await extractWithAnydocFallback(file);
-    if (!text) throw new Error(`Could not extract text from ${file.name}`);
-    return {
-      ...base,
-      type: file.type || PPTX_MIME,
-      ...withUploadBlob(file, text),
-    };
+    return { ...base, type: file.type || PPTX_MIME, uploadBlob: file };
   }
 
   if (isZipArchiveFile(file)) {
-    const text = await extractZipText(file);
-    if (!text) throw new Error(`Could not extract text from ${file.name}`);
-    return {
-      ...base,
-      type: file.type || ZIP_MIME,
-      ...withUploadBlob(file, text),
-    };
+    return { ...base, type: file.type || ZIP_MIME, uploadBlob: file };
   }
 
   if (isSpreadsheetWorkbookFile(file)) {
-    // Don't route spreadsheets through anydoc: SheetJS keeps sheet/catalog
-    // structure that anydoc's CSV-style markdown loses.
-    const { extractSpreadsheetText } = await import('./extractors');
-    const text = await extractSpreadsheetText(file);
-    if (!text) throw new Error(`Could not extract cells from ${file.name}`);
     return {
       ...base,
       type:
@@ -137,15 +100,17 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
         (name.endsWith('.xls')
           ? 'application/vnd.ms-excel'
           : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
-      ...withUploadBlob(file, text),
+      uploadBlob: file,
     };
   }
 
+  // Plain text: chat composer wants the body inline.
   const text = await file.text();
   return {
     ...base,
     type: file.type || 'text/plain',
-    ...withUploadBlob(file, text),
+    text,
+    uploadBlob: file,
   };
 }
 

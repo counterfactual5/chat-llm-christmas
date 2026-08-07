@@ -1,6 +1,10 @@
 /**
  * Browser → chat-api direct upload (bypasses Vercel ~4.5MB body limit).
  * Auth: short-lived upload ticket from /api/files/upload-token (cookie → sk-).
+ *
+ * Authoritative text extract is produced server-side; the browser never sends
+ * a multipart `extract` field. The `extractText` option is kept on the wire
+ * shape for compatibility with older callers but is ignored here.
  */
 
 export type DirectUploadTicket = {
@@ -53,7 +57,7 @@ export async function uploadAttachmentDirect(opts: {
   dataUrl?: string | null;
   filename: string;
   mime?: string;
-  /** Client-extracted text for PDF/DOCX/Excel/plain — stored as chat-api sidecar for file_read. */
+  /** @deprecated server is the extract authority; this field is ignored. */
   extractText?: string | null;
 }): Promise<{ id: string; filename?: string; bytes?: number }> {
   let blob = opts.blob || null;
@@ -84,10 +88,6 @@ export async function uploadAttachmentDirect(opts: {
   const type = opts.mime || blob.type || 'application/octet-stream';
   form.append('file', blob, filename);
   form.append('purpose', type.startsWith('image/') ? 'vision' : 'assistants');
-  const extract = String(opts.extractText || '').trim();
-  if (extract && !type.startsWith('image/')) {
-    form.append('extract', extract);
-  }
 
   const res = await fetch(ticket.uploadUrl, {
     method: 'POST',
@@ -121,14 +121,13 @@ async function uploadViaVercelProxy(opts: {
   blob?: Blob | null;
   dataUrl?: string | null;
   filename: string;
+  /** @deprecated server is the extract authority; this field is ignored. */
   extractText?: string | null;
 }): Promise<{ id: string; filename?: string; bytes?: number }> {
   let res: Response;
   if (opts.blob) {
     const form = new FormData();
     form.append('file', opts.blob, opts.filename);
-    const extract = String(opts.extractText || '').trim();
-    if (extract) form.append('extract', extract);
     res = await fetch('/api/files', { method: 'POST', body: form });
   } else {
     res = await fetch('/api/files', {
@@ -137,7 +136,6 @@ async function uploadViaVercelProxy(opts: {
       body: JSON.stringify({
         dataUrl: opts.dataUrl,
         filename: opts.filename,
-        extract: String(opts.extractText || '').trim() || undefined,
       }),
     });
   }

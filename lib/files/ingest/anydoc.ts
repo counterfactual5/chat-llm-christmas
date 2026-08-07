@@ -140,15 +140,49 @@ export function anydocPagedExtract(
 }
 
 /**
- * Public entry: try anydoc-wasm; on failure, fall back to the JS extractors.
- * PDF/DOCX/PPTX/XLSX use the existing richer fallbacks. Anything else returns
- * `null` so the caller can keep walking the current ingest chain.
+ * Wrap a markdown body produced by either pipeline into the shared catalog
+ * paging shape. The `source` tag surfaces in the catalog so the model can
+ * tell whether we used the rust path or the JS fallback — critical for
+ * spotting quality regressions when comparing attachments across runs.
+ */
+export function pagedExtractWithSource(
+  markdown: string,
+  opts: { filename: string; source: 'anydoc' | 'js-fallback' },
+): string {
+  const body = String(markdown || '').trim();
+  if (!body) return '';
+  const titleSuffix = opts.source === 'anydoc' ? '(anydoc)' : '(js fallback)';
+  const entries: CatalogEntry[] = [
+    {
+      label: '(document body)',
+      kind: 'markdown',
+      note: opts.source === 'anydoc' ? 'via @firecrawl/anydoc-wasm' : 'via js extractor',
+      extractedPage: 2,
+    },
+  ];
+  return serializePagedExtract([
+    {
+      page: 1,
+      body: buildCatalogPage({
+        title: `${opts.filename || 'document'} ${titleSuffix}`,
+        entries,
+      }),
+    },
+    { page: 2, title: 'Document', body },
+  ]);
+}
+
+/**
+ * Public entry: try anydoc-wasm; on failure, fall back to the JS extractors
+ * (which already emit their own catalog paging, so we don't double-wrap).
+ * Anything else returns `null` so the caller can keep walking the chain.
  */
 export async function extractWithAnydocFallback(file: File): Promise<string | null> {
   const name = String(file?.name || '').toLowerCase();
+  const filename = file.name || 'document';
   const md = await anydocExtractText(file).catch(() => null);
   if (md) {
-    return anydocPagedExtract(md, { filename: file.name || 'document' });
+    return pagedExtractWithSource(md, { filename, source: 'anydoc' });
   }
   if (name.endsWith('.docx')) return extractDocxText(file).catch(() => null);
   if (name.endsWith('.pdf') || file.type === 'application/pdf') {
@@ -157,7 +191,12 @@ export async function extractWithAnydocFallback(file: File): Promise<string | nu
   }
   if (name.endsWith('.pptx')) {
     const data = new Uint8Array(await file.arrayBuffer());
-    return extractPptxTextFromBytes(data, { filename: file.name }).catch(() => null);
+    return extractPptxTextFromBytes(data, { filename }).catch(() => null);
+  }
+  if (name.endsWith('.epub') || file.type === 'application/epub+zip') {
+    const { extractEpubTextFromBytes } = await import('./extractors');
+    const data = new Uint8Array(await file.arrayBuffer());
+    return extractEpubTextFromBytes(data).catch(() => null);
   }
   if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
     return extractSpreadsheetText(file).catch(() => null);

@@ -21,13 +21,21 @@ reads it via `parseExtractPages`.
   `unsupported`, `malformed`, `encrypted`, `resourceLimit`, `missingPart`
   — see `isAnydocFallbackError` in `anydoc-paging.ts`.
 
+## Source marker
+
+Catalog entries from the anydoc path carry a `via @firecrawl/anydoc-wasm`
+note (see `pagedExtractWithSource` in `lib/files/ingest/anydoc.ts`); when the
+JS fallback handles a file it emits its own richer catalog (DOCX sections,
+PPTX slides, ZIP members) without that note. This distinction lets the model
+tell which pipeline produced the attachment when comparing across runs.
+
 ## Formats routed through anydoc on the client
 
 | Kind | Routed? | Notes |
 | ---- | ------- | ----- |
 | docx | yes     | better tables/headings than mammoth |
 | pdf  | yes     | better table fidelity than pdfjs/unpdf |
-| epub | yes (future) | currently still the JS unpacker — flip when we measure epub quality |
+| epub | yes     | preserves heading anchors (`<a id="...">`) and chapter tables |
 | pptx | yes     | better tables & notes than the regex unpacker |
 | xlsx, xlsm, ods, csv | **no** (client) | SheetJS keeps sheet/catalog structure; anydoc's flat markdown drops sheet names |
 | doc, ppt, xls (OLE) | **no** | still rejected up-front with a "save as OOXML" hint |
@@ -37,6 +45,21 @@ source of truth. If the server pipes a format through anydoc that the client
 does not (e.g. `.xlsx`), the server MUST rebuild a sheet catalog itself
 before serializing, otherwise attachments ingest via API will look different
 from the drag-drop path.
+
+## PDF page-splitting — explicitly deferred
+
+anydoc's PDF markdown output has **no page boundary markers**: it emits GFM
+headings/tables without telling us which PDF page produced which block, and
+`Format::Pdf` is likewise not exposed through `toDocument` (per
+`node_modules/@firecrawl/anydoc-wasm/anydoc_wasm.d.ts`). Splitting client-side
+on heuristics like `\f` / `## ` would drift against any later server-side
+split and break the contract.
+
+**Decision**: keep PDF extracts as "catalog page 1 + single body page 2"
+until `@firecrawl/anydoc-wasm` exposes page-tagged blocks for PDF. Browser
+and server should stay symmetrical; if either side needs page-true slices
+urgently, we can go through the previous JS path (pdfjs/unpdf) which still
+splits per page (see `lib/files/ingest/extractors/pdf.ts`).
 
 ## Lazy loading
 

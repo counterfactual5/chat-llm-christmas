@@ -2,7 +2,6 @@
 
 import type { IngestedAttachment } from './types';
 import {
-  extractEpubTextFromBytes,
   extractZipText,
 } from './extractors';
 import { extractWithAnydocFallback } from './anydoc';
@@ -96,8 +95,7 @@ export async function ingestFile(file: File): Promise<IngestedAttachment> {
   }
 
   if (name.endsWith('.epub') || file.type === 'application/epub+zip') {
-    const data = new Uint8Array(await file.arrayBuffer());
-    const text = await extractEpubTextFromBytes(data);
+    const text = await extractWithAnydocFallback(file);
     if (!text) throw new Error(`Could not extract text from ${file.name}`);
     return {
       ...base,

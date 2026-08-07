@@ -334,8 +334,9 @@ async function fetchGatewayFileText(
           : Array.isArray(data.pptx_image_slides)
             ? data.pptx_image_slides
             : [];
+      const ocrReady = needsOcrFlag || listedNeed.length > 0;
       // Empty placeholder extract is OK when OCR is available on demand.
-      if (text.trim() || needsOcrFlag || listedNeed.length) {
+      if (text.trim() || ocrReady) {
         return {
           ok: true,
           name: data.filename ? String(data.filename) : filename,
@@ -351,8 +352,20 @@ async function fetchGatewayFileText(
           pdfConfidence:
             Number(data.pdf_confidence) > 0 ? Number(data.pdf_confidence) : null,
           pagesNeedingOcr: listedNeed,
-          needsOcr: needsOcrFlag || listedNeed.length > 0,
+          needsOcr: ocrReady,
           docKind,
+        };
+      }
+      // Sidecar still building: no usable body and not OCR-ready → retry later
+      // (KTD4). Do not fall through to /content and invent a success.
+      if (Boolean(data.partial)) {
+        return {
+          ok: false,
+          error: [
+            `Text extract for ${filename} is still being built.`,
+            'Wait a moment, then call file_read again.',
+          ].join(' '),
+          code: 'EXTRACT_PENDING',
         };
       }
     } catch {
@@ -611,7 +624,9 @@ export function createFileReadTool(): ChatTool {
                 tip:
                   fetched.needsOcr || fetched.code === 'NEEDS_OCR'
                     ? 'This document looks image-based. Call file_read again after OCR is available, or ensure the gateway OCR endpoint is configured.'
-                    : undefined,
+                    : fetched.code === 'EXTRACT_PENDING'
+                      ? 'Extract sidecar is still building; wait briefly, then call file_read again.'
+                      : undefined,
               }),
             };
           }

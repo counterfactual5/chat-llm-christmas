@@ -74,3 +74,17 @@ export function mountedPreviewEntries(
   }
   return out;
 }
+
+/**
+ * File previews opened from Output are keyed by a real assistant message id.
+ * Workspace-only opens (e.g. OA paper download → `url-preview-paper`) are not
+ * in `generatedFileHistory`; missing them must not clear the panel.
+ */
+export function isOutputSourcedPreviewMessageId(
+  messageId: string,
+  sessionMessageIds: readonly string[],
+): boolean {
+  const id = String(messageId || '');
+  if (!id) return false;
+  return sessionMessageIds.includes(id);
+}

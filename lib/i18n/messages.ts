@@ -226,9 +226,12 @@ export const dict = {
       'The site refuses to load inside other pages. Open it in a new tab, or retry text extraction.',
     urlPreviewRetryExtract: 'Retry text extract',
     urlPreviewResolvingPaper: 'Looking for an open-access PDF…',
+    urlPreviewResolvingBook: 'Looking for an open book file…',
     urlPreviewNoOpenAccessTitle: 'No open full text in preview',
     urlPreviewNoOpenAccessBody:
       'This publisher page is paywalled or only exposed references to our extractors. Open it in your browser, or save to Files when a real OA PDF is available.',
+    urlPreviewNoBookBody:
+      'Could not load an open book file for preview. Open the page in your browser, or save to Files when a downloadable file is available.',
     urlPreviewSaveToFiles: 'Save to Files & open',
     urlPreviewSavingToFiles: 'Saving…',
     urlPreviewSaveFailed: 'Could not save this paper (no open PDF, or download failed).',
@@ -688,9 +691,12 @@ export const dict = {
       '该站点拒绝在其他页面内加载。你可以在新标签页打开，或重试正文抽取。',
     urlPreviewRetryExtract: '重试正文抽取',
     urlPreviewResolvingPaper: '正在查找开放获取 PDF…',
+    urlPreviewResolvingBook: '正在查找可预览的图书文件…',
     urlPreviewNoOpenAccessTitle: '预览中没有开放全文',
     urlPreviewNoOpenAccessBody:
       '该出版商页面可能需付费，或抽取结果只剩参考文献。请在浏览器中打开；若有真正的 OA PDF，可保存到 Files 再查看。',
+    urlPreviewNoBookBody:
+      '无法加载可预览的图书文件。请在浏览器中打开；若有可下载文件，可保存到 Files 再查看。',
     urlPreviewSaveToFiles: '保存到 Files 并打开',
     urlPreviewSavingToFiles: '正在保存…',
     urlPreviewSaveFailed: '无法保存（没有开放 PDF，或下载失败）。',

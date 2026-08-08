@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
   isLikelyAuthGatedPreviewUrl,
+  isLikelyBookPreviewUrl,
   isLikelyPaperPreviewUrl,
   normalizePreviewHttpUrl,
   previewNavigationTargetEquals,
@@ -26,10 +27,16 @@ import { cleanUrlExtractText } from '@/lib/files/url-extract-clean';
 import {
   ephemeralPaperPreviewEntry,
   paperPreviewContentUrl,
+  requestBookDownload,
+  requestBookResolve,
   requestPaperDownload,
   requestPaperResolve,
 } from '@/lib/chat/turn/literature-search';
-import { friendlyLiteraturePreviewMessage } from '@/lib/files/ephemeral-preview';
+import {
+  ephemeralPreviewEntry,
+  friendlyLiteraturePreviewMessage,
+  literatureContentUrl,
+} from '@/lib/files/ephemeral-preview';
 import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -411,10 +418,62 @@ export function UrlPreviewPanel({
           // Fall through to HTML extract; thin shells become CTA.
         }
 
+        if (isLikelyBookPreviewUrl(url) && onOpenDownloadedFileRef.current) {
+          const resolved = await requestBookResolve(url, { signal: ac.signal });
+          if (ac.signal.aborted) return;
+          if (resolved.ok) {
+            const probe = await fetch(literatureContentUrl('book', url), {
+              method: 'GET',
+              signal: ac.signal,
+              credentials: 'same-origin',
+            });
+            if (ac.signal.aborted) return;
+            const ct = (probe.headers.get('content-type') || '').toLowerCase();
+            const looksBook =
+              probe.ok &&
+              (ct.includes('pdf') ||
+                ct.includes('epub') ||
+                ct.includes('djvu') ||
+                ct.includes('text/plain') ||
+                ct.includes('octet-stream'));
+            if (looksBook) {
+              void probe.body?.cancel?.();
+              const mime =
+                ct.includes('pdf')
+                  ? 'application/pdf'
+                  : ct.includes('epub')
+                    ? 'application/epub+zip'
+                    : ct.includes('djvu')
+                      ? 'image/vnd.djvu'
+                      : ct.includes('text/plain')
+                        ? 'text/plain'
+                        : undefined;
+              onOpenDownloadedFileRef.current(
+                ephemeralPreviewEntry({
+                  kind: 'book',
+                  identifier: url,
+                  title: resolved.title || initialTitle,
+                  filename: resolved.filename,
+                  mimeType: mime,
+                }),
+              );
+              return;
+            }
+            const errBody = await probe.json().catch(() => ({} as { error?: string; message?: string }));
+            applyThinOrError(
+              friendlyPaperPreviewMessage(
+                String(errBody.error || errBody.message || ''),
+                tRef.current('urlPreviewNoOpenAccessBody'),
+              ),
+            );
+            return;
+          }
+        }
+
         const result = await fetchWebReadExtract(url, ac.signal);
         if (ac.signal.aborted) return;
         if (
-          isLikelyPaperPreviewUrl(url) &&
+          (isLikelyPaperPreviewUrl(url) || isLikelyBookPreviewUrl(url)) &&
           (result.quality === 'thin' || !result.content.trim())
         ) {
           applyThinOrError(tRef.current('urlPreviewNoOpenAccessBody'));
@@ -423,7 +482,7 @@ export function UrlPreviewPanel({
         applyDone(result);
       } catch (err) {
         if (ac.signal.aborted) return;
-        if (isLikelyPaperPreviewUrl(url)) {
+        if (isLikelyPaperPreviewUrl(url) || isLikelyBookPreviewUrl(url)) {
           applyThinOrError(
             friendlyPaperPreviewMessage(
               err instanceof Error ? err.message : '',
@@ -776,7 +835,9 @@ export function UrlPreviewPanel({
                   <span>
                     {isLikelyPaperPreviewUrl(url)
                       ? t('urlPreviewResolvingPaper')
-                      : t('urlPreviewExtracting')}
+                      : isLikelyBookPreviewUrl(url)
+                        ? t('urlPreviewResolvingBook')
+                        : t('urlPreviewExtracting')}
                   </span>
                 </div>
               ) : extract.status === 'no-oa' ? (
@@ -788,7 +849,9 @@ export function UrlPreviewPanel({
                   <p className="max-w-sm leading-5">
                     {friendlyPaperPreviewMessage(
                       extract.message,
-                      t('urlPreviewNoOpenAccessBody'),
+                      isLikelyBookPreviewUrl(url)
+                        ? t('urlPreviewNoBookBody')
+                        : t('urlPreviewNoOpenAccessBody'),
                     )}
                   </p>
                   <div className="flex flex-wrap items-center justify-center gap-2">
@@ -800,7 +863,10 @@ export function UrlPreviewPanel({
                           void (async () => {
                             setSavingPaper(true);
                             try {
-                              const dl = await requestPaperDownload(url);
+                              const isBook = isLikelyBookPreviewUrl(url);
+                              const dl = isBook
+                                ? await requestBookDownload(url)
+                                : await requestPaperDownload(url);
                               if (!dl.ok) {
                                 const message = friendlyPaperPreviewMessage(
                                   dl.error,
@@ -810,11 +876,17 @@ export function UrlPreviewPanel({
                                 return;
                               }
                               onOpenDownloadedFile({
-                                messageId: 'url-preview-paper',
+                                messageId: isBook
+                                  ? 'url-preview-book'
+                                  : 'url-preview-paper',
                                 fileIndex: 0,
                                 id: dl.fileId,
-                                name: dl.filename || `${dl.title || 'paper'}.pdf`,
-                                mimeType: 'application/pdf',
+                                name:
+                                  dl.filename ||
+                                  `${dl.title || (isBook ? 'book' : 'paper')}.bin`,
+                                mimeType: isBook
+                                  ? 'application/octet-stream'
+                                  : 'application/pdf',
                                 size: dl.bytes || 0,
                                 url: `/api/files/${encodeURIComponent(dl.fileId)}`,
                                 createdAt: Date.now(),

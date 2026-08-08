@@ -220,8 +220,119 @@ export type PaperDownloadResult =
       bytes: number;
       sourceUrl: string;
       provider?: string;
+      deduped?: boolean;
     }
   | { ok: false; error: string };
+
+/** Same-origin URL for ephemeral OA PDF Preview (does not write Files). */
+export function paperPreviewContentUrl(identifier: string): string {
+  const id = String(identifier || '').trim();
+  return `/api/literature/papers/content?identifier=${encodeURIComponent(id)}`;
+}
+
+export function isEphemeralPaperPreviewId(id: string): boolean {
+  return String(id || '').startsWith('paper-preview:');
+}
+
+export function paperIdentifierFromContentUrl(url: string): string {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  try {
+    const u = new URL(raw, 'http://local.invalid');
+    return String(u.searchParams.get('identifier') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function ephemeralPaperPreviewEntry(opts: {
+  identifier: string;
+  title?: string;
+  filename?: string;
+}): {
+  messageId: string;
+  fileIndex: number;
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  createdAt: number;
+} {
+  const identifier = String(opts.identifier || '').trim();
+  const title = String(opts.title || 'paper').trim() || 'paper';
+  const filename =
+    String(opts.filename || '').trim() ||
+    `${title.replace(/[^\w\u4e00-\u9fff\-]+/g, '_').slice(0, 80) || 'paper'}.pdf`;
+  return {
+    messageId: 'url-preview-paper',
+    fileIndex: 0,
+    id: `paper-preview:${encodeURIComponent(identifier).slice(0, 180)}`,
+    name: filename.endsWith('.pdf') ? filename : `${filename}.pdf`,
+    mimeType: 'application/pdf',
+    size: 0,
+    url: paperPreviewContentUrl(identifier),
+    createdAt: Date.now(),
+  };
+}
+
+export type PaperResolveResult =
+  | {
+      ok: true;
+      identifier: string;
+      title: string;
+      filename: string;
+      downloadUrl: string;
+      provider?: string;
+      doi?: string;
+    }
+  | { ok: false; error: string; code?: string };
+
+export async function requestPaperResolve(
+  identifier: string,
+  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+): Promise<PaperResolveResult> {
+  const doFetch = opts?.fetchImpl ?? fetch;
+  const url = `/api/literature/papers/resolve?identifier=${encodeURIComponent(identifier)}`;
+  const res = await doFetch(url, { method: 'GET', signal: opts?.signal });
+  const raw = await res.text();
+  let data: {
+    ok?: boolean;
+    error?: string;
+    message?: string;
+    code?: string;
+    identifier?: string;
+    title?: string;
+    filename?: string;
+    downloadUrl?: string;
+    provider?: string;
+    doi?: string;
+  } = {};
+  try {
+    data = raw ? (JSON.parse(raw) as typeof data) : {};
+  } catch {
+    return {
+      ok: false,
+      error: raw.trim().slice(0, 400) || `Resolve API returned non-JSON (HTTP ${res.status})`,
+    };
+  }
+  if (!res.ok || !data.downloadUrl) {
+    return {
+      ok: false,
+      error: data.error || data.message || `Paper resolve failed (HTTP ${res.status})`,
+      code: data.code,
+    };
+  }
+  return {
+    ok: true,
+    identifier: String(data.identifier || identifier),
+    title: String(data.title || data.filename || identifier),
+    filename: String(data.filename || 'paper.pdf'),
+    downloadUrl: String(data.downloadUrl),
+    provider: data.provider ? String(data.provider) : undefined,
+    doi: data.doi ? String(data.doi) : undefined,
+  };
+}
 
 export async function requestPaperDownload(
   identifier: string,
@@ -244,6 +355,7 @@ export async function requestPaperDownload(
     bytes?: number;
     sourceUrl?: string;
     provider?: string;
+    deduped?: boolean;
     file?: { id?: string };
   } = {};
   try {
@@ -269,6 +381,7 @@ export async function requestPaperDownload(
     bytes: Number(data.bytes) || 0,
     sourceUrl: String(data.sourceUrl || ''),
     provider: data.provider ? String(data.provider) : undefined,
+    deduped: Boolean(data.deduped),
   };
 }
 

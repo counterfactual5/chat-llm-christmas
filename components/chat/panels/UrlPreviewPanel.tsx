@@ -23,7 +23,10 @@ import {
   probeEmbedOutcome,
 } from '@/lib/files/url-preview-embed';
 import { cleanUrlExtractText } from '@/lib/files/url-extract-clean';
-import { requestPaperDownload } from '@/lib/chat/turn/literature-search';
+import {
+  ephemeralPaperPreviewEntry,
+  requestPaperResolve,
+} from '@/lib/chat/turn/literature-search';
 import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -179,24 +182,6 @@ async function fetchWebReadExtract(
   });
 }
 
-function fileEntryFromPaperDownload(dl: {
-  fileId: string;
-  filename: string;
-  title: string;
-  bytes: number;
-}): GeneratedFileEntry {
-  return {
-    messageId: 'url-preview-paper',
-    fileIndex: 0,
-    id: dl.fileId,
-    name: dl.filename || `${dl.title || 'paper'}.pdf`,
-    mimeType: 'application/pdf',
-    size: dl.bytes || 0,
-    url: `/api/files/${encodeURIComponent(dl.fileId)}`,
-    createdAt: Date.now(),
-  };
-}
-
 export function UrlPreviewPanel({
   open,
   onClose,
@@ -342,7 +327,7 @@ export function UrlPreviewPanel({
     return () => ac.abort();
   }, [url, mode, extractRetryNonce]);
 
-  // Load extract when in extract mode. Paper-like URLs try OA PDF download first.
+  // Load extract when in extract mode. Paper-like URLs try ephemeral OA PDF first.
   // Abort only when the page target / mode changes — not when soft-hidden.
   useEffect(() => {
     if (!url || mode !== 'extract') return;
@@ -386,10 +371,16 @@ export function UrlPreviewPanel({
     void (async () => {
       try {
         if (isLikelyPaperPreviewUrl(url) && onOpenDownloadedFileRef.current) {
-          const dl = await requestPaperDownload(url);
+          const resolved = await requestPaperResolve(url, { signal: ac.signal });
           if (ac.signal.aborted) return;
-          if (dl.ok) {
-            onOpenDownloadedFileRef.current(fileEntryFromPaperDownload(dl));
+          if (resolved.ok) {
+            onOpenDownloadedFileRef.current(
+              ephemeralPaperPreviewEntry({
+                identifier: url,
+                title: resolved.title || initialTitle,
+                filename: resolved.filename,
+              }),
+            );
             return;
           }
           // Fall through to HTML extract; thin shells become CTA.

@@ -11,6 +11,7 @@ import {
   isValidBookDownloadIdentifier,
   isValidPaperDownloadIdentifier,
   resolveBookDownloadIdentifier,
+  resolvePaperActionId,
   resolvePaperDownloadIdentifier,
 } from '@/lib/chat/turn/literature-command';
 import {
@@ -109,21 +110,22 @@ async function fetchLiterature(
 export const LITERATURE_TOOL_ANSWER_HINT = {
   books:
     'Prefer copying answerMarkdown verbatim for the results list (same shape as /books). ' +
-    'Each hit: `N. [title](url)`, then a blank line, then ONE detail line ' +
-    '(authors · year · source · format · size · Download: `/books download …` in backticks — required for clickable UI buttons). ' +
-    'Do not put newlines inside a hit’s detail line; blank line before the next `N.`. ' +
+    'Each hit is one numbered list item: title link, then meta (authors · year · source · size), ' +
+    'then each Download / Manual download command on its own line in backticks (use markdown hard breaks — two trailing spaces — not blank lines inside a hit). ' +
+    'Blank line only before the next `N.`. ' +
     'Only use downloadCommand / alternateDownloads from this receipt — never invent md5 or archive ids, ' +
     'never bury commands in em-dash prose or narrative sentences. ' +
-    'If downloadCommand is missing, use Manual download: [title](url) on that same detail line.',
+    'If downloadCommand is missing, use Manual download: [title](url) on its own line under the meta.',
   papers:
     'Prefer copying answerMarkdown verbatim for the results list (same shape as /papers). ' +
-    'Each hit: `N. [title](url)`, then a blank line, then ONE detail line ' +
-    '(meta · Actions / Download commands in backticks — required for clickable UI buttons). ' +
-    'Do not put newlines inside a hit’s detail line; blank line before the next `N.`. ' +
-    'When downloadCommand is present, show Download: `<downloadCommand>` — that stores the PDF in Files; ' +
+    'Each hit is one numbered list item: title link, then meta (authors · year · venue · ID), ' +
+    'then each `/papers details|citations|references|download` command in backticks on its own line ' +
+    '(markdown hard breaks — two trailing spaces — not blank lines inside a hit). ' +
+    'Blank line only before the next `N.`. ' +
+    'When downloadCommand is present, emit that command as its own backtick line — that stores the PDF in Files; ' +
     'do not turn an external URL into a “download” link. ' +
     'Never invent ids or bury commands in em-dash prose. ' +
-    'When only pdfUrl is present (no downloadCommand), link it as Open PDF on the detail line.',
+    'When only pdfUrl is present (no downloadCommand), link it as Open PDF on its own line.',
 } as const;
 
 /** Shape tool receipts so the model can cite real download / paper-action commands. */
@@ -199,7 +201,7 @@ export function formatHitsForModel(
     query,
     provider,
     results: results.slice(0, 12).map((r) => {
-      const paperId = r.paperId ? String(r.paperId) : undefined;
+      const actionId = resolvePaperActionId(r) || undefined;
       const resolved = resolvePaperDownloadIdentifier(r);
       const downloadCommand =
         resolved && isValidPaperDownloadIdentifier(resolved)
@@ -212,7 +214,7 @@ export function formatHitsForModel(
         authors: r.authors,
         year: r.year,
         source: r.sourceProvider,
-        paperId,
+        paperId: actionId || (r.paperId ? String(r.paperId) : undefined),
         // Only expose pdfUrl when API download is unavailable — otherwise models
         // turn it into a “下载” markdown link and skip /papers download → Files.
         ...(downloadCommand
@@ -220,12 +222,14 @@ export function formatHitsForModel(
           : r.pdfUrl
             ? { pdfUrl: r.pdfUrl }
             : {}),
-        detailsCommand: paperId ? formatPaperActionCommand('details', paperId) : undefined,
-        citationsCommand: paperId
-          ? formatPaperActionCommand('citations', paperId)
+        detailsCommand: actionId
+          ? formatPaperActionCommand('details', actionId)
           : undefined,
-        referencesCommand: paperId
-          ? formatPaperActionCommand('references', paperId)
+        citationsCommand: actionId
+          ? formatPaperActionCommand('citations', actionId)
+          : undefined,
+        referencesCommand: actionId
+          ? formatPaperActionCommand('references', actionId)
           : undefined,
       };
     }),
@@ -238,19 +242,19 @@ export const PAPER_SYSTEM = [
   'You have a paper_search tool for academic papers (arXiv / Semantic Scholar / OpenAlex).',
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
-  'After results, match answerMarkdown / the /papers slash shape: `N. [title](url)`, blank line, then ONE detail line with meta · Actions · Download in backticks — never invent ids, never bury commands in em-dash prose, no newlines inside the detail line.',
+  'After results, match answerMarkdown / the /papers slash shape: one numbered list item per hit — title link, meta line, then each `/papers details|citations|references|download` command in backticks on its own line (markdown hard breaks; no blank lines inside a hit) — never invent ids, never bury commands in em-dash prose.',
   'Blank line before the next numbered hit.',
   'Copy exact receipt fields (detailsCommand / citationsCommand / referencesCommand / downloadCommand) as inline code so they become clickable buttons.',
-  'downloadCommand saves the PDF into the user Files store (in-app). When a hit has downloadCommand, show Download: `<downloadCommand>` — do not turn an external URL into a “download” link.',
-  'Only when a hit has pdfUrl and no downloadCommand, link pdfUrl as Open PDF on the detail line.',
+  'downloadCommand saves the PDF into the user Files store (in-app). Emit it as its own backtick line — do not turn an external URL into a “download” link.',
+  'Only when a hit has pdfUrl and no downloadCommand, link pdfUrl as Open PDF on its own line.',
 ].join(' ');
 
 export const BOOK_SYSTEM = [
   'You have a book_search tool for books (LibGen / Internet Archive / Open Library / Gutenberg / catalogs).',
   'Call it when the user asks to find books or ebooks. Prefer book_search over web_search for book lookup.',
-  'After results, match answerMarkdown / the /books slash shape: `N. [title](url)`, blank line, then ONE detail line (authors · year · source · size · Download: `/books download …` in backticks) — never invent identifiers, never bury commands in em-dash prose, no newlines inside the detail line.',
+  'After results, match answerMarkdown / the /books slash shape: one numbered list item per hit — title link, meta line, then `/books download …` / Manual download on its own line in backticks (markdown hard breaks; no blank lines inside a hit) — never invent identifiers, never bury commands in em-dash prose.',
   'Blank line before the next numbered hit.',
-  'When downloadCommand is absent, put Manual download: [title](url) on that same detail line. Prefer copying answerMarkdown from the receipt when present.',
+  'When downloadCommand is absent, put Manual download: [title](url) on its own line under the meta. Prefer copying answerMarkdown from the receipt when present.',
   'Never invent catalog entries; only cite title + URL and commands from the tool receipt.',
 ].join(' ');
 

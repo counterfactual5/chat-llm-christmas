@@ -81,7 +81,10 @@ const markdownComponents = {
     return <ol className="my-3 pl-6 list-decimal space-y-1">{children}</ol>;
   },
   li({ children }: any) {
-    return <li className="leading-6">{children}</li>;
+    // Literature hits stack title/meta/commands with hard breaks inside one <li>;
+    // keep nested paragraphs tight so a model blank line does not look like a
+    // deliberate empty row under the title.
+    return <li className="leading-6 [&_p]:mb-1 [&_p]:last:mb-0">{children}</li>;
   },
   a({ href, children }: any) {
     const { onPreviewLink, previewBaseUrl } = useContext(AnswerMarkdownCtx);

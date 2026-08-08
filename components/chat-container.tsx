@@ -1845,9 +1845,10 @@ export default function ChatContainer() {
   const researchReattachRef = useRef(deepResearch.reattach);
   researchReattachRef.current = deepResearch.reattach;
   // After refresh or switching sessions, reconnect SSE for in-flight Deep Research.
-  // Gate on the same SSOT as orphan cleanup — not a raw busy flag alone.
+  // Wait for cloud hydrate epoch so reattach does not bump updatedAt before LWW merge.
+  // Guest sets epoch=1 with chatsHydrated; bound bumps after GET success or failure.
   useEffect(() => {
-    if (!chatsHydrated) return;
+    if (!chatsHydrated || cloudHydrateEpoch < 1) return;
     if (deepResearch.busy || researchBusySessionId) return;
     const session = sessionsRef.current.find((s) => s.id === activeSessionId);
     if (!session) return;
@@ -2213,8 +2214,9 @@ export default function ChatContainer() {
   // After refresh / remount / lost tool-done events, orphan tool runs can stay at
   // status:"start" and spin forever. Close them whenever the session is idle.
   // Keep Deep Research tools open only on the research session itself.
+  // Same epoch gate as research reattach — avoid mutating sessions before cloud merge.
   useEffect(() => {
-    if (!chatsHydrated) return;
+    if (!chatsHydrated || cloudHydrateEpoch < 1) return;
     setSessions((prev) => {
       let changed = false;
       const next = prev.map((s) => {

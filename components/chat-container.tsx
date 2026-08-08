@@ -128,6 +128,7 @@ import {
   UrlPreviewEmptyPaste,
   UrlPreviewPanel,
 } from '@/components/chat/panels/UrlPreviewPanel';
+import { usePreviewWorkspaceRegistry } from '@/hooks/chat/use-preview-workspace';
 import { ChatModals } from '@/components/chat/overlays/ChatModals';
 import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
@@ -242,6 +243,13 @@ export default function ChatContainer() {
     | { kind: 'url'; url: string; title?: string }
     | null;
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget>(null);
+  /** Snapshots for kind keep-alive (active + previous instance payloads). */
+  type KeptPreviewSlots = {
+    url?: { url: string; title?: string };
+    file?: { entry: GeneratedFileEntry; sessionId: string };
+    view?: { view: ToolViewPayload; messageId?: string; sessionId: string };
+  };
+  const [keptPreviewSlots, setKeptPreviewSlots] = useState<KeptPreviewSlots>({});
   // open* helpers are defined after activeSessionIdRef (stable useCallback).
   const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
@@ -321,6 +329,52 @@ export default function ChatContainer() {
     setPreviewTarget({ kind: 'url', url, title: title?.trim() || undefined });
     setIsPreviewPanelOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!previewTarget) return;
+    setKeptPreviewSlots((prev) => {
+      if (previewTarget.kind === 'url') {
+        return {
+          ...prev,
+          url: { url: previewTarget.url, title: previewTarget.title },
+        };
+      }
+      if (previewTarget.kind === 'file') {
+        return {
+          ...prev,
+          file: {
+            entry: previewTarget.entry,
+            sessionId: previewTarget.sessionId,
+          },
+        };
+      }
+      return {
+        ...prev,
+        view: {
+          view: previewTarget.view,
+          messageId: previewTarget.messageId,
+          sessionId: previewTarget.sessionId,
+        },
+      };
+    });
+  }, [previewTarget]);
+
+  const previewWorkspaceTarget = useMemo(() => {
+    if (!previewTarget) return null;
+    if (previewTarget.kind === 'url') {
+      return { kind: 'url' as const, identity: previewTarget.url };
+    }
+    if (previewTarget.kind === 'file') {
+      return { kind: 'file' as const, identity: previewTarget.entry.id };
+    }
+    return {
+      kind: 'view' as const,
+      identity: `${previewTarget.view.id}:${previewTarget.messageId || ''}`,
+    };
+  }, [previewTarget]);
+
+  const { mounted: mountedPreviewKinds, isActive: isPreviewKindActive } =
+    usePreviewWorkspaceRegistry(previewWorkspaceTarget);
 
   const persistDefaultModelPref = useCallback((modelId: string) => {
     const next = String(modelId || '').trim();
@@ -995,9 +1049,17 @@ export default function ChatContainer() {
     void import('@/lib/files/epub-progress').then(({ clearEpubReaderPrefs }) => {
       clearEpubReaderPrefs(fileId);
     });
+    void import('@/lib/files/preview-progress').then(
+      ({ clearPreviewScrollForFileId }) => {
+        clearPreviewScrollForFileId(fileId);
+      },
+    );
     if (previewTarget?.kind === 'file' && previewTarget.entry.id === fileId) {
       setPreviewTarget(null);
     }
+    setKeptPreviewSlots((prev) =>
+      prev.file?.entry.id === fileId ? { ...prev, file: undefined } : prev,
+    );
     if (filePreview?.id === fileId) setFilePreview(null);
     setSessions((prev) => scrubFileIdFromSessions(prev, fileId));
   };
@@ -2969,57 +3031,81 @@ export default function ChatContainer() {
             </div>
           </div>
 
-          {previewTarget?.kind === 'view' ? (
-            <ToolViewPanel
-              open={isPreviewPanelOpen}
-              onClose={() => setIsPreviewPanelOpen(false)}
-              contextOpen={isContextPanelOpen}
-              quoteRootRef={previewQuoteRootRef}
-              view={previewTarget.view}
-              messageId={previewTarget.messageId}
-              onJumpToMessage={() => {
-                if (!previewTarget.messageId) return;
-                jumpToPreviewMessage(previewTarget.sessionId, previewTarget.messageId);
-              }}
-            />
-          ) : previewTarget?.kind === 'url' ? (
-            <UrlPreviewPanel
-              open={isPreviewPanelOpen}
-              onClose={() => setIsPreviewPanelOpen(false)}
-              contextOpen={isContextPanelOpen}
-              quoteRootRef={previewQuoteRootRef}
-              url={previewTarget.url}
-              title={previewTarget.title}
-              onNavigateUrl={(next) => openUrlPreview(next)}
-              onOpenDownloadedFile={openFilePreview}
-            />
-          ) : previewTarget?.kind === 'file' ? (
-            <ChatPreviewPanel
-              open={isPreviewPanelOpen}
-              onClose={() => setIsPreviewPanelOpen(false)}
-              contextOpen={isContextPanelOpen}
-              quoteRootRef={previewQuoteRootRef}
-              file={previewTarget.entry}
-              onExpandFullscreen={(payload) => {
-                setFilePreview(payload);
-              }}
-              onJumpToMessage={() => {
-                jumpToPreviewMessage(
-                  previewTarget.sessionId,
-                  previewTarget.entry.messageId,
-                );
-              }}
-              onDownload={() => {
-                void downloadGeneratedFile(previewTarget.entry);
-              }}
-            />
-          ) : (
+          {!previewTarget ? (
             <UrlPreviewEmptyPaste
               open={isPreviewPanelOpen}
               onClose={() => setIsPreviewPanelOpen(false)}
               contextOpen={isContextPanelOpen}
               onOpenUrl={(url) => openUrlPreview(url)}
             />
+          ) : (
+            mountedPreviewKinds.map((entry) => {
+              const active = isPreviewKindActive(entry.kind, entry.identity);
+              const panelOpen = isPreviewPanelOpen && active;
+              const quoteRef = active ? previewQuoteRootRef : undefined;
+              if (entry.kind === 'url') {
+                const slot = keptPreviewSlots.url;
+                if (!slot || slot.url !== entry.identity) return null;
+                return (
+                  <UrlPreviewPanel
+                    key={`url:${entry.identity}`}
+                    open={panelOpen}
+                    keepMounted
+                    onClose={() => setIsPreviewPanelOpen(false)}
+                    contextOpen={isContextPanelOpen}
+                    quoteRootRef={quoteRef}
+                    url={slot.url}
+                    title={slot.title}
+                    onNavigateUrl={openUrlPreview}
+                    onOpenDownloadedFile={openFilePreview}
+                  />
+                );
+              }
+              if (entry.kind === 'file') {
+                const slot = keptPreviewSlots.file;
+                if (!slot || slot.entry.id !== entry.identity) return null;
+                return (
+                  <ChatPreviewPanel
+                    key={`file:${entry.identity}`}
+                    open={panelOpen}
+                    keepMounted
+                    onClose={() => setIsPreviewPanelOpen(false)}
+                    contextOpen={isContextPanelOpen}
+                    quoteRootRef={quoteRef}
+                    file={slot.entry}
+                    onExpandFullscreen={(payload) => {
+                      setFilePreview(payload);
+                    }}
+                    onJumpToMessage={() => {
+                      jumpToPreviewMessage(slot.sessionId, slot.entry.messageId);
+                    }}
+                    onDownload={() => {
+                      void downloadGeneratedFile(slot.entry);
+                    }}
+                  />
+                );
+              }
+              const slot = keptPreviewSlots.view;
+              if (!slot || `${slot.view.id}:${slot.messageId || ''}` !== entry.identity) {
+                return null;
+              }
+              return (
+                <ToolViewPanel
+                  key={`view:${entry.identity}`}
+                  open={panelOpen}
+                  keepMounted
+                  onClose={() => setIsPreviewPanelOpen(false)}
+                  contextOpen={isContextPanelOpen}
+                  quoteRootRef={quoteRef}
+                  view={slot.view}
+                  messageId={slot.messageId}
+                  onJumpToMessage={() => {
+                    if (!slot.messageId) return;
+                    jumpToPreviewMessage(slot.sessionId, slot.messageId);
+                  }}
+                />
+              );
+            })
           )}
           <ChatContextPanel
             open={isContextPanelOpen}

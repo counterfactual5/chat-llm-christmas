@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowUpRight,
   FileText,
@@ -28,12 +27,16 @@ import { requestPaperDownload } from '@/lib/chat/turn/literature-search';
 import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { usePersistedPreviewScroll } from '@/hooks/chat/use-preview-scroll';
 import { previewPanelWidth } from './panel-widths';
+import { PreviewPanelShell } from './preview-panel-shell';
 
 export type UrlPreviewPanelProps = {
   open: boolean;
   onClose: () => void;
   contextOpen?: boolean;
+  /** Stay mounted while closed so extract / scroll survive soft-hide. */
+  keepMounted?: boolean;
   quoteRootRef?: RefObject<HTMLDivElement | null>;
   url: string;
   title?: string;
@@ -198,6 +201,7 @@ export function UrlPreviewPanel({
   open,
   onClose,
   contextOpen = false,
+  keepMounted = false,
   quoteRootRef,
   url,
   title: initialTitle,
@@ -302,8 +306,9 @@ export function UrlPreviewPanel({
 
   // Prefetch extract in parallel while iframe tries to load (skip auth-gated hosts).
   // Used when the user switches to Text — do not auto-switch mode on timer/Quote alone.
+  // Soft-hide (`open` false) must not abort — keep loading for workspace Preview.
   useEffect(() => {
-    if (!open || !url || mode !== 'iframe') return;
+    if (!url || mode !== 'iframe') return;
     const ac = new AbortController();
     prefetchRef.current = { status: 'loading' };
     setPrefetchReady({ status: 'loading' });
@@ -335,13 +340,12 @@ export function UrlPreviewPanel({
         setPrefetchReady(prefetchRef.current);
       });
     return () => ac.abort();
-  }, [open, url, mode, extractRetryNonce]);
+  }, [url, mode, extractRetryNonce]);
 
   // Load extract when in extract mode. Paper-like URLs try OA PDF download first.
-  // Abort only when the page target / mode / open flag changes — not when the
-  // parent re-renders with a new callback identity (conversation switch).
+  // Abort only when the page target / mode changes — not when soft-hidden.
   useEffect(() => {
-    if (!open || !url || mode !== 'extract') return;
+    if (!url || mode !== 'extract') return;
     const applyDone = (result: {
       title?: string;
       content: string;
@@ -423,7 +427,7 @@ export function UrlPreviewPanel({
     })();
 
     return () => ac.abort();
-  }, [open, url, mode, extractRetryNonce]);
+  }, [url, mode, extractRetryNonce]);
 
   // Blocked-embed degrade (KTD1/KTD2): heuristic probe + settle timer.
   // Auto-switches to Text only when the prefetched extract is already in
@@ -540,16 +544,20 @@ export function UrlPreviewPanel({
     }
   };
 
+  const persistRef = usePersistedPreviewScroll(
+    'url',
+    url,
+    mode === 'extract' && extract.status === 'done',
+  );
+  const setExtractBodyRef = (el: HTMLDivElement | null) => {
+    (persistRef as { current: HTMLDivElement | null }).current = el;
+    if (quoteRootRef) {
+      (quoteRootRef as { current: HTMLDivElement | null }).current = el;
+    }
+  };
+
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ width: 0, opacity: 0 }}
-          animate={{ width, opacity: 1 }}
-          exit={{ width: 0, opacity: 0 }}
-          transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
-          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
-        >
+    <PreviewPanelShell open={open} keepMounted={keepMounted} width={width}>
           <div className="relative flex h-14 shrink-0 items-center justify-center gap-2 border-b border-stone-200/50 px-4 dark:border-stone-800/50">
             <span className="pointer-events-none absolute inset-x-40 truncate text-center text-sm font-semibold text-stone-700 dark:text-stone-300">
               {headerTitle}
@@ -630,7 +638,7 @@ export function UrlPreviewPanel({
           </form>
 
           <div
-            ref={quoteRootRef}
+            ref={setExtractBodyRef}
             data-quote-url={mode === 'extract' ? url : undefined}
             data-quote-title={
               mode === 'extract' ? displayTitle || undefined : undefined
@@ -826,9 +834,7 @@ export function UrlPreviewPanel({
               )}
             </div>
           </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </PreviewPanelShell>
   );
 }
 
@@ -861,15 +867,7 @@ export function UrlPreviewEmptyPaste({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ width: 0, opacity: 0 }}
-          animate={{ width, opacity: 1 }}
-          exit={{ width: 0, opacity: 0 }}
-          transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
-          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
-        >
+    <PreviewPanelShell open={open} width={width}>
           <div className="relative flex h-14 shrink-0 items-center justify-center border-b border-stone-200/50 px-4 dark:border-stone-800/50">
             <span className="pointer-events-none absolute inset-x-12 truncate text-center text-sm font-semibold text-stone-700 dark:text-stone-300">
               {t('previewPanel')}
@@ -909,8 +907,6 @@ export function UrlPreviewEmptyPaste({
               </Button>
             </form>
           </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </PreviewPanelShell>
   );
 }

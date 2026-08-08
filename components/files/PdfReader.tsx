@@ -10,6 +10,10 @@ import { FileText, Loader2 } from 'lucide-react';
 import { EpubReader } from '@/components/files/EpubReader';
 import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { isEpubBytes, isPdfBytes } from '@/lib/files/serve-headers';
+import {
+  loadPreviewScroll,
+  savePreviewScroll,
+} from '@/lib/files/preview-progress';
 import { cn } from '@/lib/utils';
 import { bindPdfTextLayerSelection } from '@/components/files/pdf-text-layer-selection';
 import './pdf-reader.css';

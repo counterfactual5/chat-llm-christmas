@@ -29,6 +29,7 @@ import {
   requestPaperDownload,
   requestPaperResolve,
 } from '@/lib/chat/turn/literature-search';
+import { friendlyLiteraturePreviewMessage } from '@/lib/files/ephemeral-preview';
 import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -36,25 +37,7 @@ import { usePersistedPreviewScroll } from '@/hooks/chat/use-preview-scroll';
 import { previewPanelWidth } from './panel-widths';
 import { PreviewPanelShell } from './preview-panel-shell';
 
-function friendlyPaperPreviewMessage(
-  raw: string | undefined,
-  fallback: string,
-): string {
-  const msg = String(raw || '').trim();
-  if (!msg) return fallback;
-  const lower = msg.toLowerCase();
-  if (
-    lower === 'internal error' ||
-    lower.includes('semantic scholar http') ||
-    lower.includes('download returned html') ||
-    lower.includes('no open-access pdf') ||
-    lower.includes('not_pdf') ||
-    lower.includes('download_html')
-  ) {
-    return fallback;
-  }
-  return msg;
-}
+const friendlyPaperPreviewMessage = friendlyLiteraturePreviewMessage;
 
 export type UrlPreviewPanelProps = {
   open: boolean;

@@ -174,6 +174,28 @@ export type PaperDownloadHitFields = {
   url?: string;
 };
 
+/**
+ * Prefer identifiers that details/citations/references can resolve.
+ * OpenAlex `W…` ids are not Semantic Scholar paper ids — use DOI when present.
+ */
+export function resolvePaperActionId(hit: {
+  paperId?: string;
+  doi?: string;
+}): string {
+  const id = String(hit.paperId || '').trim();
+  const doi = String(hit.doi || '')
+    .trim()
+    .replace(/^https?:\/\/doi\.org\//i, '');
+  if (/^(?:OPENALEX:)?(?:https?:\/\/openalex\.org\/)?W\d+$/i.test(id)) {
+    if (doi) return `DOI:${doi}`;
+    const m = id.match(/W\d+/i);
+    return m ? m[0] : id;
+  }
+  if (id) return id;
+  if (doi) return `DOI:${doi}`;
+  return '';
+}
+
 /** Extract bare arXiv id from abs/pdf/html URLs. */
 export function arxivIdFromUrl(url: string): string {
   const m = String(url || '').match(

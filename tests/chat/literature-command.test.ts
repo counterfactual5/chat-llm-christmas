@@ -262,14 +262,17 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('/papers citations ARXIV:1706.03762');
     expect(md).toContain('/papers references ARXIV:1706.03762');
     expect(md).toContain('/papers download ARXIV:1706.03762');
+    // Each action / download on its own hard-break line (not ·-joined).
     expect(md).toMatch(
-      /Actions: `\/papers details ARXIV:1706\.03762` · `\/papers citations ARXIV:1706\.03762` · `\/papers references ARXIV:1706\.03762`/,
+      /`\/papers details ARXIV:1706\.03762`  \n`\/papers citations ARXIV:1706\.03762`  \n`\/papers references ARXIV:1706\.03762`/,
     );
+    expect(md).toMatch(/`\/papers download ARXIV:1706\.03762`/);
+    expect(md).not.toContain('Actions:');
     expect(md).not.toContain('[Open PDF]');
     expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);
-    // Title, blank, one detail line — no nested `- ` bullets inside the hit.
+    // Title + meta via hard break — no blank paragraph under the title.
     expect(md).toMatch(
-      /1\. \[Attention Is All You Need\]\([^\n]+\)\n\nVaswani et al\. · 2017/,
+      /1\. \[Attention Is All You Need\]\([^\n]+\)  \nVaswani et al\. · 2017/,
     );
     expect(md).not.toMatch(/^\s+-\s/m);
   });
@@ -385,7 +388,7 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('Alt download (mobi · 7 MB)');
     expect(md).toContain('/books download libgen:313848e5d3427b4983b8f90162f59cea');
     expect(md).toMatch(
-      /1\. \[区块链\]\([^\n]+\)\n\n[^\n]*6 MB[^\n]*Download:/,
+      /1\. \[区块链\]\([^\n]+\)  \n[^\n]*6 MB[^\n]*  \nDownload:/,
     );
     expect(md).not.toMatch(/^\s+-\s/m);
   });
@@ -488,6 +491,32 @@ describe('inferPaperDownloadProvider / resolvePaperDownloadIdentifier', () => {
     expect(isValidPaperDownloadIdentifier('1706.03762v2')).toBe(true);
     expect(isValidPaperDownloadIdentifier('short')).toBe(false);
     expect(isValidPaperDownloadIdentifier('<id>')).toBe(false);
+  });
+
+  it('prefers DOI over OpenAlex W-ids for details/citations/references', async () => {
+    const { resolvePaperActionId } = await import('@/lib/chat/turn/literature-command');
+    expect(
+      resolvePaperActionId({
+        paperId: 'W4407173730',
+        doi: '10.1007/s11704-026-60308-3',
+      }),
+    ).toBe('DOI:10.1007/s11704-026-60308-3');
+    expect(resolvePaperActionId({ paperId: 'W4407173730' })).toBe('W4407173730');
+    expect(resolvePaperActionId({ paperId: 'abcdefghijklmnop' })).toBe(
+      'abcdefghijklmnop',
+    );
+
+    const md = formatLiteratureMarkdown('papers', 'survey', 'openalex', [
+      {
+        title: 'A Survey',
+        url: 'https://openalex.org/W4407173730',
+        paperId: 'W4407173730',
+        doi: '10.1007/s11704-026-60308-3',
+        sourceProvider: 'openalex',
+      },
+    ]);
+    expect(md).toContain('/papers details DOI:10.1007/s11704-026-60308-3');
+    expect(md).not.toContain('/papers details W4407173730');
   });
 });
 
@@ -608,7 +637,7 @@ describe('formatHitsForModel', () => {
     );
     expect(papers.results[0].pdfUrl).toBeUndefined();
     expect(papers.answerMarkdown).toContain(
-      'Download: `/papers download ARXIV:1706.03762`',
+      '`/papers download ARXIV:1706.03762`',
     );
     expect(papers.hint).toBe(LITERATURE_TOOL_ANSWER_HINT.papers);
   });
@@ -618,12 +647,12 @@ describe('formatHitsForModel', () => {
     expect(BOOK_SYSTEM).toMatch(/backticks/);
     expect(BOOK_SYSTEM).toMatch(/em-dash/);
     expect(BOOK_SYSTEM).toContain('/books download');
-    expect(BOOK_SYSTEM).toMatch(/ONE detail line/);
+    expect(BOOK_SYSTEM).toMatch(/own line/);
     expect(BOOK_SYSTEM).toMatch(/Blank line before the next numbered hit/);
-    expect(PAPER_SYSTEM).toMatch(/ONE detail line/);
+    expect(PAPER_SYSTEM).toMatch(/own line/);
     expect(PAPER_SYSTEM).toMatch(/Blank line before the next numbered hit/);
-    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/ONE detail line/);
-    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/ONE detail line/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/own line/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/own line/);
     expect(PAPER_SYSTEM).toMatch(/answerMarkdown/);
     expect(PAPER_SYSTEM).toMatch(/backticks/);
     expect(PAPER_SYSTEM).toMatch(/em-dash/);

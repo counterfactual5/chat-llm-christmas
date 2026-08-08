@@ -1252,7 +1252,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                         <p className="text-sm font-medium text-red-700 dark:text-red-300">
                           {t('requestFailed')}
                         </p>
-                        <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-red-600/90 dark:text-red-400/90">
+                        <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-5 text-red-600/90 dark:text-red-400/90">
                           {visibleContent.replace(/^Error:\s*/, '')}
                         </p>
                         {message.id === lastMessage?.id && canRetryFailed && (

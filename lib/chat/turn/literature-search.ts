@@ -14,6 +14,7 @@ import {
   isValidPaperDownloadIdentifier,
   markdownLinkLabel,
   resolveBookDownloadIdentifier,
+  resolvePaperActionId,
   resolvePaperDownloadIdentifier,
   type BookSource,
   type LiteratureKind,
@@ -439,11 +440,14 @@ export function formatLiteratureMarkdown(
     '',
   ];
   results.forEach((hit, i) => {
-    // Shape: `N. [title](url)` + blank + one detail line (no intra-hit newlines).
-    lines.push(`${i + 1}. [${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`);
-    lines.push('');
+    // Shape: one list item with markdown hard breaks (two trailing spaces) so
+    // title / meta / each slash command stack vertically without a blank-line
+    // paragraph gap (AnswerMarkdown `<p className="mb-4">`).
+    const blocks: string[] = [
+      `[${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`,
+    ];
 
-    const parts: string[] = [
+    const meta: string[] = [
       hit.authors,
       hit.year,
       hit.venue,
@@ -457,33 +461,38 @@ export function formatLiteratureMarkdown(
     if (kind === 'papers') {
       const blurb = (hit.tldr || hit.snippet || '').replace(/\s+/g, ' ').trim();
       if (blurb && blurb.length <= 160) {
-        parts.push(hit.tldr ? `TLDR: ${blurb}` : blurb);
+        meta.push(hit.tldr ? `TLDR: ${blurb}` : blurb);
       }
-      if (hit.paperId) {
-        const id = hit.paperId;
-        parts.push(`ID: \`${id}\``);
-        parts.push(
-          `Actions: \`${formatPaperActionCommand('details', id)}\` · \`${formatPaperActionCommand('citations', id)}\` · \`${formatPaperActionCommand('references', id)}\``,
-        );
+      const actionId = resolvePaperActionId(hit);
+      if (actionId) meta.push(`ID: \`${actionId}\``);
+    }
+
+    if (meta.length) blocks.push(meta.join(' · '));
+
+    if (kind === 'papers') {
+      const actionId = resolvePaperActionId(hit);
+      if (actionId) {
+        blocks.push(`\`${formatPaperActionCommand('details', actionId)}\``);
+        blocks.push(`\`${formatPaperActionCommand('citations', actionId)}\``);
+        blocks.push(`\`${formatPaperActionCommand('references', actionId)}\``);
       }
       const dlId = resolvePaperDownloadIdentifier(hit);
       if (dlId && isValidPaperDownloadIdentifier(dlId)) {
-        // In-app Files download — do not also emit Open PDF here.
-        parts.push(`Download: \`${formatPaperDownloadCommand(dlId)}\``);
+        blocks.push(`\`${formatPaperDownloadCommand(dlId)}\``);
       } else if (hit.pdfUrl) {
-        parts.push(`PDF: [Open PDF](${hit.pdfUrl})`);
+        blocks.push(`PDF: [Open PDF](${hit.pdfUrl})`);
       }
     }
 
     if (kind === 'books') {
       const dlId = hit.downloadable ? resolveBookDownloadIdentifier(hit) : '';
       if (dlId && isValidBookDownloadIdentifier(dlId)) {
-        parts.push(
+        blocks.push(
           `${bookDownloadCommandLabel(dlId)}: \`${formatBookDownloadCommand(dlId)}\``,
         );
       } else if (hit.url && /^https?:\/\//i.test(hit.url)) {
         const label = markdownLinkLabel(hit.title || '', 'Page');
-        parts.push(`Manual download: [${label}](${hit.url})`);
+        blocks.push(`Manual download: [${label}](${hit.url})`);
       }
       const alt = (hit.alternates || []).find((a) => {
         const altId = resolveBookDownloadIdentifier(a);
@@ -492,13 +501,14 @@ export function formatLiteratureMarkdown(
       if (alt) {
         const altId = resolveBookDownloadIdentifier(alt)!;
         const bits = [alt.format, alt.size].filter(Boolean).join(' · ');
-        parts.push(
+        blocks.push(
           `Alt download${bits ? ` (${bits})` : ''}: \`${formatBookDownloadCommand(altId)}\``,
         );
       }
     }
 
-    if (parts.length) lines.push(parts.join(' · '));
+    // Hard breaks keep one list item; blank line separates the next hit.
+    lines.push(`${i + 1}. ${blocks.join('  \n')}`);
     lines.push('');
   });
   return lines.join('\n').trim();

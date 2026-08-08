@@ -67,6 +67,55 @@ type PreviewMode = 'iframe' | 'extract' | 'auth';
 const PREVIEW_CHUNK_CHARS = 24_000;
 
 const TRUNCATED_MARKER_RE = /\n\n…\[truncated\]\s*$/;
+const PAGINATION_CUE_RE =
+  /to get more content|Content truncated|start_index\s+of\s+\d+/i;
+
+function normalizeExtractResult(data: {
+  title?: string;
+  content: string;
+  quality?: string;
+  truncated?: boolean;
+  nextOffset?: number | null;
+  /** Absolute offset already consumed before this chunk (for continue). */
+  baseOffset?: number;
+}): {
+  title?: string;
+  content: string;
+  quality?: string;
+  truncated: boolean;
+  nextOffset: number | null;
+} {
+  const base = Math.max(0, Math.floor(Number(data.baseOffset) || 0));
+  let content = String(data.content || '').trim();
+  const cue = PAGINATION_CUE_RE.test(content);
+  content = content
+    .replace(/\bContent truncated\.[^\n]*/gi, '')
+    .replace(/Call the fetch tool with a start_index of \d+[^\n]*/gi, '')
+    .replace(/\bto get more content\.?/gi, '')
+    .replace(TRUNCATED_MARKER_RE, '')
+    .trim();
+
+  let truncated = Boolean(data.truncated) || cue;
+  let nextOffset =
+    data.nextOffset == null || !Number.isFinite(Number(data.nextOffset))
+      ? null
+      : Number(data.nextOffset);
+
+  if (truncated && nextOffset == null) {
+    nextOffset = base + content.length;
+  }
+  if (truncated) {
+    content = `${content}\n\n…[truncated]`;
+  }
+
+  return {
+    title: data.title,
+    content,
+    quality: data.quality,
+    truncated,
+    nextOffset,
+  };
+}
 
 function initialPreviewMode(url: string, forceExtract: boolean): PreviewMode {
   if (isLikelyAuthGatedPreviewUrl(url) && !forceExtract) return 'auth';
@@ -114,7 +163,7 @@ async function fetchWebReadExtract(
   if (!content) {
     throw new Error(String(data.error || data.message || 'Empty page'));
   }
-  return {
+  return normalizeExtractResult({
     title: data.title ? String(data.title) : undefined,
     content,
     quality: data.quality ? String(data.quality) : undefined,
@@ -123,7 +172,8 @@ async function fetchWebReadExtract(
       data.nextOffset == null || !Number.isFinite(Number(data.nextOffset))
         ? null
         : Number(data.nextOffset),
-  };
+    baseOffset: opts?.startIndex,
+  });
 }
 
 function fileEntryFromPaperDownload(dl: {
@@ -454,14 +504,16 @@ export function UrlPreviewPanel({
   );
 
   const loadMoreExtract = async () => {
-    if (extract.status !== 'done' || !extract.truncated || extract.nextOffset == null) {
-      return;
-    }
+    if (extract.status !== 'done' || !extract.truncated) return;
+    const startAt =
+      extract.nextOffset != null && Number.isFinite(extract.nextOffset)
+        ? extract.nextOffset
+        : extract.content.replace(TRUNCATED_MARKER_RE, '').length;
     if (loadingMore) return;
     setLoadingMore(true);
     try {
       const more = await fetchWebReadExtract(url, undefined, {
-        startIndex: extract.nextOffset,
+        startIndex: startAt,
       });
       const prior = extract.content.replace(TRUNCATED_MARKER_RE, '').trimEnd();
       const chunk = more.content.replace(TRUNCATED_MARKER_RE, '').trim();
@@ -751,9 +803,7 @@ export function UrlPreviewPanel({
                         : undefined
                     }
                   />
-                  {extract.status === 'done' &&
-                  extract.truncated &&
-                  extract.nextOffset != null ? (
+                  {extract.status === 'done' && extract.truncated ? (
                     <div className="mt-4 flex flex-col items-center gap-2 border-t border-stone-200/80 pt-4 dark:border-stone-800">
                       <p className="text-[11px] text-stone-400 dark:text-stone-500">
                         {t('urlPreviewTruncated')}

@@ -106,7 +106,14 @@ export function cleanUrlExtractText(raw: string, opts?: { title?: string }): str
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   out = rewriteDirtyCitationLinks(out);
-  return out.replace(/\n{3,}/g, '\n\n').trim();
+  // Fetch MCP pagination leftovers that survived a mid-notice cut.
+  out = out
+    .replace(/\bContent truncated\.[^\n]*/gi, '')
+    .replace(/Call the fetch tool with a start_index of \d+[^\n]*/gi, '')
+    .replace(/\bto get more content\.?/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return out;
 }
 
 function footnoteFromLabel(label: string): string {

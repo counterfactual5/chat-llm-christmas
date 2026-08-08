@@ -493,18 +493,21 @@ describe('inferPaperDownloadProvider / resolvePaperDownloadIdentifier', () => {
     expect(isValidPaperDownloadIdentifier('<id>')).toBe(false);
   });
 
-  it('prefers DOI over OpenAlex W-ids for details/citations/references', async () => {
+  it('keeps OpenAlex W-ids for details/citations/references (not DOI)', async () => {
     const { resolvePaperActionId } = await import('@/lib/chat/turn/literature-command');
     expect(
       resolvePaperActionId({
         paperId: 'W4407173730',
         doi: '10.1007/s11704-026-60308-3',
       }),
-    ).toBe('DOI:10.1007/s11704-026-60308-3');
+    ).toBe('W4407173730');
     expect(resolvePaperActionId({ paperId: 'W4407173730' })).toBe('W4407173730');
     expect(resolvePaperActionId({ paperId: 'abcdefghijklmnop' })).toBe(
       'abcdefghijklmnop',
     );
+    expect(
+      resolvePaperActionId({ doi: '10.1007/s11704-026-60308-3' }),
+    ).toBe('DOI:10.1007/s11704-026-60308-3');
 
     const md = formatLiteratureMarkdown('papers', 'survey', 'openalex', [
       {
@@ -515,8 +518,31 @@ describe('inferPaperDownloadProvider / resolvePaperDownloadIdentifier', () => {
         sourceProvider: 'openalex',
       },
     ]);
-    expect(md).toContain('/papers details DOI:10.1007/s11704-026-60308-3');
-    expect(md).not.toContain('/papers details W4407173730');
+    expect(md).toContain('/papers details W4407173730');
+    expect(md).not.toContain('/papers details DOI:10.1007/s11704-026-60308-3');
+  });
+
+  it('renders full abstract for paper details (no 160-char search gate)', () => {
+    const long =
+      'A'.repeat(200) +
+      ' This abstract is longer than the search blurb limit and must still appear.';
+    const md = formatLiteratureMarkdown(
+      'papers',
+      'W1',
+      'openalex',
+      [
+        {
+          title: 'Long Abstract Paper',
+          url: 'https://openalex.org/W1',
+          paperId: 'W1',
+          abstract: long,
+          sourceProvider: 'openalex',
+        },
+      ],
+      { action: 'details' },
+    );
+    expect(md).toContain(long);
+    expect(md).toContain('/papers details W1');
   });
 });
 

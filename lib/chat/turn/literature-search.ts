@@ -442,8 +442,8 @@ export function formatLiteratureMarkdown(
     '',
   ];
   results.forEach((hit, i) => {
-    // Shape: one list item with markdown hard breaks between title / meta /
-    // (optional abstract) / commands — commands stay on one ·-joined line.
+    // Shape: numbered hit (title + meta via hard breaks), then nested
+    // unordered list of slash commands — one command per bullet.
     const blocks: string[] = [
       `[${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`,
     ];
@@ -479,9 +479,9 @@ export function formatLiteratureMarkdown(
       if (body) blocks.push(body);
     }
 
+    const cmds: string[] = [];
     if (kind === 'papers') {
       const actionId = resolvePaperActionId(hit);
-      const cmds: string[] = [];
       if (actionId) {
         cmds.push(`\`${formatPaperActionCommand('details', actionId)}\``);
         cmds.push(`\`${formatPaperActionCommand('citations', actionId)}\``);
@@ -493,18 +493,17 @@ export function formatLiteratureMarkdown(
       } else if (hit.pdfUrl) {
         cmds.push(`PDF: [Open PDF](${hit.pdfUrl})`);
       }
-      if (cmds.length) blocks.push(cmds.join(' · '));
     }
 
     if (kind === 'books') {
       const dlId = hit.downloadable ? resolveBookDownloadIdentifier(hit) : '';
       if (dlId && isValidBookDownloadIdentifier(dlId)) {
-        blocks.push(
+        cmds.push(
           `${bookDownloadCommandLabel(dlId)}: \`${formatBookDownloadCommand(dlId)}\``,
         );
       } else if (hit.url && /^https?:\/\//i.test(hit.url)) {
         const label = markdownLinkLabel(hit.title || '', 'Page');
-        blocks.push(`Manual download: [${label}](${hit.url})`);
+        cmds.push(`Manual download: [${label}](${hit.url})`);
       }
       const alt = (hit.alternates || []).find((a) => {
         const altId = resolveBookDownloadIdentifier(a);
@@ -513,14 +512,18 @@ export function formatLiteratureMarkdown(
       if (alt) {
         const altId = resolveBookDownloadIdentifier(alt)!;
         const bits = [alt.format, alt.size].filter(Boolean).join(' · ');
-        blocks.push(
+        cmds.push(
           `Alt download${bits ? ` (${bits})` : ''}: \`${formatBookDownloadCommand(altId)}\``,
         );
       }
     }
 
-    // Hard breaks keep one list item; blank line separates the next hit.
-    lines.push(`${i + 1}. ${blocks.join('  \n')}`);
+    // Nested bullets under the ordered item (3-space indent after `1. `).
+    let item = `${i + 1}. ${blocks.join('  \n')}`;
+    if (cmds.length) {
+      item += `\n\n${cmds.map((c) => `   - ${c}`).join('\n')}`;
+    }
+    lines.push(item);
     lines.push('');
   });
   return lines.join('\n').trim();

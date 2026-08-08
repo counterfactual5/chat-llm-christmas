@@ -442,10 +442,12 @@ export function formatLiteratureMarkdown(
     '',
   ];
   results.forEach((hit, i) => {
-    // Shape: numbered hit (title + meta via hard breaks), then nested
-    // unordered list of slash commands — one command per bullet.
+    // Use an explicit bold index (**N.**) instead of a Markdown ordered list.
+    // Nested `-` under `10.` / `11.` needs marker-width indent or CommonMark
+    // splits the <ol>; models and exports also often flatten that indent. A
+    // top-level ul after **N.** keeps the same shape for 1…N without indent math.
     const blocks: string[] = [
-      `[${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`,
+      `**${i + 1}.** [${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`,
     ];
 
     const meta: string[] = [
@@ -518,19 +520,11 @@ export function formatLiteratureMarkdown(
       }
     }
 
-    // Marker width grows at 10+ (`10. ` is 4 chars). Nested bullets must indent
-    // to that width or CommonMark treats them as a sibling list and splits the
-    // ordered list — later items then start a new <ol> (looks like a reset to 1
-    // if the renderer drops `start`).
-    const marker = `${i + 1}. `;
-    const pad = ' '.repeat(marker.length);
-    const [titleBlock, ...restBlocks] = blocks;
-    let item = `${marker}${titleBlock}`;
-    for (const block of restBlocks) {
-      item += `  \n${pad}${block}`;
-    }
+    // Hard breaks inside one paragraph (title / meta / abstract); commands are
+    // a following sibling ul — no blank line, so chat-markdown can keep p+ul tight.
+    let item = blocks.join('  \n');
     if (cmds.length) {
-      item += `\n${cmds.map((c) => `${pad}- ${c}`).join('\n')}`;
+      item += `\n${cmds.map((c) => `- ${c}`).join('\n')}`;
     }
     lines.push(item);
     lines.push('');

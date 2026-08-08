@@ -262,23 +262,27 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('/papers citations ARXIV:1706.03762');
     expect(md).toContain('/papers references ARXIV:1706.03762');
     expect(md).toContain('/papers download ARXIV:1706.03762');
-    // Each action as a nested unordered-list bullet (indent follows `N. ` width).
+    // Bold index + top-level command bullets (not nested under `N.` — avoids
+    // CommonMark marker-width splits after item 10).
     expect(md).toMatch(
-      /\n   - `\/papers details ARXIV:1706\.03762`\n   - `\/papers citations ARXIV:1706\.03762`\n   - `\/papers references ARXIV:1706\.03762`\n   - `\/papers download ARXIV:1706\.03762`/,
+      /\*\*1\.\*\* \[Attention Is All You Need\]/,
+    );
+    expect(md).toMatch(
+      /\n- `\/papers details ARXIV:1706\.03762`\n- `\/papers citations ARXIV:1706\.03762`\n- `\/papers references ARXIV:1706\.03762`\n- `\/papers download ARXIV:1706\.03762`/,
     );
     expect(md).not.toContain('Actions:');
     expect(md).not.toContain('[Open PDF]');
     expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);
     // Title + meta via hard break — no blank paragraph under the title.
     expect(md).toMatch(
-      /1\. \[Attention Is All You Need\]\([^\n]+\)  \n   Vaswani et al\. · 2017/,
+      /\*\*1\.\*\* \[Attention Is All You Need\]\([^\n]+\)  \nVaswani et al\. · 2017/,
     );
-    expect(md).toMatch(/^\s+-\s/m);
+    expect(md).toMatch(/^- `/m);
     // No blank line between meta and the first command bullet.
-    expect(md).not.toMatch(/citations · arxiv[^\n]*\n\n\s+- `/);
+    expect(md).not.toMatch(/citations · arxiv[^\n]*\n\n- `/);
   });
 
-  it('indents nested command bullets for double-digit list markers', () => {
+  it('keeps double-digit hits as bold indexes with sibling command lists', () => {
     const hits = Array.from({ length: 12 }, (_, i) => ({
       title: `Paper ${i + 1}`,
       url: `https://example.com/${i + 1}`,
@@ -286,15 +290,16 @@ describe('formatLiteratureMarkdown', () => {
       sourceProvider: 'openalex',
     }));
     const md = formatLiteratureMarkdown('papers', 'q', 'openalex', hits);
-    expect(md).toContain('10. [Paper 10]');
-    expect(md).toContain('11. [Paper 11]');
-    expect(md).toContain('12. [Paper 12]');
-    // `10. ` is 4 chars — bullets must use 4-space indent or the ol splits.
+    expect(md).toContain('**10.** [Paper 10]');
+    expect(md).toContain('**11.** [Paper 11]');
+    expect(md).toContain('**12.** [Paper 12]');
+    // Must not emit Markdown ordered-list markers (those break after 10.).
+    expect(md).not.toMatch(/^10\. /m);
     expect(md).toMatch(
-      /10\. \[Paper 10\]\([^\n]+\)  \n    openalex · ID: `W10`\n    - `\/papers details W10`/,
+      /\*\*10\.\*\* \[Paper 10\]\([^\n]+\)  \nopenalex · ID: `W10`\n- `\/papers details W10`/,
     );
     expect(md).toMatch(
-      /11\. \[Paper 11\]\([^\n]+\)  \n    openalex · ID: `W11`\n    - `\/papers details W11`/,
+      /\*\*11\.\*\* \[Paper 11\]\([^\n]+\)  \nopenalex · ID: `W11`\n- `\/papers details W11`/,
     );
   });
 
@@ -409,7 +414,7 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('Alt download (mobi · 7 MB)');
     expect(md).toContain('/books download libgen:313848e5d3427b4983b8f90162f59cea');
     expect(md).toMatch(
-      /\n   - Download: `\/books download libgen:70a383c096ff335b1ec51de27571d04c`\n   - Alt download \(mobi · 7 MB\):/,
+      /\n- Download: `\/books download libgen:70a383c096ff335b1ec51de27571d04c`\n- Alt download \(mobi · 7 MB\):/,
     );
   });
 
@@ -693,12 +698,12 @@ describe('formatHitsForModel', () => {
     expect(BOOK_SYSTEM).toMatch(/backticks/);
     expect(BOOK_SYSTEM).toMatch(/em-dash/);
     expect(BOOK_SYSTEM).toContain('/books download');
-    expect(BOOK_SYSTEM).toMatch(/own line|nested unordered-list bullet/);
+    expect(BOOK_SYSTEM).toMatch(/own line|unordered-list bullet/);
     expect(BOOK_SYSTEM).toMatch(/Blank line before the next numbered hit/);
-    expect(PAPER_SYSTEM).toMatch(/own line|nested unordered-list bullet/);
+    expect(PAPER_SYSTEM).toMatch(/own line|unordered-list bullet/);
     expect(PAPER_SYSTEM).toMatch(/Blank line before the next numbered hit/);
-    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/own line|nested unordered-list bullet/);
-    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/own line|nested unordered-list bullet/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.books).toMatch(/own line|unordered-list bullet/);
+    expect(LITERATURE_TOOL_ANSWER_HINT.papers).toMatch(/own line|unordered-list bullet/);
     expect(PAPER_SYSTEM).toMatch(/answerMarkdown/);
     expect(PAPER_SYSTEM).toMatch(/backticks/);
     expect(PAPER_SYSTEM).toMatch(/em-dash/);

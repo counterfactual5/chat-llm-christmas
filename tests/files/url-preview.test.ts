@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isLikelyAuthGatedPreviewUrl,
+  isLikelyPaperPreviewUrl,
   isPreviewableHttpUrl,
   normalizePreviewHttpUrl,
   previewNavigationTargetEquals,
@@ -31,6 +32,18 @@ describe('url-preview helpers', () => {
     expect(shouldOpenLinkExternally({ metaKey: true })).toBe(true);
     expect(shouldOpenLinkExternally({ ctrlKey: true })).toBe(true);
     expect(shouldOpenLinkExternally({ button: 1 })).toBe(true);
+  });
+
+  it('flags paper / DOI hosts for OA-first preview', () => {
+    expect(isLikelyPaperPreviewUrl('https://doi.org/10.1038/s41575-025-01108-1')).toBe(
+      true,
+    );
+    expect(isLikelyPaperPreviewUrl('https://arxiv.org/abs/1706.03762')).toBe(true);
+    expect(isLikelyPaperPreviewUrl('https://www.nature.com/articles/s41575-025-01108-1')).toBe(
+      true,
+    );
+    expect(isLikelyPaperPreviewUrl('https://openalex.org/W4407173730')).toBe(true);
+    expect(isLikelyPaperPreviewUrl('https://example.com/blog')).toBe(false);
   });
 
   it('flags auth-gated hosts that cannot reuse browser login in-panel', () => {

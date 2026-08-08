@@ -2951,6 +2951,7 @@ export default function ChatContainer() {
               url={previewTarget.url}
               title={previewTarget.title}
               onNavigateUrl={(next) => openUrlPreview(next)}
+              onOpenDownloadedFile={openFilePreview}
             />
           ) : previewTarget?.kind === 'file' ? (
             <ChatPreviewPanel

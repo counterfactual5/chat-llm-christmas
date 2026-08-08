@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
   isLikelyAuthGatedPreviewUrl,
+  isLikelyPaperPreviewUrl,
   normalizePreviewHttpUrl,
   previewNavigationTargetEquals,
 } from '@/lib/files/url-preview';
@@ -23,6 +24,8 @@ import {
   probeEmbedOutcome,
 } from '@/lib/files/url-preview-embed';
 import { cleanUrlExtractText } from '@/lib/files/url-extract-clean';
+import { requestPaperDownload } from '@/lib/chat/turn/literature-search';
+import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { previewPanelWidth } from './panel-widths';
@@ -38,13 +41,16 @@ export type UrlPreviewPanelProps = {
   forceExtract?: boolean;
   /** Navigate the preview to another http(s) URL (address-bar submit). */
   onNavigateUrl?: (url: string) => void;
+  /** After OA paper PDF downloads into Files, switch to file preview. */
+  onOpenDownloadedFile?: (entry: GeneratedFileEntry) => void;
 };
 
 type ExtractState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'done'; title?: string; content: string }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string }
+  | { status: 'no-oa'; message: string };
 
 type PreviewMode = 'iframe' | 'extract' | 'auth';
 
@@ -57,7 +63,7 @@ function initialPreviewMode(url: string, forceExtract: boolean): PreviewMode {
 async function fetchWebReadExtract(
   url: string,
   signal?: AbortSignal,
-): Promise<{ title?: string; content: string }> {
+): Promise<{ title?: string; content: string; quality?: string }> {
   const res = await fetch('/api/web-read', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -69,6 +75,7 @@ async function fetchWebReadExtract(
     message?: string;
     title?: string | null;
     content?: string;
+    quality?: string;
   };
   if (!res.ok) {
     throw new Error(String(data.error || data.message || `HTTP ${res.status}`));
@@ -80,6 +87,25 @@ async function fetchWebReadExtract(
   return {
     title: data.title ? String(data.title) : undefined,
     content,
+    quality: data.quality ? String(data.quality) : undefined,
+  };
+}
+
+function fileEntryFromPaperDownload(dl: {
+  fileId: string;
+  filename: string;
+  title: string;
+  bytes: number;
+}): GeneratedFileEntry {
+  return {
+    messageId: 'url-preview-paper',
+    fileIndex: 0,
+    id: dl.fileId,
+    name: dl.filename || `${dl.title || 'paper'}.pdf`,
+    mimeType: 'application/pdf',
+    size: dl.bytes || 0,
+    url: `/api/files/${encodeURIComponent(dl.fileId)}`,
+    createdAt: Date.now(),
   };
 }
 
@@ -92,6 +118,7 @@ export function UrlPreviewPanel({
   title: initialTitle,
   forceExtract = false,
   onNavigateUrl,
+  onOpenDownloadedFile,
 }: UrlPreviewPanelProps) {
   const { t } = useLocale();
   const width = previewPanelWidth(contextOpen);
@@ -211,7 +238,7 @@ export function UrlPreviewPanel({
     return () => ac.abort();
   }, [open, url, mode, t, extractRetryNonce]);
 
-  // Load extract when in extract mode.
+  // Load extract when in extract mode. Paper-like URLs try OA PDF download first.
   useEffect(() => {
     if (!open || !url || mode !== 'extract') return;
     const applyDone = (result: { title?: string; content: string }) => {
@@ -225,21 +252,55 @@ export function UrlPreviewPanel({
       setExtract(next);
       if (result.title) setDisplayTitle((prev) => prev || result.title || '');
     };
+    const applyThinOrError = (message: string) => {
+      const next: ExtractState = { status: 'no-oa', message };
+      prefetchRef.current = next;
+      setPrefetchReady(next);
+      setExtract(next);
+    };
     const cached = prefetchRef.current;
     if (cached.status === 'done') {
       setExtract(cached);
       if (cached.title) setDisplayTitle((prev) => prev || cached.title || '');
       return;
     }
+    if (cached.status === 'no-oa') {
+      setExtract(cached);
+      return;
+    }
     const ac = new AbortController();
     setExtract({ status: 'loading' });
-    void fetchWebReadExtract(url, ac.signal)
-      .then((result) => {
+
+    void (async () => {
+      try {
+        if (isLikelyPaperPreviewUrl(url) && onOpenDownloadedFile) {
+          const dl = await requestPaperDownload(url);
+          if (ac.signal.aborted) return;
+          if (dl.ok) {
+            onOpenDownloadedFile(fileEntryFromPaperDownload(dl));
+            return;
+          }
+          // Fall through to HTML extract; thin shells become CTA.
+        }
+
+        const result = await fetchWebReadExtract(url, ac.signal);
         if (ac.signal.aborted) return;
+        if (
+          isLikelyPaperPreviewUrl(url) &&
+          (result.quality === 'thin' || !result.content.trim())
+        ) {
+          applyThinOrError(t('urlPreviewNoOpenAccessBody'));
+          return;
+        }
         applyDone(result);
-      })
-      .catch((err) => {
+      } catch (err) {
         if (ac.signal.aborted) return;
+        if (isLikelyPaperPreviewUrl(url)) {
+          applyThinOrError(
+            err instanceof Error ? err.message : t('urlPreviewNoOpenAccessBody'),
+          );
+          return;
+        }
         const next: ExtractState = {
           status: 'error',
           message: err instanceof Error ? err.message : t('requestFailed'),
@@ -247,9 +308,11 @@ export function UrlPreviewPanel({
         prefetchRef.current = next;
         setPrefetchReady(next);
         setExtract(next);
-      });
+      }
+    })();
+
     return () => ac.abort();
-  }, [open, url, mode, t, extractRetryNonce]);
+  }, [open, url, mode, t, extractRetryNonce, onOpenDownloadedFile]);
 
   // Blocked-embed degrade (KTD1/KTD2): heuristic probe + settle timer.
   // Auto-switches to Text only when the prefetched extract is already in
@@ -537,7 +600,28 @@ export function UrlPreviewPanel({
               ) : extract.status === 'loading' || extract.status === 'idle' ? (
                 <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-stone-400">
                   <Loader2 className="h-8 w-8 animate-spin opacity-60" />
-                  <span>{t('urlPreviewExtracting')}</span>
+                  <span>
+                    {isLikelyPaperPreviewUrl(url)
+                      ? t('urlPreviewResolvingPaper')
+                      : t('urlPreviewExtracting')}
+                  </span>
+                </div>
+              ) : extract.status === 'no-oa' ? (
+                <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-500 dark:text-stone-400">
+                  <FileText className="h-8 w-8 opacity-40" />
+                  <p className="text-sm font-medium text-stone-700 dark:text-stone-200">
+                    {t('urlPreviewNoOpenAccessTitle')}
+                  </p>
+                  <p className="max-w-sm leading-5">
+                    {extract.message || t('urlPreviewNoOpenAccessBody')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openExternally}
+                    className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                  >
+                    {t('openInNewTab')}
+                  </button>
                 </div>
               ) : extract.status === 'error' ? (
                 <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-400">

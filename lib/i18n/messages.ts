@@ -228,7 +228,10 @@ export const dict = {
     urlPreviewResolvingPaper: 'Looking for an open-access PDF…',
     urlPreviewNoOpenAccessTitle: 'No open full text in preview',
     urlPreviewNoOpenAccessBody:
-      'This publisher page is paywalled or only exposed references to our extractors. Open it in your browser, or use /papers download when an OA PDF id is available.',
+      'This publisher page is paywalled or only exposed references to our extractors. Open it in your browser, or save to Files when a real OA PDF is available.',
+    urlPreviewSaveToFiles: 'Save to Files & open',
+    urlPreviewSavingToFiles: 'Saving…',
+    urlPreviewSaveFailed: 'Could not save this paper (no open PDF, or download failed).',
     urlPreviewOpenPdfInstead: 'Open downloaded PDF',
     urlPreviewTruncated: 'Extract truncated — more text is available.',
     urlPreviewLoadMore: 'Load more',
@@ -680,7 +683,10 @@ export const dict = {
     urlPreviewResolvingPaper: '正在查找开放获取 PDF…',
     urlPreviewNoOpenAccessTitle: '预览中没有开放全文',
     urlPreviewNoOpenAccessBody:
-      '该出版商页面可能需付费，或抽取结果只剩参考文献。请在浏览器中打开，或在有 OA PDF 时使用 /papers download。',
+      '该出版商页面可能需付费，或抽取结果只剩参考文献。请在浏览器中打开；若有真正的 OA PDF，可保存到 Files 再查看。',
+    urlPreviewSaveToFiles: '保存到 Files 并打开',
+    urlPreviewSavingToFiles: '正在保存…',
+    urlPreviewSaveFailed: '无法保存（没有开放 PDF，或下载失败）。',
     urlPreviewOpenPdfInstead: '打开已下载的 PDF',
     urlPreviewTruncated: '正文已截断，还有后续内容。',
     urlPreviewLoadMore: '加载更多',

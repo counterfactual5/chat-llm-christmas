@@ -108,11 +108,10 @@ import {
   downloadGeneratedImage,
 } from '@/lib/chat/composer/download';
 import {
-  identifierFromContentUrl,
-  isEphemeralPreviewId,
   requestBookDownload,
   requestPaperDownload,
 } from '@/lib/chat/turn/literature-search';
+import { persistEphemeralLiteratureEntry } from '@/lib/files/literature-preview-ladder';
 import { downloadTextContent } from '@/lib/files/download';
 import {
   accountExportFilename,
@@ -3284,49 +3283,21 @@ export default function ChatContainer() {
                     onDownload={() => {
                       void (async () => {
                         const entry = slot.entry;
-                        if (isEphemeralPreviewId(entry.id, 'paper')) {
-                          const identifier =
-                            identifierFromContentUrl(entry.url) ||
-                            decodeURIComponent(
-                              entry.id.slice('paper-preview:'.length),
-                            );
-                          if (!identifier) return;
-                          const dl = await requestPaperDownload(identifier);
-                          if (!dl.ok) return;
-                          openFilePreview({
-                            messageId: entry.messageId,
-                            fileIndex: entry.fileIndex,
-                            id: dl.fileId,
-                            name: dl.filename || entry.name,
-                            mimeType: 'application/pdf',
-                            size: dl.bytes || 0,
-                            url: `/api/files/${encodeURIComponent(dl.fileId)}`,
-                            createdAt: Date.now(),
-                          });
+                        const persisted = await persistEphemeralLiteratureEntry({
+                          entry,
+                          downloadPaper: requestPaperDownload,
+                          downloadBook: requestBookDownload,
+                        });
+                        if ('skipped' in persisted && persisted.skipped) {
+                          await downloadGeneratedFile(entry);
                           return;
                         }
-                        if (isEphemeralPreviewId(entry.id, 'book')) {
-                          const identifier =
-                            identifierFromContentUrl(entry.url) ||
-                            decodeURIComponent(
-                              entry.id.slice('book-preview:'.length),
-                            );
-                          if (!identifier) return;
-                          const dl = await requestBookDownload(identifier);
-                          if (!dl.ok) return;
-                          openFilePreview({
-                            messageId: entry.messageId,
-                            fileIndex: entry.fileIndex,
-                            id: dl.fileId,
-                            name: dl.filename || entry.name,
-                            mimeType: entry.mimeType || 'application/octet-stream',
-                            size: dl.bytes || 0,
-                            url: `/api/files/${encodeURIComponent(dl.fileId)}`,
-                            createdAt: Date.now(),
-                          });
-                          return;
-                        }
-                        await downloadGeneratedFile(entry);
+                        if (!persisted.ok) return;
+                        openFilePreview({
+                          ...persisted.entry,
+                          messageId: entry.messageId,
+                          fileIndex: entry.fileIndex,
+                        });
                       })();
                     }}
                   />

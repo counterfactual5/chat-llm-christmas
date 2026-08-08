@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isJunkBookExtractHost,
   isLikelyAuthGatedPreviewUrl,
   isLikelyBookPreviewUrl,
+  isLikelyDirectLiteratureFileUrl,
   isLikelyPaperPreviewUrl,
   isPreviewableHttpUrl,
   normalizePreviewHttpUrl,
@@ -44,7 +46,22 @@ describe('url-preview helpers', () => {
       true,
     );
     expect(isLikelyPaperPreviewUrl('https://openalex.org/W4407173730')).toBe(true);
+    expect(
+      isLikelyPaperPreviewUrl('https://arxiv.org/pdf/1706.03762.pdf'),
+    ).toBe(true);
+    expect(
+      isLikelyPaperPreviewUrl('https://cdn.example.org/papers/paper.pdf'),
+    ).toBe(true);
     expect(isLikelyPaperPreviewUrl('https://example.com/blog')).toBe(false);
+  });
+
+  it('flags direct literature file URLs', () => {
+    expect(isLikelyDirectLiteratureFileUrl('https://cdn.example/a.pdf')).toBe(true);
+    expect(isLikelyDirectLiteratureFileUrl('https://arxiv.org/pdf/1706.03762')).toBe(
+      true,
+    );
+    expect(isLikelyDirectLiteratureFileUrl('https://cdn.example/book.epub')).toBe(true);
+    expect(isLikelyDirectLiteratureFileUrl('https://example.com/blog')).toBe(false);
   });
 
   it('flags archive.org / gutenberg / libgen book landing URLs', () => {
@@ -63,10 +80,22 @@ describe('url-preview helpers', () => {
       ),
     ).toBe(true);
     expect(isLikelyBookPreviewUrl('https://cdn.example/book.epub')).toBe(true);
+    expect(isLikelyBookPreviewUrl('https://cdn.example/book.pdf')).toBe(true);
     expect(isLikelyBookPreviewUrl('https://example.com/blog')).toBe(false);
     expect(isLikelyBookPreviewUrl('https://doi.org/10.1038/s41575-025-01108-1')).toBe(
       false,
     );
+  });
+
+  it('marks libgen landing hosts as junk extract', () => {
+    expect(
+      isJunkBookExtractHost(
+        'https://libgen.li/ads.php?md5=f370d2605d3cc160902406c9724c00ef',
+      ),
+    ).toBe(true);
+    expect(
+      isJunkBookExtractHost('https://archive.org/details/aliceinwonderland00carrrich'),
+    ).toBe(false);
   });
 
   it('flags auth-gated hosts that cannot reuse browser login in-panel', () => {

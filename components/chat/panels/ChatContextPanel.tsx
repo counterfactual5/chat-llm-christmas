@@ -69,12 +69,11 @@ export type ChatContextPanelProps = {
 
   messagesCount: number;
   selectedModel: string;
-  contextLimit: number | null | undefined;
   usableLimit: number | null;
   usageRatio: number | null;
   estimatedTokens: number;
   contextSources: Array<[string, number]>;
-  /** Gateway-reported usage for the last completed turn (optional). */
+  /** When set, Context used may be floored by gateway-reported last-turn usage. */
   lastTurnUsage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -119,7 +118,6 @@ export function ChatContextPanel({
   onSystemPromptChange,
   messagesCount,
   selectedModel,
-  contextLimit,
   usableLimit,
   usageRatio,
   estimatedTokens,
@@ -270,19 +268,10 @@ export function ChatContextPanel({
               <span>Messages</span>
               <span className="font-mono text-stone-700 dark:text-stone-300">{messagesCount}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Model window</span>
-              <span className="font-mono text-stone-700 dark:text-stone-300 text-right">
-                {contextLimit != null ? (
-                  <>
-                    {contextLimit.toLocaleString()}
-                    <span className="block text-[10px] font-sans font-normal text-stone-400 truncate max-w-[140px]">
-                      {selectedModel || '—'}
-                    </span>
-                  </>
-                ) : (
-                  'unknown'
-                )}
+            <div className="flex justify-between gap-3">
+              <span>Model</span>
+              <span className="font-mono text-stone-700 dark:text-stone-300 truncate max-w-[160px] text-right">
+                {selectedModel || '—'}
               </span>
             </div>
 
@@ -297,6 +286,11 @@ export function ChatContextPanel({
                         ? 'text-amber-600 dark:text-amber-400'
                         : 'text-stone-700 dark:text-stone-300',
                     )}
+                    title={
+                      lastTurnUsage
+                        ? 'Floored by last turn usage when higher than the local estimate'
+                        : undefined
+                    }
                   >
                     ~{estimatedTokens.toLocaleString()} / {usableLimit.toLocaleString()}
                     {usageRatio != null && (
@@ -307,29 +301,6 @@ export function ChatContextPanel({
                     )}
                   </span>
                 </div>
-                <p className="text-[10px] leading-snug text-stone-400">
-                  Window occupancy for compact / send gates. When the last turn
-                  reported usage, that measurement floors this number so the bar
-                  cannot look emptier than the real prompt.
-                </p>
-                {lastTurnUsage &&
-                  (lastTurnUsage.prompt_tokens != null ||
-                    lastTurnUsage.completion_tokens != null ||
-                    lastTurnUsage.total_tokens != null) && (
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-stone-400">Measured last turn</span>
-                      <span className="font-mono text-stone-500 text-right">
-                        {lastTurnUsage.prompt_tokens != null
-                          ? `${lastTurnUsage.prompt_tokens.toLocaleString()} prompt`
-                          : lastTurnUsage.total_tokens != null
-                            ? `${lastTurnUsage.total_tokens.toLocaleString()} total`
-                            : '—'}
-                        {lastTurnUsage.completion_tokens != null
-                          ? ` · ${lastTurnUsage.completion_tokens.toLocaleString()} out`
-                          : ''}
-                      </span>
-                    </div>
-                  )}
                 <div className="h-1.5 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800">
                   <div
                     className={cn(

@@ -66,7 +66,13 @@ export function probeEmbedOutcome(
   }
 }
 
-export type PrefetchLikeStatus = 'idle' | 'loading' | 'done' | 'error';
+export type PrefetchLikeStatus =
+  | 'idle'
+  | 'loading'
+  | 'done'
+  | 'error'
+  /** Extract finished but the page has no open-access body. */
+  | 'no-oa';
 
 export type DegradeAction = 'wait' | 'auto-extract' | 'fallback';
 
@@ -90,7 +96,8 @@ export function decideDegradeAction(input: {
 }): DegradeAction {
   if (!input.embedLikelyBlocked) return 'wait';
   if (input.prefetch === 'done') return 'auto-extract';
-  if (input.prefetch === 'error') return 'fallback';
+  // Failed extract or paywalled/no-OA body — no usable Text to switch to.
+  if (input.prefetch === 'error' || input.prefetch === 'no-oa') return 'fallback';
   // prefetch idle/loading: give the in-flight prefetch a grace window.
   return input.settleFired ? 'fallback' : 'wait';
 }

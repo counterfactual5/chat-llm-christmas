@@ -135,6 +135,16 @@ describe('decideDegradeAction', () => {
     ).toBe('fallback');
   });
 
+  it('fallback: blocked + prefetch no-oa (immediately)', () => {
+    expect(
+      decideDegradeAction({
+        embedLikelyBlocked: true,
+        prefetch: 'no-oa',
+        settleFired: false,
+      }),
+    ).toBe('fallback');
+  });
+
   it('fallback: blocked + prefetch idle after settle', () => {
     expect(
       decideDegradeAction({

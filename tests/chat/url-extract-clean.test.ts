@@ -93,6 +93,11 @@ describe('cleanUrlExtractText', () => {
     expect(cleanUrlExtractText(raw)).toBe(raw);
   });
 
+  it('strips Fetch MCP pagination leftover tails', () => {
+    const raw = 'End of chunk.\n\nto get more content.';
+    expect(cleanUrlExtractText(raw)).toBe('End of chunk.');
+  });
+
   it('empty / whitespace input → empty', () => {
     expect(cleanUrlExtractText('')).toBe('');
     expect(cleanUrlExtractText('   \n \n ')).toBe('');

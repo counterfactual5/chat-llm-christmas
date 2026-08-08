@@ -60,8 +60,11 @@ type ExtractState =
 
 type PreviewMode = 'iframe' | 'extract' | 'auth';
 
-/** Align with chat-api HARD_MAX_CONTENT_CHARS / proxy clamp. */
-const PREVIEW_MAX_CHARS = 200_000;
+/**
+ * Chunked extract: first paint + each Load more asks only this many chars.
+ * Keeps chat-api / provider work bounded (avoids 200k one-shot hangs).
+ */
+const PREVIEW_CHUNK_CHARS = 24_000;
 
 const TRUNCATED_MARKER_RE = /\n\n…\[truncated\]\s*$/;
 
@@ -82,7 +85,10 @@ async function fetchWebReadExtract(
   truncated?: boolean;
   nextOffset?: number | null;
 }> {
-  const body: Record<string, unknown> = { url, maxChars: PREVIEW_MAX_CHARS };
+  const body: Record<string, unknown> = {
+    url,
+    maxChars: PREVIEW_CHUNK_CHARS,
+  };
   if (opts?.startIndex != null && opts.startIndex > 0) {
     body.startIndex = Math.floor(opts.startIndex);
   }

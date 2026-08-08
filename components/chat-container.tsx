@@ -3007,7 +3007,6 @@ export default function ChatContainer() {
             onSystemPromptChange={setSystemPrompt}
             messagesCount={messages.length}
             selectedModel={selectedModel}
-            contextLimit={contextLimit}
             usableLimit={usableLimit}
             usageRatio={usageRatio}
             estimatedTokens={estimatedTokens}

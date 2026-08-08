@@ -11,9 +11,9 @@ const MAX_OPS = 50;
 
 const OFFICE_WRITE_SYSTEM = [
   'You have office_write to edit an existing .docx / .pptx / .xlsx by durable file_id (same id, in place).',
-  'Only call it when the user asked to change that attached/generated Office file.',
+  'Only call it when the user asked to change that attached/generated Office file in this thread.',
   'Prefer structured ops: replace_text; pptx_replace_on_slide; xlsx_set_cell / xlsx_set_cells; docx_set_paragraph.',
-  'full_replace (content_base64) is an escape hatch — warn the user about fidelity.',
+  'full_replace (content_base64) is an escape hatch — set confirm_full_replace:true and warn the user about fidelity.',
   'Never claim an edit succeeded unless office_write returned ok:true.',
   'Use office_rollback with snapshot_id from the write receipt to undo.',
 ].join(' ');
@@ -24,34 +24,83 @@ const OFFICE_ROLLBACK_SYSTEM = [
 ].join(' ');
 
 export type OfficeWriteParse =
-  | { fileId: string; ops: unknown[]; error?: undefined }
-  | { fileId: string; ops: unknown[]; error: string };
+  | { fileId: string; ops: unknown[]; confirmFullReplace: boolean; error?: undefined }
+  | { fileId: string; ops: unknown[]; confirmFullReplace: boolean; error: string };
+
+function opsIncludeFullReplace(ops: unknown[]): boolean {
+  return ops.some(
+    (op) =>
+      op &&
+      typeof op === 'object' &&
+      String((op as { op?: unknown }).op || '').toLowerCase() === 'full_replace',
+  );
+}
 
 export function parseOfficeWriteArgs(rawArguments: string): OfficeWriteParse {
   let args: Record<string, unknown> = {};
   try {
     args = JSON.parse(rawArguments || '{}') || {};
   } catch {
-    return { fileId: '', ops: [], error: 'Invalid JSON arguments' };
+    return {
+      fileId: '',
+      ops: [],
+      confirmFullReplace: false,
+      error: 'Invalid JSON arguments',
+    };
   }
   const fileId = normalizeFileId(
     String(args.file_id || args.fileId || args.id || ''),
   );
   const ops = Array.isArray(args.ops) ? args.ops : [];
+  const confirmFullReplace = Boolean(
+    args.confirm_full_replace ?? args.confirmFullReplace,
+  );
   if (!fileId) {
-    return { fileId: '', ops, error: 'office_write requires file_id' };
+    return {
+      fileId: '',
+      ops,
+      confirmFullReplace,
+      error: 'office_write requires file_id',
+    };
   }
   if (!ops.length) {
-    return { fileId, ops: [], error: 'office_write requires non-empty ops' };
+    return {
+      fileId,
+      ops: [],
+      confirmFullReplace,
+      error: 'office_write requires non-empty ops',
+    };
   }
   if (ops.length > MAX_OPS) {
     return {
       fileId,
       ops: [],
+      confirmFullReplace,
       error: `office_write allows at most ${MAX_OPS} ops`,
     };
   }
-  return { fileId, ops };
+  if (opsIncludeFullReplace(ops) && !confirmFullReplace) {
+    return {
+      fileId,
+      ops: [],
+      confirmFullReplace,
+      error:
+        'full_replace requires confirm_full_replace:true (warn user about fidelity first)',
+    };
+  }
+  return { fileId, ops, confirmFullReplace };
+}
+
+function assertFileIdInThread(
+  fileId: string,
+  ctx: ToolRuntimeContext,
+): string | null {
+  const extracts = ctx.fileExtracts;
+  if (!extracts) return null;
+  const known = Object.keys(extracts);
+  if (!known.length) return null;
+  if (known.some((id) => normalizeFileId(id) === fileId)) return null;
+  return `office_write file_id ${fileId} is not in this thread's attached/known files`;
 }
 
 export function parseOfficeRollbackArgs(rawArguments: string): {
@@ -140,8 +189,13 @@ export function createOfficeWriteTool(): ChatTool {
             ops: {
               type: 'array',
               description:
-                'Mutations: replace_text {find,replace,slide?,sheet?}; pptx_replace_on_slide {slide,find,replace}; xlsx_set_cell {sheet,cell,value}; xlsx_set_cells {sheet,cells:[{cell,value}]}; docx_set_paragraph {index,text}; or sole full_replace {content_base64}.',
+                'Mutations: replace_text {find,replace,slide?,sheet?}; pptx_replace_on_slide {slide,find,replace}; xlsx_set_cell {sheet,cell,value}; xlsx_set_cells {sheet,cells:[{cell,value}]}; docx_set_paragraph {index,text}; or sole full_replace {content_base64} (also set confirm_full_replace:true).',
               items: { type: 'object' },
+            },
+            confirm_full_replace: {
+              type: 'boolean',
+              description:
+                'Required true when ops include full_replace. Confirm with the user first.',
             },
           },
           required: ['file_id', 'ops'],
@@ -164,6 +218,22 @@ export function createOfficeWriteTool(): ChatTool {
         });
         return {
           content: JSON.stringify({ ok: false, error: parsed.error }),
+        };
+      }
+
+      const threadGate = assertFileIdInThread(parsed.fileId, ctx);
+      if (threadGate) {
+        ctx.send({
+          tool: {
+            status: 'done',
+            name: 'office_write',
+            provider: 'office',
+            query: parsed.fileId,
+            error: threadGate,
+          },
+        });
+        return {
+          content: JSON.stringify({ ok: false, error: threadGate }),
         };
       }
 

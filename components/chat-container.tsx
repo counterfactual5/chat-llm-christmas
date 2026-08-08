@@ -756,8 +756,14 @@ export default function ChatContainer() {
         },
       );
       const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) {
-        throw new Error(String(data.error || `Undo failed (${res.status})`));
+      if (!res.ok || data.ok === false || data.extract_error) {
+        throw new Error(
+          String(
+            data.extract_error ||
+              data.error ||
+              `Undo failed (${res.status})`,
+          ),
+        );
       }
       void import('@/lib/files/direct-content').then(
         ({ invalidatePreviewContentCache }) => {

@@ -67,6 +67,8 @@ export type Message = {
     /** Inline UTF-8 text for local/gateway-backed downloads. */
     content?: string;
     createdAt: number;
+    /** Bumps when office_write / restore rewrites the same file id. */
+    contentRev?: number;
     /** Account storage was deleted; keep as Output history, not file_read-able. */
     unavailable?: boolean;
   }>;

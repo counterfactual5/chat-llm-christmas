@@ -199,6 +199,39 @@ export function ChatMessageList(props: ChatMessageListProps) {
     onDismissMemorySaved,
   } = props;
 
+  const latestOfficeUndoRunByFileId = (() => {
+    const map = new Map<string, string>();
+    for (const message of messages) {
+      for (const run of message.toolRuns || []) {
+        if (run.name !== 'office_write' || run.status !== 'done' || run.error) {
+          continue;
+        }
+        const body = String(run.results?.[0]?.body || '');
+        if (!body) continue;
+        try {
+          const meta = JSON.parse(body) as {
+            kind?: string;
+            file_id?: string;
+            snapshot_id?: string;
+            undone?: boolean;
+          };
+          if (
+            meta.kind !== 'office_undo' ||
+            !meta.file_id ||
+            !meta.snapshot_id ||
+            meta.undone
+          ) {
+            continue;
+          }
+          map.set(meta.file_id, run.id);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return map;
+  })();
+
   return (
     <>
     {/* Messages List */}
@@ -814,6 +847,7 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                 kind?: string;
                                 file_id?: string;
                                 snapshot_id?: string;
+                                undone?: boolean;
                               };
                               const body = String(run.results?.[0]?.body || '');
                               let meta: OfficeUndoMeta | null = null;
@@ -826,12 +860,17 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                 !meta ||
                                 meta.kind !== 'office_undo' ||
                                 !meta.file_id ||
-                                !meta.snapshot_id
+                                !meta.snapshot_id ||
+                                meta.undone
                               ) {
                                 return null;
                               }
                               const fileId = meta.file_id;
                               const snapshotId = meta.snapshot_id;
+                              // Only the latest successful write per file keeps Undo.
+                              if (latestOfficeUndoRunByFileId.get(fileId) !== run.id) {
+                                return null;
+                              }
                               const busy = officeUndoBusyId === run.id;
                               return (
                                 <button

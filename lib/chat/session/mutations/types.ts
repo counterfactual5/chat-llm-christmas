@@ -12,6 +12,8 @@ export type GeneratedFileInput = {
   url: string;
   content?: string;
   createdAt?: number;
+  /** Bumps when office_write / restore rewrites the same file id. */
+  contentRev?: number;
 };
 
 export type ToolViewInput = {

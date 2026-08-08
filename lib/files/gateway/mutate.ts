@@ -68,6 +68,19 @@ export async function mutateGatewayOfficeFile(opts: {
       code: typeof data.code === 'string' ? data.code : undefined,
     });
   }
+  const extractError = data.extract_error ? String(data.extract_error) : null;
+  if (data.ok === false || extractError) {
+    throw Object.assign(
+      new Error(extractError || String(data.error || 'office-mutate extract rebuild failed')),
+      {
+        status: 502,
+        code:
+          typeof data.code === 'string'
+            ? data.code
+            : 'EXTRACT_REBUILD_FAILED',
+      },
+    );
+  }
   return {
     ok: true,
     id: String(data.id || opts.fileId),
@@ -82,7 +95,7 @@ export async function mutateGatewayOfficeFile(opts: {
       ? data.warnings.map((w) => String(w))
       : [],
     extract_partial: Boolean(data.extract_partial),
-    extract_error: data.extract_error ? String(data.extract_error) : null,
+    extract_error: null,
   };
 }
 
@@ -117,6 +130,19 @@ export async function restoreGatewayOfficeFile(opts: {
       code: typeof data.code === 'string' ? data.code : undefined,
     });
   }
+  const extractError = data.extract_error ? String(data.extract_error) : null;
+  if (data.ok === false || extractError) {
+    throw Object.assign(
+      new Error(extractError || String(data.error || 'restore extract rebuild failed')),
+      {
+        status: 502,
+        code:
+          typeof data.code === 'string'
+            ? data.code
+            : 'EXTRACT_REBUILD_FAILED',
+      },
+    );
+  }
   return {
     id: String(data.id || opts.fileId),
     bytes: typeof data.bytes === 'number' ? data.bytes : 0,
@@ -128,6 +154,6 @@ export async function restoreGatewayOfficeFile(opts: {
       ? String(data.safety_snapshot_id)
       : null,
     extract_partial: Boolean(data.extract_partial),
-    extract_error: data.extract_error ? String(data.extract_error) : null,
+    extract_error: null,
   };
 }

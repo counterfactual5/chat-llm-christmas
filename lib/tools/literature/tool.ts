@@ -119,7 +119,7 @@ export const LITERATURE_TOOL_ANSWER_HINT = {
   papers:
     'Prefer copying answerMarkdown verbatim for the results list (same shape as /papers). ' +
     'Each hit is one numbered list item: title link, then meta (authors · year · venue · ID), ' +
-    'then each `/papers details|citations|references|download` command in backticks on its own line ' +
+    'then `/papers details|citations|references|download` commands in backticks on one ·-joined line ' +
     '(markdown hard breaks — two trailing spaces — not blank lines inside a hit). ' +
     'Blank line only before the next `N.`. ' +
     'When downloadCommand is present, emit that command as its own backtick line — that stores the PDF in Files; ' +
@@ -242,7 +242,7 @@ export const PAPER_SYSTEM = [
   'You have a paper_search tool for academic papers (arXiv / Semantic Scholar / OpenAlex).',
   'Call it when the user asks for papers, research literature, citations, or scholarly work — do not invent paper titles/DOIs.',
   'Prefer paper_search over web_search for academic literature.',
-  'After results, match answerMarkdown / the /papers slash shape: one numbered list item per hit — title link, meta line, then each `/papers details|citations|references|download` command in backticks on its own line (markdown hard breaks; no blank lines inside a hit) — never invent ids, never bury commands in em-dash prose.',
+  'After results, match answerMarkdown / the /papers slash shape: one numbered list item per hit — title link, meta line, then `/papers details|citations|references|download` commands in backticks on one ·-joined line (hard breaks between title/meta/commands only; no blank lines inside a hit) — never invent ids, never bury commands in em-dash prose.',
   'Blank line before the next numbered hit.',
   'Copy exact receipt fields (detailsCommand / citationsCommand / referencesCommand / downloadCommand) as inline code so they become clickable buttons.',
   'downloadCommand saves the PDF into the user Files store (in-app). Emit it as its own backtick line — do not turn an external URL into a “download” link.',

@@ -262,11 +262,10 @@ describe('formatLiteratureMarkdown', () => {
     expect(md).toContain('/papers citations ARXIV:1706.03762');
     expect(md).toContain('/papers references ARXIV:1706.03762');
     expect(md).toContain('/papers download ARXIV:1706.03762');
-    // Each action / download on its own hard-break line (not ·-joined).
+    // Actions + download on one ·-joined line (not stacked hard breaks).
     expect(md).toMatch(
-      /`\/papers details ARXIV:1706\.03762`  \n`\/papers citations ARXIV:1706\.03762`  \n`\/papers references ARXIV:1706\.03762`/,
+      /`\/papers details ARXIV:1706\.03762` · `\/papers citations ARXIV:1706\.03762` · `\/papers references ARXIV:1706\.03762` · `\/papers download ARXIV:1706\.03762`/,
     );
-    expect(md).toMatch(/`\/papers download ARXIV:1706\.03762`/);
     expect(md).not.toContain('Actions:');
     expect(md).not.toContain('[Open PDF]');
     expect(md.split('\n').filter((l) => l.includes('/papers details')).length).toBe(1);

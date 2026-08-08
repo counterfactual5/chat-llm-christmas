@@ -47,11 +47,21 @@ describe('url-preview helpers', () => {
     expect(isLikelyPaperPreviewUrl('https://example.com/blog')).toBe(false);
   });
 
-  it('flags archive.org / gutenberg book landing URLs', () => {
+  it('flags archive.org / gutenberg / libgen book landing URLs', () => {
     expect(
       isLikelyBookPreviewUrl('https://archive.org/details/aliceinwonderland00carrrich'),
     ).toBe(true);
     expect(isLikelyBookPreviewUrl('https://www.gutenberg.org/ebooks/11')).toBe(true);
+    expect(
+      isLikelyBookPreviewUrl(
+        'https://libgen.li/ads.php?md5=f370d2605d3cc160902406c9724c00ef',
+      ),
+    ).toBe(true);
+    expect(
+      isLikelyBookPreviewUrl(
+        'https://library.lol/main/f370d2605d3cc160902406c9724c00ef',
+      ),
+    ).toBe(true);
     expect(isLikelyBookPreviewUrl('https://cdn.example/book.epub')).toBe(true);
     expect(isLikelyBookPreviewUrl('https://example.com/blog')).toBe(false);
     expect(isLikelyBookPreviewUrl('https://doi.org/10.1038/s41575-025-01108-1')).toBe(

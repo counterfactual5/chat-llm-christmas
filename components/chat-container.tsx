@@ -115,6 +115,13 @@ import {
 } from '@/lib/chat/turn/literature-search';
 import { downloadTextContent } from '@/lib/files/download';
 import {
+  accountExportFilename,
+  accountExportJson,
+  buildAccountDataExport,
+  fetchMemoriesForExport,
+} from '@/lib/chat/session/export-all';
+import type { MemoryItem } from '@/lib/memories/types';
+import {
   normalizeSameLineFences,
   unwrapMarkdownDocumentFence,
 } from '@/lib/markdown/core/document-fence';
@@ -640,6 +647,7 @@ export default function ChatContainer() {
 
   const {
     chatsHydrated,
+    cloudHydrateSettled,
     cloudHydrateEpoch,
     hydrateBoundAccount,
     hydrateGuest,
@@ -652,6 +660,7 @@ export default function ChatContainer() {
     onCloudSyncError: (message) => setAttachError(message),
     onCrossTabMerge: () => setAttachError('Chats updated from another tab.'),
   });
+  const exportingAllRef = useRef(false);
 
   const {
     notionStatus,
@@ -2752,6 +2761,56 @@ export default function ChatContainer() {
     downloadTextContent(`${session.title}.md`, md, 'text/markdown;charset=utf-8');
   };
 
+  const exportAllData = async () => {
+    if (exportingAllRef.current) {
+      setAttachError(t('exportAllDataBusy'));
+      return;
+    }
+    if (!chatsHydrated || (isAccountBound && !cloudHydrateSettled)) {
+      setAttachError(t('exportAllDataWaitHydrate'));
+      return;
+    }
+
+    exportingAllRef.current = true;
+    try {
+      let exportMemories: MemoryItem[] = [];
+      let memoriesComplete = true;
+      const warnings: string[] = [];
+
+      if (isAccountBound) {
+        const fetched = await fetchMemoriesForExport();
+        if (!fetched.ok) {
+          setAttachError(t('exportAllDataMemoriesFailed'));
+          return;
+        }
+        exportMemories = fetched.memories;
+        memoriesComplete = !fetched.mayBeTruncated;
+        if (fetched.mayBeTruncated) {
+          warnings.push('Memories may be truncated (API page limit).');
+          setAttachError(t('exportAllDataMemoriesTruncated'));
+        }
+      }
+
+      const exportedAt = new Date();
+      const payload = buildAccountDataExport({
+        sessions: sessionsRef.current,
+        memories: exportMemories,
+        scope: isAccountBound ? 'account' : 'guest',
+        sessionsSource: isAccountBound ? 'local+cloud' : 'local',
+        memoriesComplete,
+        warnings,
+        exportedAt,
+      });
+      downloadTextContent(
+        accountExportFilename(exportedAt),
+        accountExportJson(payload),
+        'application/json;charset=utf-8',
+      );
+    } finally {
+      exportingAllRef.current = false;
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (slashMenuItems.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -2906,7 +2965,6 @@ export default function ChatContainer() {
         isSessionLoading={sessionIsBusy}
         skills={skills}
         activeSkillIds={activeSkillIds}
-        autoReviewEnabled={activeAutoReview}
         modelSupportsVision={Boolean(selectedSpec?.vision)}
         isAccountBound={isAccountBound}
         accountDisplayName={
@@ -2965,13 +3023,7 @@ export default function ChatContainer() {
         onOpenFilesModal={() => setFilesManagerOpen(true)}
         onOpenMemoriesModal={openMemoriesModal}
         onOpenLoginModal={openLoginModal}
-        onSetAutoReview={setActiveAutoReview}
-        paperSearchEnabled={paperSearchEnabled}
-        bookSearchEnabled={bookSearchEnabled}
-        generateImageEnabled={generateImageEnabled}
-        onSetPaperSearch={(v) => setOptionalBuiltinTool('paper_search', v)}
-        onSetBookSearch={(v) => setOptionalBuiltinTool('book_search', v)}
-        onSetGenerateImage={(v) => setOptionalBuiltinTool('generate_image', v)}
+        onExportAllData={exportAllData}
         onDisconnectAccount={disconnectAccount}
       />
 

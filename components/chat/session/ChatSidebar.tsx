@@ -39,7 +39,6 @@ import { GitHubLogo } from '@/components/integrations/logos/GitHubLogo';
 import { GoogleLogo } from '@/components/integrations/logos/GoogleLogo';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Switch } from '@/components/ui/switch';
 import { useLocale } from '@/lib/i18n';
 import { useTheme } from '@/components/theme/ThemeProvider';
 import { cn } from '@/lib/utils';
@@ -62,7 +61,6 @@ export type ChatSidebarProps = {
   isSessionLoading: (sessionId: string) => boolean;
   skills: SkillItem[];
   activeSkillIds: string[];
-  autoReviewEnabled: boolean;
   modelSupportsVision: boolean;
   isAccountBound: boolean;
   accountDisplayName: string;
@@ -90,13 +88,7 @@ export type ChatSidebarProps = {
   onOpenFilesModal: () => void;
   onOpenMemoriesModal: () => void;
   onOpenLoginModal: () => void;
-  onSetAutoReview: (enabled: boolean) => void;
-  paperSearchEnabled: boolean;
-  bookSearchEnabled: boolean;
-  generateImageEnabled: boolean;
-  onSetPaperSearch: (enabled: boolean) => void;
-  onSetBookSearch: (enabled: boolean) => void;
-  onSetGenerateImage: (enabled: boolean) => void;
+  onExportAllData: () => void | Promise<void>;
   onDisconnectAccount: () => void | Promise<void>;
 };
 
@@ -107,7 +99,6 @@ export function ChatSidebar({
   isSessionLoading,
   skills,
   activeSkillIds,
-  autoReviewEnabled,
   modelSupportsVision,
   isAccountBound,
   accountDisplayName,
@@ -135,13 +126,7 @@ export function ChatSidebar({
   onOpenFilesModal,
   onOpenMemoriesModal,
   onOpenLoginModal,
-  onSetAutoReview,
-  paperSearchEnabled,
-  bookSearchEnabled,
-  generateImageEnabled,
-  onSetPaperSearch,
-  onSetBookSearch,
-  onSetGenerateImage,
+  onExportAllData,
   onDisconnectAccount,
 }: ChatSidebarProps) {
   const { t, locale, setLocale } = useLocale();
@@ -586,73 +571,62 @@ export function ChatSidebar({
                     className="overflow-hidden pl-2"
                   >
                     <div className="space-y-0.5 pb-1">
-                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                      {/* Opt-in tools — catalog only; toggles live in composer +. */}
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300"
+                        title={t('autoReviewHint')}
+                      >
                         <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                          <div className="truncate text-stone-700 dark:text-stone-200">
                             {t('autoReview')}
                           </div>
                           <div className="truncate text-[10px] text-stone-400">
                             {t('autoReviewHint')}
                           </div>
                         </div>
-                        <Switch
-                          size="sm"
-                          checked={autoReviewEnabled}
-                          onCheckedChange={onSetAutoReview}
-                          aria-label={t('autoReview')}
-                        />
                       </div>
-<div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300"
+                        title={t('generateImageToolHint')}
+                      >
                         <ImageIcon className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                          <div className="truncate text-stone-700 dark:text-stone-200">
                             {t('generateImageTool')}
                           </div>
                           <div className="truncate text-[10px] text-stone-400">
                             {t('generateImageToolHint')}
                           </div>
                         </div>
-                        <Switch
-                          size="sm"
-                          checked={generateImageEnabled}
-                          onCheckedChange={onSetGenerateImage}
-                          aria-label={t('generateImageTool')}
-                        />
                       </div>
-                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300"
+                        title={t('paperSearchToolHint')}
+                      >
                         <GraduationCap className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                          <div className="truncate text-stone-700 dark:text-stone-200">
                             {t('paperSearchTool')}
                           </div>
                           <div className="truncate text-[10px] text-stone-400">
                             {t('paperSearchToolHint')}
                           </div>
                         </div>
-                        <Switch
-                          size="sm"
-                          checked={paperSearchEnabled}
-                          onCheckedChange={onSetPaperSearch}
-                          aria-label={t('paperSearchTool')}
-                        />
                       </div>
-                      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5">
+                      <div
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-stone-600 dark:text-stone-300"
+                        title={t('bookSearchToolHint')}
+                      >
                         <BookOpen className="h-3.5 w-3.5 shrink-0 text-stone-500" />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm text-stone-700 dark:text-stone-200">
+                          <div className="truncate text-stone-700 dark:text-stone-200">
                             {t('bookSearchTool')}
                           </div>
                           <div className="truncate text-[10px] text-stone-400">
                             {t('bookSearchToolHint')}
                           </div>
                         </div>
-                        <Switch
-                          size="sm"
-                          checked={bookSearchEnabled}
-                          onCheckedChange={onSetBookSearch}
-                          aria-label={t('bookSearchTool')}
-                        />
                       </div>
 
                       <div className="pt-2 pb-1 border-t border-stone-200/50 dark:border-stone-800/50 mt-1 mb-1">
@@ -929,6 +903,23 @@ export function ChatSidebar({
                           : preference === 'dark'
                             ? t('themeDark')
                             : t('themeLight')}
+                      </span>
+                    </button>
+
+                    <div className="my-1 border-t border-stone-100 dark:border-stone-800" />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAccountMenuOpen(false);
+                        void onExportAllData();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-stone-700 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-800"
+                    >
+                      <Download className="h-3.5 w-3.5 text-stone-400" />
+                      <span className="flex-1 text-left">{t('exportAllData')}</span>
+                      <span className="max-w-[7.5rem] truncate text-[10px] text-stone-400">
+                        {isAccountBound ? t('exportAllDataHint') : t('exportAllDataHintGuest')}
                       </span>
                     </button>
 

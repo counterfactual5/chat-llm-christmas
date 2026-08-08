@@ -99,6 +99,7 @@ import {
 import {
   patchSessionAutoReview,
   patchSessionMcpIds,
+  patchSessionModel,
   patchSessionSkillIds,
 } from '@/lib/chat/session/tool-flags';
 import { bindImeGuards, isEnterSubmitBlockedByIme } from '@/lib/chat/composer/ime';
@@ -189,9 +190,10 @@ export default function ChatContainer() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageContent, setEditingMessageContent] = useState('');
 
-  // Model & Auth State
+  // Global default for new chats + sessions that have no model yet (legacy).
+  // Active chat model is `activeSession.model || defaultModelPref` (see below).
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
-  const [selectedModel, setSelectedModel] = useState(() => {
+  const [defaultModelPref, setDefaultModelPref] = useState(() => {
     if (typeof window === 'undefined') return '';
     try {
       return localStorage.getItem('llm_christmas_selected_model') || '';
@@ -199,6 +201,8 @@ export default function ChatContainer() {
       return '';
     }
   });
+  const defaultModelPrefRef = useRef(defaultModelPref);
+  defaultModelPrefRef.current = defaultModelPref;
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -310,10 +314,39 @@ export default function ChatContainer() {
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
 
+  const persistDefaultModelPref = useCallback((modelId: string) => {
+    const next = String(modelId || '').trim();
+    if (!next) return;
+    setDefaultModelPref(next);
+    try {
+      localStorage.setItem('llm_christmas_selected_model', next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /** Composer / UI: write model onto the active session and refresh the new-chat default. */
+  const setSelectedModel = useCallback(
+    (modelId: string) => {
+      const next = String(modelId || '').trim();
+      if (!next) return;
+      persistDefaultModelPref(next);
+      const sessionId = activeSessionIdRef.current;
+      if (!sessionId) return;
+      setSessions((prev) => {
+        const patched = patchSessionModel(prev, sessionId, next);
+        if (patched !== prev) sessionsRef.current = patched;
+        return patched;
+      });
+    },
+    [persistDefaultModelPref],
+  );
+
   const createNewSession = useCallback(() => {
     // Switch to a blank composer. The draft is kept in memory only and is
     // omitted from the sidebar until the first message lands.
     setQuotedSelections([]);
+    const defaultModel = defaultModelPrefRef.current;
     setSessions((prev) => {
       const emptyDraft = prev.find((session) => session.messages.length === 0);
 
@@ -325,7 +358,11 @@ export default function ChatContainer() {
           )
           .map((session) =>
             session.id === emptyDraft.id
-              ? { ...session, updatedAt: Date.now() }
+              ? {
+                  ...session,
+                  updatedAt: Date.now(),
+                  model: session.model || defaultModel || undefined,
+                }
               : session,
           );
       }
@@ -335,6 +372,7 @@ export default function ChatContainer() {
         title: 'New Conversation',
         messages: [],
         updatedAt: Date.now(),
+        ...(defaultModel ? { model: defaultModel } : {}),
       };
       setActiveSessionId(newSession.id);
       // Drop any stray empty drafts while creating a fresh one.
@@ -376,10 +414,27 @@ export default function ChatContainer() {
 
   /** Pass `authed` from account status — do not rely on React state timing. */
   const fetchModels = useCallback(async (authed: boolean) => {
+    const applyResolved = (models: ModelOption[]) => {
+      const sid = activeSessionIdRef.current;
+      const sessionModel = sessionsRef.current.find((s) => s.id === sid)?.model || '';
+      const resolved = resolveSelectedModelId(
+        models,
+        sessionModel || defaultModelPrefRef.current,
+      );
+      if (resolved) persistDefaultModelPref(resolved);
+      if (sid && sessionModel && !models.some((m) => m.id === sessionModel) && resolved) {
+        setSessions((prev) => {
+          const next = patchSessionModel(prev, sid, resolved);
+          if (next !== prev) sessionsRef.current = next;
+          return next;
+        });
+      }
+    };
+
     const cached = readModelsCache({ authed });
     if (cached?.length) {
       setAvailableModels(cached);
-      setSelectedModel((prev) => resolveSelectedModelId(cached, prev));
+      applyResolved(cached);
       setModelsLoading(false);
     } else {
       setModelsLoading(true);
@@ -395,7 +450,7 @@ export default function ChatContainer() {
         const models = data.models as ModelOption[];
         const scopeAuthed = Boolean(data.authed);
         setAvailableModels(models);
-        setSelectedModel((prev) => resolveSelectedModelId(models, prev));
+        applyResolved(models);
         writeModelsCache({ authed: scopeAuthed, models });
       } else {
         console.error('Failed to fetch models', data?.error || res.status);
@@ -405,7 +460,7 @@ export default function ChatContainer() {
     } finally {
       setModelsLoading(false);
     }
-  }, []);
+  }, [persistDefaultModelPref]);
 
   const {
     isAccountBound,
@@ -482,7 +537,7 @@ export default function ChatContainer() {
   } = useMemoryWiring({
     setSessions,
     getSession: (id) => sessionsRef.current.find((s) => s.id === id),
-    selectedModel,
+    selectedModel: defaultModelPref,
     isAccountBound,
   });
 
@@ -592,6 +647,7 @@ export default function ChatContainer() {
   googleStatusRef.current = googleStatus;
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
+  const selectedModel = activeSession?.model || defaultModelPref;
   const messages = activeSession?.messages || [];
   const { onGmailApproval, gmailApprovalBusyId, gmailApprovalError } = useGmailApproval({
     setSessions,
@@ -1252,12 +1308,23 @@ export default function ChatContainer() {
     /** Command layer: one-off claim review of the latest assistant answer. */
     requestReview?: boolean,
     requestOpts?: import('@/lib/chat/stream/client').StreamChatRequestOpts,
-  ) =>
-    runStreamChatResponse(
+  ) => {
+    // Stamp model onto the target session so queued/background turns keep it.
+    const existing = sessionsRef.current.find((s) => s.id === sessionId);
+    const resolvedModel =
+      existing?.model || defaultModelPrefRef.current || selectedModel;
+    if (resolvedModel && existing && !existing.model) {
+      setSessions((prev) => {
+        const next = patchSessionModel(prev, sessionId, resolvedModel);
+        if (next !== prev) sessionsRef.current = next;
+        return next;
+      });
+    }
+    return runStreamChatResponse(
       {
         getSessions: () => sessionsRef.current,
         setSessions,
-        selectedModel,
+        selectedModel: resolvedModel,
         systemPrompt,
         skillsPayloadForSession,
         memoriesPayload,
@@ -1326,6 +1393,7 @@ export default function ChatContainer() {
       requestReview,
       requestOpts,
     );
+  };
 
   const deleteSession = (id: string) => {
     const all = sessionsRef.current;
@@ -1865,7 +1933,10 @@ export default function ChatContainer() {
         mode,
         sources: opts.sources,
         sessionId: sid,
-        model: selectedModel || undefined,
+        model:
+          sessionsRef.current.find((s) => s.id === sid)?.model ||
+          selectedModel ||
+          undefined,
         assistantId: opts.assistantId,
       });
     },
@@ -2338,11 +2409,9 @@ export default function ChatContainer() {
     [contextBreakdown],
   );
 
-  // Remember the user's model choice across refreshes.
-  useEffect(() => {
-    if (!selectedModel) return;
-    localStorage.setItem('llm_christmas_selected_model', selectedModel);
-  }, [selectedModel]);
+  // New-chat default is written in setSelectedModel / fetchModels via
+  // persistDefaultModelPref — do not mirror active-session model into LS on
+  // every session switch (that would clobber the default).
 
   // Close skill picker on outside click.
   useEffect(() => {

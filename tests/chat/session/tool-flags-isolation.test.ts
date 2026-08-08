@@ -3,6 +3,7 @@ import {
   applySessionToolFlagSequence,
   patchSessionAutoReview,
   patchSessionMcpIds,
+  patchSessionModel,
 } from '@/lib/chat/session/tool-flags';
 import {
   stripMcpIdFromSessions,
@@ -16,6 +17,7 @@ function session(
   opts: {
     mcpIds?: string[];
     autoReview?: boolean;
+    model?: string;
     messages?: ChatSession['messages'];
   } = {},
 ): ChatSession {
@@ -28,6 +30,7 @@ function session(
     ],
     mcpIds: opts.mcpIds,
     autoReview: opts.autoReview,
+    model: opts.model,
   };
 }
 
@@ -118,8 +121,22 @@ describe('per-session tool / MCP flag isolation', () => {
         messages: [],
         autoReview: false,
       }),
+      session('model-draft', { messages: [], model: 'gpt-test' }),
     ]);
-    expect(kept.map((s) => s.id)).toEqual(['mcp-draft']);
+    expect(kept.map((s) => s.id).sort()).toEqual(['mcp-draft', 'model-draft']);
+  });
+
+  it('set model on A, change B, switch back → A unchanged', () => {
+    const initial = [session('A'), session('B')];
+    const afterA = patchSessionModel(initial, 'A', 'model-a');
+    expect(afterA.find((s) => s.id === 'A')?.model).toBe('model-a');
+    expect(afterA.find((s) => s.id === 'B')?.model).toBeUndefined();
+
+    const afterB = applySessionToolFlagSequence(afterA, [
+      { type: 'model', sessionId: 'B', model: 'model-b' },
+    ]);
+    expect(afterB.find((s) => s.id === 'A')?.model).toBe('model-a');
+    expect(afterB.find((s) => s.id === 'B')?.model).toBe('model-b');
   });
 
   it('patchSessionAutoReview only touches the target session', () => {

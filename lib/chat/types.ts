@@ -169,6 +169,8 @@ export type ChatSession = {
   mcpIds?: string[];
   /** Per-chat claim reviewer auto switch (default on when absent). */
   autoReview?: boolean;
+  /** Per-chat chat-completion model id (composer selection). */
+  model?: string;
   /** Latest web search hits for this chat — shown in Reference Material. */
   webSources?: WebSearchSource[];
   /** User removed inherited sources; retain only sources added by later tool runs. */

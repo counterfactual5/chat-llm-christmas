@@ -137,7 +137,10 @@ export function useMemoryWiring(opts: {
       scheduleMemoryExtraction(
         {
           getSession: (id) => getSessionRef.current(id),
-          getSelectedModel: () => selectedModelRef.current,
+          getSelectedModel: () => {
+            const session = getSessionRef.current(sessionId);
+            return session?.model || selectedModelRef.current;
+          },
           getExistingMemories: () => enabledMemoriesPayload(),
           isAccountBound: () => Boolean(isAccountBoundRef.current),
           setMemoryExtractCursor,

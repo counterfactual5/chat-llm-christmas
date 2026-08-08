@@ -1,5 +1,5 @@
 /**
- * Per-chat Tools / MCP / Skills / auto-review flags.
+ * Per-chat Tools / MCP / Skills / auto-review / model flags.
  * Session object is SSOT — patch only the target id; never copy UI state across chats.
  */
 
@@ -74,6 +74,25 @@ export function patchSessionAutoReview(
   return changed ? next : sessions;
 }
 
+/** Patch chat-completion model on one session only. */
+export function patchSessionModel(
+  sessions: ChatSession[],
+  sessionId: string,
+  model: string,
+): ChatSession[] {
+  if (!sessionId) return sessions;
+  const nextModel = String(model || '').trim();
+  if (!nextModel) return sessions;
+  let changed = false;
+  const next = sessions.map((s) => {
+    if (s.id !== sessionId) return s;
+    if (s.model === nextModel) return s;
+    changed = true;
+    return { ...s, model: nextModel, updatedAt: Date.now() };
+  });
+  return changed ? next : sessions;
+}
+
 /**
  * Simulate: set tools on A → switch to B → change B → switch back to A.
  * Pure reducer used by tests (and documents the isolation contract).
@@ -83,11 +102,15 @@ export function applySessionToolFlagSequence(
   steps: Array<
     | { type: 'mcp'; sessionId: string; updater: StringListUpdater }
     | { type: 'autoReview'; sessionId: string; value: boolean }
+    | { type: 'model'; sessionId: string; model: string }
   >,
 ): ChatSession[] {
   return steps.reduce((acc, step) => {
     if (step.type === 'mcp') {
       return patchSessionMcpIds(acc, step.sessionId, step.updater);
+    }
+    if (step.type === 'model') {
+      return patchSessionModel(acc, step.sessionId, step.model);
     }
     return patchSessionAutoReview(acc, step.sessionId, step.value);
   }, sessions);

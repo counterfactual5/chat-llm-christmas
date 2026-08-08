@@ -167,7 +167,7 @@ export async function streamChatResponse(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: apiMessages,
-      model: deps.selectedModel,
+      model: deps.getSessions().find((s) => s.id === sessionId)?.model || deps.selectedModel,
       systemPrompt: deps.systemPrompt,
       referenceText: combinedReference,
       skills: deps.skillsPayloadForSession(sessionId),

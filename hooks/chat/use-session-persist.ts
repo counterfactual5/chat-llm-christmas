@@ -196,6 +196,7 @@ export function useChatSessionPersist(opts: {
   return {
     chatsHydrated,
     setChatsHydrated,
+    cloudHydrateSettled,
     cloudHydrateEpoch,
     hydrateBoundAccount,
     hydrateGuest,

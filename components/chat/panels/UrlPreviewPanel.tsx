@@ -25,6 +25,8 @@ import {
 import { cleanUrlExtractText } from '@/lib/files/url-extract-clean';
 import {
   ephemeralPaperPreviewEntry,
+  paperPreviewContentUrl,
+  requestPaperDownload,
   requestPaperResolve,
 } from '@/lib/chat/turn/literature-search';
 import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
@@ -33,6 +35,26 @@ import { cn } from '@/lib/utils';
 import { usePersistedPreviewScroll } from '@/hooks/chat/use-preview-scroll';
 import { previewPanelWidth } from './panel-widths';
 import { PreviewPanelShell } from './preview-panel-shell';
+
+function friendlyPaperPreviewMessage(
+  raw: string | undefined,
+  fallback: string,
+): string {
+  const msg = String(raw || '').trim();
+  if (!msg) return fallback;
+  const lower = msg.toLowerCase();
+  if (
+    lower === 'internal error' ||
+    lower.includes('semantic scholar http') ||
+    lower.includes('download returned html') ||
+    lower.includes('no open-access pdf') ||
+    lower.includes('not_pdf') ||
+    lower.includes('download_html')
+  ) {
+    return fallback;
+  }
+  return msg;
+}
 
 export type UrlPreviewPanelProps = {
   open: boolean;
@@ -220,6 +242,7 @@ export function UrlPreviewPanel({
   const degradeHandledRef = useRef(false);
   const [extractRetryNonce, setExtractRetryNonce] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [savingPaper, setSavingPaper] = useState(false);
   // Parent often passes inline callbacks (e.g. openFilePreview). Keep them off
   // effect deps — otherwise every ChatContainer re-render (session switch,
   // streaming, …) aborts an in-flight extract and the Preview looks "cut off".
@@ -374,12 +397,31 @@ export function UrlPreviewPanel({
           const resolved = await requestPaperResolve(url, { signal: ac.signal });
           if (ac.signal.aborted) return;
           if (resolved.ok) {
-            onOpenDownloadedFileRef.current(
-              ephemeralPaperPreviewEntry({
-                identifier: url,
-                title: resolved.title || initialTitle,
-                filename: resolved.filename,
-              }),
+            // Probe content: metadata may advertise a PDF URL that is HTML paywall.
+            const probe = await fetch(paperPreviewContentUrl(url), {
+              method: 'GET',
+              signal: ac.signal,
+              credentials: 'same-origin',
+            });
+            if (ac.signal.aborted) return;
+            const ct = (probe.headers.get('content-type') || '').toLowerCase();
+            if (probe.ok && ct.includes('pdf')) {
+              void probe.body?.cancel?.();
+              onOpenDownloadedFileRef.current(
+                ephemeralPaperPreviewEntry({
+                  identifier: url,
+                  title: resolved.title || initialTitle,
+                  filename: resolved.filename,
+                }),
+              );
+              return;
+            }
+            const errBody = await probe.json().catch(() => ({} as { error?: string; message?: string; code?: string }));
+            applyThinOrError(
+              friendlyPaperPreviewMessage(
+                String(errBody.error || errBody.message || ''),
+                tRef.current('urlPreviewNoOpenAccessBody'),
+              ),
             );
             return;
           }
@@ -400,9 +442,10 @@ export function UrlPreviewPanel({
         if (ac.signal.aborted) return;
         if (isLikelyPaperPreviewUrl(url)) {
           applyThinOrError(
-            err instanceof Error
-              ? err.message
-              : tRef.current('urlPreviewNoOpenAccessBody'),
+            friendlyPaperPreviewMessage(
+              err instanceof Error ? err.message : '',
+              tRef.current('urlPreviewNoOpenAccessBody'),
+            ),
           );
           return;
         }
@@ -760,15 +803,72 @@ export function UrlPreviewPanel({
                     {t('urlPreviewNoOpenAccessTitle')}
                   </p>
                   <p className="max-w-sm leading-5">
-                    {extract.message || t('urlPreviewNoOpenAccessBody')}
+                    {friendlyPaperPreviewMessage(
+                      extract.message,
+                      t('urlPreviewNoOpenAccessBody'),
+                    )}
                   </p>
-                  <button
-                    type="button"
-                    onClick={openExternally}
-                    className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-                  >
-                    {t('openInNewTab')}
-                  </button>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {onOpenDownloadedFile ? (
+                      <button
+                        type="button"
+                        disabled={savingPaper}
+                        onClick={() => {
+                          void (async () => {
+                            setSavingPaper(true);
+                            try {
+                              const dl = await requestPaperDownload(url);
+                              if (!dl.ok) {
+                                const message = friendlyPaperPreviewMessage(
+                                  dl.error,
+                                  t('urlPreviewSaveFailed'),
+                                );
+                                setExtract({ status: 'no-oa', message });
+                                return;
+                              }
+                              onOpenDownloadedFile({
+                                messageId: 'url-preview-paper',
+                                fileIndex: 0,
+                                id: dl.fileId,
+                                name: dl.filename || `${dl.title || 'paper'}.pdf`,
+                                mimeType: 'application/pdf',
+                                size: dl.bytes || 0,
+                                url: `/api/files/${encodeURIComponent(dl.fileId)}`,
+                                createdAt: Date.now(),
+                              });
+                            } catch (err) {
+                              setExtract({
+                                status: 'no-oa',
+                                message: friendlyPaperPreviewMessage(
+                                  err instanceof Error ? err.message : '',
+                                  t('urlPreviewSaveFailed'),
+                                ),
+                              });
+                            } finally {
+                              setSavingPaper(false);
+                            }
+                          })();
+                        }}
+                        className="rounded-lg border border-stone-800 bg-stone-900 px-3 py-1.5 text-stone-50 hover:bg-stone-800 disabled:opacity-60 dark:border-stone-200 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+                      >
+                        {savingPaper ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {t('urlPreviewSavingToFiles')}
+                          </span>
+                        ) : (
+                          t('urlPreviewSaveToFiles')
+                        )}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={openExternally}
+                      className="rounded-lg border border-stone-200 px-3 py-1.5 text-stone-600 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+                    >
+                      {t('openInNewTab')}
+                    </button>
+                  </div>
                 </div>
               ) : extract.status === 'error' ? (
                 <div className="flex flex-col items-center gap-3 px-6 py-16 text-center text-xs text-stone-400">

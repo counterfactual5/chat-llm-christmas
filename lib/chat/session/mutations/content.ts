@@ -57,6 +57,52 @@ export function withAppendedAssistantGeneratedFile(
   });
 }
 
+/** Refresh an existing generated file entry in place (same fileId after office write). */
+export function withUpdatedAssistantGeneratedFile(
+  sessions: ChatSession[],
+  sessionId: string,
+  assistantId: string,
+  file: GeneratedFileInput,
+): ChatSession[] {
+  const entryId = String(file.id || '').trim();
+  if (!entryId) return sessions;
+  let found = false;
+  const next = sessions.map((s) => {
+    if (s.id !== sessionId) return s;
+    return touchSession(s, {
+      messages: s.messages.map((m) => {
+        if (m.id !== assistantId) return m;
+        const existing = m.files || [];
+        if (!existing.some((f) => f.id === entryId)) return m;
+        found = true;
+        return {
+          ...m,
+          files: existing.map((f) => {
+            if (f.id !== entryId) return f;
+            return {
+              ...f,
+              name: String(file.name || f.name || 'file').trim() || f.name,
+              mimeType:
+                String(file.mimeType || f.mimeType || 'application/octet-stream').trim() ||
+                f.mimeType,
+              size: typeof file.size === 'number' ? file.size : f.size,
+              url: String(file.url || f.url || '').trim() || f.url,
+              createdAt:
+                typeof file.createdAt === 'number' ? file.createdAt : f.createdAt,
+            };
+          }),
+        };
+      }),
+    });
+  });
+  // If the file wasn't on this assistant turn (user attachment / older turn),
+  // still append so Output can surface the refreshed id.
+  if (!found) {
+    return withAppendedAssistantGeneratedFile(sessions, sessionId, assistantId, file);
+  }
+  return next;
+}
+
 export function withAppendedAssistantToolView(
   sessions: ChatSession[],
   sessionId: string,

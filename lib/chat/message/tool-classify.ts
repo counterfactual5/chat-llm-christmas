@@ -24,6 +24,8 @@ export type ToolRunClassification = {
   isFileRead: boolean;
   isDocxExtract: boolean;
   isXlsxExtract: boolean;
+  isOfficeWrite: boolean;
+  isOfficeRollback: boolean;
   isSaveSkill: boolean;
   isImageUnderstand: boolean;
   isClaimReviewer: boolean;
@@ -80,6 +82,8 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     run.name === 'docx_extract' || run.provider === 'docx-extract';
   const isXlsxExtract =
     run.name === 'xlsx_extract' || run.provider === 'xlsx-extract';
+  const isOfficeWrite = run.name === 'office_write';
+  const isOfficeRollback = run.name === 'office_rollback';
   const isSaveSkill = run.name === 'save_skill' || run.provider === 'skills';
   const isImageUnderstand =
     run.name === 'image_understand' ||
@@ -130,6 +134,8 @@ export function classifyToolRun(run: ClassifiableToolRun): ToolRunClassification
     isFileRead,
     isDocxExtract,
     isXlsxExtract,
+    isOfficeWrite,
+    isOfficeRollback,
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
@@ -208,6 +214,8 @@ export function getToolRunLabelKey(
     isFileRead,
     isDocxExtract,
     isXlsxExtract,
+    isOfficeWrite,
+    isOfficeRollback,
     isSaveSkill,
     isImageUnderstand,
     isClaimReviewer,
@@ -301,6 +309,8 @@ export function getToolRunLabelKey(
     if (isFileRead) return 'readingFile';
     if (isDocxExtract) return 'extractingDocx';
     if (isXlsxExtract) return 'extractingXlsx';
+    if (isOfficeWrite) return 'writingOffice';
+    if (isOfficeRollback) return 'rollingBackOffice';
     if (isSaveSkill) return 'savingSkill';
     if (isWebRead) return 'readingWeb';
     return 'searchingWeb';
@@ -320,6 +330,8 @@ export function getToolRunLabelKey(
   if (isFileRead) return 'readFile';
   if (isDocxExtract) return 'extractedDocx';
   if (isXlsxExtract) return 'extractedXlsx';
+  if (isOfficeWrite) return 'wroteOffice';
+  if (isOfficeRollback) return 'rolledBackOffice';
   if (isSaveSkill) return 'savedSkill';
   if (isWebRead) return 'readWeb';
   return 'searchedWeb';
@@ -345,6 +357,8 @@ export function toolRunShowsFetchingResults(
     classification.isFileRead ||
     classification.isDocxExtract ||
     classification.isXlsxExtract ||
+    classification.isOfficeWrite ||
+    classification.isOfficeRollback ||
     classification.isSaveSkill ||
     classification.isImageUnderstand ||
     classification.isClaimReviewer ||

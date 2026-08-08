@@ -10,6 +10,7 @@ import {
   FilePlus,
   FileSearch,
   ScrollText,
+  FilePen,
   Image as ImageIcon,
   Globe,
   ShieldCheck,
@@ -107,6 +108,14 @@ export type ChatMessageListProps = {
   ) => void | Promise<void>;
   gmailApprovalBusyId?: string | null;
   gmailApprovalError?: string | null;
+  /** UI Undo for office_write snapshot (direct REST restore). */
+  onOfficeUndo?: (opts: {
+    messageId: string;
+    toolRunId: string;
+    fileId: string;
+    snapshotId: string;
+  }) => void | Promise<void>;
+  officeUndoBusyId?: string | null;
   cancelEditMessage: () => void;
   saveEditedMessage: (messageId: string) => void;
   editUserMessage: (messageId: string) => void;
@@ -171,6 +180,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
     onGmailApproval,
     gmailApprovalBusyId,
     gmailApprovalError,
+    onOfficeUndo,
+    officeUndoBusyId,
     cancelEditMessage,
     saveEditedMessage,
     editUserMessage,
@@ -482,6 +493,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     isFileRead,
                     isDocxExtract,
                     isXlsxExtract,
+                    isOfficeWrite,
+                    isOfficeRollback,
                     isSaveSkill,
                     isClaimReviewer,
                     isReviewAudit,
@@ -531,6 +544,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                       isFileRead ||
                       isDocxExtract ||
                       isXlsxExtract ||
+                      isOfficeWrite ||
+                      isOfficeRollback ||
                       isSaveSkill ||
                       isWebRead ||
                       isPaperRead ||
@@ -612,6 +627,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           <FileSearch className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isDocxExtract || isXlsxExtract ? (
                           <Layers className="h-3 w-3 shrink-0 opacity-60" />
+                        ) : isOfficeWrite || isOfficeRollback ? (
+                          <FilePen className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isSaveSkill ? (
                           <ScrollText className="h-3 w-3 shrink-0 opacity-60" />
                         ) : isWebRead ? (
@@ -638,6 +655,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                           !isFileRead &&
                           !isDocxExtract &&
                           !isXlsxExtract &&
+                          !isOfficeWrite &&
+                          !isOfficeRollback &&
                           !isSaveSkill &&
                           !isClaimReviewer &&
                           !isReviewAudit &&
@@ -777,18 +796,69 @@ export function ChatMessageList(props: ChatMessageListProps) {
                                       className="space-y-1 text-[12px] leading-5 text-stone-500 dark:text-stone-400 [&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-[12px] [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-[12px] [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-[12px] [&_p]:mb-0 [&_p]:leading-5 [&_ul]:my-1 [&_ol]:my-1"
                                     />
                                   ) : (
-                                    <span title={r.snippet || r.title}>{r.title}</span>
+                                    <span title={r.snippet || r.title}>
+                                      {isOfficeWrite || isOfficeRollback
+                                        ? r.snippet || r.title
+                                        : r.title}
+                                    </span>
                                   )}
                                 </li>
                               ))}
                             </ul>
                           )}
                           {run.status === 'done' &&
+                            isOfficeWrite &&
+                            onOfficeUndo &&
+                            (() => {
+                              type OfficeUndoMeta = {
+                                kind?: string;
+                                file_id?: string;
+                                snapshot_id?: string;
+                              };
+                              const body = String(run.results?.[0]?.body || '');
+                              let meta: OfficeUndoMeta | null = null;
+                              try {
+                                meta = JSON.parse(body) as OfficeUndoMeta;
+                              } catch {
+                                meta = null;
+                              }
+                              if (
+                                !meta ||
+                                meta.kind !== 'office_undo' ||
+                                !meta.file_id ||
+                                !meta.snapshot_id
+                              ) {
+                                return null;
+                              }
+                              const fileId = meta.file_id;
+                              const snapshotId = meta.snapshot_id;
+                              const busy = officeUndoBusyId === run.id;
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void onOfficeUndo({
+                                      messageId: message.id,
+                                      toolRunId: run.id,
+                                      fileId,
+                                      snapshotId,
+                                    })
+                                  }
+                                  className="mt-1 rounded border border-stone-300 px-2 py-0.5 text-[11px] text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-800"
+                                >
+                                  {busy ? t('officeUndoing') : t('officeUndo')}
+                                </button>
+                              );
+                            })()}
+                          {run.status === 'done' &&
                             emptyResults &&
                             !isResearchPlan &&
                             !isResearchSynthesize &&
                             !isResearchVerify &&
-                            !isResearchWrite && (
+                            !isResearchWrite &&
+                            !isOfficeWrite &&
+                            !isOfficeRollback && (
                               <div>{t('searchNoResults')}</div>
                             )}
                         </div>

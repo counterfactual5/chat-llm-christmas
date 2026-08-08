@@ -16,7 +16,7 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 | `direct-content.ts` | `fetchFileContentForPreview` — prefer browser → chat-api content GET; fall back to same-origin `/api/files` proxy. All in-product text/binary preview fetch should go through here. |
 | `direct-upload.ts` | Upload ticket mint for browser → chat-api multipart. |
 | `ingest/` | Thin client-side validation + image compression only. Bytes for docs (pdf/docx/epub/pptx/xlsx/zip) upload as opaque blobs; authoritative extract is produced by chat-api (see [`docs/plans/2026-08-07-008-feat-server-authority-anydoc-parsing-plan.md`](../../docs/plans/2026-08-07-008-feat-server-authority-anydoc-parsing-plan.md) U4a). Plain-text files are still read inline so the chat composer can render them. Drop whitelist: `ingest/support.ts`. |
-| `gateway/` | Server Files API base URL, upload helpers, content parts for tools. |
+| `gateway/` | Server Files API base URL, upload helpers, office mutate/restore (`mutate.ts`), content parts for tools. |
 | `epub-progress.ts` | EPUB reading CFI + font prefs in localStorage (`load/save/clearEpubReaderPrefs`). |
 | `preview-progress.ts` | Side Preview scroll positions (url / file / pdf / tool / sheet) in localStorage; `clearPreviewScrollForFileId` on account file delete. |
 | `url-preview.ts` | Side-panel online URL helpers (`isPreviewableHttpUrl`, normalize, `resolvePreviewHttpUrl` for extract/markdown hrefs + base, same-document nav equality, external-click detection, `isLikelyAuthGatedPreviewUrl` for hosts that need top-level browser login, `isLikelyPaperPreviewUrl` for DOI/publisher hosts that prefer OA PDF resolve over HTML extract). Extract Text links navigate in-panel via `onPreviewLink`; cross-origin iframe clicks stay uninterceptable. Paper Preview resolves OA then opens an **ephemeral** same-origin content URL in `PdfReader` (does **not** write Files). Explicit `/papers download` (or Preview Download on an ephemeral paper) persists via `papers/download` with `source_key` dedupe. Thin/paywalled HTML shows a CTA instead of References-only extract. Webpage image OCR is out of scope for URL Preview. |
@@ -26,6 +26,8 @@ Repo-wide split rules: [`docs/code-organization.md`](../../docs/code-organizatio
 Product-level attachment / vision / `file_read` flow: [`docs/images-and-files.md`](../../docs/images-and-files.md).
 
 Assistant-delivered files (`book_download` / `create_file`) are serialized as `【历史文件引用】` markers (same family as collapsed user attachments) via `formatChatFileHistoryRefs` so follow-up turns can call `file_read`. After book download, `ensure-file-extract.ts` warms chat-api extract; `file_read` returns page slices via `extract-slice.ts`.
+
+Office write-back (`office_write` / `office_rollback`) mutates the same durable `fileId` on chat-api (snapshot + extract rebuild). Prefer that over re-uploading a new file when the user asked to edit an attachment. UI Undo calls `POST /api/files/:id/restore`.
 
 ## Import rules
 

@@ -213,7 +213,9 @@ export async function handleChatRequest(req: NextRequest) {
         (t) =>
           t.name !== 'file_read' &&
           t.name !== 'docx_extract' &&
-          t.name !== 'xlsx_extract',
+          t.name !== 'xlsx_extract' &&
+          t.name !== 'office_write' &&
+          t.name !== 'office_rollback',
       );
     }
     const toolDefs = openaiToolDefinitions(enabledTools);

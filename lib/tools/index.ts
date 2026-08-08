@@ -10,6 +10,10 @@ import { createFileReadTool } from '@/lib/tools/file-read/tool';
 import { createDocxExtractTool } from '@/lib/tools/docx-extract/tool';
 import { createXlsxExtractTool } from '@/lib/tools/xlsx-extract/tool';
 import {
+  createOfficeWriteTool,
+  createOfficeRollbackTool,
+} from '@/lib/tools/office-write/tool';
+import {
   createPaperSearchTool,
   createBookSearchTool,
 } from '@/lib/tools/literature/tool';
@@ -31,6 +35,8 @@ export function builtinToolRegistry(): ChatTool[] {
     createFileReadTool(),
     createDocxExtractTool(),
     createXlsxExtractTool(),
+    createOfficeWriteTool(),
+    createOfficeRollbackTool(),
     createSaveSkillTool(),
     createCreateFileTool(),
     createCreateSpreadsheetTool(),
@@ -139,6 +145,13 @@ export {
   createXlsxExtractTool,
   parseXlsxExtractArgs,
 } from '@/lib/tools/xlsx-extract/tool';
+
+export {
+  createOfficeWriteTool,
+  createOfficeRollbackTool,
+  parseOfficeWriteArgs,
+  parseOfficeRollbackArgs,
+} from '@/lib/tools/office-write/tool';
 
 export {
   createPaperSearchTool,

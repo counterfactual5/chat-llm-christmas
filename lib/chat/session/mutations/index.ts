@@ -18,6 +18,7 @@ export type {
 
 export {
   withAppendedAssistantGeneratedFile,
+  withUpdatedAssistantGeneratedFile,
   withAppendedAssistantToolView,
   withMarkedAssistantIncomplete,
   withAppendedAssistantContent,

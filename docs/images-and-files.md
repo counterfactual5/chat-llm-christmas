@@ -103,6 +103,7 @@ flowchart TD
 - **会话也折叠**：下一轮发送时，旧用户消息里的全文（有 fileId）被压成引用；云同步 / 本地恢复同样处理。最新用户轮保留全文，方便 Retry。
 - **气泡不泄全文**：UI 展示用 `attachedFilesForUserBubbleDisplay`，即使本轮会话里还存着全文也不刷屏。
 - **`file_read` 懒注入**：本线程有附件文档，或助手交付的文件（`book_download` / `create_file` → `【历史文件引用】`）时才进工具列表。
+- **Office 就地写回**：登录账号下，对已有 `.docx` / `.pptx` / `.xlsx` 的 `fileId` 可用 `office_write`（chat-api 自动 apply + 预写快照）与 `office_rollback`；工具卡显示 diff 摘要与 **Undo**。`create_file` / `create_spreadsheet` 仍创建**新** id。写回后会清/重建 extract，并经 SSE `file_updated` 刷新 Output / 预览缓存（勿依赖 forever-`immutable` content）。
 - **按需切片（非整书）**：`file_read` 默认返回约 8 个 page 单元；可用 `start_page` / `max_pages` / `focus` 继续读。「page」= 抽取单元（PDF 页；或 PPT 幻灯 / DOCX 节 / Excel sheet / ZIP 成员）。
   - 省略 `start_page` 时：优先 PDF outline 的 `body_start_page`；否则启发式跳过 PDF 目录；对 `# ZIP catalog:` / `# PPTX outline:` / `# DOCX outline:` / `# Excel sheets:` 的 page 1 直接从 page 2 起读。
   - 显式 `start_page=1` 或 `focus=目录/contents` 可读 catalog；ZIP 的 `focus` 也可是成员路径。
@@ -145,6 +146,7 @@ ChatGPT / Claude / Gemini 常见模式：上传后服务端持有资产 id，上
 | 生图 + 入库 | `lib/images/generate-and-store.ts`（`/api/images` 与 `generate_image` 工具共用） |
 | 视觉组装 / 转写 | `lib/chat/server/chat-request.ts`，`lib/tools/image-understand/*` |
 | file_read | `lib/tools/file-read/tool.ts` |
+| office_write / office_rollback | `lib/tools/office-write/tool.ts`（chat-api mutate/restore） |
 | 斜杠命令目录（UI） | `lib/chat/composer/slash-commands.ts` + `components/chat/composer/slash-command-ui.ts` |
 | 产品说明（注入模型） | `lib/chat/server/product-guide.ts` |
 | 模块地图 | `lib/files/README.md`，`lib/images/README.md`，`lib/chat/README.md` |

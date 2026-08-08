@@ -735,6 +735,77 @@ export default function ChatContainer() {
     setSessions,
     activeSessionId: activeSessionId || null,
   });
+  const [officeUndoBusyId, setOfficeUndoBusyId] = useState<string | null>(null);
+
+  const onOfficeUndo = async (opts: {
+    messageId: string;
+    toolRunId: string;
+    fileId: string;
+    snapshotId: string;
+  }) => {
+    if (officeUndoBusyId) return;
+    setOfficeUndoBusyId(opts.toolRunId);
+    try {
+      const res = await fetch(
+        `/api/files/${encodeURIComponent(opts.fileId)}/restore`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot_id: opts.snapshotId }),
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        throw new Error(String(data.error || `Undo failed (${res.status})`));
+      }
+      void import('@/lib/files/direct-content').then(
+        ({ invalidatePreviewContentCache }) => {
+          invalidatePreviewContentCache(opts.fileId);
+        },
+      );
+      const size = typeof data.bytes === 'number' ? data.bytes : undefined;
+      const name = typeof data.filename === 'string' ? data.filename : undefined;
+      const mime = typeof data.mime === 'string' ? data.mime : undefined;
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) => {
+              if (!Array.isArray(m.files)) return m;
+              const files = m.files.map((f) => {
+                if (f.id !== opts.fileId) return f;
+                return {
+                  ...f,
+                  ...(name ? { name } : {}),
+                  ...(mime ? { mimeType: mime } : {}),
+                  ...(typeof size === 'number' ? { size } : {}),
+                };
+              });
+              return { ...m, files };
+            }),
+            updatedAt: Date.now(),
+          };
+        }),
+      );
+      setPreviewTarget((prev) => {
+        if (prev?.kind !== 'file' || prev.entry.id !== opts.fileId) return prev;
+        return {
+          ...prev,
+          entry: {
+            ...prev.entry,
+            ...(name ? { name } : {}),
+            ...(mime ? { mimeType: mime } : {}),
+            ...(typeof size === 'number' ? { size } : {}),
+          },
+        };
+      });
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Undo failed');
+    } finally {
+      setOfficeUndoBusyId(null);
+    }
+  };
 
   useEffect(() => {
     if (!imagePreviewSrc) return;
@@ -1452,6 +1523,23 @@ export default function ChatContainer() {
           setPicturesExpanded(true);
           setOutputGroupsOpen((prev) => ({ ...prev, files: true, views: true }));
           setIsContextPanelOpen(true);
+        },
+        onFileUpdatedForActiveSession: (file) => {
+          setOutputGroupsOpen((prev) => ({ ...prev, files: true }));
+          setIsContextPanelOpen(true);
+          setPreviewTarget((prev) => {
+            if (prev?.kind !== 'file' || prev.entry.id !== file.id) return prev;
+            return {
+              ...prev,
+              entry: {
+                ...prev.entry,
+                name: file.name || prev.entry.name,
+                mimeType: file.mimeType || prev.entry.mimeType,
+                size: typeof file.size === 'number' ? file.size : prev.entry.size,
+                url: file.url || prev.entry.url,
+              },
+            };
+          });
         },
         onViewCreatedForActiveSession: (view) => {
           setOutputGroupsOpen((prev) => ({ ...prev, views: true }));
@@ -2914,6 +3002,8 @@ export default function ChatContainer() {
                 onGmailApproval={onGmailApproval}
                 gmailApprovalBusyId={gmailApprovalBusyId}
                 gmailApprovalError={gmailApprovalError}
+                onOfficeUndo={onOfficeUndo}
+                officeUndoBusyId={officeUndoBusyId}
                 cancelEditMessage={cancelEditMessage}
                 saveEditedMessage={saveEditedMessageOrResearch}
                 editUserMessage={editUserMessage}

@@ -7,13 +7,14 @@ import { collapseAttachedFileBodiesInMessages } from '@/lib/files/attached-file-
 /** localStorage key recording which account owns the cached chats (anti cross-account bleed). */
 export const CHATS_OWNER_KEY = 'llm_christmas_chats_owner';
 
-/** Sessions with messages or per-chat MCP/Skills — worth keeping in local/cloud storage. */
+/** Sessions with messages or per-chat MCP/Skills/model — worth keeping in local/cloud storage. */
 export function sessionsWorthPersisting(sessions: ChatSession[]): ChatSession[] {
   return sessions.filter(
     (session) =>
       session.messages.length > 0 ||
       (session.mcpIds && session.mcpIds.length > 0) ||
-      (session.skillIds && session.skillIds.length > 0),
+      (session.skillIds && session.skillIds.length > 0) ||
+      Boolean(session.model),
   );
 }
 

@@ -176,7 +176,9 @@ export type PaperDownloadHitFields = {
 
 /**
  * Prefer identifiers that details/citations/references can resolve.
- * OpenAlex `W…` ids are not Semantic Scholar paper ids — use DOI when present.
+ * OpenAlex `W…` ids stay as W… so they hit chat-api's OpenAlex route
+ * (DOI:… always goes to Semantic Scholar and 404s when S2 lacks the work).
+ * Fall back to DOI only when no resolvable paperId is present.
  */
 export function resolvePaperActionId(hit: {
   paperId?: string;
@@ -187,7 +189,6 @@ export function resolvePaperActionId(hit: {
     .trim()
     .replace(/^https?:\/\/doi\.org\//i, '');
   if (/^(?:OPENALEX:)?(?:https?:\/\/openalex\.org\/)?W\d+$/i.test(id)) {
-    if (doi) return `DOI:${doi}`;
     const m = id.match(/W\d+/i);
     return m ? m[0] : id;
   }

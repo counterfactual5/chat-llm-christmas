@@ -38,6 +38,8 @@ export type LiteratureHit = {
   citationCount?: number;
   venue?: string;
   tldr?: string;
+  /** Full abstract when present (details responses). */
+  abstract?: string;
   pdfUrl?: string;
   format?: string;
   category?: string;
@@ -373,7 +375,7 @@ export async function requestLiteratureSearch(
       ok: true,
       kind,
       query: String(data.paper.paperId || query),
-      provider: 'semantic-scholar',
+      provider: String(data.paper.sourceProvider || 'semantic-scholar'),
       results: [data.paper],
       paper: data.paper,
     };
@@ -459,15 +461,24 @@ export function formatLiteratureMarkdown(
     ].filter(Boolean) as string[];
 
     if (kind === 'papers') {
-      const blurb = (hit.tldr || hit.snippet || '').replace(/\s+/g, ' ').trim();
-      if (blurb && blurb.length <= 160) {
-        meta.push(hit.tldr ? `TLDR: ${blurb}` : blurb);
-      }
       const actionId = resolvePaperActionId(hit);
       if (actionId) meta.push(`ID: \`${actionId}\``);
+      if (extras?.action !== 'details') {
+        const blurb = (hit.tldr || hit.snippet || '').replace(/\s+/g, ' ').trim();
+        if (blurb && blurb.length <= 160) {
+          meta.push(hit.tldr ? `TLDR: ${blurb}` : blurb);
+        }
+      }
     }
 
     if (meta.length) blocks.push(meta.join(' · '));
+
+    if (kind === 'papers' && extras?.action === 'details') {
+      const body = String(hit.abstract || hit.tldr || hit.snippet || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (body) blocks.push(body);
+    }
 
     if (kind === 'papers') {
       const actionId = resolvePaperActionId(hit);

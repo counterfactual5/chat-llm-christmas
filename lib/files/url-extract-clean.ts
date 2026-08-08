@@ -101,8 +101,60 @@ export function cleanUrlExtractText(raw: string, opts?: { title?: string }): str
   let lines = text.replace(/\r\n/g, '\n').split('\n');
   lines = stripProviderHeaderBlock(lines, opts?.title);
   lines = lines.filter((line) => !isBadImageLine(line));
-  return lines
+  let out = lines
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  out = rewriteDirtyCitationLinks(out);
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function footnoteFromLabel(label: string): string {
+  const t = String(label).trim();
+  if (/^\d{1,4}[a-z]?$/i.test(t)) return `[${t}]`;
+  return t;
+}
+
+/** Mirror of chat-api cleanContent: about:/hash citation → footnote numbers. */
+function rewriteDirtyCitationLinks(text: string): string {
+  const src = String(text || '');
+  if (!src) return '';
+  const chunks: string[] = [];
+  let fence = false;
+  let buf: string | null = null;
+  const flushProse = () => {
+    if (buf == null) return;
+    chunks.push(
+      buf
+        .replace(
+          /\[([^\]]{1,120})\]\(\s*(about:[^)\s]+|#[^)\s]*)(?:\s+"[\s\S]*?")?\s*\)/gi,
+          (_m, label: string) => footnoteFromLabel(label),
+        )
+        .replace(
+          /\[([^\]]{1,120})\]\(\s*#\s*\)/g,
+          (_m, label: string) => footnoteFromLabel(label),
+        ),
+    );
+    buf = null;
+  };
+  for (const line of src.replace(/\r\n/g, '\n').split('\n')) {
+    if (/^\s*```/.test(line)) {
+      if (fence) {
+        chunks.push(line);
+        fence = false;
+      } else {
+        flushProse();
+        fence = true;
+        chunks.push(line);
+      }
+      continue;
+    }
+    if (fence) {
+      chunks.push(line);
+      continue;
+    }
+    buf = buf == null ? line : `${buf}\n${line}`;
+  }
+  flushProse();
+  return chunks.join('\n');
 }

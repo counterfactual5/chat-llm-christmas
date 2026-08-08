@@ -80,6 +80,19 @@ describe('cleanUrlExtractText', () => {
     expect(cleanUrlExtractText(once)).toBe(once);
   });
 
+  it('rewrites about: citation links to footnote numbers', () => {
+    const raw =
+      'reasoning[15](about:/articles/s43856-025-01194-x#ref-CR15 "Liu, H. et al.\n\n(2023).") and more.';
+    const cleaned = cleanUrlExtractText(raw);
+    expect(cleaned).toContain('reasoning[15] and more.');
+    expect(cleaned).not.toContain('about:');
+  });
+
+  it('keeps real http(s) links', () => {
+    const raw = 'See [paper](https://doi.org/10.1000/xyz).';
+    expect(cleanUrlExtractText(raw)).toBe(raw);
+  });
+
   it('empty / whitespace input → empty', () => {
     expect(cleanUrlExtractText('')).toBe('');
     expect(cleanUrlExtractText('   \n \n ')).toBe('');

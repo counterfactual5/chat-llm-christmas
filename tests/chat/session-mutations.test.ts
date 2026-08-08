@@ -3,6 +3,8 @@ import {
   serializeReviewToolRuns,
   settleEmptyBodyAction,
   withAppendedAssistantContent,
+  withAppendedAssistantGeneratedFile,
+  withUpdatedAssistantGeneratedFile,
   withAppendedAssistantReasoning,
   withAppendedAssistantToolView,
   withEmptyReplyFallback,
@@ -236,5 +238,49 @@ describe('session/mutations', () => {
       data: { sections: [] },
     });
     expect(dup[0].messages[0].views).toHaveLength(1);
+  });
+
+  it('updates generated file in place on same id (office write-back)', () => {
+    let sessions = [
+      session([
+        msg({
+          id: 'a',
+          role: 'assistant',
+          content: '',
+          files: [
+            {
+              id: 'file-1',
+              name: 'old.docx',
+              mimeType:
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              size: 10,
+              url: '/api/files/file-1',
+              createdAt: 1,
+            },
+          ],
+        } as Partial<Message> & Pick<Message, 'id' | 'role' | 'content'>),
+      ]),
+    ];
+    // msg() helper drops files — seed via append then update
+    sessions = withAppendedAssistantGeneratedFile(sessions, 's1', 'a', {
+      id: 'file-1',
+      name: 'old.docx',
+      mimeType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 10,
+      url: '/api/files/file-1',
+      createdAt: 1,
+    });
+    const updated = withUpdatedAssistantGeneratedFile(sessions, 's1', 'a', {
+      id: 'file-1',
+      name: 'old.docx',
+      mimeType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 99,
+      url: '/api/files/file-1',
+      createdAt: 2,
+    });
+    expect(updated[0].messages[0].files).toHaveLength(1);
+    expect(updated[0].messages[0].files?.[0].size).toBe(99);
   });
 });

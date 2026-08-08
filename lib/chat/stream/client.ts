@@ -29,6 +29,7 @@ import { isOptionalBuiltinToolId } from '@/lib/tools/optional-builtins';
 import {
   withAppendedAssistantContent,
   withAppendedAssistantGeneratedFile,
+  withUpdatedAssistantGeneratedFile,
   withAppendedAssistantToolView,
   withAppendedAssistantReasoning,
   withAppendedAssistantReviewFix,
@@ -69,6 +70,8 @@ export type StreamChatDeps = {
   scrollToBottom: () => void;
   fetchSkills: () => void | Promise<void>;
   onGeneratedFileForActiveSession: () => void;
+  /** Same-id file refresh after office_write / office_rollback. */
+  onFileUpdatedForActiveSession?: (file: GeneratedFileInput) => void;
   /** Open specialized tool view in the preview panel when SSE view_created arrives. */
   onViewCreatedForActiveSession?: (view: ToolViewInput) => void;
   onWebSourcesUpdated: (opts: {
@@ -652,6 +655,31 @@ export async function streamChatResponse(
           );
           if (sessionId === deps.getActiveSessionId()) {
             deps.onGeneratedFileForActiveSession();
+          }
+        }
+        if (parsed.file_updated && typeof parsed.file_updated === 'object') {
+          const raw = parsed.file_updated as Record<string, unknown>;
+          const file: GeneratedFileInput = {
+            id: String(raw.id || ''),
+            name: String(raw.name || ''),
+            mimeType: String(raw.mimeType || 'application/octet-stream'),
+            size: typeof raw.size === 'number' ? raw.size : 0,
+            url: String(raw.url || ''),
+            createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+          };
+          deps.setSessions((prev) =>
+            withUpdatedAssistantGeneratedFile(prev, sessionId, assistantId, file),
+          );
+          if (file.id) {
+            void import('@/lib/files/direct-content').then(
+              ({ invalidatePreviewContentCache }) => {
+                invalidatePreviewContentCache(file.id);
+              },
+            );
+          }
+          if (sessionId === deps.getActiveSessionId()) {
+            deps.onGeneratedFileForActiveSession();
+            deps.onFileUpdatedForActiveSession?.(file);
           }
         }
         if (parsed.view_created && typeof parsed.view_created === 'object') {

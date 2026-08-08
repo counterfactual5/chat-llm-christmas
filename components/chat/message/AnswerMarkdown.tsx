@@ -75,16 +75,26 @@ const markdownComponents = {
     return <h3 className="text-base font-bold mt-4 mb-2 text-stone-900 dark:text-stone-100">{children}</h3>;
   },
   ul({ children }: any) {
-    return <ul className="my-3 pl-6 list-disc space-y-1">{children}</ul>;
+    return <ul className="my-3 pl-6 list-disc space-y-1 last:mb-0">{children}</ul>;
   },
-  ol({ children }: any) {
-    return <ol className="my-3 pl-6 list-decimal space-y-1">{children}</ol>;
+  ol({ start, children }: any) {
+    return (
+      <ol
+        start={typeof start === 'number' ? start : undefined}
+        className="my-3 pl-6 list-decimal space-y-1"
+      >
+        {children}
+      </ol>
+    );
   },
   li({ children }: any) {
-    // Literature hits stack title/meta/commands with hard breaks inside one <li>;
-    // keep nested paragraphs tight so a model blank line does not look like a
-    // deliberate empty row under the title.
-    return <li className="leading-6 [&_p]:mb-1 [&_p]:last:mb-0">{children}</li>;
+    // Literature hits stack title/meta/commands; keep nested p/ul tight so a
+    // blank line (or nested command list) does not look like an empty row.
+    return (
+      <li className="leading-6 [&_p]:mb-1 [&_p]:last:mb-0 [&_ul]:my-1 [&_ol]:my-1">
+        {children}
+      </li>
+    );
   },
   a({ href, children }: any) {
     const { onPreviewLink, previewBaseUrl } = useContext(AnswerMarkdownCtx);

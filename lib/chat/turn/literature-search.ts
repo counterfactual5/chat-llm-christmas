@@ -518,10 +518,19 @@ export function formatLiteratureMarkdown(
       }
     }
 
-    // Nested bullets under the ordered item (3-space indent after `1. `).
-    let item = `${i + 1}. ${blocks.join('  \n')}`;
+    // Marker width grows at 10+ (`10. ` is 4 chars). Nested bullets must indent
+    // to that width or CommonMark treats them as a sibling list and splits the
+    // ordered list — later items then start a new <ol> (looks like a reset to 1
+    // if the renderer drops `start`).
+    const marker = `${i + 1}. `;
+    const pad = ' '.repeat(marker.length);
+    const [titleBlock, ...restBlocks] = blocks;
+    let item = `${marker}${titleBlock}`;
+    for (const block of restBlocks) {
+      item += `  \n${pad}${block}`;
+    }
     if (cmds.length) {
-      item += `\n\n${cmds.map((c) => `   - ${c}`).join('\n')}`;
+      item += `\n${cmds.map((c) => `${pad}- ${c}`).join('\n')}`;
     }
     lines.push(item);
     lines.push('');

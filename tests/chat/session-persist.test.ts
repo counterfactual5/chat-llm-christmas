@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CLOUD_SESSIONS_FETCH_TIMEOUT_MS,
   LOCAL_CHATS_KEY,
   LOCAL_GUEST_CHATS_KEY,
   clearLocalSessions,
+  fetchCloudSessions,
   hydrateSessionsFromLocal,
   putCloudSessions,
   mergeLocalWithCloud,
@@ -80,6 +82,39 @@ describe('session persist helpers', () => {
     const fetchImpl = vi.fn();
     await putCloudSessions([], fetchImpl);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('fetchCloudSessions throws on HTTP error (do not treat as empty cloud)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('nope', { status: 503 }));
+    await expect(fetchCloudSessions(fetchImpl)).rejects.toThrow(
+      /Cloud sync failed \(HTTP 503\)/,
+    );
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/sync/sessions',
+      expect.objectContaining({
+        cache: 'no-store',
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('fetchCloudSessions throws on network failure', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(fetchCloudSessions(fetchImpl)).rejects.toThrow(/Failed to fetch/);
+  });
+
+  it('fetchCloudSessions returns empty array on successful empty payload', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ sessions: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(fetchCloudSessions(fetchImpl)).resolves.toEqual([]);
+  });
+
+  it('fetchCloudSessions uses a hard timeout budget', () => {
+    expect(CLOUD_SESSIONS_FETCH_TIMEOUT_MS).toBe(20_000);
   });
 
   it('keeps guest drafts in a separate key from bound-account chats', () => {

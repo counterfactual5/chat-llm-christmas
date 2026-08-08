@@ -92,10 +92,19 @@ export function useChatSessionPersist(opts: {
       if (cloud.length > 0) {
         setSessions((prev) => mergeLocalWithCloud(prev, cloud));
       }
-    } catch {
-      // Local list already painted; banner path covers later PUTs.
-    } finally {
+      // Only unlock PUT after a successful GET (empty list included).
       setCloudHydrateSettled(true);
+    } catch (err: unknown) {
+      // Keep cloudHydrateSettled false so debounced PUT cannot overwrite newer cloud.
+      const detail =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Cloud sync failed';
+      onCloudSyncErrorRef.current?.(
+        `${detail} — chats stay on this device until sync works again.`,
+      );
+    } finally {
+      // Always bump epoch so remount/reattach can run on post-GET local (or failed) state.
       setCloudHydrateEpoch((n) => n + 1);
     }
   };

@@ -90,19 +90,28 @@ export function enforceChatsOwner(username: string | null): void {
   }
 }
 
+/** Bound-account cloud GET budget — hang must not leave PUT gated forever. */
+export const CLOUD_SESSIONS_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * Fetch cloud sessions for merge. Throws on network/HTTP/timeout failure so
+ * callers can keep PUT blocked (do not treat failure as empty cloud).
+ * Empty `sessions` on a successful 2xx is a real empty list.
+ */
 export async function fetchCloudSessions(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ChatSession[]> {
-  try {
-    const syncRes = await fetchImpl('/api/sync/sessions', { cache: 'no-store' });
-    if (!syncRes.ok) return [];
-    const syncData = await syncRes.json();
-    return Array.isArray(syncData?.sessions)
-      ? (syncData.sessions as ChatSession[])
-      : [];
-  } catch {
-    return [];
+  const syncRes = await fetchImpl('/api/sync/sessions', {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(CLOUD_SESSIONS_FETCH_TIMEOUT_MS),
+  });
+  if (!syncRes.ok) {
+    throw new Error(`Cloud sync failed (HTTP ${syncRes.status})`);
   }
+  const syncData = await syncRes.json();
+  return Array.isArray(syncData?.sessions)
+    ? (syncData.sessions as ChatSession[])
+    : [];
 }
 
 export async function putCloudSessions(

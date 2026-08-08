@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { AnswerMarkdown } from '@/components/chat/message/AnswerMarkdown';
 import {
+  isJunkBookExtractHost,
   isLikelyAuthGatedPreviewUrl,
   isLikelyBookPreviewUrl,
   isLikelyPaperPreviewUrl,
@@ -25,18 +26,18 @@ import {
 } from '@/lib/files/url-preview-embed';
 import { cleanUrlExtractText } from '@/lib/files/url-extract-clean';
 import {
-  ephemeralPaperPreviewEntry,
-  paperPreviewContentUrl,
   requestBookDownload,
   requestBookResolve,
   requestPaperDownload,
   requestPaperResolve,
 } from '@/lib/chat/turn/literature-search';
+import { friendlyLiteraturePreviewMessage } from '@/lib/files/ephemeral-preview';
 import {
-  ephemeralPreviewEntry,
-  friendlyLiteraturePreviewMessage,
-  literatureContentUrl,
-} from '@/lib/files/ephemeral-preview';
+  attemptLiteratureEphemeralPreview,
+  literaturePreviewKindsForUrl,
+  noFileFallbackForKind,
+  persistLiteraturePreview,
+} from '@/lib/files/literature-preview-ladder';
 import type { GeneratedFileEntry } from '@/components/chat/panels/OutputPanel';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -383,99 +384,35 @@ export function UrlPreviewPanel({
 
     void (async () => {
       try {
-        if (isLikelyPaperPreviewUrl(url) && onOpenDownloadedFileRef.current) {
-          const resolved = await requestPaperResolve(url, { signal: ac.signal });
-          if (ac.signal.aborted) return;
-          if (resolved.ok) {
-            // Probe content: metadata may advertise a PDF URL that is HTML paywall.
-            const probe = await fetch(paperPreviewContentUrl(url), {
-              method: 'GET',
+        const openFile = onOpenDownloadedFileRef.current;
+        if (openFile) {
+          const kinds = literaturePreviewKindsForUrl(url);
+          const downloadOnly = tRef.current('urlPreviewDownloadOnlyBody');
+          const messages = {
+            noPaper: tRef.current('urlPreviewNoOpenAccessBody'),
+            noBook: tRef.current('urlPreviewNoBookBody'),
+          };
+          for (const kind of kinds) {
+            const ladder = await attemptLiteratureEphemeralPreview({
+              kind,
+              url,
+              title: initialTitle,
               signal: ac.signal,
-              credentials: 'same-origin',
+              resolve: kind === 'book' ? requestBookResolve : requestPaperResolve,
+              downloadOnlyFallback: downloadOnly,
+              resolveFailFallback: noFileFallbackForKind(kind, messages),
             });
-            if (ac.signal.aborted) return;
-            const ct = (probe.headers.get('content-type') || '').toLowerCase();
-            if (probe.ok && ct.includes('pdf')) {
-              void probe.body?.cancel?.();
-              onOpenDownloadedFileRef.current(
-                ephemeralPaperPreviewEntry({
-                  identifier: url,
-                  title: resolved.title || initialTitle,
-                  filename: resolved.filename,
-                }),
-              );
+            if (ladder.outcome === 'aborted') return;
+            if (ladder.outcome === 'ephemeral') {
+              openFile(ladder.entry);
               return;
             }
-            const errBody = await probe.json().catch(() => ({} as { error?: string; message?: string; code?: string }));
-            applyThinOrError(
-              friendlyPaperPreviewMessage(
-                String(errBody.error || errBody.message || ''),
-                tRef.current('urlPreviewNoOpenAccessBody'),
-              ),
-            );
-            return;
+            if (ladder.outcome === 'download_only' || ladder.outcome === 'cta') {
+              applyThinOrError(ladder.message);
+              return;
+            }
+            // fallthrough → next kind or extract
           }
-          // Fall through to HTML extract; thin shells become CTA.
-        }
-
-        if (isLikelyBookPreviewUrl(url) && onOpenDownloadedFileRef.current) {
-          const resolved = await requestBookResolve(url, { signal: ac.signal });
-          if (ac.signal.aborted) return;
-          if (!resolved.ok) {
-            // Libgen/IA landing pages are fat HTML junk — CTA, never extract.
-            applyThinOrError(
-              friendlyPaperPreviewMessage(
-                resolved.error || '',
-                tRef.current('urlPreviewNoBookBody'),
-              ),
-            );
-            return;
-          }
-          const probe = await fetch(literatureContentUrl('book', url), {
-            method: 'GET',
-            signal: ac.signal,
-            credentials: 'same-origin',
-          });
-          if (ac.signal.aborted) return;
-          const ct = (probe.headers.get('content-type') || '').toLowerCase();
-          const looksBook =
-            probe.ok &&
-            (ct.includes('pdf') ||
-              ct.includes('epub') ||
-              ct.includes('djvu') ||
-              ct.includes('text/plain') ||
-              ct.includes('octet-stream'));
-          if (looksBook) {
-            void probe.body?.cancel?.();
-            const mime =
-              ct.includes('pdf')
-                ? 'application/pdf'
-                : ct.includes('epub')
-                  ? 'application/epub+zip'
-                  : ct.includes('djvu')
-                    ? 'image/vnd.djvu'
-                    : ct.includes('text/plain')
-                      ? 'text/plain'
-                      : undefined;
-            onOpenDownloadedFileRef.current(
-              ephemeralPreviewEntry({
-                kind: 'book',
-                identifier: url,
-                title: resolved.title || initialTitle,
-                filename: resolved.filename,
-                mimeType: mime,
-              }),
-            );
-            return;
-          }
-          const errBody = await probe.json().catch(() => ({} as { error?: string; message?: string }));
-          applyThinOrError(
-            friendlyPaperPreviewMessage(
-              String(errBody.error || errBody.message || ''),
-              tRef.current('urlPreviewNoBookBody'),
-            ),
-          );
-          return;
         }
 
         const result = await fetchWebReadExtract(url, ac.signal);
@@ -484,22 +421,54 @@ export function UrlPreviewPanel({
           (isLikelyPaperPreviewUrl(url) || isLikelyBookPreviewUrl(url)) &&
           (result.quality === 'thin' || !result.content.trim())
         ) {
-          applyThinOrError(tRef.current('urlPreviewNoOpenAccessBody'));
+          applyThinOrError(
+            isLikelyBookPreviewUrl(url)
+              ? tRef.current('urlPreviewNoBookBody')
+              : tRef.current('urlPreviewNoOpenAccessBody'),
+          );
           return;
         }
         applyDone(result);
       } catch (err) {
         if (ac.signal.aborted) return;
         if (isLikelyPaperPreviewUrl(url) || isLikelyBookPreviewUrl(url)) {
-          applyThinOrError(
-            friendlyPaperPreviewMessage(
-              err instanceof Error ? err.message : '',
-              isLikelyBookPreviewUrl(url)
-                ? tRef.current('urlPreviewNoBookBody')
-                : tRef.current('urlPreviewNoOpenAccessBody'),
-            ),
-          );
-          return;
+          if (isJunkBookExtractHost(url)) {
+            applyThinOrError(
+              friendlyPaperPreviewMessage(
+                err instanceof Error ? err.message : '',
+                tRef.current('urlPreviewNoBookBody'),
+              ),
+            );
+            return;
+          }
+          // Prefer extract on transient errors for non-junk literature pages.
+          try {
+            const result = await fetchWebReadExtract(url, ac.signal);
+            if (ac.signal.aborted) return;
+            if (result.quality === 'thin' || !result.content.trim()) {
+              applyThinOrError(
+                friendlyPaperPreviewMessage(
+                  err instanceof Error ? err.message : '',
+                  isLikelyBookPreviewUrl(url)
+                    ? tRef.current('urlPreviewNoBookBody')
+                    : tRef.current('urlPreviewNoOpenAccessBody'),
+                ),
+              );
+              return;
+            }
+            applyDone(result);
+            return;
+          } catch {
+            applyThinOrError(
+              friendlyPaperPreviewMessage(
+                err instanceof Error ? err.message : '',
+                isLikelyBookPreviewUrl(url)
+                  ? tRef.current('urlPreviewNoBookBody')
+                  : tRef.current('urlPreviewNoOpenAccessBody'),
+              ),
+            );
+            return;
+          }
         }
         const next: ExtractState = {
           status: 'error',
@@ -873,34 +842,28 @@ export function UrlPreviewPanel({
                           void (async () => {
                             setSavingPaper(true);
                             try {
-                              const isBook = isLikelyBookPreviewUrl(url);
-                              const dl = isBook
-                                ? await requestBookDownload(url)
-                                : await requestPaperDownload(url);
-                              if (!dl.ok) {
-                                const message = friendlyPaperPreviewMessage(
-                                  dl.error,
-                                  t('urlPreviewSaveFailed'),
-                                );
-                                setExtract({ status: 'no-oa', message });
+                              const kind = isLikelyBookPreviewUrl(url)
+                                ? 'book'
+                                : 'paper';
+                              const saved = await persistLiteraturePreview({
+                                kind,
+                                identifier: url,
+                                download:
+                                  kind === 'book'
+                                    ? requestBookDownload
+                                    : requestPaperDownload,
+                              });
+                              if (!saved.ok) {
+                                setExtract({
+                                  status: 'no-oa',
+                                  message: friendlyPaperPreviewMessage(
+                                    saved.error,
+                                    t('urlPreviewSaveFailed'),
+                                  ),
+                                });
                                 return;
                               }
-                              onOpenDownloadedFile({
-                                messageId: isBook
-                                  ? 'url-preview-book'
-                                  : 'url-preview-paper',
-                                fileIndex: 0,
-                                id: dl.fileId,
-                                name:
-                                  dl.filename ||
-                                  `${dl.title || (isBook ? 'book' : 'paper')}.bin`,
-                                mimeType: isBook
-                                  ? 'application/octet-stream'
-                                  : 'application/pdf',
-                                size: dl.bytes || 0,
-                                url: `/api/files/${encodeURIComponent(dl.fileId)}`,
-                                createdAt: Date.now(),
-                              });
+                              onOpenDownloadedFile(saved.entry);
                             } catch (err) {
                               setExtract({
                                 status: 'no-oa',

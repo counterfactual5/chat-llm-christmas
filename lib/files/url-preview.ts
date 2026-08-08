@@ -194,6 +194,47 @@ const PAPER_PREVIEW_HOST_SUFFIXES = [
   'pnas.org',
 ] as const;
 
+/** Direct literature file path (PDF / EPUB / DJVU) — prefer ephemeral reader. */
+export function isLikelyDirectLiteratureFileUrl(raw: string): boolean {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const path = `${u.pathname}${u.search}`;
+    if (/\.pdf(?:\?|$)/i.test(path) || /\/pdf(?:\/|\?|$)/i.test(path)) return true;
+    if (/\.(?:epub|djvu)(?:\?|$)/i.test(u.pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Libgen / library.lol landing pages are fat HTML junk — Preview may resolve
+ * a file, but must never fall through to web extract.
+ */
+export function isJunkBookExtractHost(raw: string): boolean {
+  try {
+    const u = new URL(String(raw || '').trim());
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    if (
+      /(^|\.)libgen\.(li|rs|is|st|gs|lc|pm|vg)$/i.test(host) ||
+      host === 'library.lol' ||
+      host.endsWith('.library.lol')
+    ) {
+      return true;
+    }
+    if (
+      /(?:ads|get|file)\.php/i.test(u.pathname) &&
+      /(?:[?&]md5=|\/md5\/)[a-f0-9]{32}\b/i.test(u.href)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * True when URL Preview should try literature OA PDF resolve before trusting
  * HTML extract (paywalled publisher pages often only expose References).
@@ -202,8 +243,9 @@ export function isLikelyPaperPreviewUrl(raw: string): boolean {
   try {
     const u = new URL(String(raw || '').trim());
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const path = `${u.pathname}${u.search}`;
-    if (/\/pdf(\?|$)/i.test(path) && /\.pdf(\?|$)/i.test(path)) return true;
+    if (isLikelyDirectLiteratureFileUrl(u.href) && /\.pdf|\/pdf/i.test(u.href)) {
+      return true;
+    }
     if (/arxiv\.org\/(?:abs|pdf|html)\//i.test(u.href)) return true;
     if (/openalex\.org\/W\d+/i.test(u.href)) return true;
     if (/(?:dx\.)?doi\.org\//i.test(u.href)) return true;
@@ -225,22 +267,8 @@ export function isLikelyBookPreviewUrl(raw: string): boolean {
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
     if (/archive\.org\/(?:details|download)\//i.test(u.href)) return true;
     if (/gutenberg\.org\/(?:ebooks|files)\/\d+/i.test(u.href)) return true;
-    if (/\.(?:epub|djvu)(?:\?|$)/i.test(u.pathname)) return true;
-    // Libgen ads/get landing pages are HTML shells — never trust extract.
-    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
-    if (
-      /(^|\.)libgen\.(li|rs|is|st|gs|lc|pm|vg)$/i.test(host) ||
-      host === 'library.lol' ||
-      host.endsWith('.library.lol')
-    ) {
-      return true;
-    }
-    if (
-      /(?:ads|get|file)\.php/i.test(u.pathname) &&
-      /(?:[?&]md5=|\/md5\/)[a-f0-9]{32}\b/i.test(u.href)
-    ) {
-      return true;
-    }
+    if (/\.(?:pdf|epub|djvu)(?:\?|$)/i.test(u.pathname)) return true;
+    if (isJunkBookExtractHost(u.href)) return true;
     return false;
   } catch {
     return false;

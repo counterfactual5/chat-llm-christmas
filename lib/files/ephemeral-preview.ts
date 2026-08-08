@@ -48,6 +48,29 @@ export function identifierFromContentUrl(url: string): string {
   }
 }
 
+/** Decode identifier from `paper-preview:` / `book-preview:` entry id. */
+export function identifierFromEphemeralPreviewId(
+  id: string,
+  kind: EphemeralPreviewKind,
+): string {
+  const raw = String(id || '');
+  const prefix = KIND_PREFIX[kind];
+  if (!raw.startsWith(prefix)) return '';
+  try {
+    return decodeURIComponent(raw.slice(prefix.length));
+  } catch {
+    return raw.slice(prefix.length);
+  }
+}
+
+export function kindFromEphemeralPreviewId(
+  id: string,
+): EphemeralPreviewKind | null {
+  if (isEphemeralPreviewId(id, 'paper')) return 'paper';
+  if (isEphemeralPreviewId(id, 'book')) return 'book';
+  return null;
+}
+
 export type EphemeralPreviewEntry = {
   messageId: string;
   fileIndex: number;

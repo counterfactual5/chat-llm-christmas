@@ -20,12 +20,12 @@ import {
 } from 'react';
 import type { ChatSession } from '@/lib/chat/types';
 import {
-  applyGoogleLiveProbe,
   disconnectIntegration,
+  enrichSnapshotWithLiveProbes,
   fetchIntegrationsSnapshot,
-  probeGoogleLiveStatus,
   stripGoogleMcpFromSessions,
   stripMcpIdFromSessions,
+  type IntegrationProvider,
   type IntegrationStatus,
 } from '@/lib/chat/integrations/client';
 import type { AuthModalMode } from '@/lib/chat/account/oauth-return';
@@ -73,16 +73,10 @@ export function useChatIntegrations(opts: {
   }, [applySessions]);
 
   const fetchIntegrations = useCallback(async () => {
-    const snap = await fetchIntegrationsSnapshot();
+    const snap = await enrichSnapshotWithLiveProbes(await fetchIntegrationsSnapshot());
     setNotionStatus(snap.notion);
     setGitHubStatus(snap.github);
-
-    let google = snap.google;
-    if (google?.connected) {
-      const probe = await probeGoogleLiveStatus();
-      google = applyGoogleLiveProbe(google, probe);
-    }
-    setGoogleStatus(google);
+    setGoogleStatus(snap.google);
 
     // Only scrub when we know the provider is disconnected. `null` = still
     // loading / fetch failed — wiping mcpIds then looks like toggles won't save.
@@ -93,13 +87,21 @@ export function useChatIntegrations(opts: {
   }, [scrubNotion, scrubGitHub, scrubGoogle]);
 
   /** Stream/auth failure: flip UI without wiping vault tokens. */
-  const markGoogleNeedsReconnect = useCallback(() => {
-    setGoogleStatus((prev) => {
+  const markNeedsReconnect = useCallback((provider: IntegrationProvider) => {
+    const apply = (prev: IntegrationStatus | null): IntegrationStatus | null => {
       if (!prev?.connected) return prev;
       if (prev.needsReconnect) return prev;
       return { ...prev, needsReconnect: true };
-    });
+    };
+    if (provider === 'notion') setNotionStatus(apply);
+    else if (provider === 'github') setGitHubStatus(apply);
+    else setGoogleStatus(apply);
   }, []);
+
+  /** @deprecated Prefer markNeedsReconnect('google') */
+  const markGoogleNeedsReconnect = useCallback(() => {
+    markNeedsReconnect('google');
+  }, [markNeedsReconnect]);
 
   const disconnectNotion = useCallback(async () => {
     setNotionBusy(true);
@@ -151,6 +153,7 @@ export function useChatIntegrations(opts: {
     setGoogleStatus,
     googleBusy,
     fetchIntegrations,
+    markNeedsReconnect,
     markGoogleNeedsReconnect,
     disconnectNotion,
     disconnectGitHub,

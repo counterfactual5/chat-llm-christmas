@@ -1038,13 +1038,22 @@ export function ChatComposer(props: ChatComposerProps) {
                             <div className="text-sm text-stone-800 dark:text-stone-100">
                               Notion
                             </div>
-                            <div className="truncate text-[10px] text-stone-400">
-                              {notionStatus?.connected
-                                ? t('useInThisChat')
-                                : t('notionMcpNeedsConnect')}
+                            <div
+                              className={cn(
+                                'truncate text-[10px]',
+                                notionStatus?.connected && notionStatus.needsReconnect
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : 'text-stone-400',
+                              )}
+                            >
+                              {notionStatus?.connected && notionStatus.needsReconnect
+                                ? t('notionNeedsReconnect')
+                                : notionStatus?.connected
+                                  ? t('useInThisChat')
+                                  : t('notionMcpNeedsConnect')}
                             </div>
                           </div>
-                          {notionStatus?.connected ? (
+                          {notionStatus?.connected && !notionStatus.needsReconnect ? (
                             <Switch
                               size="sm"
                               checked={notionMcpOn}
@@ -1061,7 +1070,9 @@ export function ChatComposer(props: ChatComposerProps) {
                               }}
                               className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                             >
-                              {t('connectNotion')}
+                              {notionStatus?.connected && notionStatus.needsReconnect
+                                ? t('reconnectNotion')
+                                : t('connectNotion')}
                             </button>
                           )}
                         </div>
@@ -1071,13 +1082,22 @@ export function ChatComposer(props: ChatComposerProps) {
                             <div className="text-sm text-stone-800 dark:text-stone-100">
                               GitHub
                             </div>
-                            <div className="truncate text-[10px] text-stone-400">
-                              {githubStatus?.connected
-                                ? t('useInThisChat')
-                                : t('githubMcpNeedsConnect')}
+                            <div
+                              className={cn(
+                                'truncate text-[10px]',
+                                githubStatus?.connected && githubStatus.needsReconnect
+                                  ? 'text-amber-600 dark:text-amber-400'
+                                  : 'text-stone-400',
+                              )}
+                            >
+                              {githubStatus?.connected && githubStatus.needsReconnect
+                                ? t('githubNeedsReconnect')
+                                : githubStatus?.connected
+                                  ? t('useInThisChat')
+                                  : t('githubMcpNeedsConnect')}
                             </div>
                           </div>
-                          {githubStatus?.connected ? (
+                          {githubStatus?.connected && !githubStatus.needsReconnect ? (
                             <Switch
                               size="sm"
                               checked={githubMcpOn}
@@ -1094,7 +1114,9 @@ export function ChatComposer(props: ChatComposerProps) {
                               }}
                               className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800 dark:hover:bg-stone-800 dark:hover:text-stone-100"
                             >
-                              {t('connectGitHub')}
+                              {githubStatus?.connected && githubStatus.needsReconnect
+                                ? t('reconnectGitHub')
+                                : t('connectGitHub')}
                             </button>
                           )}
                         </div>

@@ -19,6 +19,11 @@ import { cn } from '@/lib/utils';
 import type { SkillItem } from '@/lib/chat/types';
 import type { SkillModalMode } from '@/hooks/chat/use-skills';
 import type { GeneratedFileEntry } from '../panels/OutputPanel';
+import {
+  OAuthConnectActions,
+  OAuthConnectStatusText,
+} from '@/components/integrations/OAuthConnectCard';
+import { oauthMcpProvider } from '@/lib/chat/integrations/oauth-health';
 
 export type IntegrationStatus = {
   connected: boolean;
@@ -438,53 +443,22 @@ export function ChatModals(props: ChatModalsProps) {
             <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
               {t('notionConnectCardTitle')}
             </h2>
-            {notionStatus?.connected ? (
-              <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
-                {t('notionConnected')}
-                {notionStatus.label ? ` · ${notionStatus.label}` : ''}
-              </p>
-            ) : notionStatus?.available === false ? (
-              <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
-                {t('notionNotConfigured')}
-              </p>
-            ) : (
-              <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">
-                {t('notionConnectCardBody')}
-              </p>
-            )}
-
-            <div className="mt-6 w-full max-w-sm">
-              {notionStatus?.connected ? (
-                <Button
-                  type="button"
-                  disabled={notionBusy}
-                  onClick={() => void disconnectNotion()}
-                  className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
-                >
-                  {t('disconnectNotion')}
-                </Button>
-              ) : (
-                <a
-                  href={
-                    notionStatus?.available === false
-                      ? undefined
-                      : '/api/integrations/notion/start'
-                  }
-                  aria-disabled={notionStatus?.available === false}
-                  onClick={(e) => {
-                    if (notionStatus?.available === false) e.preventDefault();
-                  }}
-                  className={cn(
-                    'inline-flex h-11 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
-                    notionStatus?.available === false
-                      ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
-                      : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
-                  )}
-                >
-                  {t('connectNotion')}
-                </a>
-              )}
-            </div>
+            <OAuthConnectStatusText
+              status={notionStatus}
+              connectedLabel={t('notionConnected')}
+              needsReconnectLabel={t('notionNeedsReconnect')}
+              notConfiguredLabel={t('notionNotConfigured')}
+              connectBody={t('notionConnectCardBody')}
+            />
+            <OAuthConnectActions
+              status={notionStatus}
+              busy={notionBusy}
+              startPath={oauthMcpProvider('notion')!.startPath}
+              connectLabel={t('connectNotion')}
+              reconnectLabel={t('reconnectNotion')}
+              disconnectLabel={t('disconnectNotion')}
+              onDisconnect={() => void disconnectNotion()}
+            />
             {accountError ? (
               <p className="mt-4 w-full text-sm text-red-600 dark:text-red-400">
                 {accountError}
@@ -497,53 +471,22 @@ export function ChatModals(props: ChatModalsProps) {
             <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
               {t('githubConnectCardTitle')}
             </h2>
-            {githubStatus?.connected ? (
-              <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
-                {t('githubConnected')}
-                {githubStatus.label ? ` · ${githubStatus.label}` : ''}
-              </p>
-            ) : githubStatus?.available === false ? (
-              <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
-                {t('githubNotConfigured')}
-              </p>
-            ) : (
-              <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">
-                {t('githubConnectCardBody')}
-              </p>
-            )}
-
-            <div className="mt-6 w-full max-w-sm">
-              {githubStatus?.connected ? (
-                <Button
-                  type="button"
-                  disabled={githubBusy}
-                  onClick={() => void disconnectGitHub()}
-                  className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
-                >
-                  {t('disconnectGitHub')}
-                </Button>
-              ) : (
-                <a
-                  href={
-                    githubStatus?.available === false
-                      ? undefined
-                      : '/api/integrations/github/start'
-                  }
-                  aria-disabled={githubStatus?.available === false}
-                  onClick={(e) => {
-                    if (githubStatus?.available === false) e.preventDefault();
-                  }}
-                  className={cn(
-                    'inline-flex h-11 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
-                    githubStatus?.available === false
-                      ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
-                      : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
-                  )}
-                >
-                  {t('connectGitHub')}
-                </a>
-              )}
-            </div>
+            <OAuthConnectStatusText
+              status={githubStatus}
+              connectedLabel={t('githubConnected')}
+              needsReconnectLabel={t('githubNeedsReconnect')}
+              notConfiguredLabel={t('githubNotConfigured')}
+              connectBody={t('githubConnectCardBody')}
+            />
+            <OAuthConnectActions
+              status={githubStatus}
+              busy={githubBusy}
+              startPath={oauthMcpProvider('github')!.startPath}
+              connectLabel={t('connectGitHub')}
+              reconnectLabel={t('reconnectGitHub')}
+              disconnectLabel={t('disconnectGitHub')}
+              onDisconnect={() => void disconnectGitHub()}
+            />
             {accountError ? (
               <p className="mt-4 w-full text-sm text-red-600 dark:text-red-400">
                 {accountError}
@@ -556,75 +499,22 @@ export function ChatModals(props: ChatModalsProps) {
             <h2 className="mt-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-stone-50">
               {t('googleConnectCardTitle')}
             </h2>
-            {googleStatus?.connected && googleStatus.needsReconnect ? (
-              <p className="mt-2 text-sm leading-6 text-amber-700 dark:text-amber-400">
-                {t('googleNeedsReconnect')}
-                {googleStatus.label ? ` · ${googleStatus.label}` : ''}
-              </p>
-            ) : googleStatus?.connected ? (
-              <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">
-                {t('googleConnected')}
-                {googleStatus.label ? ` · ${googleStatus.label}` : ''}
-              </p>
-            ) : googleStatus?.available === false ? (
-              <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
-                {t('googleNotConfigured')}
-              </p>
-            ) : (
-              <p className="mt-2 max-w-sm text-sm leading-6 text-stone-500 dark:text-stone-400">
-                {t('googleConnectCardBody')}
-              </p>
-            )}
-
-            <div className="mt-6 w-full max-w-sm space-y-2">
-              {googleStatus?.connected && googleStatus.needsReconnect ? (
-                <>
-                  <a
-                    href="/api/integrations/google/start"
-                    className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-stone-900 text-sm font-semibold text-white transition-colors hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-                  >
-                    {t('reconnectGoogle')}
-                  </a>
-                  <Button
-                    type="button"
-                    disabled={googleBusy}
-                    onClick={() => void disconnectGoogle()}
-                    className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
-                  >
-                    {t('disconnectGoogle')}
-                  </Button>
-                </>
-              ) : googleStatus?.connected ? (
-                <Button
-                  type="button"
-                  disabled={googleBusy}
-                  onClick={() => void disconnectGoogle()}
-                  className="h-11 w-full rounded-xl border border-red-200 bg-white text-sm font-medium text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-stone-700 dark:bg-stone-800 dark:text-red-300/90 dark:hover:border-stone-600 dark:hover:bg-stone-700 dark:hover:text-red-200"
-                >
-                  {t('disconnectGoogle')}
-                </Button>
-              ) : (
-                <a
-                  href={
-                    googleStatus?.available === false
-                      ? undefined
-                      : '/api/integrations/google/start'
-                  }
-                  aria-disabled={googleStatus?.available === false}
-                  onClick={(e) => {
-                    if (googleStatus?.available === false) e.preventDefault();
-                  }}
-                  className={cn(
-                    'inline-flex h-11 w-full items-center justify-center rounded-xl text-sm font-semibold transition-colors',
-                    googleStatus?.available === false
-                      ? 'cursor-not-allowed bg-stone-200 text-stone-400 dark:bg-stone-800'
-                      : 'bg-stone-900 text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white',
-                  )}
-                >
-                  {t('connectGoogle')}
-                </a>
-              )}
-            </div>
+            <OAuthConnectStatusText
+              status={googleStatus}
+              connectedLabel={t('googleConnected')}
+              needsReconnectLabel={t('googleNeedsReconnect')}
+              notConfiguredLabel={t('googleNotConfigured')}
+              connectBody={t('googleConnectCardBody')}
+            />
+            <OAuthConnectActions
+              status={googleStatus}
+              busy={googleBusy}
+              startPath={oauthMcpProvider('google')!.startPath}
+              connectLabel={t('connectGoogle')}
+              reconnectLabel={t('reconnectGoogle')}
+              disconnectLabel={t('disconnectGoogle')}
+              onDisconnect={() => void disconnectGoogle()}
+            />
             {accountError ? (
               <p className="mt-4 w-full text-sm text-red-600 dark:text-red-400">
                 {accountError}

@@ -793,7 +793,7 @@ export function UrlPreviewPanel({
                   <AnswerMarkdown
                     text={cleanedExtractContent}
                     streaming={false}
-                    previewBaseUrl={onNavigateUrl ? url : undefined}
+                    previewBaseUrl={url || undefined}
                     onPreviewLink={
                       onNavigateUrl
                         ? (next) => {

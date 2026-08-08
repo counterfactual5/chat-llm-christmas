@@ -1,0 +1,63 @@
+spec: chat-boot-critical-path
+run_id: 2026-08-06T16-00-00Z
+started_at: "2026-08-06T16:00:00.000Z"
+
+baseline:
+  timestamp: "2026-08-06T16:05:00.000Z"
+  gates:
+    tests_passed: 1
+    schedule_valid: 1
+    auth_before_models_cache: 1
+  diagnostics:
+    interactive_ms: 2855
+    full_boot_ms: 2855
+    cloud_on_critical_path: 1
+    models_after_cloud: 1
+    warm_interactive_ms: 2060
+    warm_full_boot_ms: 2455
+
+experiments:
+  - iteration: 1
+    hypothesis: "Local-first hydrate + start models parallel with cloud GET"
+    category: architecture
+    outcome: kept
+    metrics:
+      interactive_ms: 855
+      full_boot_ms: 2055
+      cloud_on_critical_path: 0
+      models_after_cloud: 0
+      tests_passed: 1
+      schedule_valid: 1
+      auth_before_models_cache: 1
+      warm_interactive_ms: 60
+    learnings: >
+      Marking chatsHydrated after local restore and kicking models/skills in the
+      same tick as cloud GET removes cloud latency from interactive. Auth still
+      precedes models-cache read.
+
+best:
+  iteration: 1
+  hypothesis: "Local-first hydrate + start models parallel with cloud GET"
+  interactive_ms: 855
+  full_boot_ms: 2055
+  cloud_on_critical_path: 0
+  models_after_cloud: 0
+
+hypothesis_backlog:
+  - description: "Only mark chatsHydrated after-local; keep models after hydrate-ready"
+    category: "architecture"
+    priority: medium
+    dep_status: approved
+    required_deps: []
+  - description: "Only parallel models with cloud; keep chatsHydrated after-cloud"
+    category: "architecture"
+    priority: medium
+    dep_status: approved
+    required_deps: []
+  - description: "Skip awaiting skills/memories/integrations before OAuth UI"
+    category: "architecture"
+    priority: low
+    dep_status: approved
+    required_deps: []
+
+stopping_reason: target_reached

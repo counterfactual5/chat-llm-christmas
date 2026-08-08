@@ -23,6 +23,7 @@ import {
   resolvePreviewHttpUrl,
   shouldOpenLinkExternally,
 } from '@/lib/files/url-preview';
+import { UrlPreviewImage } from '@/components/chat/panels/UrlPreviewImage';
 import { cn } from '@/lib/utils';
 
 const KATEX_OPTIONS = {
@@ -129,6 +130,13 @@ const markdownComponents = {
     );
   },
   img({ src, alt, ...props }: any) {
+    const { previewBaseUrl } = useContext(AnswerMarkdownCtx);
+    // URL Preview panel: render extracted http(s) images with placeholder
+    // fallback + on-demand image understand. Other contexts keep the
+    // silent-hide behavior so transcripts stay clean.
+    if (previewBaseUrl) {
+      return <UrlPreviewImage src={src} alt={alt} baseUrl={previewBaseUrl} />;
+    }
     return (
       // eslint-disable-next-line @next/next/no-img-element -- chat/extract markdown images are arbitrary remote URLs
       <img

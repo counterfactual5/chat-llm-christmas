@@ -1,0 +1,71 @@
+name: chat-boot-critical-path
+description: >
+  Reduce chat page time-to-interactive by shortening the serial boot path
+  (account → cloud hydrate → models/skills). Measure with fixed mock latencies
+  so network jitter does not dominate.
+
+metric:
+  primary:
+    type: hard
+    name: interactive_ms
+    direction: minimize
+    target: 900
+  degenerate_gates:
+    - name: tests_passed
+      check: "== 1"
+      description: Boot critical-path unit tests must pass
+    - name: schedule_valid
+      check: "== 1"
+      description: Boot schedule must remain structurally valid
+    - name: auth_before_models_cache
+      check: "== 1"
+      description: Models cache must still be read only after auth scope is known
+  diagnostics:
+    - name: full_boot_ms
+    - name: cloud_on_critical_path
+    - name: models_after_cloud
+
+measurement:
+  command: "node tools/eval/boot/measure.mjs"
+  timeout_seconds: 120
+  working_directory: "."
+  stability:
+    mode: single
+    noise_threshold: 1
+
+scope:
+  mutable:
+    - "lib/chat/boot/"
+    - "hooks/chat/use-session-persist.ts"
+    - "components/chat-container.tsx"
+    - "tests/chat/boot-critical-path.test.ts"
+  immutable:
+    - "tools/eval/boot/measure.mjs"
+    - "lib/models/models-cache.ts"
+    - "app/api/"
+
+execution:
+  mode: serial
+  backend: worktree
+  max_concurrent: 1
+
+parallel:
+  port_strategy: none
+  shared_files: []
+
+dependencies:
+  approved: []
+
+constraints:
+  - "Do not remove account binding check before reading models cache (auth-scoped)"
+  - "Local sessions must still paint; cloud merge may complete after interactive"
+  - "Keep guest hydrate path working"
+  - "No new runtime dependencies"
+
+stopping:
+  max_iterations: 4
+  max_hours: 1
+  plateau_iterations: 3
+  target_reached: true
+
+max_runner_up_merges_per_batch: 0

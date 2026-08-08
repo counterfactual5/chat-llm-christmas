@@ -237,17 +237,19 @@ export default function ChatContainer() {
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [isPreviewPanelOpen, setIsPreviewPanelOpen] = useState(false);
   type PreviewTarget =
-    | { kind: 'file'; entry: GeneratedFileEntry }
-    | { kind: 'view'; view: ToolViewPayload; messageId?: string }
+    | { kind: 'file'; entry: GeneratedFileEntry; sessionId: string }
+    | { kind: 'view'; view: ToolViewPayload; messageId?: string; sessionId: string }
     | { kind: 'url'; url: string; title?: string }
     | null;
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget>(null);
   const openFilePreview = (entry: GeneratedFileEntry) => {
-    setPreviewTarget({ kind: 'file', entry });
+    if (!activeSessionId) return;
+    setPreviewTarget({ kind: 'file', entry, sessionId: activeSessionId });
     setIsPreviewPanelOpen(true);
   };
   const openViewPreview = (view: ToolViewPayload, messageId?: string) => {
-    setPreviewTarget({ kind: 'view', view, messageId });
+    if (!activeSessionId) return;
+    setPreviewTarget({ kind: 'view', view, messageId, sessionId: activeSessionId });
     setIsPreviewPanelOpen(true);
   };
   const openUrlPreview = (rawUrl: string, title?: string) => {
@@ -310,6 +312,8 @@ export default function ChatContainer() {
   const dragDepthRef = useRef(0);
   // Only auto-follow new tokens while the user is already near the bottom.
   const stickToBottomRef = useRef(true);
+  /** After switching session from Preview "jump to message", scroll here instead of bottom. */
+  const pendingJumpMessageIdRef = useRef<string | null>(null);
 
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
@@ -775,6 +779,16 @@ export default function ChatContainer() {
       ],
       { duration: 1200, easing: 'ease-out' },
     );
+  };
+
+  const jumpToPreviewMessage = (sessionId: string, messageId: string) => {
+    if (sessionId !== activeSessionId) {
+      pendingJumpMessageIdRef.current = messageId;
+      stickToBottomRef.current = false;
+      setActiveSessionId(sessionId);
+      return;
+    }
+    scrollToMessage(messageId);
   };
 
   const openUploadReference = (source: WebSearchSource) => {
@@ -1418,6 +1432,11 @@ export default function ChatContainer() {
   };
 
   const deleteSession = (id: string) => {
+    setPreviewTarget((prev) =>
+      prev && (prev.kind === 'file' || prev.kind === 'view') && prev.sessionId === id
+        ? null
+        : prev,
+    );
     const all = sessionsRef.current;
     const doomed = all.find((s) => s.id === id);
     const keep = all.filter((s) => s.id !== id);
@@ -2284,17 +2303,25 @@ export default function ChatContainer() {
     scrollToBottom();
   }, [messages, activeSessionBusy]);
 
-  // Switching conversations should land at the latest message.
-  // Clear the previewed file only when the session id actually changes — same-session
-  // sends / session array identity churn must not wipe an open Preview.
-  // Keep the Preview panel open/closed as a layout preference (same as Context).
+  // Switching conversations should land at the latest message — unless Preview
+  // requested a jump to a message in another session.
+  // Preview content is workspace-level (like panel open/closed): keep it across
+  // session switches. File/view sync effects only clear when the owning session
+  // drops the item.
   const lastPreviewSessionIdRef = useRef(activeSessionId);
   useEffect(() => {
-    stickToBottomRef.current = true;
-    scrollToBottom(true);
     if (lastPreviewSessionIdRef.current === activeSessionId) return;
     lastPreviewSessionIdRef.current = activeSessionId;
-    setPreviewTarget(null);
+    const pendingJump = pendingJumpMessageIdRef.current;
+    pendingJumpMessageIdRef.current = null;
+    if (pendingJump) {
+      stickToBottomRef.current = false;
+      // Wait for the target session's message list to paint.
+      requestAnimationFrame(() => scrollToMessage(pendingJump));
+    } else {
+      stickToBottomRef.current = true;
+      scrollToBottom(true);
+    }
     // Composer banners that belong to the previous chat (upload/vision/wait)
     // must not follow the user into another session. Cloud-sync notices stay —
     // they describe account-wide state, not one conversation.
@@ -2305,8 +2332,10 @@ export default function ChatContainer() {
 
   // Keep / drop the side-panel preview against the live Output file list:
   // deleted → clear; same id with updated content/name/size → refresh snapshot.
+  // Skip when the preview belongs to another session (sticky across switches).
   useEffect(() => {
     if (!previewTarget || previewTarget.kind !== 'file') return;
+    if (previewTarget.sessionId !== activeSessionId) return;
     const previewFileEntry = previewTarget.entry;
     const latest = generatedFileHistory.find(
       (f) => f.id === previewFileEntry.id && f.messageId === previewFileEntry.messageId,
@@ -2322,13 +2351,19 @@ export default function ChatContainer() {
       latest.url !== previewFileEntry.url ||
       latest.mimeType !== previewFileEntry.mimeType
     ) {
-      setPreviewTarget({ kind: 'file', entry: latest });
+      setPreviewTarget({
+        kind: 'file',
+        entry: latest,
+        sessionId: previewTarget.sessionId,
+      });
     }
-  }, [generatedFileHistory, previewTarget]);
+  }, [activeSessionId, generatedFileHistory, previewTarget]);
 
   // Keep specialized views in sync with message.views (or clear if removed).
+  // Skip when the preview belongs to another session (sticky across switches).
   useEffect(() => {
     if (!previewTarget || previewTarget.kind !== 'view') return;
+    if (previewTarget.sessionId !== activeSessionId) return;
     const latest = generatedViewHistory.find(
       (v) =>
         v.id === previewTarget.view.id &&
@@ -2348,9 +2383,10 @@ export default function ChatContainer() {
         kind: 'view',
         view: latest,
         messageId: latest.messageId,
+        sessionId: previewTarget.sessionId,
       });
     }
-  }, [generatedViewHistory, previewTarget]);
+  }, [activeSessionId, generatedViewHistory, previewTarget]);
 
   // While the assistant turn is still open but the stream has gone idle (no new
   // content / thought / tool), show a textless spinner under the bubble — including
@@ -2939,7 +2975,7 @@ export default function ChatContainer() {
               messageId={previewTarget.messageId}
               onJumpToMessage={() => {
                 if (!previewTarget.messageId) return;
-                scrollToMessage(previewTarget.messageId);
+                jumpToPreviewMessage(previewTarget.sessionId, previewTarget.messageId);
               }}
             />
           ) : previewTarget?.kind === 'url' ? (
@@ -2964,7 +3000,10 @@ export default function ChatContainer() {
                 setFilePreview(payload);
               }}
               onJumpToMessage={() => {
-                scrollToMessage(previewTarget.entry.messageId);
+                jumpToPreviewMessage(
+                  previewTarget.sessionId,
+                  previewTarget.entry.messageId,
+                );
               }}
               onDownload={() => {
                 void downloadGeneratedFile(previewTarget.entry);

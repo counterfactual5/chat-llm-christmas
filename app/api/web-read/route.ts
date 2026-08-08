@@ -22,6 +22,10 @@ export async function POST(req: NextRequest) {
     if (Number.isFinite(maxChars) && maxChars > 0) {
       payload.maxChars = Math.min(Math.floor(maxChars), 200_000);
     }
+    const startIndex = Number(body?.startIndex ?? body?.start_index);
+    if (Number.isFinite(startIndex) && startIndex > 0) {
+      payload.startIndex = Math.floor(startIndex);
+    }
     const upstream = await fetch(chatBackendToolsURL('web_read'), {
       method: 'POST',
       headers: {

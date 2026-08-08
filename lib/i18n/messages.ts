@@ -230,6 +230,8 @@ export const dict = {
     urlPreviewNoOpenAccessBody:
       'This publisher page is paywalled or only exposed references to our extractors. Open it in your browser, or use /papers download when an OA PDF id is available.',
     urlPreviewOpenPdfInstead: 'Open downloaded PDF',
+    urlPreviewTruncated: 'Extract truncated — more text is available.',
+    urlPreviewLoadMore: 'Load more',
     dismiss: 'Dismiss',
     openInNewTab: 'Open in new tab',
     toolViewPanel: 'View',
@@ -675,6 +677,8 @@ export const dict = {
     urlPreviewNoOpenAccessBody:
       '该出版商页面可能需付费，或抽取结果只剩参考文献。请在浏览器中打开，或在有 OA PDF 时使用 /papers download。',
     urlPreviewOpenPdfInstead: '打开已下载的 PDF',
+    urlPreviewTruncated: '正文已截断，还有后续内容。',
+    urlPreviewLoadMore: '加载更多',
     dismiss: '关闭',
     openInNewTab: '新窗口打开',
     toolViewPanel: '专项视图',

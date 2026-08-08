@@ -48,11 +48,22 @@ export type UrlPreviewPanelProps = {
 type ExtractState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'done'; title?: string; content: string }
+  | {
+      status: 'done';
+      title?: string;
+      content: string;
+      truncated?: boolean;
+      nextOffset?: number | null;
+    }
   | { status: 'error'; message: string }
   | { status: 'no-oa'; message: string };
 
 type PreviewMode = 'iframe' | 'extract' | 'auth';
+
+/** Align with chat-api HARD_MAX_CONTENT_CHARS / proxy clamp. */
+const PREVIEW_MAX_CHARS = 200_000;
+
+const TRUNCATED_MARKER_RE = /\n\n…\[truncated\]\s*$/;
 
 function initialPreviewMode(url: string, forceExtract: boolean): PreviewMode {
   if (isLikelyAuthGatedPreviewUrl(url) && !forceExtract) return 'auth';
@@ -63,11 +74,22 @@ function initialPreviewMode(url: string, forceExtract: boolean): PreviewMode {
 async function fetchWebReadExtract(
   url: string,
   signal?: AbortSignal,
-): Promise<{ title?: string; content: string; quality?: string }> {
+  opts?: { startIndex?: number },
+): Promise<{
+  title?: string;
+  content: string;
+  quality?: string;
+  truncated?: boolean;
+  nextOffset?: number | null;
+}> {
+  const body: Record<string, unknown> = { url, maxChars: PREVIEW_MAX_CHARS };
+  if (opts?.startIndex != null && opts.startIndex > 0) {
+    body.startIndex = Math.floor(opts.startIndex);
+  }
   const res = await fetch('/api/web-read', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, maxChars: 80_000 }),
+    body: JSON.stringify(body),
     signal,
   });
   const data = (await res.json().catch(() => ({}))) as {
@@ -76,6 +98,8 @@ async function fetchWebReadExtract(
     title?: string | null;
     content?: string;
     quality?: string;
+    truncated?: boolean;
+    nextOffset?: number | null;
   };
   if (!res.ok) {
     throw new Error(String(data.error || data.message || `HTTP ${res.status}`));
@@ -88,6 +112,11 @@ async function fetchWebReadExtract(
     title: data.title ? String(data.title) : undefined,
     content,
     quality: data.quality ? String(data.quality) : undefined,
+    truncated: Boolean(data.truncated),
+    nextOffset:
+      data.nextOffset == null || !Number.isFinite(Number(data.nextOffset))
+        ? null
+        : Number(data.nextOffset),
   };
 }
 
@@ -145,6 +174,7 @@ export function UrlPreviewPanel({
   urlRef.current = url;
   const degradeHandledRef = useRef(false);
   const [extractRetryNonce, setExtractRetryNonce] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const clearReProbeTimer = () => {
     if (reProbeTimerRef.current != null) {
@@ -167,6 +197,7 @@ export function UrlPreviewPanel({
     setPrefetchReady({ status: 'idle' });
     setSettleFired(false);
     setEmbedNotice(false);
+    setLoadingMore(false);
     degradeHandledRef.current = false;
     setExtractRetryNonce(0);
     return () => clearReProbeTimer();
@@ -219,11 +250,15 @@ export function UrlPreviewPanel({
           status: 'done',
           title: result.title,
           content: result.content,
+          truncated: result.truncated,
+          nextOffset: result.nextOffset,
         };
         setPrefetchReady({
           status: 'done',
           title: result.title,
           content: result.content,
+          truncated: result.truncated,
+          nextOffset: result.nextOffset,
         });
         if (result.title) setDisplayTitle((prev) => prev || result.title || '');
       })
@@ -241,11 +276,18 @@ export function UrlPreviewPanel({
   // Load extract when in extract mode. Paper-like URLs try OA PDF download first.
   useEffect(() => {
     if (!open || !url || mode !== 'extract') return;
-    const applyDone = (result: { title?: string; content: string }) => {
+    const applyDone = (result: {
+      title?: string;
+      content: string;
+      truncated?: boolean;
+      nextOffset?: number | null;
+    }) => {
       const next: ExtractState = {
         status: 'done',
         title: result.title,
         content: result.content,
+        truncated: result.truncated,
+        nextOffset: result.nextOffset,
       };
       prefetchRef.current = next;
       setPrefetchReady(next);
@@ -391,6 +433,41 @@ export function UrlPreviewPanel({
         : '',
     [extract],
   );
+
+  const loadMoreExtract = async () => {
+    if (extract.status !== 'done' || !extract.truncated || extract.nextOffset == null) {
+      return;
+    }
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const more = await fetchWebReadExtract(url, undefined, {
+        startIndex: extract.nextOffset,
+      });
+      const prior = extract.content.replace(TRUNCATED_MARKER_RE, '').trimEnd();
+      const chunk = more.content.replace(TRUNCATED_MARKER_RE, '').trim();
+      const merged = chunk ? `${prior}\n\n${chunk}` : prior;
+      const next: ExtractState = {
+        status: 'done',
+        title: extract.title || more.title,
+        content: more.truncated ? `${merged}\n\n…[truncated]` : merged,
+        truncated: Boolean(more.truncated),
+        nextOffset: more.nextOffset,
+      };
+      prefetchRef.current = next;
+      setPrefetchReady(next);
+      setExtract(next);
+    } catch (err) {
+      // Keep existing body; surface a soft failure via title bar is overkill —
+      // leave truncated state so the user can retry Load more.
+      console.warn(
+        '[UrlPreview] load more failed',
+        err instanceof Error ? err.message : err,
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -655,6 +732,27 @@ export function UrlPreviewPanel({
                         : undefined
                     }
                   />
+                  {extract.status === 'done' &&
+                  extract.truncated &&
+                  extract.nextOffset != null ? (
+                    <div className="mt-4 flex flex-col items-center gap-2 border-t border-stone-200/80 pt-4 dark:border-stone-800">
+                      <p className="text-[11px] text-stone-400 dark:text-stone-500">
+                        {t('urlPreviewTruncated')}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-lg"
+                        disabled={loadingMore}
+                        onClick={() => void loadMoreExtract()}
+                      >
+                        {loadingMore ? (
+                          <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        ) : null}
+                        {t('urlPreviewLoadMore')}
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

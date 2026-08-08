@@ -442,9 +442,8 @@ export function formatLiteratureMarkdown(
     '',
   ];
   results.forEach((hit, i) => {
-    // Shape: one list item with markdown hard breaks (two trailing spaces) so
-    // title / meta / each slash command stack vertically without a blank-line
-    // paragraph gap (AnswerMarkdown `<p className="mb-4">`).
+    // Shape: one list item with markdown hard breaks between title / meta /
+    // (optional abstract) / commands — commands stay on one ·-joined line.
     const blocks: string[] = [
       `[${hit.title || hit.url}](${hit.url || hit.pdfUrl || '#'})`,
     ];
@@ -482,17 +481,19 @@ export function formatLiteratureMarkdown(
 
     if (kind === 'papers') {
       const actionId = resolvePaperActionId(hit);
+      const cmds: string[] = [];
       if (actionId) {
-        blocks.push(`\`${formatPaperActionCommand('details', actionId)}\``);
-        blocks.push(`\`${formatPaperActionCommand('citations', actionId)}\``);
-        blocks.push(`\`${formatPaperActionCommand('references', actionId)}\``);
+        cmds.push(`\`${formatPaperActionCommand('details', actionId)}\``);
+        cmds.push(`\`${formatPaperActionCommand('citations', actionId)}\``);
+        cmds.push(`\`${formatPaperActionCommand('references', actionId)}\``);
       }
       const dlId = resolvePaperDownloadIdentifier(hit);
       if (dlId && isValidPaperDownloadIdentifier(dlId)) {
-        blocks.push(`\`${formatPaperDownloadCommand(dlId)}\``);
+        cmds.push(`\`${formatPaperDownloadCommand(dlId)}\``);
       } else if (hit.pdfUrl) {
-        blocks.push(`PDF: [Open PDF](${hit.pdfUrl})`);
+        cmds.push(`PDF: [Open PDF](${hit.pdfUrl})`);
       }
+      if (cmds.length) blocks.push(cmds.join(' · '));
     }
 
     if (kind === 'books') {

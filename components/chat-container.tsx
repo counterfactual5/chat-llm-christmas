@@ -107,6 +107,11 @@ import {
   downloadGeneratedFile,
   downloadGeneratedImage,
 } from '@/lib/chat/composer/download';
+import {
+  isEphemeralPaperPreviewId,
+  paperIdentifierFromContentUrl,
+  requestPaperDownload,
+} from '@/lib/chat/turn/literature-search';
 import { downloadTextContent } from '@/lib/files/download';
 import {
   normalizeSameLineFences,
@@ -3086,7 +3091,31 @@ export default function ChatContainer() {
                       jumpToPreviewMessage(slot.sessionId, slot.entry.messageId);
                     }}
                     onDownload={() => {
-                      void downloadGeneratedFile(slot.entry);
+                      void (async () => {
+                        const entry = slot.entry;
+                        if (isEphemeralPaperPreviewId(entry.id)) {
+                          const identifier =
+                            paperIdentifierFromContentUrl(entry.url) ||
+                            decodeURIComponent(
+                              entry.id.slice('paper-preview:'.length),
+                            );
+                          if (!identifier) return;
+                          const dl = await requestPaperDownload(identifier);
+                          if (!dl.ok) return;
+                          openFilePreview({
+                            messageId: entry.messageId,
+                            fileIndex: entry.fileIndex,
+                            id: dl.fileId,
+                            name: dl.filename || entry.name,
+                            mimeType: 'application/pdf',
+                            size: dl.bytes || 0,
+                            url: `/api/files/${encodeURIComponent(dl.fileId)}`,
+                            createdAt: Date.now(),
+                          });
+                          return;
+                        }
+                        await downloadGeneratedFile(entry);
+                      })();
                     }}
                   />
                 );

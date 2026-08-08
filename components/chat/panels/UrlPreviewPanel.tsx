@@ -421,53 +421,61 @@ export function UrlPreviewPanel({
         if (isLikelyBookPreviewUrl(url) && onOpenDownloadedFileRef.current) {
           const resolved = await requestBookResolve(url, { signal: ac.signal });
           if (ac.signal.aborted) return;
-          if (resolved.ok) {
-            const probe = await fetch(literatureContentUrl('book', url), {
-              method: 'GET',
-              signal: ac.signal,
-              credentials: 'same-origin',
-            });
-            if (ac.signal.aborted) return;
-            const ct = (probe.headers.get('content-type') || '').toLowerCase();
-            const looksBook =
-              probe.ok &&
-              (ct.includes('pdf') ||
-                ct.includes('epub') ||
-                ct.includes('djvu') ||
-                ct.includes('text/plain') ||
-                ct.includes('octet-stream'));
-            if (looksBook) {
-              void probe.body?.cancel?.();
-              const mime =
-                ct.includes('pdf')
-                  ? 'application/pdf'
-                  : ct.includes('epub')
-                    ? 'application/epub+zip'
-                    : ct.includes('djvu')
-                      ? 'image/vnd.djvu'
-                      : ct.includes('text/plain')
-                        ? 'text/plain'
-                        : undefined;
-              onOpenDownloadedFileRef.current(
-                ephemeralPreviewEntry({
-                  kind: 'book',
-                  identifier: url,
-                  title: resolved.title || initialTitle,
-                  filename: resolved.filename,
-                  mimeType: mime,
-                }),
-              );
-              return;
-            }
-            const errBody = await probe.json().catch(() => ({} as { error?: string; message?: string }));
+          if (!resolved.ok) {
+            // Libgen/IA landing pages are fat HTML junk — CTA, never extract.
             applyThinOrError(
               friendlyPaperPreviewMessage(
-                String(errBody.error || errBody.message || ''),
-                tRef.current('urlPreviewNoOpenAccessBody'),
+                resolved.error || '',
+                tRef.current('urlPreviewNoBookBody'),
               ),
             );
             return;
           }
+          const probe = await fetch(literatureContentUrl('book', url), {
+            method: 'GET',
+            signal: ac.signal,
+            credentials: 'same-origin',
+          });
+          if (ac.signal.aborted) return;
+          const ct = (probe.headers.get('content-type') || '').toLowerCase();
+          const looksBook =
+            probe.ok &&
+            (ct.includes('pdf') ||
+              ct.includes('epub') ||
+              ct.includes('djvu') ||
+              ct.includes('text/plain') ||
+              ct.includes('octet-stream'));
+          if (looksBook) {
+            void probe.body?.cancel?.();
+            const mime =
+              ct.includes('pdf')
+                ? 'application/pdf'
+                : ct.includes('epub')
+                  ? 'application/epub+zip'
+                  : ct.includes('djvu')
+                    ? 'image/vnd.djvu'
+                    : ct.includes('text/plain')
+                      ? 'text/plain'
+                      : undefined;
+            onOpenDownloadedFileRef.current(
+              ephemeralPreviewEntry({
+                kind: 'book',
+                identifier: url,
+                title: resolved.title || initialTitle,
+                filename: resolved.filename,
+                mimeType: mime,
+              }),
+            );
+            return;
+          }
+          const errBody = await probe.json().catch(() => ({} as { error?: string; message?: string }));
+          applyThinOrError(
+            friendlyPaperPreviewMessage(
+              String(errBody.error || errBody.message || ''),
+              tRef.current('urlPreviewNoBookBody'),
+            ),
+          );
+          return;
         }
 
         const result = await fetchWebReadExtract(url, ac.signal);
@@ -486,7 +494,9 @@ export function UrlPreviewPanel({
           applyThinOrError(
             friendlyPaperPreviewMessage(
               err instanceof Error ? err.message : '',
-              tRef.current('urlPreviewNoOpenAccessBody'),
+              isLikelyBookPreviewUrl(url)
+                ? tRef.current('urlPreviewNoBookBody')
+                : tRef.current('urlPreviewNoOpenAccessBody'),
             ),
           );
           return;

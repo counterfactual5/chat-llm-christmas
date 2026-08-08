@@ -216,8 +216,8 @@ export function isLikelyPaperPreviewUrl(raw: string): boolean {
 }
 
 /**
- * True when URL Preview should try literature book resolve (IA / Gutenberg)
- * before trusting HTML extract of the landing page.
+ * True when URL Preview should try literature book resolve (IA / Gutenberg /
+ * Library Genesis) before trusting HTML extract of the landing page.
  */
 export function isLikelyBookPreviewUrl(raw: string): boolean {
   try {
@@ -226,6 +226,21 @@ export function isLikelyBookPreviewUrl(raw: string): boolean {
     if (/archive\.org\/(?:details|download)\//i.test(u.href)) return true;
     if (/gutenberg\.org\/(?:ebooks|files)\/\d+/i.test(u.href)) return true;
     if (/\.(?:epub|djvu)(?:\?|$)/i.test(u.pathname)) return true;
+    // Libgen ads/get landing pages are HTML shells — never trust extract.
+    const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+    if (
+      /(^|\.)libgen\.(li|rs|is|st|gs|lc|pm|vg)$/i.test(host) ||
+      host === 'library.lol' ||
+      host.endsWith('.library.lol')
+    ) {
+      return true;
+    }
+    if (
+      /(?:ads|get|file)\.php/i.test(u.pathname) &&
+      /(?:[?&]md5=|\/md5\/)[a-f0-9]{32}\b/i.test(u.href)
+    ) {
+      return true;
+    }
     return false;
   } catch {
     return false;

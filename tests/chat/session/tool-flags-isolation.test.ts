@@ -123,7 +123,8 @@ describe('per-session tool / MCP flag isolation', () => {
       }),
       session('model-draft', { messages: [], model: 'gpt-test' }),
     ]);
-    expect(kept.map((s) => s.id).sort()).toEqual(['mcp-draft', 'model-draft']);
+    // Model alone must not qualify — empty drafts stamp a default in memory only.
+    expect(kept.map((s) => s.id)).toEqual(['mcp-draft']);
   });
 
   it('set model on A, change B, switch back → A unchanged', () => {

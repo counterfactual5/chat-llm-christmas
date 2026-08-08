@@ -26,6 +26,36 @@ describe('chat sessions', () => {
     expect(merged.find((item) => item.id === 'shared')?.messages[0]?.content).toBe('cloud');
   });
 
+  it('preserves local model when a newer cloud row omits it', () => {
+    const local: ChatSession = {
+      ...session('shared', 10, 'local'),
+      model: 'local-model',
+      mcpIds: ['paper_search'],
+    };
+    const cloud: ChatSession = {
+      ...session('shared', 20, 'cloud'),
+      // legacy peer — no model / mcp
+    };
+    const merged = mergeSyncedSessions([local], [cloud]);
+    const shared = merged.find((item) => item.id === 'shared');
+    expect(shared?.messages[0]?.content).toBe('cloud');
+    expect(shared?.model).toBe('local-model');
+    expect(shared?.mcpIds).toEqual(['paper_search']);
+  });
+
+  it('patchSessionModel can remap without bumping updatedAt', async () => {
+    const { patchSessionModel } = await import('@/lib/chat/session/tool-flags');
+    const before: ChatSession = {
+      ...session('A', 100),
+      model: 'dead-model',
+    };
+    const next = patchSessionModel([before], 'A', 'alive-model', {
+      touchUpdatedAt: false,
+    });
+    expect(next[0]?.model).toBe('alive-model');
+    expect(next[0]?.updatedAt).toBe(100);
+  });
+
   it('normalizes an interrupted restored assistant message', () => {
     const restored = normalizeRestoredSession({
       ...session('interrupted', 1),

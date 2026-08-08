@@ -416,18 +416,32 @@ export default function ChatContainer() {
   const fetchModels = useCallback(async (authed: boolean) => {
     const applyResolved = (models: ModelOption[]) => {
       const sid = activeSessionIdRef.current;
-      const sessionModel = sessionsRef.current.find((s) => s.id === sid)?.model || '';
-      const resolved = resolveSelectedModelId(
-        models,
-        sessionModel || defaultModelPrefRef.current,
-      );
-      if (resolved) persistDefaultModelPref(resolved);
-      if (sid && sessionModel && !models.some((m) => m.id === sessionModel) && resolved) {
-        setSessions((prev) => {
-          const next = patchSessionModel(prev, sid, resolved);
-          if (next !== prev) sessionsRef.current = next;
-          return next;
-        });
+      const sessionModel =
+        sessionsRef.current.find((s) => s.id === sid)?.model || '';
+      const preferredDefault = defaultModelPrefRef.current;
+      // Only rewrite the new-chat LS default when it is missing/invalid in catalog —
+      // never promote the active session's model into the default on every fetch.
+      const resolvedDefault = resolveSelectedModelId(models, preferredDefault);
+      if (resolvedDefault && resolvedDefault !== preferredDefault) {
+        persistDefaultModelPref(resolvedDefault);
+      } else if (!preferredDefault && resolvedDefault) {
+        persistDefaultModelPref(resolvedDefault);
+      }
+      // Dead session model: remap without bumping updatedAt (avoid LWW vs cloud).
+      if (sid && sessionModel && !models.some((m) => m.id === sessionModel)) {
+        const remapped = resolveSelectedModelId(
+          models,
+          preferredDefault || resolvedDefault,
+        );
+        if (remapped) {
+          setSessions((prev) => {
+            const next = patchSessionModel(prev, sid, remapped, {
+              touchUpdatedAt: false,
+            });
+            if (next !== prev) sessionsRef.current = next;
+            return next;
+          });
+        }
       }
     };
 

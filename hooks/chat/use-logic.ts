@@ -24,6 +24,7 @@ import { SKILL_CREATOR_ID } from '@/lib/skills/creator';
 import { useLocale } from '@/lib/i18n';
 import { formatQuotedMessage, type QuotedSelection } from '@/lib/chat/message/quotes';
 import { toApiMessages, ingestedToMessageImages } from '@/lib/chat/message/api-messages';
+import { getModelSpec } from '@/lib/models/specs';
 import { ensureFileExtractSidecar } from '@/lib/files/ensure-file-extract';
 import { isImageAttachment } from '@/components/files/AttachmentImageThumb';
 import { stripUserMessageArtifactsForDisplay } from '@/lib/tools/image-understand/persist';
@@ -365,14 +366,17 @@ export function useChatLogic(props: UseChatLogicProps) {
     }, 50);
   };
 
-  const runCompact = async (history: Message[]): Promise<Message[] | null> => {
+  const runCompact = async (
+    history: Message[],
+    opts?: { model?: string; vision?: boolean },
+  ): Promise<Message[] | null> => {
     setIsCompacting(true);
     setCompactNotice('Compacting earlier conversation…');
     try {
       const result = await compactConversationHistory({
         history,
-        model: selectedModel,
-        vision: selectedSpec.vision,
+        model: opts?.model || selectedModel,
+        vision: opts?.vision ?? selectedSpec.vision,
       });
       setCompactNotice(result.notice);
       if (result.messages) window.setTimeout(() => setCompactNotice(''), 4000);
@@ -380,6 +384,28 @@ export function useChatLogic(props: UseChatLogicProps) {
     } finally {
       setIsCompacting(false);
     }
+  };
+
+  /** Model / vision / usable window for the session that owns this turn (not always active UI). */
+  const resolveTurnModel = (sessionId: string) => {
+    const turnModelId =
+      sessionsRef.current.find((s) => s.id === sessionId)?.model || selectedModel;
+    if (sessionId === activeSessionIdRef.current) {
+      return {
+        model: turnModelId,
+        vision: selectedSpec.vision,
+        usableLimit,
+      };
+    }
+    const catalog = getModelSpec(turnModelId);
+    const contextLimit = catalog.context ?? null;
+    const outputReserve = Math.min(catalog.maxOutput || 8192, 8192);
+    return {
+      model: turnModelId,
+      vision: Boolean(catalog.vision),
+      usableLimit:
+        contextLimit != null ? Math.max(contextLimit - outputReserve, 1) : null,
+    };
   };
 
   const generateImage = async (
@@ -888,6 +914,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     },
   ): Promise<boolean> => {
     const sessionId = targetSessionId || activeSessionId;
+    const turn = resolveTurnModel(sessionId);
     const textToSend = overrideInput || (sessionId === activeSessionId ? input : '');
     const imagePrompt = parseImageCommand(textToSend);
     if (imagePrompt) {
@@ -949,7 +976,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       resendAttachments: opts?.resendAttachments,
       baseMessagesOverride,
       isActiveSession: sessionId === activeSessionId,
-      vision: selectedSpec.vision,
+      vision: turn.vision,
       zhipuVisionOn,
       isAccountBound,
       isLoading: isSessionLoading(sessionId),
@@ -1043,10 +1070,13 @@ export function useChatLogic(props: UseChatLogicProps) {
       updateSession(sessionId, historySnapshot.messages, historySnapshot.title);
     };
 
-    if (usableLimit != null) {
+    if (turn.usableLimit != null) {
       let projected = projectTokens(baseMessages);
-      if (shouldCompactBeforeSend(projected, usableLimit)) {
-        const compacted = await runCompact(baseMessages);
+      if (shouldCompactBeforeSend(projected, turn.usableLimit)) {
+        const compacted = await runCompact(baseMessages, {
+          model: turn.model,
+          vision: turn.vision,
+        });
         if (!compacted) {
           restoreHistoryIfNeeded();
           setAttachError('Context is full. Compact failed — open a new chat or remove attachments.');
@@ -1059,18 +1089,18 @@ export function useChatLogic(props: UseChatLogicProps) {
         // Measured usage is stale after rewrite — floor without it.
         onHistoryTruncated?.();
         projected = projectTokens(baseMessages, null);
-        if (exceedsUsableWindow(projected, usableLimit)) {
+        if (exceedsUsableWindow(projected, turn.usableLimit)) {
           restoreHistoryIfNeeded();
           setAttachError(
-            `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
+            `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${turn.usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
           );
           if (!opts?.alreadyLoading) endLoading(sessionId);
           return false;
         }
-      } else if (exceedsUsableWindow(projected, usableLimit)) {
+      } else if (exceedsUsableWindow(projected, turn.usableLimit)) {
         restoreHistoryIfNeeded();
         setAttachError(
-          `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
+          `Context (~${projected.toLocaleString()}) exceeds this model's usable window (${turn.usableLimit.toLocaleString()}). Remove attachments, compact, or switch to a larger-window model.`,
         );
         if (!opts?.alreadyLoading) endLoading(sessionId);
         return false;
@@ -1100,7 +1130,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     try {
       await streamChatResponse(
         sessionId,
-        toApiMessages(newMessages, { vision: selectedSpec.vision }),
+        toApiMessages(newMessages, { vision: turn.vision }),
         assistantMessage.id,
         controller.signal,
         '',
@@ -1117,6 +1147,7 @@ export function useChatLogic(props: UseChatLogicProps) {
 
   const resumeIncompleteReply = async (opts?: { force?: boolean }) => {
     const sessionId = activeSessionIdRef.current;
+    const turn = resolveTurnModel(sessionId);
     const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
     const last = sessionMessages[sessionMessages.length - 1];
     const gate = gateResumeIncompleteReply(last, {
@@ -1154,7 +1185,7 @@ export function useChatLogic(props: UseChatLogicProps) {
           sessionId,
           toApiMessages(
             sessionMessages.filter((m) => m.id !== last.id),
-            { vision: selectedSpec.vision },
+            { vision: turn.vision },
           ),
           last.id,
           controller.signal,
@@ -1171,7 +1202,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     }
 
     const apiMessages: ReturnType<typeof toApiMessages> = [
-      ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
+      ...toApiMessages(sessionMessages, { vision: turn.vision }),
       {
         role: 'user' as const,
         content: plan.extraUserContent,
@@ -1216,6 +1247,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     baseMessages?: Message[];
   }) => {
     const sessionId = activeSessionIdRef.current;
+    const turn = resolveTurnModel(sessionId);
     if (!isAccountBound) {
       openLoginModal();
       return;
@@ -1255,7 +1287,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     }
 
     const apiMessages: ReturnType<typeof toApiMessages> = [
-      ...toApiMessages(sessionMessages, { vision: selectedSpec.vision }),
+      ...toApiMessages(sessionMessages, { vision: turn.vision }),
       {
         role: 'user' as const,
         content: buildClaimReviewUserPrompt(focus),
@@ -1287,6 +1319,7 @@ export function useChatLogic(props: UseChatLogicProps) {
   /** Drop the Error: assistant bubble and re-run the same user turn. */
   const retryFailedReply = async () => {
     const sessionId = activeSessionIdRef.current;
+    const turn = resolveTurnModel(sessionId);
     const sessionMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages || [];
     const last = sessionMessages[sessionMessages.length - 1];
     if (isSessionLoading(sessionId) || !isAssistantError(last)) return;
@@ -1369,7 +1402,7 @@ export function useChatLogic(props: UseChatLogicProps) {
     try {
       await streamChatResponse(
         sessionId,
-        toApiMessages(prior, { vision: selectedSpec.vision }),
+        toApiMessages(prior, { vision: turn.vision }),
         assistantMessage.id,
         controller.signal,
       );
@@ -1429,7 +1462,7 @@ export function useChatLogic(props: UseChatLogicProps) {
       setAttachError(t('uploadFailedRetry'));
       return;
     }
-    if (resendImages.length > 0 && !selectedSpec.vision && !zhipuVisionOn) {
+    if (resendImages.length > 0 && !resolveTurnModel(activeSessionId).vision && !zhipuVisionOn) {
       setAttachError(t('imagesNeedVision'));
       return;
     }

@@ -7,14 +7,16 @@ import { collapseAttachedFileBodiesInMessages } from '@/lib/files/attached-file-
 /** localStorage key recording which account owns the cached chats (anti cross-account bleed). */
 export const CHATS_OWNER_KEY = 'llm_christmas_chats_owner';
 
-/** Sessions with messages or per-chat MCP/Skills/model — worth keeping in local/cloud storage. */
+/** Sessions with messages or per-chat MCP/Skills — worth keeping in local/cloud storage.
+ * Model alone does not qualify: empty drafts stamp a default model in memory, but
+ * should not enter sidebar/cloud until the first message (or MCP/skills toggle).
+ */
 export function sessionsWorthPersisting(sessions: ChatSession[]): ChatSession[] {
   return sessions.filter(
     (session) =>
       session.messages.length > 0 ||
       (session.mcpIds && session.mcpIds.length > 0) ||
-      (session.skillIds && session.skillIds.length > 0) ||
-      Boolean(session.model),
+      (session.skillIds && session.skillIds.length > 0),
   );
 }
 
@@ -56,7 +58,10 @@ export function normalizeRestoredSession(session: ChatSession): ChatSession {
   };
 }
 
-/** Merge local + cloud sessions per id, keeping the newer updatedAt (LWW). */
+/** Merge local + cloud sessions per id, keeping the newer updatedAt (LWW).
+ * When the winner omits sticky per-chat prefs (model / mcp / skills / autoReview),
+ * keep the loser's values so a legacy peer cannot wipe them.
+ */
 export function mergeSyncedSessions(local: ChatSession[], cloud: ChatSession[]): ChatSession[] {
   const byId = new Map<string, ChatSession>();
   for (const s of local) byId.set(s.id, s);
@@ -64,9 +69,26 @@ export function mergeSyncedSessions(local: ChatSession[], cloud: ChatSession[]):
     if (!raw?.id) continue;
     const remote = normalizeRestoredSession(raw);
     const existing = byId.get(remote.id);
-    if (!existing || Number(remote.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+    if (!existing) {
       byId.set(remote.id, remote);
+      continue;
     }
+    const remoteWins =
+      Number(remote.updatedAt || 0) >= Number(existing.updatedAt || 0);
+    const winner = remoteWins ? remote : existing;
+    const loser = remoteWins ? existing : remote;
+    byId.set(remote.id, {
+      ...winner,
+      model: winner.model || loser.model,
+      mcpIds:
+        winner.mcpIds && winner.mcpIds.length > 0 ? winner.mcpIds : loser.mcpIds,
+      skillIds:
+        winner.skillIds && winner.skillIds.length > 0
+          ? winner.skillIds
+          : loser.skillIds,
+      autoReview:
+        winner.autoReview !== undefined ? winner.autoReview : loser.autoReview,
+    });
   }
   return [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }

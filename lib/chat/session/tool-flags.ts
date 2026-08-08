@@ -79,16 +79,20 @@ export function patchSessionModel(
   sessions: ChatSession[],
   sessionId: string,
   model: string,
+  opts?: { touchUpdatedAt?: boolean },
 ): ChatSession[] {
   if (!sessionId) return sessions;
   const nextModel = String(model || '').trim();
   if (!nextModel) return sessions;
+  const touchUpdatedAt = opts?.touchUpdatedAt !== false;
   let changed = false;
   const next = sessions.map((s) => {
     if (s.id !== sessionId) return s;
     if (s.model === nextModel) return s;
     changed = true;
-    return { ...s, model: nextModel, updatedAt: Date.now() };
+    return touchUpdatedAt
+      ? { ...s, model: nextModel, updatedAt: Date.now() }
+      : { ...s, model: nextModel };
   });
   return changed ? next : sessions;
 }

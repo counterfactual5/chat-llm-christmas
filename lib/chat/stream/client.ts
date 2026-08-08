@@ -666,6 +666,9 @@ export async function streamChatResponse(
             size: typeof raw.size === 'number' ? raw.size : 0,
             url: String(raw.url || ''),
             createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+            ...(typeof raw.contentRev === 'number'
+              ? { contentRev: raw.contentRev }
+              : {}),
           };
           deps.setSessions((prev) =>
             withUpdatedAssistantGeneratedFile(prev, sessionId, assistantId, file),
@@ -674,6 +677,11 @@ export async function streamChatResponse(
             void import('@/lib/files/direct-content').then(
               ({ invalidatePreviewContentCache }) => {
                 invalidatePreviewContentCache(file.id);
+              },
+            );
+            void import('@/lib/files/ensure-file-extract').then(
+              ({ invalidateSharedFileExtractWait }) => {
+                invalidateSharedFileExtractWait(file.id);
               },
             );
           }

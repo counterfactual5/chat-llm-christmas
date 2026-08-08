@@ -403,6 +403,16 @@ export async function waitForSharedFileExtractSidecar(opts: {
   }
 }
 
+/** Abort and drop a shared extract wait so a later open refetches. */
+export function invalidateSharedFileExtractWait(fileId: string): void {
+  const id = String(fileId || '').trim();
+  if (!id) return;
+  const entry = sharedWaits.get(id);
+  if (!entry) return;
+  entry.controller.abort();
+  sharedWaits.delete(id);
+}
+
 /** Test-only: clear shared wait map between cases. */
 export function resetSharedFileExtractWaitsForTests(): void {
   for (const entry of sharedWaits.values()) {

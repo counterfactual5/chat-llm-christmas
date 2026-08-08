@@ -34,6 +34,7 @@ export type GeneratedFileEntry = {
   url: string;
   content?: string;
   createdAt: number;
+  contentRev?: number;
   /** Storage deleted from Files; kept as Output history. */
   unavailable?: boolean;
 };

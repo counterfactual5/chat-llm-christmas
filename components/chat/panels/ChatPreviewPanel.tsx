@@ -159,7 +159,7 @@ export function ChatPreviewPanel({
       cancelled = true;
       ac.abort();
     };
-  }, [file?.id, file?.url, needsAsyncLoad, needsExtractWait, sourceUrl, t]);
+  }, [file?.id, file?.url, file?.size, file?.contentRev, needsAsyncLoad, needsExtractWait, sourceUrl, t]);
 
   const resolved: FilePreviewPayload | null = (() => {
     if (!file || !previewable) return null;

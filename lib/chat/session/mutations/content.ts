@@ -27,6 +27,7 @@ export function withAppendedAssistantGeneratedFile(
       (content != null ? `local://${String(file.id || '').trim()}` : ''),
     ...(content != null ? { content } : {}),
     createdAt: typeof file.createdAt === 'number' ? file.createdAt : Date.now(),
+    ...(typeof file.contentRev === 'number' ? { contentRev: file.contentRev } : {}),
   };
   if (!entry.id || (!entry.url && content == null)) return sessions;
   return sessions.map((s) => {
@@ -89,6 +90,9 @@ export function withUpdatedAssistantGeneratedFile(
               url: String(file.url || f.url || '').trim() || f.url,
               createdAt:
                 typeof file.createdAt === 'number' ? file.createdAt : f.createdAt,
+              ...(typeof file.contentRev === 'number'
+                ? { contentRev: file.contentRev }
+                : {}),
             };
           }),
         };

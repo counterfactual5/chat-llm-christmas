@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify(payload),
       cache: 'no-store',
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(40_000),
     });
     const data = await upstream.json().catch(() => ({}));
     return Response.json(data, {

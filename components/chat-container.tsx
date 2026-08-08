@@ -242,22 +242,7 @@ export default function ChatContainer() {
     | { kind: 'url'; url: string; title?: string }
     | null;
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget>(null);
-  const openFilePreview = (entry: GeneratedFileEntry) => {
-    if (!activeSessionId) return;
-    setPreviewTarget({ kind: 'file', entry, sessionId: activeSessionId });
-    setIsPreviewPanelOpen(true);
-  };
-  const openViewPreview = (view: ToolViewPayload, messageId?: string) => {
-    if (!activeSessionId) return;
-    setPreviewTarget({ kind: 'view', view, messageId, sessionId: activeSessionId });
-    setIsPreviewPanelOpen(true);
-  };
-  const openUrlPreview = (rawUrl: string, title?: string) => {
-    const url = normalizePreviewHttpUrl(rawUrl);
-    if (!url) return;
-    setPreviewTarget({ kind: 'url', url, title: title?.trim() || undefined });
-    setIsPreviewPanelOpen(true);
-  };
+  // open* helpers are defined after activeSessionIdRef (stable useCallback).
   const [picturesExpanded, setPicturesExpanded] = useState(false);
   const [referenceExpanded, setReferenceExpanded] = useState(false);
   /** Per-source groups within Reference Material; all start collapsed. */
@@ -317,6 +302,25 @@ export default function ChatContainer() {
 
   sessionsRef.current = sessions;
   activeSessionIdRef.current = activeSessionId;
+
+  const openFilePreview = useCallback((entry: GeneratedFileEntry) => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId) return;
+    setPreviewTarget({ kind: 'file', entry, sessionId });
+    setIsPreviewPanelOpen(true);
+  }, []);
+  const openViewPreview = useCallback((view: ToolViewPayload, messageId?: string) => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId) return;
+    setPreviewTarget({ kind: 'view', view, messageId, sessionId });
+    setIsPreviewPanelOpen(true);
+  }, []);
+  const openUrlPreview = useCallback((rawUrl: string, title?: string) => {
+    const url = normalizePreviewHttpUrl(rawUrl);
+    if (!url) return;
+    setPreviewTarget({ kind: 'url', url, title: title?.trim() || undefined });
+    setIsPreviewPanelOpen(true);
+  }, []);
 
   const persistDefaultModelPref = useCallback((modelId: string) => {
     const next = String(modelId || '').trim();

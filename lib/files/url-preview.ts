@@ -158,3 +158,60 @@ export function shouldOpenLinkExternally(e: {
     e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1,
   );
 }
+
+/**
+ * Hosts / URL shapes that are academic papers (DOI, arXiv, OpenAlex, common
+ * publishers). Preview should prefer OA PDF resolve over HTML extract.
+ */
+const PAPER_PREVIEW_HOST_SUFFIXES = [
+  'doi.org',
+  'dx.doi.org',
+  'arxiv.org',
+  'openalex.org',
+  'semanticscholar.org',
+  'nature.com',
+  'sciencedirect.com',
+  'springer.com',
+  'link.springer.com',
+  'wiley.com',
+  'onlinelibrary.wiley.com',
+  'acm.org',
+  'ieee.org',
+  'ieeexplore.ieee.org',
+  'nih.gov',
+  'pubmed.ncbi.nlm.nih.gov',
+  'biorxiv.org',
+  'medrxiv.org',
+  'plos.org',
+  'frontiersin.org',
+  'mdpi.com',
+  'tandfonline.com',
+  'oup.com',
+  'academic.oup.com',
+  'bmj.com',
+  'cell.com',
+  'science.org',
+  'pnas.org',
+] as const;
+
+/**
+ * True when URL Preview should try literature OA PDF resolve before trusting
+ * HTML extract (paywalled publisher pages often only expose References).
+ */
+export function isLikelyPaperPreviewUrl(raw: string): boolean {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const path = `${u.pathname}${u.search}`;
+    if (/\/pdf(\?|$)/i.test(path) && /\.pdf(\?|$)/i.test(path)) return true;
+    if (/arxiv\.org\/(?:abs|pdf|html)\//i.test(u.href)) return true;
+    if (/openalex\.org\/W\d+/i.test(u.href)) return true;
+    if (/(?:dx\.)?doi\.org\//i.test(u.href)) return true;
+    return PAPER_PREVIEW_HOST_SUFFIXES.some((suffix) =>
+      hostMatchesSuffix(u.hostname, suffix),
+    );
+  } catch {
+    return false;
+  }
+}
+

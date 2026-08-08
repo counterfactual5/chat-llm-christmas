@@ -225,6 +225,11 @@ export const dict = {
     urlPreviewEmbedBlockedBody:
       'The site refuses to load inside other pages. Open it in a new tab, or retry text extraction.',
     urlPreviewRetryExtract: 'Retry text extract',
+    urlPreviewResolvingPaper: 'Looking for an open-access PDF…',
+    urlPreviewNoOpenAccessTitle: 'No open full text in preview',
+    urlPreviewNoOpenAccessBody:
+      'This publisher page is paywalled or only exposed references to our extractors. Open it in your browser, or use /papers download when an OA PDF id is available.',
+    urlPreviewOpenPdfInstead: 'Open downloaded PDF',
     dismiss: 'Dismiss',
     openInNewTab: 'Open in new tab',
     toolViewPanel: 'View',
@@ -665,6 +670,11 @@ export const dict = {
     urlPreviewEmbedBlockedBody:
       '该站点拒绝在其他页面内加载。你可以在新标签页打开，或重试正文抽取。',
     urlPreviewRetryExtract: '重试正文抽取',
+    urlPreviewResolvingPaper: '正在查找开放获取 PDF…',
+    urlPreviewNoOpenAccessTitle: '预览中没有开放全文',
+    urlPreviewNoOpenAccessBody:
+      '该出版商页面可能需付费，或抽取结果只剩参考文献。请在浏览器中打开，或在有 OA PDF 时使用 /papers download。',
+    urlPreviewOpenPdfInstead: '打开已下载的 PDF',
     dismiss: '关闭',
     openInNewTab: '新窗口打开',
     toolViewPanel: '专项视图',

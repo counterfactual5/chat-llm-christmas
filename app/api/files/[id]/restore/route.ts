@@ -61,6 +61,24 @@ export async function POST(req: NextRequest, { params }: Params) {
       { status: res.status >= 400 && res.status < 600 ? res.status : 502 },
     );
   }
+  try {
+    const parsed = JSON.parse(detail || '{}') as {
+      ok?: boolean;
+      extract_error?: string | null;
+    };
+    if (parsed.ok === false || parsed.extract_error) {
+      return Response.json(
+        {
+          error: parsed.extract_error || 'Restore extract rebuild failed',
+          ok: false,
+          extract_error: parsed.extract_error || null,
+        },
+        { status: 502 },
+      );
+    }
+  } catch {
+    /* forward raw body */
+  }
   return new Response(detail || JSON.stringify({ ok: true }), {
     status: 200,
     headers: {

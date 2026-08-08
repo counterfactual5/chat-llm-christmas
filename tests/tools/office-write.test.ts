@@ -35,6 +35,27 @@ describe('office_write parse', () => {
       parseOfficeWriteArgs(JSON.stringify({ file_id: 'file-x', ops })).error,
     ).toMatch(/at most/);
   });
+  it('rejects full_replace without confirm', () => {
+    expect(
+      parseOfficeWriteArgs(
+        JSON.stringify({
+          file_id: 'file-abc',
+          ops: [{ op: 'full_replace', content_base64: 'QQ==' }],
+        }),
+      ).error,
+    ).toMatch(/confirm_full_replace/);
+  });
+
+  it('accepts full_replace with confirm', () => {
+    const parsed = parseOfficeWriteArgs(
+      JSON.stringify({
+        file_id: 'file-abc',
+        confirm_full_replace: true,
+        ops: [{ op: 'full_replace', content_base64: 'QQ==' }],
+      }),
+    );
+    expect(parsed.error).toBeUndefined();
+  });
 });
 
 describe('office_rollback parse', () => {
@@ -67,5 +88,29 @@ describe('office_write execute', () => {
     const body = JSON.parse(out.content);
     expect(body.ok).toBe(false);
     expect(String(body.error)).toMatch(/connected account/i);
+  });
+
+  it('rejects file_id outside thread fileExtracts when present', async () => {
+    const tool = createOfficeWriteTool();
+    const send = vi.fn();
+    const out = await tool.execute(
+      {
+        callId: 'c2',
+        rawArguments: JSON.stringify({
+          file_id: 'file-other',
+          ops: [{ op: 'replace_text', find: 'a', replace: 'b' }],
+        }),
+        fallbackQuery: '',
+      },
+      {
+        userAsk: 'edit',
+        send,
+        credentials: { skillsApiKey: 'sk-user' },
+        fileExtracts: { 'file-known': { text: 'hello' } },
+      },
+    );
+    const body = JSON.parse(out.content);
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toMatch(/not in this thread/i);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activatePreviewTarget,
   emptyPreviewWorkspaceRegistry,
+  isOutputSourcedPreviewMessageId,
   mountedPreviewEntries,
 } from '@/lib/chat/preview-workspace-registry';
 
@@ -69,5 +70,23 @@ describe('preview-workspace-registry', () => {
     });
     reg = activatePreviewTarget(reg, null);
     expect(reg).toEqual(emptyPreviewWorkspaceRegistry());
+  });
+});
+
+describe('isOutputSourcedPreviewMessageId', () => {
+  it('treats real assistant message ids as Output-sourced', () => {
+    expect(
+      isOutputSourcedPreviewMessageId('msg_1', ['msg_0', 'msg_1']),
+    ).toBe(true);
+  });
+
+  it('does not clear workspace paper downloads missing from Output', () => {
+    expect(
+      isOutputSourcedPreviewMessageId('url-preview-paper', ['msg_1']),
+    ).toBe(false);
+  });
+
+  it('rejects empty message ids', () => {
+    expect(isOutputSourcedPreviewMessageId('', ['msg_1'])).toBe(false);
   });
 });

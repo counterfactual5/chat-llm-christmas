@@ -129,6 +129,7 @@ import {
   UrlPreviewPanel,
 } from '@/components/chat/panels/UrlPreviewPanel';
 import { usePreviewWorkspaceRegistry } from '@/hooks/chat/use-preview-workspace';
+import { isOutputSourcedPreviewMessageId } from '@/lib/chat/preview-workspace-registry';
 import { ChatModals } from '@/components/chat/overlays/ChatModals';
 import { ChatQuoteToolbar } from '@/components/chat/overlays/ChatQuoteToolbar';
 import type { ToolViewPayload } from '@/lib/tools/views/types';
@@ -2399,6 +2400,8 @@ export default function ChatContainer() {
   // Keep / drop the side-panel preview against the live Output file list:
   // deleted → clear; same id with updated content/name/size → refresh snapshot.
   // Skip when the preview belongs to another session (sticky across switches).
+  // Workspace-only opens (OA paper download, etc.) are not in Output history —
+  // do not treat "missing" as deleted or the panel snaps back to EmptyPaste.
   useEffect(() => {
     if (!previewTarget || previewTarget.kind !== 'file') return;
     if (previewTarget.sessionId !== activeSessionId) return;
@@ -2407,7 +2410,10 @@ export default function ChatContainer() {
       (f) => f.id === previewFileEntry.id && f.messageId === previewFileEntry.messageId,
     );
     if (!latest) {
-      setPreviewTarget(null);
+      const sessionMessageIds = messages.map((m) => m.id);
+      if (isOutputSourcedPreviewMessageId(previewFileEntry.messageId, sessionMessageIds)) {
+        setPreviewTarget(null);
+      }
       return;
     }
     if (
@@ -2423,7 +2429,7 @@ export default function ChatContainer() {
         sessionId: previewTarget.sessionId,
       });
     }
-  }, [activeSessionId, generatedFileHistory, previewTarget]);
+  }, [activeSessionId, generatedFileHistory, messages, previewTarget]);
 
   // Keep specialized views in sync with message.views (or clear if removed).
   // Skip when the preview belongs to another session (sticky across switches).

@@ -873,8 +873,9 @@ export function ChatMessageList(props: ChatMessageListProps) {
                   // Hard gate: never spin unless this session is actually
                   // streaming. Incomplete alone (e.g. after refresh) is not live.
                   const segLive = Boolean(seg.live && isActiveLoading);
-                  // While the stream is idle (replyWait), freeze Thought chrome;
-                  // Waiting is shown as a Process row instead of a bare spinner.
+                  // While the stream is idle (replyWait), freeze Thought chrome.
+                  // Waiting text is only for a true empty stream (below) — never
+                  // beside existing Thought/tools (that read as truncated CoT).
                   const thoughtStreaming = segLive && !replyWait;
                   const lastIdx = seg.steps.length - 1;
                   const rendered = seg.steps
@@ -892,7 +893,8 @@ export function ChatMessageList(props: ChatMessageListProps) {
                     )
                     .filter(Boolean);
 
-                  const showWaitingRow = segLive && (replyWait || rendered.length === 0);
+                  // Placeholder only when there is nothing to show yet.
+                  const showWaitingRow = segLive && rendered.length === 0;
                   // Nothing yet and not live — skip.
                   if (rendered.length === 0 && !showWaitingRow) {
                     return null;

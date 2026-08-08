@@ -175,6 +175,13 @@ export function UrlPreviewPanel({
   const degradeHandledRef = useRef(false);
   const [extractRetryNonce, setExtractRetryNonce] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Parent often passes inline callbacks (e.g. openFilePreview). Keep them off
+  // effect deps — otherwise every ChatContainer re-render (session switch,
+  // streaming, …) aborts an in-flight extract and the Preview looks "cut off".
+  const onOpenDownloadedFileRef = useRef(onOpenDownloadedFile);
+  onOpenDownloadedFileRef.current = onOpenDownloadedFile;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const clearReProbeTimer = () => {
     if (reProbeTimerRef.current != null) {
@@ -266,14 +273,17 @@ export function UrlPreviewPanel({
         if (ac.signal.aborted) return;
         prefetchRef.current = {
           status: 'error',
-          message: err instanceof Error ? err.message : t('requestFailed'),
+          message:
+            err instanceof Error ? err.message : tRef.current('requestFailed'),
         };
         setPrefetchReady(prefetchRef.current);
       });
     return () => ac.abort();
-  }, [open, url, mode, t, extractRetryNonce]);
+  }, [open, url, mode, extractRetryNonce]);
 
   // Load extract when in extract mode. Paper-like URLs try OA PDF download first.
+  // Abort only when the page target / mode / open flag changes — not when the
+  // parent re-renders with a new callback identity (conversation switch).
   useEffect(() => {
     if (!open || !url || mode !== 'extract') return;
     const applyDone = (result: {
@@ -315,11 +325,11 @@ export function UrlPreviewPanel({
 
     void (async () => {
       try {
-        if (isLikelyPaperPreviewUrl(url) && onOpenDownloadedFile) {
+        if (isLikelyPaperPreviewUrl(url) && onOpenDownloadedFileRef.current) {
           const dl = await requestPaperDownload(url);
           if (ac.signal.aborted) return;
           if (dl.ok) {
-            onOpenDownloadedFile(fileEntryFromPaperDownload(dl));
+            onOpenDownloadedFileRef.current(fileEntryFromPaperDownload(dl));
             return;
           }
           // Fall through to HTML extract; thin shells become CTA.
@@ -331,7 +341,7 @@ export function UrlPreviewPanel({
           isLikelyPaperPreviewUrl(url) &&
           (result.quality === 'thin' || !result.content.trim())
         ) {
-          applyThinOrError(t('urlPreviewNoOpenAccessBody'));
+          applyThinOrError(tRef.current('urlPreviewNoOpenAccessBody'));
           return;
         }
         applyDone(result);
@@ -339,13 +349,16 @@ export function UrlPreviewPanel({
         if (ac.signal.aborted) return;
         if (isLikelyPaperPreviewUrl(url)) {
           applyThinOrError(
-            err instanceof Error ? err.message : t('urlPreviewNoOpenAccessBody'),
+            err instanceof Error
+              ? err.message
+              : tRef.current('urlPreviewNoOpenAccessBody'),
           );
           return;
         }
         const next: ExtractState = {
           status: 'error',
-          message: err instanceof Error ? err.message : t('requestFailed'),
+          message:
+            err instanceof Error ? err.message : tRef.current('requestFailed'),
         };
         prefetchRef.current = next;
         setPrefetchReady(next);
@@ -354,7 +367,7 @@ export function UrlPreviewPanel({
     })();
 
     return () => ac.abort();
-  }, [open, url, mode, t, extractRetryNonce, onOpenDownloadedFile]);
+  }, [open, url, mode, extractRetryNonce]);
 
   // Blocked-embed degrade (KTD1/KTD2): heuristic probe + settle timer.
   // Auto-switches to Text only when the prefetched extract is already in

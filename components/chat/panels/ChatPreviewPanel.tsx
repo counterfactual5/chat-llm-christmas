@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, type RefObject } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowUpRight,
   Download,
@@ -28,14 +27,18 @@ import { fetchFileContentForPreview } from '@/lib/files/direct-content';
 import { loadExtractSidecarPreviewContent } from '@/lib/files/extract-sidecar-preview';
 import { useLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { usePersistedPreviewScroll } from '@/hooks/chat/use-preview-scroll';
 import type { GeneratedFileEntry } from './OutputPanel';
 import { previewPanelWidth } from './panel-widths';
+import { PreviewPanelShell } from './preview-panel-shell';
 
 export type ChatPreviewPanelProps = {
   open: boolean;
   onClose: () => void;
   /** When Context is closed, Preview absorbs its width. */
   contextOpen?: boolean;
+  /** Stay mounted while closed so loads / scroll survive soft-hide. */
+  keepMounted?: boolean;
   /** Root for chat Quote selection inside the preview body. */
   quoteRootRef?: RefObject<HTMLDivElement | null>;
   file: GeneratedFileEntry | null;
@@ -62,6 +65,7 @@ export function ChatPreviewPanel({
   open,
   onClose,
   contextOpen = false,
+  keepMounted = false,
   quoteRootRef,
   file,
   onExpandFullscreen,
@@ -89,8 +93,24 @@ export function ChatPreviewPanel({
     !isPreviewableImageFile(file!);
   const needsAsyncLoad = needsExtractWait || needsTextFetch;
 
+  const isPdfOrEpubOrImage = Boolean(
+    file &&
+      (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)) &&
+      !file.content,
+  );
+  const isSheet = Boolean(file && isSpreadsheetPreviewFile(file));
+  const scrollSurface = isSheet ? 'sheet' : 'file';
+  const persistScroll = Boolean(file && !isPdfOrEpubOrImage);
+  const persistRef = usePersistedPreviewScroll(
+    scrollSurface,
+    file?.id,
+    persistScroll,
+  );
+
   useEffect(() => {
-    if (!open || !file || !needsAsyncLoad) {
+    // Do not abort when the panel is soft-hidden (`open` false) — only when
+    // there is no file / no async work to do.
+    if (!file || !needsAsyncLoad) {
       setFetchedContent(null);
       setFetchError('');
       setExtracting(false);
@@ -139,7 +159,7 @@ export function ChatPreviewPanel({
       cancelled = true;
       ac.abort();
     };
-  }, [open, file?.id, file?.url, needsAsyncLoad, needsExtractWait, sourceUrl, t]);
+  }, [file?.id, file?.url, needsAsyncLoad, needsExtractWait, sourceUrl, t]);
 
   const resolved: FilePreviewPayload | null = (() => {
     if (!file || !previewable) return null;
@@ -175,16 +195,15 @@ export function ChatPreviewPanel({
     return null;
   })();
 
+  const setBodyRef = (el: HTMLDivElement | null) => {
+    (persistRef as { current: HTMLDivElement | null }).current = el;
+    if (quoteRootRef) {
+      (quoteRootRef as { current: HTMLDivElement | null }).current = el;
+    }
+  };
+
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ width: 0, opacity: 0 }}
-          animate={{ width, opacity: 1 }}
-          exit={{ width: 0, opacity: 0 }}
-          transition={{ width: { duration: 0.2, ease: 'easeInOut' } }}
-          className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-l border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900"
-        >
+    <PreviewPanelShell open={open} keepMounted={keepMounted} width={width}>
           <div className="relative flex h-14 shrink-0 items-center justify-center gap-2 border-b border-stone-200/50 px-4 dark:border-stone-800/50">
             <span
               className={cn(
@@ -241,14 +260,12 @@ export function ChatPreviewPanel({
           </div>
 
           <div
-            ref={quoteRootRef}
+            ref={setBodyRef}
             className={cn(
               'relative min-h-0 min-w-0 flex-1 overscroll-contain',
-              file &&
-                (isEpubFile(file) || isPdfFile(file) || isPreviewableImageFile(file)) &&
-                !file.content
+              isPdfOrEpubOrImage
                 ? 'overflow-hidden'
-                : file && isSpreadsheetPreviewFile(file)
+                : isSheet
                   ? 'overflow-auto'
                   : 'overflow-x-hidden overflow-y-auto',
             )}
@@ -288,8 +305,6 @@ export function ChatPreviewPanel({
               </div>
             )}
           </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </PreviewPanelShell>
   );
 }

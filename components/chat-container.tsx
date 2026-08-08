@@ -108,8 +108,9 @@ import {
   downloadGeneratedImage,
 } from '@/lib/chat/composer/download';
 import {
-  isEphemeralPaperPreviewId,
-  paperIdentifierFromContentUrl,
+  identifierFromContentUrl,
+  isEphemeralPreviewId,
+  requestBookDownload,
   requestPaperDownload,
 } from '@/lib/chat/turn/literature-search';
 import { downloadTextContent } from '@/lib/files/download';
@@ -766,23 +767,56 @@ export default function ChatContainer() {
       const size = typeof data.bytes === 'number' ? data.bytes : undefined;
       const name = typeof data.filename === 'string' ? data.filename : undefined;
       const mime = typeof data.mime === 'string' ? data.mime : undefined;
+      const contentRev =
+        typeof data.content_rev === 'number' ? data.content_rev : undefined;
+      void import('@/lib/files/ensure-file-extract').then(
+        ({ invalidateSharedFileExtractWait }) => {
+          invalidateSharedFileExtractWait(opts.fileId);
+        },
+      );
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== activeSessionId) return s;
           return {
             ...s,
             messages: s.messages.map((m) => {
-              if (!Array.isArray(m.files)) return m;
-              const files = m.files.map((f) => {
-                if (f.id !== opts.fileId) return f;
-                return {
-                  ...f,
-                  ...(name ? { name } : {}),
-                  ...(mime ? { mimeType: mime } : {}),
-                  ...(typeof size === 'number' ? { size } : {}),
-                };
-              });
-              return { ...m, files };
+              let next = m;
+              if (Array.isArray(m.files)) {
+                const files = m.files.map((f) => {
+                  if (f.id !== opts.fileId) return f;
+                  return {
+                    ...f,
+                    ...(name ? { name } : {}),
+                    ...(mime ? { mimeType: mime } : {}),
+                    ...(typeof size === 'number' ? { size } : {}),
+                    ...(typeof contentRev === 'number' ? { contentRev } : {}),
+                  };
+                });
+                next = { ...next, files };
+              }
+              if (m.id === opts.messageId && Array.isArray(m.toolRuns)) {
+                const toolRuns = m.toolRuns.map((run) => {
+                  if (run.id !== opts.toolRunId) return run;
+                  const results = (run.results || []).map((r, idx) => {
+                    if (idx !== 0) return r;
+                    try {
+                      const meta = JSON.parse(String(r.body || '{}')) as Record<
+                        string,
+                        unknown
+                      >;
+                      return {
+                        ...r,
+                        body: JSON.stringify({ ...meta, undone: true }),
+                      };
+                    } catch {
+                      return r;
+                    }
+                  });
+                  return { ...run, results };
+                });
+                next = { ...next, toolRuns };
+              }
+              return next;
             }),
             updatedAt: Date.now(),
           };
@@ -797,6 +831,7 @@ export default function ChatContainer() {
             ...(name ? { name } : {}),
             ...(mime ? { mimeType: mime } : {}),
             ...(typeof size === 'number' ? { size } : {}),
+            ...(typeof contentRev === 'number' ? { contentRev } : {}),
           },
         };
       });
@@ -1075,6 +1110,7 @@ export default function ChatContainer() {
           url: file.url,
           content: file.content,
           createdAt: file.createdAt || m.timestamp,
+          contentRev: file.contentRev,
           unavailable: Boolean(file.unavailable),
         });
       });
@@ -1537,6 +1573,12 @@ export default function ChatContainer() {
                 mimeType: file.mimeType || prev.entry.mimeType,
                 size: typeof file.size === 'number' ? file.size : prev.entry.size,
                 url: file.url || prev.entry.url,
+                ...(typeof file.contentRev === 'number'
+                  ? { contentRev: file.contentRev }
+                  : {}),
+                ...(typeof file.createdAt === 'number'
+                  ? { createdAt: file.createdAt }
+                  : {}),
               },
             };
           });
@@ -2513,6 +2555,7 @@ export default function ChatContainer() {
       latest.content !== previewFileEntry.content ||
       latest.name !== previewFileEntry.name ||
       latest.size !== previewFileEntry.size ||
+      latest.contentRev !== previewFileEntry.contentRev ||
       latest.url !== previewFileEntry.url ||
       latest.mimeType !== previewFileEntry.mimeType
     ) {
@@ -3183,9 +3226,9 @@ export default function ChatContainer() {
                     onDownload={() => {
                       void (async () => {
                         const entry = slot.entry;
-                        if (isEphemeralPaperPreviewId(entry.id)) {
+                        if (isEphemeralPreviewId(entry.id, 'paper')) {
                           const identifier =
-                            paperIdentifierFromContentUrl(entry.url) ||
+                            identifierFromContentUrl(entry.url) ||
                             decodeURIComponent(
                               entry.id.slice('paper-preview:'.length),
                             );
@@ -3198,6 +3241,27 @@ export default function ChatContainer() {
                             id: dl.fileId,
                             name: dl.filename || entry.name,
                             mimeType: 'application/pdf',
+                            size: dl.bytes || 0,
+                            url: `/api/files/${encodeURIComponent(dl.fileId)}`,
+                            createdAt: Date.now(),
+                          });
+                          return;
+                        }
+                        if (isEphemeralPreviewId(entry.id, 'book')) {
+                          const identifier =
+                            identifierFromContentUrl(entry.url) ||
+                            decodeURIComponent(
+                              entry.id.slice('book-preview:'.length),
+                            );
+                          if (!identifier) return;
+                          const dl = await requestBookDownload(identifier);
+                          if (!dl.ok) return;
+                          openFilePreview({
+                            messageId: entry.messageId,
+                            fileIndex: entry.fileIndex,
+                            id: dl.fileId,
+                            name: dl.filename || entry.name,
+                            mimeType: entry.mimeType || 'application/octet-stream',
                             size: dl.bytes || 0,
                             url: `/api/files/${encodeURIComponent(dl.fileId)}`,
                             createdAt: Date.now(),

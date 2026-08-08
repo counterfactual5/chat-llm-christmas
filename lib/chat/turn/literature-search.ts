@@ -158,6 +158,7 @@ export type BookDownloadResult =
       bytes: number;
       sourceUrl: string;
       provider?: string;
+      deduped?: boolean;
     }
   | { ok: false; error: string };
 
@@ -182,7 +183,8 @@ export async function requestBookDownload(
     bytes?: number;
     sourceUrl?: string;
     provider?: string;
-    file?: { id?: string };
+    deduped?: boolean;
+    file?: { id?: string; mime?: string };
   } = {};
   try {
     data = raw ? (JSON.parse(raw) as typeof data) : {};
@@ -207,6 +209,65 @@ export async function requestBookDownload(
     bytes: Number(data.bytes) || 0,
     sourceUrl: String(data.sourceUrl || ''),
     provider: data.provider ? String(data.provider) : undefined,
+    deduped: Boolean(data.deduped),
+  };
+}
+
+export type BookResolveResult =
+  | {
+      ok: true;
+      identifier: string;
+      title: string;
+      filename?: string;
+      downloadUrl: string;
+      provider?: string;
+      format?: string;
+    }
+  | { ok: false; error: string; code?: string };
+
+export async function requestBookResolve(
+  identifier: string,
+  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+): Promise<BookResolveResult> {
+  const doFetch = opts?.fetchImpl ?? fetch;
+  const url = `/api/literature/books/resolve?identifier=${encodeURIComponent(identifier)}`;
+  const res = await doFetch(url, { method: 'GET', signal: opts?.signal });
+  const raw = await res.text();
+  let data: {
+    ok?: boolean;
+    error?: string;
+    message?: string;
+    code?: string;
+    identifier?: string;
+    title?: string;
+    filename?: string;
+    downloadUrl?: string;
+    provider?: string;
+    format?: string;
+  } = {};
+  try {
+    data = raw ? (JSON.parse(raw) as typeof data) : {};
+  } catch {
+    return {
+      ok: false,
+      error: raw.trim().slice(0, 400) || `Resolve API returned non-JSON (HTTP ${res.status})`,
+    };
+  }
+  if (!res.ok || !data.downloadUrl) {
+    return {
+      ok: false,
+      error: data.error || data.message || `Book resolve failed (HTTP ${res.status})`,
+      code: data.code,
+    };
+  }
+  return {
+    ok: true,
+    identifier: String(data.identifier || identifier),
+    title: String(data.title || data.filename || identifier),
+    filename: data.filename ? String(data.filename) : undefined,
+    downloadUrl: String(data.downloadUrl),
+    provider: data.provider ? String(data.provider) : undefined,
+    format: data.format ? String(data.format) : undefined,
   };
 }
 

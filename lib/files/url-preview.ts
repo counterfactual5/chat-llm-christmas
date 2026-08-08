@@ -215,3 +215,20 @@ export function isLikelyPaperPreviewUrl(raw: string): boolean {
   }
 }
 
+/**
+ * True when URL Preview should try literature book resolve (IA / Gutenberg)
+ * before trusting HTML extract of the landing page.
+ */
+export function isLikelyBookPreviewUrl(raw: string): boolean {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    if (/archive\.org\/(?:details|download)\//i.test(u.href)) return true;
+    if (/gutenberg\.org\/(?:ebooks|files)\/\d+/i.test(u.href)) return true;
+    if (/\.(?:epub|djvu)(?:\?|$)/i.test(u.pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+

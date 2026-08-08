@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isLikelyAuthGatedPreviewUrl,
+  isLikelyBookPreviewUrl,
   isLikelyPaperPreviewUrl,
   isPreviewableHttpUrl,
   normalizePreviewHttpUrl,
@@ -44,6 +45,18 @@ describe('url-preview helpers', () => {
     );
     expect(isLikelyPaperPreviewUrl('https://openalex.org/W4407173730')).toBe(true);
     expect(isLikelyPaperPreviewUrl('https://example.com/blog')).toBe(false);
+  });
+
+  it('flags archive.org / gutenberg book landing URLs', () => {
+    expect(
+      isLikelyBookPreviewUrl('https://archive.org/details/aliceinwonderland00carrrich'),
+    ).toBe(true);
+    expect(isLikelyBookPreviewUrl('https://www.gutenberg.org/ebooks/11')).toBe(true);
+    expect(isLikelyBookPreviewUrl('https://cdn.example/book.epub')).toBe(true);
+    expect(isLikelyBookPreviewUrl('https://example.com/blog')).toBe(false);
+    expect(isLikelyBookPreviewUrl('https://doi.org/10.1038/s41575-025-01108-1')).toBe(
+      false,
+    );
   });
 
   it('flags auth-gated hosts that cannot reuse browser login in-panel', () => {

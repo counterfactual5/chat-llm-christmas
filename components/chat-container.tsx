@@ -595,7 +595,7 @@ export default function ChatContainer() {
     setGoogleStatus,
     googleBusy,
     fetchIntegrations,
-    markGoogleNeedsReconnect,
+    markNeedsReconnect,
     disconnectNotion,
     disconnectGitHub,
     disconnectGoogle,
@@ -785,10 +785,14 @@ export default function ChatContainer() {
     }
   };
   const notionMcpOn =
-    Boolean(notionStatus?.connected) && activeMcpIds.includes('notion');
+    Boolean(notionStatus?.connected && !notionStatus.needsReconnect) &&
+    activeMcpIds.includes('notion');
   const githubMcpOn =
-    Boolean(githubStatus?.connected) && activeMcpIds.includes('github');
-  const googleMcpConnected = Boolean(googleStatus?.connected);
+    Boolean(githubStatus?.connected && !githubStatus.needsReconnect) &&
+    activeMcpIds.includes('github');
+  const googleMcpConnected = Boolean(
+    googleStatus?.connected && !googleStatus.needsReconnect,
+  );
   const gmailMcpOn = googleMcpConnected && activeMcpIds.includes('gmail');
   const calendarMcpOn = googleMcpConnected && activeMcpIds.includes('calendar');
   const driveMcpOn = googleMcpConnected && activeMcpIds.includes('drive');
@@ -1082,7 +1086,7 @@ export default function ChatContainer() {
       setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
       return;
     }
-    if (!isAccountBound || !notionStatus?.connected) {
+    if (!isAccountBound || !notionStatus?.connected || notionStatus.needsReconnect) {
       openNotionModal();
       return;
     }
@@ -1094,7 +1098,7 @@ export default function ChatContainer() {
       setActiveMcpIds((prev) => prev.filter((id) => id !== 'notion'));
       return;
     }
-    if (!isAccountBound || !notionStatus?.connected) {
+    if (!isAccountBound || !notionStatus?.connected || notionStatus.needsReconnect) {
       openNotionModal();
       return;
     }
@@ -1106,7 +1110,7 @@ export default function ChatContainer() {
       setActiveMcpIds((prev) => prev.filter((id) => id !== 'github'));
       return;
     }
-    if (!isAccountBound || !githubStatus?.connected) {
+    if (!isAccountBound || !githubStatus?.connected || githubStatus.needsReconnect) {
       openGitHubModal();
       return;
     }
@@ -1343,8 +1347,14 @@ export default function ChatContainer() {
         skillsPayloadForSession,
         memoriesPayload,
         memoriesEnabled,
-        getNotionConnected: () => Boolean(notionStatusRef.current?.connected),
-        getGitHubConnected: () => Boolean(githubStatusRef.current?.connected),
+        getNotionConnected: () => {
+          const n = notionStatusRef.current;
+          return Boolean(n?.connected && !n.needsReconnect);
+        },
+        getGitHubConnected: () => {
+          const g = githubStatusRef.current;
+          return Boolean(g?.connected && !g.needsReconnect);
+        },
         getGoogleConnected: () => {
           const g = googleStatusRef.current;
           return Boolean(g?.connected && !g.needsReconnect);
@@ -1376,18 +1386,16 @@ export default function ChatContainer() {
         },
         onReplySettled: onMemoryReplySettled,
         onGoogleAuthRequired: () => {
-          markGoogleNeedsReconnect();
+          markNeedsReconnect('google');
           setAttachError(t('googleAuthRequired'));
         },
         onNotionAuthRequired: () => {
-          setAttachError(
-            'Notion is enabled but not authorized — reconnect Notion in Settings, then try again.',
-          );
+          markNeedsReconnect('notion');
+          setAttachError(t('notionAuthRequired'));
         },
         onGitHubAuthRequired: () => {
-          setAttachError(
-            'GitHub is enabled but not authorized — reconnect GitHub in Settings, then try again.',
-          );
+          markNeedsReconnect('github');
+          setAttachError(t('githubAuthRequired'));
         },
         onMalformedSse: (message) => {
           setAttachError(message);

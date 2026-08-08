@@ -1,6 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getGoogleAccessToken, resolveOwnerId } from '@/lib/integrations';
 import { probeGoogleApis } from '@/lib/integrations/google/rest';
+import {
+  probeAuthRequired,
+  probeOk,
+  probeTokenUnavailable,
+} from '@/lib/integrations/oauth-probe';
 
 export const runtime = 'edge';
 export const maxDuration = 30;
@@ -11,12 +16,12 @@ const GCP_ENABLE_HINT =
 export async function GET(req: NextRequest) {
   const ownerId = await resolveOwnerId(req);
   if (!ownerId) {
-    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+    return probeAuthRequired('Not authenticated.');
   }
 
   const { token } = await getGoogleAccessToken(req, ownerId);
   if (!token) {
-    return NextResponse.json({ error: 'Google OAuth token unavailable.' }, { status: 401 });
+    return probeTokenUnavailable('Google OAuth token unavailable.');
   }
 
   const results = await probeGoogleApis(token);
@@ -27,10 +32,9 @@ export async function GET(req: NextRequest) {
     ),
   );
 
-  return NextResponse.json({
-    connected: true,
-    mode: 'rest',
+  return probeOk({
     usable,
+    mode: 'rest',
     allUsable: results.every((result) => result.ok),
     results,
     ...(forbidden && !usable ? { hint: GCP_ENABLE_HINT } : {}),

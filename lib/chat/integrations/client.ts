@@ -5,14 +5,20 @@
 
 import type { ChatSession } from '@/lib/chat/types';
 import { isGoogleMcpId } from '@/lib/integrations';
+import {
+  applyLiveProbe,
+  OAUTH_MCP_PROVIDERS,
+  probeProviderLiveStatus,
+  type LiveProbeResult,
+} from '@/lib/chat/integrations/oauth-health';
 
-export type IntegrationProvider = 'notion' | 'github' | 'google';
+export type IntegrationProvider = import('@/lib/chat/integrations/oauth-health').OAuthMcpProviderId;
 
 export type IntegrationStatus = {
   connected: boolean;
   available: boolean;
   label?: string;
-  /** Vault still has tokens, but live Google APIs rejected them. */
+  /** Vault still has tokens, but live provider APIs rejected them. */
   needsReconnect?: boolean;
 };
 
@@ -22,11 +28,17 @@ export type IntegrationsSnapshot = {
   google: IntegrationStatus | null;
 };
 
-/** Outcome of probing Google REST APIs against stored OAuth tokens. */
-export type GoogleLiveProbeResult =
-  | { kind: 'ok' }
-  | { kind: 'needs_reconnect' }
-  | { kind: 'inconclusive' };
+/** @deprecated Prefer LiveProbeResult from oauth-health. */
+export type GoogleLiveProbeResult = LiveProbeResult;
+
+export {
+  applyLiveProbe,
+  isIntegrationUsable,
+  OAUTH_MCP_PROVIDERS,
+  oauthMcpProvider,
+  probeProviderLiveStatus,
+  type LiveProbeResult,
+} from '@/lib/chat/integrations/oauth-health';
 
 type ApiRow = {
   provider?: string;
@@ -65,49 +77,38 @@ export async function fetchIntegrationsSnapshot(
 }
 
 /**
- * Live check via `/api/integrations/google/probe`.
- * - 401 / usable:false → needs reconnect
- * - network / 5xx → inconclusive (do not flip vault-connected UI)
+ * After vault snapshot: probe each OAuth MCP that looks connected.
+ * Network/5xx probes leave status unchanged (inconclusive).
  */
-export async function probeGoogleLiveStatus(
+export async function enrichSnapshotWithLiveProbes(
+  snap: IntegrationsSnapshot,
   fetchImpl: typeof fetch = fetch,
-): Promise<GoogleLiveProbeResult> {
-  try {
-    const response = await fetchImpl('/api/integrations/google/probe', {
-      cache: 'no-store',
-    });
-    if (response.status === 401) {
-      return { kind: 'needs_reconnect' };
-    }
-    if (!response.ok) {
-      return { kind: 'inconclusive' };
-    }
-    const data = (await response.json()) as { usable?: boolean };
-    if (data.usable === false) {
-      return { kind: 'needs_reconnect' };
-    }
-    return { kind: 'ok' };
-  } catch {
-    return { kind: 'inconclusive' };
-  }
+): Promise<IntegrationsSnapshot> {
+  const next: IntegrationsSnapshot = { ...snap };
+  await Promise.all(
+    OAUTH_MCP_PROVIDERS.map(async (cfg) => {
+      const status = next[cfg.id];
+      if (!status?.connected) return;
+      const probe = await probeProviderLiveStatus(cfg.id, fetchImpl);
+      next[cfg.id] = applyLiveProbe(status, probe);
+    }),
+  );
+  return next;
 }
 
-/** Merge vault snapshot with a live probe without clearing tokens. */
+/** @deprecated Prefer probeProviderLiveStatus('google'). */
+export async function probeGoogleLiveStatus(
+  fetchImpl: typeof fetch = fetch,
+): Promise<LiveProbeResult> {
+  return probeProviderLiveStatus('google', fetchImpl);
+}
+
+/** @deprecated Prefer applyLiveProbe. */
 export function applyGoogleLiveProbe(
   status: IntegrationStatus,
-  probe: GoogleLiveProbeResult,
+  probe: LiveProbeResult,
 ): IntegrationStatus {
-  if (!status.connected) {
-    return { ...status, needsReconnect: false };
-  }
-  if (probe.kind === 'needs_reconnect') {
-    return { ...status, needsReconnect: true };
-  }
-  if (probe.kind === 'ok') {
-    return { ...status, needsReconnect: false };
-  }
-  // inconclusive: keep prior flag if any, otherwise leave unset
-  return status;
+  return applyLiveProbe(status, probe);
 }
 
 export async function disconnectIntegration(
